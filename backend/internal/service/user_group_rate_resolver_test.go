@@ -81,3 +81,20 @@ func TestGatewayServiceGetUserGroupRateMultiplier_FallbacksAndUsesExistingResolv
 	require.Equal(t, rate, got)
 	require.Equal(t, 1, repo.calls)
 }
+
+func TestUserGroupRateResolverResolve_AllowsZeroAndRejectsNegative(t *testing.T) {
+	zero := 0.0
+	repo := &userGroupRateResolverRepoStub{rate: &zero}
+	resolver := newUserGroupRateResolver(repo, nil, time.Minute, nil, "service.test")
+
+	got := resolver.Resolve(context.Background(), 101, 202, 1.2)
+	require.Equal(t, 0.0, got)
+
+	negative := -0.5
+	repo.rate = &negative
+	got = resolver.Resolve(context.Background(), 303, 404, 1.2)
+	require.Equal(t, 1.2, got)
+
+	got = resolver.Resolve(context.Background(), 505, 606, -1)
+	require.Equal(t, 1.0, got)
+}

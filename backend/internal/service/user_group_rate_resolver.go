@@ -42,6 +42,9 @@ func newUserGroupRateResolver(repo UserGroupRateRepository, cache *gocache.Cache
 }
 
 func (r *userGroupRateResolver) Resolve(ctx context.Context, userID, groupID int64, groupDefaultMultiplier float64) float64 {
+	if groupDefaultMultiplier < 0 {
+		groupDefaultMultiplier = 1.0
+	}
 	if r == nil || userID <= 0 || groupID <= 0 {
 		return groupDefaultMultiplier
 	}
@@ -78,7 +81,9 @@ func (r *userGroupRateResolver) Resolve(ctx context.Context, userID, groupID int
 
 		multiplier := groupDefaultMultiplier
 		if userRate != nil {
-			multiplier = *userRate
+			if *userRate >= 0 {
+				multiplier = *userRate
+			}
 		}
 		if r.cache != nil {
 			r.cache.Set(key, multiplier, r.cacheTTL)

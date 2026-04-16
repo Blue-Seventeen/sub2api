@@ -54,6 +54,7 @@ func TestInit_DualOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Init() error: %v", err)
 	}
+	t.Cleanup(Close)
 
 	L().Info("dual-output-info")
 	L().Warn("dual-output-warn")
@@ -121,6 +122,7 @@ func TestInit_FileOutputFailureDowngrade(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Init() should downgrade instead of failing, got: %v", err)
 	}
+	t.Cleanup(Close)
 
 	_ = stderrW.Close()
 	stderrBytes, _ := io.ReadAll(stderrR)
@@ -164,6 +166,7 @@ func TestInit_CallerShouldPointToCallsite(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Init() error: %v", err)
 	}
+	t.Cleanup(Close)
 
 	L().Info("caller-check")
 	Sync()

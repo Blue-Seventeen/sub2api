@@ -4442,7 +4442,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 
 	// Get rate multiplier
 	multiplier := 1.0
-	if s.cfg != nil {
+	if s.cfg != nil && s.cfg.Default.RateMultiplier > 0 {
 		multiplier = s.cfg.Default.RateMultiplier
 	}
 	if apiKey.GroupID != nil && apiKey.Group != nil {

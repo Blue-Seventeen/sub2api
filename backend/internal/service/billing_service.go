@@ -442,7 +442,7 @@ func (s *BillingService) CalculateCostUnified(input CostInput) (*CostBreakdown, 
 		})
 	}
 
-	if input.RateMultiplier <= 0 {
+	if input.RateMultiplier < 0 {
 		input.RateMultiplier = 1.0
 	}
 
@@ -487,7 +487,7 @@ func (s *BillingService) computeTokenBreakdown(
 	rateMultiplier float64, serviceTier string,
 	applyLongCtx bool,
 ) *CostBreakdown {
-	if rateMultiplier <= 0 {
+	if rateMultiplier < 0 {
 		rateMultiplier = 1.0
 	}
 
@@ -826,7 +826,7 @@ func (s *BillingService) CalculateImageCost(model string, imageSize string, imag
 	totalCost := unitPrice * float64(imageCount)
 
 	// 应用倍率
-	if rateMultiplier <= 0 {
+	if rateMultiplier < 0 {
 		rateMultiplier = 1.0
 	}
 	actualCost := totalCost * rateMultiplier

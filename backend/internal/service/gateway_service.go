@@ -7708,7 +7708,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 
 	// 获取费率倍数（优先级：用户专属 > 分组默认 > 系统默认）
 	multiplier := 1.0
-	if s.cfg != nil {
+	if s.cfg != nil && s.cfg.Default.RateMultiplier > 0 {
 		multiplier = s.cfg.Default.RateMultiplier
 	}
 	if apiKey.GroupID != nil && apiKey.Group != nil {

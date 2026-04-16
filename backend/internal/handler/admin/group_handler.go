@@ -85,7 +85,7 @@ type CreateGroupRequest struct {
 	Name             string             `json:"name" binding:"required"`
 	Description      string             `json:"description"`
 	Platform         string             `json:"platform" binding:"omitempty,oneof=anthropic openai gemini antigravity"`
-	RateMultiplier   float64            `json:"rate_multiplier"`
+	RateMultiplier   *float64           `json:"rate_multiplier"`
 	IsExclusive      bool               `json:"is_exclusive"`
 	SubscriptionType string             `json:"subscription_type" binding:"omitempty,oneof=standard subscription"`
 	DailyLimitUSD    optionalLimitField `json:"daily_limit_usd"`
@@ -237,11 +237,20 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		return
 	}
 
+	rateMultiplier := 1.0
+	if req.RateMultiplier != nil {
+		if *req.RateMultiplier < 0 {
+			response.BadRequest(c, "rate_multiplier must be >= 0")
+			return
+		}
+		rateMultiplier = *req.RateMultiplier
+	}
+
 	group, err := h.adminService.CreateGroup(c.Request.Context(), &service.CreateGroupInput{
 		Name:                            req.Name,
 		Description:                     req.Description,
 		Platform:                        req.Platform,
-		RateMultiplier:                  req.RateMultiplier,
+		RateMultiplier:                  rateMultiplier,
 		IsExclusive:                     req.IsExclusive,
 		SubscriptionType:                req.SubscriptionType,
 		DailyLimitUSD:                   req.DailyLimitUSD.ToServiceInput(),
@@ -284,6 +293,10 @@ func (h *GroupHandler) Update(c *gin.Context) {
 	var req UpdateGroupRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if req.RateMultiplier != nil && *req.RateMultiplier < 0 {
+		response.BadRequest(c, "rate_multiplier must be >= 0")
 		return
 	}
 
@@ -467,6 +480,12 @@ func (h *GroupHandler) BatchSetGroupRateMultipliers(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
+	}
+	for _, entry := range req.Entries {
+		if entry.RateMultiplier < 0 {
+			response.BadRequest(c, "rate_multiplier must be >= 0")
+			return
+		}
 	}
 
 	if err := h.adminService.BatchSetGroupRateMultipliers(c.Request.Context(), groupID, req.Entries); err != nil {

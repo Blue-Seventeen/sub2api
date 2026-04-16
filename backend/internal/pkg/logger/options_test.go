@@ -95,7 +95,7 @@ func TestBuildFileCore_InvalidPathFallback(t *testing.T) {
 		EncodeLevel: zapcore.CapitalLevelEncoder,
 	}
 	encoder := zapcore.NewJSONEncoder(encoderCfg)
-	_, _, err := buildFileCore(encoder, zap.NewAtomicLevel(), opts)
+	_, _, _, err := buildFileCore(encoder, zap.NewAtomicLevel(), opts)
 	if err == nil {
 		t.Fatalf("buildFileCore() expected error for invalid path")
 	}

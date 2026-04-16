@@ -71,18 +71,15 @@ func TestCalculateCost_RateMultiplier(t *testing.T) {
 	require.InDelta(t, cost1x.ActualCost*2, cost2x.ActualCost, 1e-10)
 }
 
-func TestCalculateCost_ZeroMultiplierDefaultsToOne(t *testing.T) {
+func TestCalculateCost_ZeroMultiplierMakesRequestFree(t *testing.T) {
 	svc := newTestBillingService()
 
 	tokens := UsageTokens{InputTokens: 1000}
 
 	costZero, err := svc.CalculateCost("claude-sonnet-4", tokens, 0)
 	require.NoError(t, err)
-
-	costOne, err := svc.CalculateCost("claude-sonnet-4", tokens, 1.0)
-	require.NoError(t, err)
-
-	require.InDelta(t, costOne.ActualCost, costZero.ActualCost, 1e-10)
+	require.Zero(t, costZero.ActualCost)
+	require.NotZero(t, costZero.TotalCost)
 }
 
 func TestCalculateCost_NegativeMultiplierDefaultsToOne(t *testing.T) {
@@ -362,7 +359,6 @@ func TestCalculateImageCost(t *testing.T) {
 	require.InDelta(t, 0.134*3, cost.TotalCost, 1e-10)
 	require.InDelta(t, 0.134*3, cost.ActualCost, 1e-10)
 }
-
 
 func TestIsModelSupported(t *testing.T) {
 	svc := newTestBillingService()

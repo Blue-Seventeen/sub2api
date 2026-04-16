@@ -174,6 +174,36 @@ func TestAdminService_CreateGroup_WithImagePricing(t *testing.T) {
 	require.InDelta(t, 0.30, *repo.created.ImagePrice4K, 0.0001)
 }
 
+func TestAdminService_CreateGroup_AllowsZeroRateMultiplier(t *testing.T) {
+	repo := &groupRepoStubForAdmin{}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	group, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
+		Name:           "free-group",
+		Description:    "free",
+		Platform:       PlatformAnthropic,
+		RateMultiplier: 0,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, group)
+	require.NotNil(t, repo.created)
+	require.Equal(t, 0.0, repo.created.RateMultiplier)
+}
+
+func TestAdminService_CreateGroup_RejectsNegativeRateMultiplier(t *testing.T) {
+	repo := &groupRepoStubForAdmin{}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	_, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
+		Name:           "invalid-group",
+		Platform:       PlatformAnthropic,
+		RateMultiplier: -0.1,
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "rate_multiplier must be >= 0")
+	require.Nil(t, repo.created)
+}
+
 // TestAdminService_CreateGroup_NilImagePricing 测试 ImagePrice 为 nil 时正常创建
 func TestAdminService_CreateGroup_NilImagePricing(t *testing.T) {
 	repo := &groupRepoStubForAdmin{}
@@ -231,6 +261,47 @@ func TestAdminService_UpdateGroup_WithImagePricing(t *testing.T) {
 	require.InDelta(t, 0.12, *repo.updated.ImagePrice1K, 0.0001)
 	require.InDelta(t, 0.18, *repo.updated.ImagePrice2K, 0.0001)
 	require.InDelta(t, 0.36, *repo.updated.ImagePrice4K, 0.0001)
+}
+
+func TestAdminService_UpdateGroup_AllowsZeroRateMultiplier(t *testing.T) {
+	existingGroup := &Group{
+		ID:             1,
+		Name:           "existing-group",
+		Platform:       PlatformAnthropic,
+		Status:         StatusActive,
+		RateMultiplier: 1.5,
+	}
+	repo := &groupRepoStubForAdmin{getByID: existingGroup}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	zero := 0.0
+	group, err := svc.UpdateGroup(context.Background(), 1, &UpdateGroupInput{
+		RateMultiplier: &zero,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, group)
+	require.NotNil(t, repo.updated)
+	require.Equal(t, 0.0, repo.updated.RateMultiplier)
+}
+
+func TestAdminService_UpdateGroup_RejectsNegativeRateMultiplier(t *testing.T) {
+	existingGroup := &Group{
+		ID:             1,
+		Name:           "existing-group",
+		Platform:       PlatformAnthropic,
+		Status:         StatusActive,
+		RateMultiplier: 1.5,
+	}
+	repo := &groupRepoStubForAdmin{getByID: existingGroup}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	neg := -0.1
+	_, err := svc.UpdateGroup(context.Background(), 1, &UpdateGroupInput{
+		RateMultiplier: &neg,
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "rate_multiplier must be >= 0")
+	require.Nil(t, repo.updated)
 }
 
 // TestAdminService_UpdateGroup_PartialImagePricing 测试仅更新部分 ImagePrice 字段

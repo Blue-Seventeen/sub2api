@@ -16,6 +16,15 @@ type billingCacheWorkerStub struct {
 	subscriptionUpdates int64
 }
 
+type billingCacheUserGroupRateRepoStub struct {
+	UserGroupRateRepository
+	rate *float64
+}
+
+func (s *billingCacheUserGroupRateRepoStub) GetByUserAndGroup(context.Context, int64, int64) (*float64, error) {
+	return s.rate, nil
+}
+
 func (b *billingCacheWorkerStub) GetUserBalance(ctx context.Context, userID int64) (float64, error) {
 	return 0, errors.New("not implemented")
 }
@@ -101,4 +110,36 @@ func TestBillingCacheServiceEnqueueAfterStopReturnsFalse(t *testing.T) {
 		amount: 1,
 	})
 	require.False(t, enqueued)
+}
+
+func TestBillingCacheServiceCheckBillingEligibility_FreeGroupSkipsBalanceCheck(t *testing.T) {
+	svc := NewBillingCacheService(nil, nil, nil, nil, &config.Config{})
+	t.Cleanup(svc.Stop)
+
+	err := svc.CheckBillingEligibility(
+		context.Background(),
+		&User{ID: 1},
+		&APIKey{},
+		&Group{ID: 2, RateMultiplier: 0},
+		nil,
+	)
+	require.NoError(t, err)
+}
+
+func TestBillingCacheServiceCheckBillingEligibility_FreeUserRateSkipsBalanceCheck(t *testing.T) {
+	svc := NewBillingCacheService(nil, nil, nil, nil, &config.Config{})
+	svc.SetUserGroupRateRepository(&billingCacheUserGroupRateRepoStub{rate: func() *float64 {
+		v := 0.0
+		return &v
+	}()})
+	t.Cleanup(svc.Stop)
+
+	err := svc.CheckBillingEligibility(
+		context.Background(),
+		&User{ID: 1},
+		&APIKey{},
+		&Group{ID: 2, RateMultiplier: 1.5},
+		nil,
+	)
+	require.NoError(t, err)
 }

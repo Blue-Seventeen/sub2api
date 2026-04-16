@@ -86,6 +86,7 @@ type BillingCacheService struct {
 	cache                 BillingCache
 	userRepo              UserRepository
 	subRepo               UserSubscriptionRepository
+	userGroupRateResolver *userGroupRateResolver
 	apiKeyRateLimitLoader apiKeyRateLimitLoader
 	cfg                   *config.Config
 	circuitBreaker        *billingCircuitBreaker
@@ -115,6 +116,23 @@ func NewBillingCacheService(cache BillingCache, userRepo UserRepository, subRepo
 	svc.circuitBreaker = newBillingCircuitBreaker(cfg.Billing.CircuitBreaker)
 	svc.startCacheWriteWorkers()
 	return svc
+}
+
+func (s *BillingCacheService) SetUserGroupRateRepository(repo UserGroupRateRepository) {
+	if s == nil {
+		return
+	}
+	if repo == nil {
+		s.userGroupRateResolver = nil
+		return
+	}
+	s.userGroupRateResolver = newUserGroupRateResolver(
+		repo,
+		nil,
+		resolveUserGroupRateCacheTTL(s.cfg),
+		nil,
+		"service.billing_cache",
+	)
 }
 
 // Stop 关闭缓存写入工作池
@@ -646,14 +664,21 @@ func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user 
 
 	// 判断计费模式
 	isSubscriptionMode := group != nil && group.IsSubscriptionType() && subscription != nil
+	userID := int64(0)
+	if user != nil {
+		userID = user.ID
+	}
+	effectiveMultiplier := s.resolveEffectiveGroupRateMultiplier(ctx, userID, group)
 
 	if isSubscriptionMode {
-		if err := s.checkSubscriptionEligibility(ctx, user.ID, group, subscription); err != nil {
+		if err := s.checkSubscriptionEligibility(ctx, userID, group, subscription); err != nil {
 			return err
 		}
 	} else {
-		if err := s.checkBalanceEligibility(ctx, user.ID); err != nil {
-			return err
+		if effectiveMultiplier != 0 {
+			if err := s.checkBalanceEligibility(ctx, userID); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -665,6 +690,20 @@ func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user 
 	}
 
 	return nil
+}
+
+func (s *BillingCacheService) resolveEffectiveGroupRateMultiplier(ctx context.Context, userID int64, group *Group) float64 {
+	if group == nil {
+		return 1.0
+	}
+	multiplier := group.RateMultiplier
+	if multiplier < 0 {
+		multiplier = 1.0
+	}
+	if s == nil || s.userGroupRateResolver == nil || userID <= 0 {
+		return multiplier
+	}
+	return s.userGroupRateResolver.Resolve(ctx, userID, group.ID, multiplier)
 }
 
 // checkBalanceEligibility 检查余额模式资格

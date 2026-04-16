@@ -73,6 +73,7 @@ func TestStdLogBridgeRoutesLevels(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Init() error: %v", err)
 	}
+	t.Cleanup(Close)
 
 	log.Printf("service started")
 	log.Printf("Warning: queue full")
@@ -135,6 +136,7 @@ func TestLegacyPrintfRoutesLevels(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Init() error: %v", err)
 	}
+	t.Cleanup(Close)
 
 	LegacyPrintf("service.test", "request started")
 	LegacyPrintf("service.test", "Warning: queue full")

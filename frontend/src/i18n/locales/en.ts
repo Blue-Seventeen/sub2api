@@ -1583,7 +1583,7 @@ export default {
       optionalDescription: 'Optional description',
       platformHint: 'Select the platform this group is associated with',
       platformNotEditable: 'Platform cannot be changed after creation',
-      rateMultiplierHint: 'Cost multiplier for this group (e.g., 1.5 = 150% of base cost)',
+      rateMultiplierHint: '0 = free, 1.0 = base price, 0.5 = half price, 2.0 = double price',
       exclusiveHint: 'Exclusive group, manually assign to specific users',
       exclusiveTooltip: {
         title: 'What is an exclusive group?',

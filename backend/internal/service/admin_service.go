@@ -811,6 +811,10 @@ func (s *adminServiceImpl) GetGroup(ctx context.Context, id int64) (*Group, erro
 }
 
 func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupInput) (*Group, error) {
+	if input.RateMultiplier < 0 {
+		return nil, infraerrors.BadRequest("INVALID_RATE_MULTIPLIER", "rate_multiplier must be >= 0")
+	}
+
 	platform := input.Platform
 	if platform == "" {
 		platform = PlatformAnthropic
@@ -1038,6 +1042,9 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	group, err := s.groupRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if input.RateMultiplier != nil && *input.RateMultiplier < 0 {
+		return nil, infraerrors.BadRequest("INVALID_RATE_MULTIPLIER", "rate_multiplier must be >= 0")
 	}
 
 	if input.Name != "" {
@@ -1285,6 +1292,11 @@ func (s *adminServiceImpl) ClearGroupRateMultipliers(ctx context.Context, groupI
 func (s *adminServiceImpl) BatchSetGroupRateMultipliers(ctx context.Context, groupID int64, entries []GroupRateMultiplierInput) error {
 	if s.userGroupRateRepo == nil {
 		return nil
+	}
+	for _, entry := range entries {
+		if entry.RateMultiplier < 0 {
+			return infraerrors.BadRequest("INVALID_RATE_MULTIPLIER", "rate_multiplier must be >= 0")
+		}
 	}
 	return s.userGroupRateRepo.SyncGroupRateMultipliers(ctx, groupID, entries)
 }

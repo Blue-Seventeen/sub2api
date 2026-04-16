@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -233,7 +234,7 @@ func TestLoadForcedCodexInstructionsTemplate(t *testing.T) {
 	configPath := filepath.Join(tempDir, "config.yaml")
 
 	require.NoError(t, os.WriteFile(templatePath, []byte("server-prefix\n\n{{ .ExistingInstructions }}"), 0o644))
-	require.NoError(t, os.WriteFile(configPath, []byte("gateway:\n  forced_codex_instructions_template_file: \""+templatePath+"\"\n"), 0o644))
+	require.NoError(t, os.WriteFile(configPath, []byte("gateway:\n  forced_codex_instructions_template_file: "+strconv.Quote(templatePath)+"\n"), 0o644))
 	t.Setenv("DATA_DIR", tempDir)
 
 	cfg, err := Load()

@@ -146,12 +146,24 @@ func TestAdminService_BatchSetGroupRateMultipliers(t *testing.T) {
 
 		entries := []GroupRateMultiplierInput{
 			{UserID: 1, RateMultiplier: 1.5},
-			{UserID: 2, RateMultiplier: 0.8},
+			{UserID: 2, RateMultiplier: 0},
 		}
 		err := svc.BatchSetGroupRateMultipliers(context.Background(), 10, entries)
 		require.NoError(t, err)
 		require.Equal(t, int64(10), repo.syncedGroupID)
 		require.Equal(t, entries, repo.syncedEntries)
+	})
+
+	t.Run("rejects negative multiplier", func(t *testing.T) {
+		repo := &userGroupRateRepoStubForGroupRate{}
+		svc := &adminServiceImpl{userGroupRateRepo: repo}
+
+		err := svc.BatchSetGroupRateMultipliers(context.Background(), 10, []GroupRateMultiplierInput{
+			{UserID: 1, RateMultiplier: -0.1},
+		})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "rate_multiplier must be >= 0")
+		require.Empty(t, repo.syncedEntries)
 	})
 
 	t.Run("returns nil when repo is nil", func(t *testing.T) {

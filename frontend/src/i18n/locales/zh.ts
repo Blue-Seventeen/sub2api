@@ -1636,7 +1636,7 @@ export default {
         descriptionLabel: '描述',
         descriptionPlaceholder: '请输入描述（可选）',
         rateMultiplierLabel: '费率倍数',
-        rateMultiplierHint: '1.0 = 标准费率，0.5 = 半价，2.0 = 双倍',
+        rateMultiplierHint: '0 = 免费，1.0 = 标准费率，0.5 = 半价，2.0 = 双倍',
         exclusiveLabel: '专属分组',
         exclusiveHint: '专属分组，可以手动指定给用户',
         platformLabel: '平台限制',
@@ -1661,7 +1661,7 @@ export default {
         exampleContent:
           '公开分组费率 0.8，您可以创建一个费率 0.7 的专属分组，手动分配给 VIP 用户，让他们享受更优惠的价格。'
       },
-      rateMultiplierHint: '1.0 = 标准费率，0.5 = 半价，2.0 = 双倍',
+      rateMultiplierHint: '0 = 免费，1.0 = 标准费率，0.5 = 半价，2.0 = 双倍',
       platforms: {
         all: '全部平台',
         anthropic: 'Anthropic',
