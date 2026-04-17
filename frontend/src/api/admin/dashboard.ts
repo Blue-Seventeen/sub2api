@@ -270,6 +270,8 @@ export interface BatchUserUsageStats {
   user_id: number
   today_actual_cost: number
   total_actual_cost: number
+  real_today_actual_cost?: number
+  real_total_actual_cost?: number
 }
 
 export interface BatchUsersUsageResponse {
@@ -292,6 +294,8 @@ export interface BatchApiKeyUsageStats {
   api_key_id: number
   today_actual_cost: number
   total_actual_cost: number
+  real_today_actual_cost?: number
+  real_total_actual_cost?: number
 }
 
 export interface BatchApiKeysUsageResponse {

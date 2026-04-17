@@ -227,9 +227,9 @@ export async function batchSetGroupRateMultipliers(
  */
 export async function getUsageSummary(
   timezone?: string
-): Promise<{ group_id: number; today_cost: number; total_cost: number }[]> {
+): Promise<{ group_id: number; today_cost: number; total_cost: number; real_today_cost?: number; real_total_cost?: number }[]> {
   const { data } = await apiClient.get<
-    { group_id: number; today_cost: number; total_cost: number }[]
+    { group_id: number; today_cost: number; total_cost: number; real_today_cost?: number; real_total_cost?: number }[]
   >('/admin/groups/usage-summary', {
     params: timezone ? { timezone } : undefined
   })

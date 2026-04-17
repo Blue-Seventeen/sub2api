@@ -17,6 +17,7 @@ export interface AdminUsageStatsResponse {
   total_tokens: number
   total_cost: number
   total_actual_cost: number
+  real_total_actual_cost?: number
   total_account_cost?: number
   average_duration_ms: number
   endpoints?: EndpointStat[]

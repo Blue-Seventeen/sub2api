@@ -228,6 +228,97 @@ func TestOpenAIGatewayServiceRecordUsage_UsesUserSpecificGroupRate(t *testing.T)
 	require.Equal(t, 1, userRepo.deductCalls)
 }
 
+func TestOpenAIGatewayServiceRecordUsage_UsesFinalRateMultiplierWithUnifiedRate(t *testing.T) {
+	groupID := int64(21)
+	groupRate := 1.2
+	userRate := 1.6
+	unifiedRate := 1.5
+	usage := OpenAIUsage{InputTokens: 20, OutputTokens: 5}
+
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	userRepo := &openAIRecordUsageUserRepoStub{}
+	subRepo := &openAIRecordUsageSubRepoStub{}
+	rateRepo := &openAIUserGroupRateRepoStub{rate: &userRate}
+	svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, subRepo, rateRepo)
+
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID: "resp_final_rate_with_unified",
+			Usage:     usage,
+			Model:     "gpt-5.1",
+			Duration:  time.Second,
+		},
+		APIKey: &APIKey{
+			ID:      1010,
+			GroupID: i64p(groupID),
+			Group: &Group{
+				ID:             groupID,
+				RateMultiplier: groupRate,
+			},
+		},
+		User: &User{
+			ID:                    2010,
+			UnifiedRateEnabled:    true,
+			UnifiedRateMultiplier: unifiedRate,
+		},
+		Account: &Account{ID: 3010},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.Equal(t, userRate*unifiedRate, usageRepo.lastLog.RateMultiplier)
+	require.Equal(t, unifiedRate, usageRepo.lastLog.UnifiedRateMultiplier)
+
+	expected := expectedOpenAICost(t, svc, "gpt-5.1", usage, userRate*unifiedRate)
+	require.InDelta(t, expected.ActualCost, usageRepo.lastLog.ActualCost, 1e-12)
+	require.InDelta(t, usageRepo.lastLog.RealActualCost, userRepo.lastAmount, 1e-12)
+}
+
+func TestOpenAIGatewayServiceRecordUsage_ZeroUnifiedRateWritesZeroFinalRate(t *testing.T) {
+	groupID := int64(31)
+	groupRate := 1.7
+	unifiedRate := 0.0
+
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	userRepo := &openAIRecordUsageUserRepoStub{}
+	subRepo := &openAIRecordUsageSubRepoStub{}
+	svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, subRepo, nil)
+
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID: "resp_zero_unified_rate",
+			Usage: OpenAIUsage{
+				InputTokens:  10,
+				OutputTokens: 2,
+			},
+			Model:    "gpt-5.1",
+			Duration: time.Second,
+		},
+		APIKey: &APIKey{
+			ID:      1020,
+			GroupID: i64p(groupID),
+			Group: &Group{
+				ID:             groupID,
+				RateMultiplier: groupRate,
+			},
+		},
+		User: &User{
+			ID:                    2020,
+			UnifiedRateEnabled:    true,
+			UnifiedRateMultiplier: unifiedRate,
+		},
+		Account: &Account{ID: 3020},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.Equal(t, 0.0, usageRepo.lastLog.RateMultiplier)
+	require.Equal(t, 0.0, usageRepo.lastLog.UnifiedRateMultiplier)
+	require.Equal(t, 0.0, usageRepo.lastLog.ActualCost)
+	require.Equal(t, 0.0, usageRepo.lastLog.RealActualCost)
+	require.Equal(t, 0.0, userRepo.lastAmount)
+}
+
 func TestOpenAIGatewayServiceRecordUsage_IncludesEndpointMetadata(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	userRepo := &openAIRecordUsageUserRepoStub{}

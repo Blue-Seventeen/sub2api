@@ -13,6 +13,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func hasZeroChargeUnifiedRate(user *service.User) bool {
+	return user != nil && user.EffectiveUnifiedRateMultiplier() == 0
+}
+
 // NewAPIKeyAuthMiddleware 创建 API Key 认证中间件
 func NewAPIKeyAuthMiddleware(apiKeyService *service.APIKeyService, subscriptionService *service.SubscriptionService, cfg *config.Config) APIKeyAuthMiddleware {
 	return APIKeyAuthMiddleware(apiKeyAuthWithSubscription(apiKeyService, subscriptionService, cfg))
@@ -195,7 +199,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 				}
 			} else {
 				// 非订阅模式 或 订阅模式但 subscriptionService 未注入：回退到余额检查
-				if apiKey.User.Balance <= 0 {
+				if apiKey.User.Balance <= 0 && !hasZeroChargeUnifiedRate(apiKey.User) {
 					AbortWithError(c, 403, "INSUFFICIENT_BALANCE", "Insufficient account balance")
 					return
 				}

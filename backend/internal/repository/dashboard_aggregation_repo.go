@@ -331,6 +331,7 @@ func (r *dashboardAggregationRepository) upsertHourlyAggregates(ctx context.Cont
 				COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
 				COALESCE(SUM(total_cost), 0) AS total_cost,
 				COALESCE(SUM(actual_cost), 0) AS actual_cost,
+				COALESCE(SUM(real_actual_cost), 0) AS real_actual_cost,
 				COALESCE(SUM(COALESCE(duration_ms, 0)), 0) AS total_duration_ms
 			FROM usage_logs
 			WHERE created_at >= $1 AND created_at < $2
@@ -351,6 +352,7 @@ func (r *dashboardAggregationRepository) upsertHourlyAggregates(ctx context.Cont
 			cache_read_tokens,
 			total_cost,
 			actual_cost,
+			real_actual_cost,
 			total_duration_ms,
 			active_users,
 			computed_at
@@ -364,6 +366,7 @@ func (r *dashboardAggregationRepository) upsertHourlyAggregates(ctx context.Cont
 			hourly.cache_read_tokens,
 			hourly.total_cost,
 			hourly.actual_cost,
+			hourly.real_actual_cost,
 			hourly.total_duration_ms,
 			COALESCE(user_counts.active_users, 0) AS active_users,
 			NOW()
@@ -378,6 +381,7 @@ func (r *dashboardAggregationRepository) upsertHourlyAggregates(ctx context.Cont
 			cache_read_tokens = EXCLUDED.cache_read_tokens,
 			total_cost = EXCLUDED.total_cost,
 			actual_cost = EXCLUDED.actual_cost,
+			real_actual_cost = EXCLUDED.real_actual_cost,
 			total_duration_ms = EXCLUDED.total_duration_ms,
 			active_users = EXCLUDED.active_users,
 			computed_at = EXCLUDED.computed_at
@@ -399,6 +403,7 @@ func (r *dashboardAggregationRepository) upsertDailyAggregates(ctx context.Conte
 				COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
 				COALESCE(SUM(total_cost), 0) AS total_cost,
 				COALESCE(SUM(actual_cost), 0) AS actual_cost,
+				COALESCE(SUM(real_actual_cost), 0) AS real_actual_cost,
 				COALESCE(SUM(total_duration_ms), 0) AS total_duration_ms
 			FROM usage_dashboard_hourly
 			WHERE bucket_start >= $1 AND bucket_start < $2
@@ -419,6 +424,7 @@ func (r *dashboardAggregationRepository) upsertDailyAggregates(ctx context.Conte
 			cache_read_tokens,
 			total_cost,
 			actual_cost,
+			real_actual_cost,
 			total_duration_ms,
 			active_users,
 			computed_at
@@ -432,6 +438,7 @@ func (r *dashboardAggregationRepository) upsertDailyAggregates(ctx context.Conte
 			daily.cache_read_tokens,
 			daily.total_cost,
 			daily.actual_cost,
+			daily.real_actual_cost,
 			daily.total_duration_ms,
 			COALESCE(user_counts.active_users, 0) AS active_users,
 			NOW()
@@ -446,6 +453,7 @@ func (r *dashboardAggregationRepository) upsertDailyAggregates(ctx context.Conte
 			cache_read_tokens = EXCLUDED.cache_read_tokens,
 			total_cost = EXCLUDED.total_cost,
 			actual_cost = EXCLUDED.actual_cost,
+			real_actual_cost = EXCLUDED.real_actual_cost,
 			total_duration_ms = EXCLUDED.total_duration_ms,
 			active_users = EXCLUDED.active_users,
 			computed_at = EXCLUDED.computed_at

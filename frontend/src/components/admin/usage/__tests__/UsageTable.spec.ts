@@ -67,7 +67,8 @@ describe('admin UsageTable tooltip', () => {
       actual_cost: 0.092883,
       total_cost: 0.092883,
       account_rate_multiplier: 1,
-      rate_multiplier: 1,
+      rate_multiplier: 3,
+      unified_rate_multiplier: 1.5,
       service_tier: 'priority',
       input_cost: 0.020285,
       output_cost: 0.00303,
@@ -100,9 +101,8 @@ describe('admin UsageTable tooltip', () => {
     expect(text).toContain('Service tier')
     expect(text).toContain('Fast')
     expect(text).toContain('Rate')
-    expect(text).toContain('1.00x')
+    expect(text).toContain('2.00x')
     expect(text).toContain('Account rate')
-    expect(text).toContain('User billed')
     expect(text).toContain('Account billed')
     expect(text).toContain('$0.092883')
     expect(text).toContain('$5.0000 / 1M tokens')
@@ -146,5 +146,43 @@ describe('admin UsageTable tooltip', () => {
     const text = wrapper.text()
     expect(text).toContain('claude-sonnet-4')
     expect(text).toContain('claude-sonnet-4-20250514')
+  })
+
+  it('shows 0.00x base rate when unified rate snapshot is zero', async () => {
+    const row = {
+      request_id: 'req-admin-zero-unified',
+      actual_cost: 0,
+      total_cost: 0,
+      account_rate_multiplier: 1,
+      rate_multiplier: 0,
+      unified_rate_multiplier: 0,
+      input_cost: 0,
+      output_cost: 0,
+      cache_creation_cost: 0,
+      cache_read_cost: 0,
+      input_tokens: 0,
+      output_tokens: 0,
+    }
+
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [row],
+        loading: false,
+        columns: [],
+      },
+      global: {
+        stubs: {
+          DataTable: DataTableStub,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    await wrapper.find('.group.relative').trigger('mouseenter')
+    await nextTick()
+
+    expect(wrapper.text()).toContain('0.00x')
   })
 })

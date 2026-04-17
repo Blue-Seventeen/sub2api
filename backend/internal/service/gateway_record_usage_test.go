@@ -191,6 +191,47 @@ func TestGatewayServiceRecordUsage_PreservesRequestedAndUpstreamModels(t *testin
 	require.Equal(t, mappedModel, *usageRepo.lastLog.UpstreamModel)
 }
 
+func TestGatewayServiceRecordUsage_UsesFinalRateMultiplierWithUnifiedRate(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	userRepo := &openAIRecordUsageUserRepoStub{}
+	subRepo := &openAIRecordUsageSubRepoStub{}
+	quotaSvc := &openAIRecordUsageAPIKeyQuotaStub{}
+	svc := newGatewayRecordUsageServiceForTest(usageRepo, userRepo, subRepo)
+
+	err := svc.RecordUsage(context.Background(), &RecordUsageInput{
+		Result: &ForwardResult{
+			RequestID: "gateway_final_rate_with_unified",
+			Usage: ClaudeUsage{
+				InputTokens:  12,
+				OutputTokens: 8,
+			},
+			Model:    "claude-sonnet-4",
+			Duration: time.Second,
+		},
+		APIKey: &APIKey{
+			ID:      551,
+			Quota:   100,
+			GroupID: i64p(66),
+			Group: &Group{
+				ID:             66,
+				RateMultiplier: 1.25,
+			},
+		},
+		User: &User{
+			ID:                    661,
+			UnifiedRateEnabled:    true,
+			UnifiedRateMultiplier: 1.6,
+		},
+		Account:       &Account{ID: 771},
+		APIKeyService: quotaSvc,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.Equal(t, 2.0, usageRepo.lastLog.RateMultiplier)
+	require.Equal(t, 1.6, usageRepo.lastLog.UnifiedRateMultiplier)
+}
+
 func TestGatewayServiceRecordUsage_UsageLogWriteErrorDoesNotSkipBilling(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: false, err: MarkUsageLogCreateNotPersisted(context.Canceled)}
 	userRepo := &openAIRecordUsageUserRepoStub{}

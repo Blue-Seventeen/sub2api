@@ -1,7 +1,6 @@
 <template>
   <BaseDialog :show="show" :title="t('admin.users.groupConfig')" width="wide" @close="$emit('close')">
     <div v-if="user" class="space-y-6">
-      <!-- 用户信息头部 -->
       <div class="flex items-center gap-4 rounded-2xl bg-gradient-to-r from-primary-50 to-primary-100 p-5 dark:from-primary-900/30 dark:to-primary-800/20">
         <div class="flex h-14 w-14 items-center justify-center rounded-full bg-white shadow-sm dark:bg-dark-700">
           <span class="text-2xl font-semibold text-primary-600 dark:text-primary-400">{{ user.email.charAt(0).toUpperCase() }}</span>
@@ -12,7 +11,6 @@
         </div>
       </div>
 
-      <!-- 加载状态 -->
       <div v-if="loading" class="flex justify-center py-12">
         <svg class="h-10 w-10 animate-spin text-primary-500" fill="none" viewBox="0 0 24 24">
           <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -21,7 +19,54 @@
       </div>
 
       <div v-else class="space-y-6">
-        <!-- 专属分组区域 -->
+        <div class="rounded-2xl border border-primary-200/70 bg-primary-50/60 p-5 dark:border-primary-800/50 dark:bg-primary-900/10">
+          <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h4 class="text-sm font-semibold text-gray-900 dark:text-white">专属统一倍率</h4>
+              <p class="mt-1 text-xs text-gray-600 dark:text-gray-400">
+                开启后：最终倍率 = 基础倍率 × 统一倍率；显示余额 = 真实余额 × 统一倍率。
+              </p>
+            </div>
+            <label class="inline-flex cursor-pointer items-center gap-3">
+              <span class="text-sm text-gray-700 dark:text-gray-300">启用</span>
+              <button
+                type="button"
+                class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors"
+                :class="unifiedRateEnabled ? 'bg-primary-600' : 'bg-gray-300 dark:bg-dark-500'"
+                @click="unifiedRateEnabled = !unifiedRateEnabled"
+              >
+                <span
+                  class="inline-block h-5 w-5 transform rounded-full bg-white transition-transform"
+                  :class="unifiedRateEnabled ? 'translate-x-5' : 'translate-x-1'"
+                />
+              </button>
+            </label>
+          </div>
+
+          <div class="mt-4 grid gap-4 md:grid-cols-3">
+            <div>
+              <label class="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">统一倍率</label>
+              <input
+                v-model.number="unifiedRateMultiplier"
+                type="number"
+                step="0.001"
+                min="0"
+                class="hide-spinner w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium transition-colors focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20 dark:border-dark-500 dark:bg-dark-700 dark:text-white"
+              />
+            </div>
+            <div class="rounded-xl border border-white/60 bg-white/70 px-4 py-3 dark:border-dark-600 dark:bg-dark-800/60">
+              <div class="text-xs text-gray-500 dark:text-gray-400">生效倍率</div>
+              <div class="mt-1 text-lg font-semibold text-gray-900 dark:text-white">{{ effectiveUnifiedMultiplier.toFixed(3) }}x</div>
+            </div>
+            <div class="rounded-xl border border-white/60 bg-white/70 px-4 py-3 dark:border-dark-600 dark:bg-dark-800/60">
+              <div class="text-xs text-gray-500 dark:text-gray-400">说明</div>
+              <div class="mt-1 text-sm text-gray-700 dark:text-gray-300">
+                {{ unifiedRateEnabled ? '当前用户将按统一倍率放大显示余额与最终倍率' : '关闭后统一按 1x 处理' }}
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div v-if="exclusiveGroups.length > 0">
           <div class="mb-3 flex items-center gap-2">
             <div class="h-1.5 w-1.5 rounded-full bg-purple-500"></div>
@@ -38,7 +83,6 @@
                 : 'border-gray-200 bg-white hover:border-gray-300 dark:border-dark-600 dark:bg-dark-800 dark:hover:border-dark-500'"
             >
               <div class="flex items-center gap-4">
-                <!-- 复选框 -->
                 <div class="flex-shrink-0">
                   <label class="relative flex h-6 w-6 cursor-pointer items-center justify-center">
                     <input
@@ -55,7 +99,6 @@
                   </label>
                 </div>
 
-                <!-- 分组信息 -->
                 <div class="min-w-0 flex-1">
                   <div class="flex items-center gap-2">
                     <span class="text-base font-semibold text-gray-900 dark:text-white">{{ config.groupName }}</span>
@@ -63,7 +106,7 @@
                       {{ t('admin.groups.exclusive') }}
                     </span>
                   </div>
-                  <div class="mt-1.5 flex items-center gap-3 text-sm">
+                  <div class="mt-1.5 flex flex-wrap items-center gap-3 text-sm">
                     <span class="inline-flex items-center gap-1 text-gray-500 dark:text-gray-400">
                       <PlatformIcon :platform="config.platform" size="xs" />
                       <span>{{ config.platform }}</span>
@@ -72,10 +115,17 @@
                     <span class="text-gray-500 dark:text-gray-400">
                       {{ t('admin.users.defaultRate') }}: <span class="font-medium text-gray-700 dark:text-gray-300">{{ config.defaultRate }}x</span>
                     </span>
+                    <span class="text-gray-300 dark:text-dark-500">•</span>
+                    <span class="text-gray-500 dark:text-gray-400">
+                      基础倍率: <span class="font-medium text-gray-700 dark:text-gray-300">{{ getBaseRate(config).toFixed(3) }}x</span>
+                    </span>
+                    <span class="text-gray-300 dark:text-dark-500">•</span>
+                    <span class="text-gray-500 dark:text-gray-400">
+                      最终倍率: <span class="font-medium text-primary-700 dark:text-primary-300">{{ getFinalRate(config).toFixed(3) }}x</span>
+                    </span>
                   </div>
                 </div>
 
-                <!-- 专属倍率输入 -->
                 <div class="flex flex-shrink-0 items-center gap-3">
                   <label class="text-sm font-medium text-gray-600 dark:text-gray-400">{{ t('admin.users.customRate') }}</label>
                   <input
@@ -93,7 +143,6 @@
           </div>
         </div>
 
-        <!-- 公开分组区域 -->
         <div v-if="publicGroups.length > 0">
           <div class="mb-3 flex items-center gap-2">
             <div class="h-1.5 w-1.5 rounded-full bg-green-500"></div>
@@ -107,7 +156,6 @@
               class="relative overflow-hidden rounded-xl border-2 border-green-200 bg-green-50/50 p-4 dark:border-green-800/50 dark:bg-green-900/10"
             >
               <div class="flex items-center gap-4">
-                <!-- 复选框（禁用状态） -->
                 <div class="flex-shrink-0">
                   <div class="flex h-5 w-5 items-center justify-center rounded-md border-2 border-green-400 bg-green-500 dark:border-green-600 dark:bg-green-600">
                     <svg class="h-full w-full text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
@@ -116,12 +164,11 @@
                   </div>
                 </div>
 
-                <!-- 分组信息 -->
                 <div class="min-w-0 flex-1">
                   <div class="flex items-center gap-2">
                     <span class="text-base font-semibold text-gray-900 dark:text-white">{{ config.groupName }}</span>
                   </div>
-                  <div class="mt-1.5 flex items-center gap-3 text-sm">
+                  <div class="mt-1.5 flex flex-wrap items-center gap-3 text-sm">
                     <span class="inline-flex items-center gap-1 text-gray-500 dark:text-gray-400">
                       <PlatformIcon :platform="config.platform" size="xs" />
                       <span>{{ config.platform }}</span>
@@ -130,10 +177,17 @@
                     <span class="text-gray-500 dark:text-gray-400">
                       {{ t('admin.users.defaultRate') }}: <span class="font-medium text-gray-700 dark:text-gray-300">{{ config.defaultRate }}x</span>
                     </span>
+                    <span class="text-gray-300 dark:text-dark-500">•</span>
+                    <span class="text-gray-500 dark:text-gray-400">
+                      基础倍率: <span class="font-medium text-gray-700 dark:text-gray-300">{{ getBaseRate(config).toFixed(3) }}x</span>
+                    </span>
+                    <span class="text-gray-300 dark:text-dark-500">•</span>
+                    <span class="text-gray-500 dark:text-gray-400">
+                      最终倍率: <span class="font-medium text-primary-700 dark:text-primary-300">{{ getFinalRate(config).toFixed(3) }}x</span>
+                    </span>
                   </div>
                 </div>
 
-                <!-- 专属倍率输入 -->
                 <div class="flex flex-shrink-0 items-center gap-3">
                   <label class="text-sm font-medium text-gray-600 dark:text-gray-400">{{ t('admin.users.customRate') }}</label>
                   <input
@@ -151,7 +205,6 @@
           </div>
         </div>
 
-        <!-- 无分组提示 -->
         <div v-if="groups.length === 0" class="flex flex-col items-center justify-center py-12 text-center">
           <div class="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 dark:bg-dark-700">
             <svg class="h-8 w-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -179,7 +232,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
@@ -204,22 +257,28 @@ const appStore = useAppStore()
 
 const groups = ref<Group[]>([])
 const groupConfigs = ref<GroupRateConfig[]>([])
-const originalGroupRates = ref<Record<number, number>>({}) // 记录原始专属倍率，用于检测删除
+const originalGroupRates = ref<Record<number, number>>({})
+const unifiedRateEnabled = ref(false)
+const unifiedRateMultiplier = ref(1)
 const loading = ref(false)
 const submitting = ref(false)
 
-// 分离专属分组和公开分组
 const exclusiveGroups = computed(() => groups.value.filter((g) => g.is_exclusive))
 const publicGroups = computed(() => groups.value.filter((g) => !g.is_exclusive))
-
 const exclusiveGroupConfigs = computed(() => groupConfigs.value.filter((c) => c.isExclusive))
 const publicGroupConfigs = computed(() => groupConfigs.value.filter((c) => !c.isExclusive))
+const effectiveUnifiedMultiplier = computed(() => {
+  if (!unifiedRateEnabled.value) return 1
+  const normalized = Number(unifiedRateMultiplier.value)
+  if (!Number.isFinite(normalized) || normalized < 0) return 1
+  return normalized
+})
 
 watch(
   () => props.show,
   (v) => {
     if (v && props.user) {
-      load()
+      void load()
     }
   }
 )
@@ -228,14 +287,12 @@ const load = async () => {
   loading.value = true
   try {
     const res = await adminAPI.groups.list(1, 1000)
-    // 只显示标准类型且活跃的分组
     groups.value = res.items.filter((g) => g.subscription_type === 'standard' && g.status === 'active')
 
-    // 初始化配置
     const userAllowedGroups = props.user?.allowed_groups || []
     const userGroupRates = props.user?.group_rates || {}
-
-    // 保存原始专属倍率，用于检测删除操作
+    unifiedRateEnabled.value = props.user?.unified_rate_enabled ?? false
+    unifiedRateMultiplier.value = props.user?.unified_rate_multiplier ?? 1
     originalGroupRates.value = { ...userGroupRates }
 
     groupConfigs.value = groups.value.map((g) => ({
@@ -245,12 +302,11 @@ const load = async () => {
       isExclusive: g.is_exclusive,
       defaultRate: g.rate_multiplier,
       customRate: userGroupRates[g.id] ?? null,
-      // 专属分组：检查是否在 allowed_groups 中
-      // 公开分组：始终选中
-      isSelected: g.is_exclusive ? userAllowedGroups.includes(g.id) : true,
+      isSelected: g.is_exclusive ? userAllowedGroups.includes(g.id) : true
     }))
   } catch (error) {
     console.error('Failed to load groups:', error)
+    appStore.showError(t('common.error'))
   } finally {
     loading.value = false
   }
@@ -265,50 +321,49 @@ const toggleExclusiveGroup = (groupId: number) => {
 
 const updateCustomRate = (groupId: number, value: string) => {
   const config = groupConfigs.value.find((c) => c.groupId === groupId)
-  if (config) {
-    if (value === '' || value === null || value === undefined) {
-      config.customRate = null
-    } else {
-      const numValue = parseFloat(value)
-      config.customRate = isNaN(numValue) ? null : numValue
-    }
+  if (!config) return
+  if (value === '' || value == null) {
+    config.customRate = null
+    return
   }
+  const numValue = parseFloat(value)
+  config.customRate = Number.isNaN(numValue) ? null : numValue
 }
+
+const getBaseRate = (config: GroupRateConfig) => config.customRate ?? config.defaultRate
+const getFinalRate = (config: GroupRateConfig) => getBaseRate(config) * effectiveUnifiedMultiplier.value
 
 const handleSave = async () => {
   if (!props.user) return
   submitting.value = true
-
   try {
-    // 构建 allowed_groups（仅包含专属分组中被勾选的）
-    const allowedGroups = groupConfigs.value.filter((c) => c.isExclusive && c.isSelected).map((c) => c.groupId)
+    const allowedGroups = groupConfigs.value
+      .filter((c) => c.isExclusive && c.isSelected)
+      .map((c) => c.groupId)
 
-    // 构建 group_rates
-    // - 有新专属倍率: 设置为该值
-    // - 原本有专属倍率但现在被清空: 设置为 null（表示删除）
     const groupRates: Record<number, number | null> = {}
     for (const c of groupConfigs.value) {
       const hadOriginalRate = originalGroupRates.value[c.groupId] !== undefined
-
       if (c.customRate !== null) {
-        // 有专属倍率
         groupRates[c.groupId] = c.customRate
       } else if (hadOriginalRate) {
-        // 原本有专属倍率，现在被清空，需要显式删除
         groupRates[c.groupId] = null
       }
     }
 
     await adminAPI.users.update(props.user.id, {
       allowed_groups: allowedGroups,
-      group_rates: Object.keys(groupRates).length > 0 ? groupRates : undefined,
+      unified_rate_enabled: unifiedRateEnabled.value,
+      unified_rate_multiplier: effectiveUnifiedMultiplier.value,
+      group_rates: Object.keys(groupRates).length > 0 ? groupRates : undefined
     })
 
     appStore.showSuccess(t('admin.users.groupConfigUpdated'))
     emit('success')
     emit('close')
-  } catch (error) {
+  } catch (error: any) {
     console.error('Failed to update user group config:', error)
+    appStore.showError(error?.response?.data?.detail || t('common.error'))
   } finally {
     submitting.value = false
   }
@@ -316,7 +371,6 @@ const handleSave = async () => {
 </script>
 
 <style scoped>
-/* 隐藏数字输入框的箭头按钮 */
 .hide-spinner::-webkit-outer-spin-button,
 .hide-spinner::-webkit-inner-spin-button {
   -webkit-appearance: none;

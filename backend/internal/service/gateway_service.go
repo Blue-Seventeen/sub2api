@@ -7353,11 +7353,11 @@ func postUsageBilling(ctx context.Context, p *postUsageBillingParams, deps *bill
 			deps.billingCacheService.QueueUpdateSubscriptionUsage(p.User.ID, *p.APIKey.GroupID, cost.ActualCost)
 		}
 	} else {
-		if cost.ActualCost > 0 {
-			if err := deps.userRepo.DeductBalance(billingCtx, p.User.ID, cost.ActualCost); err != nil {
+		if cost.RealActualCost > 0 {
+			if err := deps.userRepo.DeductBalance(billingCtx, p.User.ID, cost.RealActualCost); err != nil {
 				slog.Error("deduct balance failed", "user_id", p.User.ID, "error", err)
 			}
-			deps.billingCacheService.QueueDeductBalance(p.User.ID, cost.ActualCost)
+			deps.billingCacheService.QueueDeductBalance(p.User.ID, cost.RealActualCost)
 		}
 	}
 
@@ -7451,8 +7451,8 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 	if p.IsSubscriptionBill && p.Subscription != nil && p.Cost.ActualCost > 0 {
 		cmd.SubscriptionID = &p.Subscription.ID
 		cmd.SubscriptionCost = p.Cost.ActualCost
-	} else if p.Cost.ActualCost > 0 {
-		cmd.BalanceCost = p.Cost.ActualCost
+	} else if p.Cost.RealActualCost > 0 {
+		cmd.BalanceCost = p.Cost.RealActualCost
 	}
 
 	if p.shouldDeductAPIKeyQuota() {
@@ -7512,8 +7512,8 @@ func finalizePostUsageBilling(p *postUsageBillingParams, deps *billingDeps) {
 		if p.Cost.ActualCost > 0 && p.User != nil && p.APIKey != nil && p.APIKey.GroupID != nil {
 			deps.billingCacheService.QueueUpdateSubscriptionUsage(p.User.ID, *p.APIKey.GroupID, p.Cost.ActualCost)
 		}
-	} else if p.Cost.ActualCost > 0 && p.User != nil {
-		deps.billingCacheService.QueueDeductBalance(p.User.ID, p.Cost.ActualCost)
+	} else if p.Cost.RealActualCost > 0 && p.User != nil {
+		deps.billingCacheService.QueueDeductBalance(p.User.ID, p.Cost.RealActualCost)
 	}
 
 	if p.Cost.ActualCost > 0 && p.APIKey != nil && p.APIKey.HasRateLimits() {
@@ -7706,15 +7706,17 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		cacheTTLOverridden = (result.Usage.CacheCreation5mTokens + result.Usage.CacheCreation1hTokens) > 0
 	}
 
-	// 获取费率倍数（优先级：用户专属 > 分组默认 > 系统默认）
-	multiplier := 1.0
+	// 获取基础分组倍率（优先级：用户专属 > 分组默认 > 系统默认）
+	baseMultiplier := 1.0
 	if s.cfg != nil && s.cfg.Default.RateMultiplier > 0 {
-		multiplier = s.cfg.Default.RateMultiplier
+		baseMultiplier = s.cfg.Default.RateMultiplier
 	}
 	if apiKey.GroupID != nil && apiKey.Group != nil {
 		groupDefault := apiKey.Group.RateMultiplier
-		multiplier = s.getUserGroupRateMultiplier(ctx, user.ID, *apiKey.GroupID, groupDefault)
+		baseMultiplier = s.getUserGroupRateMultiplier(ctx, user.ID, *apiKey.GroupID, groupDefault)
 	}
+	unifiedMultiplier := effectiveUnifiedMultiplier(user)
+	multiplier := baseMultiplier * unifiedMultiplier
 
 	// 确定计费模型
 	billingModel := forwardResultBillingModel(result.Model, result.UpstreamModel)
@@ -7733,6 +7735,9 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 
 	// 计算费用
 	cost := s.calculateRecordUsageCost(ctx, result, apiKey, billingModel, multiplier, opts)
+	if cost != nil {
+		cost.RealActualCost = realCostFromBase(cost.TotalCost, baseMultiplier, user)
+	}
 
 	// 判断计费方式：订阅模式 vs 余额模式
 	isSubscriptionBilling := subscription != nil && apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
@@ -7744,7 +7749,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	// 创建使用日志
 	accountRateMultiplier := account.BillingRateMultiplier()
 	usageLog := s.buildRecordUsageLog(ctx, input, result, apiKey, user, account, subscription,
-		requestedModel, multiplier, accountRateMultiplier, billingType, cacheTTLOverridden, cost, opts)
+		requestedModel, multiplier, unifiedMultiplier, accountRateMultiplier, billingType, cacheTTLOverridden, cost, opts)
 
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
 		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.gateway")
@@ -7911,6 +7916,7 @@ func (s *GatewayService) buildRecordUsageLog(
 	subscription *UserSubscription,
 	requestedModel string,
 	multiplier float64,
+	unifiedRateMultiplier float64,
 	accountRateMultiplier float64,
 	billingType int8,
 	cacheTTLOverridden bool,
@@ -7938,6 +7944,7 @@ func (s *GatewayService) buildRecordUsageLog(
 		CacheCreation1hTokens: result.Usage.CacheCreation1hTokens,
 		ImageOutputTokens:     result.Usage.ImageOutputTokens,
 		RateMultiplier:        multiplier,
+		UnifiedRateMultiplier: unifiedRateMultiplier,
 		AccountRateMultiplier: &accountRateMultiplier,
 		BillingType:           billingType,
 		BillingMode:           resolveBillingMode(result, cost),
@@ -7963,6 +7970,7 @@ func (s *GatewayService) buildRecordUsageLog(
 		usageLog.CacheReadCost = cost.CacheReadCost
 		usageLog.TotalCost = cost.TotalCost
 		usageLog.ActualCost = cost.ActualCost
+		usageLog.RealActualCost = cost.RealActualCost
 	}
 
 	return usageLog

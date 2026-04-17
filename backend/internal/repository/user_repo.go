@@ -62,6 +62,8 @@ func (r *userRepository) Create(ctx context.Context, userIn *service.User) error
 		SetPasswordHash(userIn.PasswordHash).
 		SetRole(userIn.Role).
 		SetBalance(userIn.Balance).
+		SetUnifiedRateEnabled(userIn.UnifiedRateEnabled).
+		SetUnifiedRateMultiplier(service.NormalizePersistedUnifiedRateMultiplier(userIn.UnifiedRateEnabled, userIn.UnifiedRateMultiplier)).
 		SetConcurrency(userIn.Concurrency).
 		SetStatus(userIn.Status).
 		Save(ctx)
@@ -144,6 +146,8 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User) error
 		SetPasswordHash(userIn.PasswordHash).
 		SetRole(userIn.Role).
 		SetBalance(userIn.Balance).
+		SetUnifiedRateEnabled(userIn.UnifiedRateEnabled).
+		SetUnifiedRateMultiplier(service.NormalizePersistedUnifiedRateMultiplier(userIn.UnifiedRateEnabled, userIn.UnifiedRateMultiplier)).
 		SetConcurrency(userIn.Concurrency).
 		SetStatus(userIn.Status).
 		Save(ctx)
@@ -290,6 +294,27 @@ func userListOrder(params pagination.PaginationParams) []func(*entsql.Selector) 
 	sortBy := strings.ToLower(strings.TrimSpace(params.SortBy))
 	sortOrder := params.NormalizedSortOrder(pagination.SortOrderDesc)
 
+	if sortBy == "balance" || sortBy == "display_balance" {
+		return []func(*entsql.Selector){
+			func(s *entsql.Selector) {
+				displayBalanceExpr := fmt.Sprintf(
+					"(%s * CASE WHEN %s THEN CASE WHEN %s < 0 THEN 1 ELSE %s END ELSE 1 END)",
+					s.C(dbuser.FieldBalance),
+					s.C(dbuser.FieldUnifiedRateEnabled),
+					s.C(dbuser.FieldUnifiedRateMultiplier),
+					s.C(dbuser.FieldUnifiedRateMultiplier),
+				)
+				if sortOrder == pagination.SortOrderAsc {
+					s.OrderExpr(entsql.Expr(displayBalanceExpr))
+					s.OrderExpr(entsql.Expr(s.C(dbuser.FieldID)))
+					return
+				}
+				s.OrderExpr(entsql.DescExpr(entsql.Expr(displayBalanceExpr)))
+				s.OrderExpr(entsql.DescExpr(entsql.Expr(s.C(dbuser.FieldID))))
+			},
+		}
+	}
+
 	var field string
 	defaultField := true
 	switch sortBy {
@@ -302,7 +327,7 @@ func userListOrder(params pagination.PaginationParams) []func(*entsql.Selector) 
 	case "role":
 		field = dbuser.FieldRole
 		defaultField = false
-	case "balance":
+	case "real_balance":
 		field = dbuser.FieldBalance
 		defaultField = false
 	case "concurrency":
@@ -545,8 +570,11 @@ func applyUserEntityToService(dst *service.User, src *dbent.User) {
 		return
 	}
 	dst.ID = src.ID
+	dst.UnifiedRateEnabled = src.UnifiedRateEnabled
+	dst.UnifiedRateMultiplier = service.NormalizePersistedUnifiedRateMultiplier(src.UnifiedRateEnabled, src.UnifiedRateMultiplier)
 	dst.CreatedAt = src.CreatedAt
 	dst.UpdatedAt = src.UpdatedAt
+	dst.RefreshBalanceViews()
 }
 
 // UpdateTotpSecret 更新用户的 TOTP 加密密钥

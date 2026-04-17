@@ -114,7 +114,7 @@
                   <span
                     class="text-amber-600 dark:text-amber-400"
                     :title="t('admin.dashboard.actual')"
-                    >${{ formatCost(stats.today_actual_cost) }}</span
+                    >${{ formatCost(getDashboardTodayCost(stats)) }}</span
                   >
                   <span
                     class="text-gray-400 dark:text-gray-500"
@@ -144,7 +144,7 @@
                   <span
                     class="text-indigo-600 dark:text-indigo-400"
                     :title="t('admin.dashboard.actual')"
-                    >${{ formatCost(stats.total_actual_cost) }}</span
+                    >${{ formatCost(getDashboardTotalCost(stats)) }}</span
                   >
                   <span
                     class="text-gray-400 dark:text-gray-500"
@@ -343,6 +343,8 @@ const rankingItems = ref<UserSpendingRankingItem[]>([])
 const rankingTotalActualCost = ref(0)
 const rankingTotalRequests = ref(0)
 const rankingTotalTokens = ref(0)
+const getDashboardTodayCost = (stats: DashboardStats) => stats.real_today_actual_cost ?? stats.today_actual_cost ?? 0
+const getDashboardTotalCost = (stats: DashboardStats) => stats.real_total_actual_cost ?? stats.total_actual_cost ?? 0
 let chartLoadSeq = 0
 let usersTrendLoadSeq = 0
 let rankingLoadSeq = 0
@@ -646,7 +648,7 @@ const loadUserSpendingRanking = async () => {
     })
     if (currentSeq !== rankingLoadSeq) return
     rankingItems.value = response.ranking || []
-    rankingTotalActualCost.value = response.total_actual_cost || 0
+    rankingTotalActualCost.value = (response.real_total_actual_cost ?? response.total_actual_cost ?? 0)
     rankingTotalRequests.value = response.total_requests || 0
     rankingTotalTokens.value = response.total_tokens || 0
   } catch (error) {

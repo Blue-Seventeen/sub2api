@@ -35,6 +35,10 @@ type CreateUsageLogRequest struct {
 	CacheReadCost         float64 `json:"cache_read_cost"`
 	TotalCost             float64 `json:"total_cost"`
 	ActualCost            float64 `json:"actual_cost"`
+	// RealActualCost 是管理员真实消费口径。
+	RealActualCost        float64 `json:"real_actual_cost"`
+	// UnifiedRateMultiplier 是写入日志时的统一倍率快照。
+	UnifiedRateMultiplier float64 `json:"unified_rate_multiplier"`
 	RateMultiplier        float64 `json:"rate_multiplier"`
 	Stream                bool    `json:"stream"`
 	DurationMs            *int    `json:"duration_ms"`
@@ -109,6 +113,8 @@ func (s *UsageService) Create(ctx context.Context, req CreateUsageLogRequest) (*
 		CacheReadCost:         req.CacheReadCost,
 		TotalCost:             req.TotalCost,
 		ActualCost:            req.ActualCost,
+		RealActualCost:        req.RealActualCost,
+		UnifiedRateMultiplier: req.UnifiedRateMultiplier,
 		RateMultiplier:        req.RateMultiplier,
 		Stream:                req.Stream,
 		DurationMs:            req.DurationMs,
@@ -121,8 +127,8 @@ func (s *UsageService) Create(ctx context.Context, req CreateUsageLogRequest) (*
 
 	// 扣除用户余额
 	balanceUpdated := false
-	if inserted && req.ActualCost > 0 {
-		if err := s.userRepo.UpdateBalance(txCtx, req.UserID, -req.ActualCost); err != nil {
+	if inserted && req.RealActualCost > 0 {
+		if err := s.userRepo.UpdateBalance(txCtx, req.UserID, -req.RealActualCost); err != nil {
 			return nil, fmt.Errorf("update user balance: %w", err)
 		}
 		balanceUpdated = true

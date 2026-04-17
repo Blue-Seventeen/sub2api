@@ -19,8 +19,8 @@ export async function getAvailable(): Promise<Group[]> {
 }
 
 /**
- * Get current user's custom group rate multipliers
- * @returns Map of group_id to custom rate_multiplier
+ * Get current user's effective/final group rate multipliers for bindable groups
+ * @returns Dense map of group_id to final rate_multiplier
  */
 export async function getUserGroupRates(): Promise<Record<number, number>> {
   const { data } = await apiClient.get<Record<number, number> | null>('/groups/rates')

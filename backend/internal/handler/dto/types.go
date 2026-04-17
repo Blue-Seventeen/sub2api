@@ -7,11 +7,14 @@ import (
 )
 
 type User struct {
-	ID            int64     `json:"id"`
-	Email         string    `json:"email"`
-	Username      string    `json:"username"`
-	Role          string    `json:"role"`
-	Balance       float64   `json:"balance"`
+	ID       int64  `json:"id"`
+	Email    string `json:"email"`
+	Username string `json:"username"`
+	Role     string `json:"role"`
+	// v0.1.114_Beta 增量兼容说明：
+	// 旧字段 balance 继续保留，不改名不删除；管理员端默认将其视为“显示余额”口径。
+	// 若需要明确读取真实余额，应优先使用新增字段 real_balance。
+	Balance       float64   `json:"balance"` // 兼容旧字段：对外展示余额（显示余额）
 	Concurrency   int       `json:"concurrency"`
 	Status        string    `json:"status"`
 	AllowedGroups []int64   `json:"allowed_groups"`
@@ -28,6 +31,17 @@ type AdminUser struct {
 	User
 
 	Notes string `json:"notes"`
+	// v0.1.114_Beta 增量兼容说明：
+	// real_balance 是管理员真实余额字段，其值与后端内部 Balance 相同；
+	// display_balance 为增量兼容新增字段，但管理员前端也可继续直接复用旧 balance 作为显示余额。
+	// RealBalance 是管理员真实余额口径（数据库实际结算余额）。
+	RealBalance float64 `json:"real_balance"`
+	// DisplayBalance 是管理员显示余额口径（真实余额 × 统一倍率）。
+	DisplayBalance float64 `json:"display_balance"`
+	// UnifiedRateEnabled 表示是否启用用户专属统一倍率。
+	UnifiedRateEnabled bool `json:"unified_rate_enabled"`
+	// UnifiedRateMultiplier 是用户专属统一倍率值（允许 0）。
+	UnifiedRateMultiplier float64 `json:"unified_rate_multiplier"`
 	// GroupRates 用户专属分组倍率配置
 	// map[groupID]rateMultiplier
 	GroupRates map[int64]float64 `json:"group_rates,omitempty"`
@@ -412,6 +426,10 @@ type AdminUsageLog struct {
 
 	// AccountRateMultiplier 账号计费倍率快照（nil 表示按 1.0 处理）
 	AccountRateMultiplier *float64 `json:"account_rate_multiplier"`
+	// RealActualCost 是管理员真实消费口径（不受统一倍率放大影响）。
+	RealActualCost float64 `json:"real_actual_cost"`
+	// UnifiedRateMultiplier 是写入日志时的用户统一倍率快照。
+	UnifiedRateMultiplier float64 `json:"unified_rate_multiplier"`
 
 	// IPAddress 用户请求 IP（仅管理员可见）
 	IPAddress *string `json:"ip_address,omitempty"`

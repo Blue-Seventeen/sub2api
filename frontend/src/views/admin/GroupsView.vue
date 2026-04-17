@@ -262,7 +262,7 @@
                 }}</span>
                 <span class="ml-1 font-medium text-gray-700 dark:text-gray-300"
                   >${{
-                    formatCost(usageMap.get(row.id)?.today_cost ?? 0)
+                    formatCost(usageMap.get(row.id)?.real_today_cost ?? usageMap.get(row.id)?.today_cost ?? 0)
                   }}</span
                 >
               </div>
@@ -272,7 +272,7 @@
                 }}</span>
                 <span class="ml-1 font-medium text-gray-700 dark:text-gray-300"
                   >${{
-                    formatCost(usageMap.get(row.id)?.total_cost ?? 0)
+                    formatCost(usageMap.get(row.id)?.real_total_cost ?? usageMap.get(row.id)?.total_cost ?? 0)
                   }}</span
                 >
               </div>
@@ -2903,7 +2903,7 @@ const copyAccountsGroupOptionsForEdit = computed(() => {
 
 const groups = ref<AdminGroup[]>([]);
 const loading = ref(false);
-const usageMap = ref<Map<number, { today_cost: number; total_cost: number }>>(
+const usageMap = ref<Map<number, { today_cost: number; total_cost: number; real_today_cost?: number; real_total_cost?: number }>>(
   new Map(),
 );
 const usageLoading = ref(false);
@@ -3341,11 +3341,13 @@ const loadUsageSummary = async () => {
   try {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const data = await adminAPI.groups.getUsageSummary(tz);
-    const map = new Map<number, { today_cost: number; total_cost: number }>();
+    const map = new Map<number, { today_cost: number; total_cost: number; real_today_cost?: number; real_total_cost?: number }>();
     for (const item of data) {
       map.set(item.group_id, {
         today_cost: item.today_cost,
         total_cost: item.total_cost,
+        real_today_cost: item.real_today_cost,
+        real_total_cost: item.real_total_cost,
       });
     }
     usageMap.value = map;

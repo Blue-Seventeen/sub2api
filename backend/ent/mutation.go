@@ -24816,6 +24816,10 @@ type UsageLogMutation struct {
 	addtotal_cost               *float64
 	actual_cost                 *float64
 	addactual_cost              *float64
+	real_actual_cost            *float64
+	addreal_actual_cost         *float64
+	unified_rate_multiplier     *float64
+	addunified_rate_multiplier  *float64
 	rate_multiplier             *float64
 	addrate_multiplier          *float64
 	account_rate_multiplier     *float64
@@ -26213,6 +26217,118 @@ func (m *UsageLogMutation) ResetActualCost() {
 	m.addactual_cost = nil
 }
 
+// SetRealActualCost sets the "real_actual_cost" field.
+func (m *UsageLogMutation) SetRealActualCost(f float64) {
+	m.real_actual_cost = &f
+	m.addreal_actual_cost = nil
+}
+
+// RealActualCost returns the value of the "real_actual_cost" field in the mutation.
+func (m *UsageLogMutation) RealActualCost() (r float64, exists bool) {
+	v := m.real_actual_cost
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRealActualCost returns the old "real_actual_cost" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldRealActualCost(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRealActualCost is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRealActualCost requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRealActualCost: %w", err)
+	}
+	return oldValue.RealActualCost, nil
+}
+
+// AddRealActualCost adds f to the "real_actual_cost" field.
+func (m *UsageLogMutation) AddRealActualCost(f float64) {
+	if m.addreal_actual_cost != nil {
+		*m.addreal_actual_cost += f
+	} else {
+		m.addreal_actual_cost = &f
+	}
+}
+
+// AddedRealActualCost returns the value that was added to the "real_actual_cost" field in this mutation.
+func (m *UsageLogMutation) AddedRealActualCost() (r float64, exists bool) {
+	v := m.addreal_actual_cost
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetRealActualCost resets all changes to the "real_actual_cost" field.
+func (m *UsageLogMutation) ResetRealActualCost() {
+	m.real_actual_cost = nil
+	m.addreal_actual_cost = nil
+}
+
+// SetUnifiedRateMultiplier sets the "unified_rate_multiplier" field.
+func (m *UsageLogMutation) SetUnifiedRateMultiplier(f float64) {
+	m.unified_rate_multiplier = &f
+	m.addunified_rate_multiplier = nil
+}
+
+// UnifiedRateMultiplier returns the value of the "unified_rate_multiplier" field in the mutation.
+func (m *UsageLogMutation) UnifiedRateMultiplier() (r float64, exists bool) {
+	v := m.unified_rate_multiplier
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUnifiedRateMultiplier returns the old "unified_rate_multiplier" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldUnifiedRateMultiplier(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUnifiedRateMultiplier is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUnifiedRateMultiplier requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUnifiedRateMultiplier: %w", err)
+	}
+	return oldValue.UnifiedRateMultiplier, nil
+}
+
+// AddUnifiedRateMultiplier adds f to the "unified_rate_multiplier" field.
+func (m *UsageLogMutation) AddUnifiedRateMultiplier(f float64) {
+	if m.addunified_rate_multiplier != nil {
+		*m.addunified_rate_multiplier += f
+	} else {
+		m.addunified_rate_multiplier = &f
+	}
+}
+
+// AddedUnifiedRateMultiplier returns the value that was added to the "unified_rate_multiplier" field in this mutation.
+func (m *UsageLogMutation) AddedUnifiedRateMultiplier() (r float64, exists bool) {
+	v := m.addunified_rate_multiplier
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetUnifiedRateMultiplier resets all changes to the "unified_rate_multiplier" field.
+func (m *UsageLogMutation) ResetUnifiedRateMultiplier() {
+	m.unified_rate_multiplier = nil
+	m.addunified_rate_multiplier = nil
+}
+
 // SetRateMultiplier sets the "rate_multiplier" field.
 func (m *UsageLogMutation) SetRateMultiplier(f float64) {
 	m.rate_multiplier = &f
@@ -27015,7 +27131,7 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 37)
+	fields := make([]string, 0, 39)
 	if m.user != nil {
 		fields = append(fields, usagelog.FieldUserID)
 	}
@@ -27090,6 +27206,12 @@ func (m *UsageLogMutation) Fields() []string {
 	}
 	if m.actual_cost != nil {
 		fields = append(fields, usagelog.FieldActualCost)
+	}
+	if m.real_actual_cost != nil {
+		fields = append(fields, usagelog.FieldRealActualCost)
+	}
+	if m.unified_rate_multiplier != nil {
+		fields = append(fields, usagelog.FieldUnifiedRateMultiplier)
 	}
 	if m.rate_multiplier != nil {
 		fields = append(fields, usagelog.FieldRateMultiplier)
@@ -27185,6 +27307,10 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.TotalCost()
 	case usagelog.FieldActualCost:
 		return m.ActualCost()
+	case usagelog.FieldRealActualCost:
+		return m.RealActualCost()
+	case usagelog.FieldUnifiedRateMultiplier:
+		return m.UnifiedRateMultiplier()
 	case usagelog.FieldRateMultiplier:
 		return m.RateMultiplier()
 	case usagelog.FieldAccountRateMultiplier:
@@ -27268,6 +27394,10 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldTotalCost(ctx)
 	case usagelog.FieldActualCost:
 		return m.OldActualCost(ctx)
+	case usagelog.FieldRealActualCost:
+		return m.OldRealActualCost(ctx)
+	case usagelog.FieldUnifiedRateMultiplier:
+		return m.OldUnifiedRateMultiplier(ctx)
 	case usagelog.FieldRateMultiplier:
 		return m.OldRateMultiplier(ctx)
 	case usagelog.FieldAccountRateMultiplier:
@@ -27476,6 +27606,20 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetActualCost(v)
 		return nil
+	case usagelog.FieldRealActualCost:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRealActualCost(v)
+		return nil
+	case usagelog.FieldUnifiedRateMultiplier:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUnifiedRateMultiplier(v)
+		return nil
 	case usagelog.FieldRateMultiplier:
 		v, ok := value.(float64)
 		if !ok {
@@ -27607,6 +27751,12 @@ func (m *UsageLogMutation) AddedFields() []string {
 	if m.addactual_cost != nil {
 		fields = append(fields, usagelog.FieldActualCost)
 	}
+	if m.addreal_actual_cost != nil {
+		fields = append(fields, usagelog.FieldRealActualCost)
+	}
+	if m.addunified_rate_multiplier != nil {
+		fields = append(fields, usagelog.FieldUnifiedRateMultiplier)
+	}
 	if m.addrate_multiplier != nil {
 		fields = append(fields, usagelog.FieldRateMultiplier)
 	}
@@ -27659,6 +27809,10 @@ func (m *UsageLogMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedTotalCost()
 	case usagelog.FieldActualCost:
 		return m.AddedActualCost()
+	case usagelog.FieldRealActualCost:
+		return m.AddedRealActualCost()
+	case usagelog.FieldUnifiedRateMultiplier:
+		return m.AddedUnifiedRateMultiplier()
 	case usagelog.FieldRateMultiplier:
 		return m.AddedRateMultiplier()
 	case usagelog.FieldAccountRateMultiplier:
@@ -27770,6 +27924,20 @@ func (m *UsageLogMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddActualCost(v)
+		return nil
+	case usagelog.FieldRealActualCost:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddRealActualCost(v)
+		return nil
+	case usagelog.FieldUnifiedRateMultiplier:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddUnifiedRateMultiplier(v)
 		return nil
 	case usagelog.FieldRateMultiplier:
 		v, ok := value.(float64)
@@ -28002,6 +28170,12 @@ func (m *UsageLogMutation) ResetField(name string) error {
 	case usagelog.FieldActualCost:
 		m.ResetActualCost()
 		return nil
+	case usagelog.FieldRealActualCost:
+		m.ResetRealActualCost()
+		return nil
+	case usagelog.FieldUnifiedRateMultiplier:
+		m.ResetUnifiedRateMultiplier()
+		return nil
 	case usagelog.FieldRateMultiplier:
 		m.ResetRateMultiplier()
 		return nil
@@ -28202,6 +28376,9 @@ type UserMutation struct {
 	role                          *string
 	balance                       *float64
 	addbalance                    *float64
+	unified_rate_enabled          *bool
+	unified_rate_multiplier       *float64
+	addunified_rate_multiplier    *float64
 	concurrency                   *int
 	addconcurrency                *int
 	status                        *string
@@ -28627,6 +28804,98 @@ func (m *UserMutation) AddedBalance() (r float64, exists bool) {
 func (m *UserMutation) ResetBalance() {
 	m.balance = nil
 	m.addbalance = nil
+}
+
+// SetUnifiedRateEnabled sets the "unified_rate_enabled" field.
+func (m *UserMutation) SetUnifiedRateEnabled(b bool) {
+	m.unified_rate_enabled = &b
+}
+
+// UnifiedRateEnabled returns the value of the "unified_rate_enabled" field in the mutation.
+func (m *UserMutation) UnifiedRateEnabled() (r bool, exists bool) {
+	v := m.unified_rate_enabled
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUnifiedRateEnabled returns the old "unified_rate_enabled" field's value of the User entity.
+// If the User object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserMutation) OldUnifiedRateEnabled(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUnifiedRateEnabled is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUnifiedRateEnabled requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUnifiedRateEnabled: %w", err)
+	}
+	return oldValue.UnifiedRateEnabled, nil
+}
+
+// ResetUnifiedRateEnabled resets all changes to the "unified_rate_enabled" field.
+func (m *UserMutation) ResetUnifiedRateEnabled() {
+	m.unified_rate_enabled = nil
+}
+
+// SetUnifiedRateMultiplier sets the "unified_rate_multiplier" field.
+func (m *UserMutation) SetUnifiedRateMultiplier(f float64) {
+	m.unified_rate_multiplier = &f
+	m.addunified_rate_multiplier = nil
+}
+
+// UnifiedRateMultiplier returns the value of the "unified_rate_multiplier" field in the mutation.
+func (m *UserMutation) UnifiedRateMultiplier() (r float64, exists bool) {
+	v := m.unified_rate_multiplier
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUnifiedRateMultiplier returns the old "unified_rate_multiplier" field's value of the User entity.
+// If the User object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserMutation) OldUnifiedRateMultiplier(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUnifiedRateMultiplier is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUnifiedRateMultiplier requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUnifiedRateMultiplier: %w", err)
+	}
+	return oldValue.UnifiedRateMultiplier, nil
+}
+
+// AddUnifiedRateMultiplier adds f to the "unified_rate_multiplier" field.
+func (m *UserMutation) AddUnifiedRateMultiplier(f float64) {
+	if m.addunified_rate_multiplier != nil {
+		*m.addunified_rate_multiplier += f
+	} else {
+		m.addunified_rate_multiplier = &f
+	}
+}
+
+// AddedUnifiedRateMultiplier returns the value that was added to the "unified_rate_multiplier" field in this mutation.
+func (m *UserMutation) AddedUnifiedRateMultiplier() (r float64, exists bool) {
+	v := m.addunified_rate_multiplier
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetUnifiedRateMultiplier resets all changes to the "unified_rate_multiplier" field.
+func (m *UserMutation) ResetUnifiedRateMultiplier() {
+	m.unified_rate_multiplier = nil
+	m.addunified_rate_multiplier = nil
 }
 
 // SetConcurrency sets the "concurrency" field.
@@ -29501,7 +29770,7 @@ func (m *UserMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UserMutation) Fields() []string {
-	fields := make([]string, 0, 14)
+	fields := make([]string, 0, 16)
 	if m.created_at != nil {
 		fields = append(fields, user.FieldCreatedAt)
 	}
@@ -29522,6 +29791,12 @@ func (m *UserMutation) Fields() []string {
 	}
 	if m.balance != nil {
 		fields = append(fields, user.FieldBalance)
+	}
+	if m.unified_rate_enabled != nil {
+		fields = append(fields, user.FieldUnifiedRateEnabled)
+	}
+	if m.unified_rate_multiplier != nil {
+		fields = append(fields, user.FieldUnifiedRateMultiplier)
 	}
 	if m.concurrency != nil {
 		fields = append(fields, user.FieldConcurrency)
@@ -29566,6 +29841,10 @@ func (m *UserMutation) Field(name string) (ent.Value, bool) {
 		return m.Role()
 	case user.FieldBalance:
 		return m.Balance()
+	case user.FieldUnifiedRateEnabled:
+		return m.UnifiedRateEnabled()
+	case user.FieldUnifiedRateMultiplier:
+		return m.UnifiedRateMultiplier()
 	case user.FieldConcurrency:
 		return m.Concurrency()
 	case user.FieldStatus:
@@ -29603,6 +29882,10 @@ func (m *UserMutation) OldField(ctx context.Context, name string) (ent.Value, er
 		return m.OldRole(ctx)
 	case user.FieldBalance:
 		return m.OldBalance(ctx)
+	case user.FieldUnifiedRateEnabled:
+		return m.OldUnifiedRateEnabled(ctx)
+	case user.FieldUnifiedRateMultiplier:
+		return m.OldUnifiedRateMultiplier(ctx)
 	case user.FieldConcurrency:
 		return m.OldConcurrency(ctx)
 	case user.FieldStatus:
@@ -29675,6 +29958,20 @@ func (m *UserMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetBalance(v)
 		return nil
+	case user.FieldUnifiedRateEnabled:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUnifiedRateEnabled(v)
+		return nil
+	case user.FieldUnifiedRateMultiplier:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUnifiedRateMultiplier(v)
+		return nil
 	case user.FieldConcurrency:
 		v, ok := value.(int)
 		if !ok {
@@ -29735,6 +30032,9 @@ func (m *UserMutation) AddedFields() []string {
 	if m.addbalance != nil {
 		fields = append(fields, user.FieldBalance)
 	}
+	if m.addunified_rate_multiplier != nil {
+		fields = append(fields, user.FieldUnifiedRateMultiplier)
+	}
 	if m.addconcurrency != nil {
 		fields = append(fields, user.FieldConcurrency)
 	}
@@ -29748,6 +30048,8 @@ func (m *UserMutation) AddedField(name string) (ent.Value, bool) {
 	switch name {
 	case user.FieldBalance:
 		return m.AddedBalance()
+	case user.FieldUnifiedRateMultiplier:
+		return m.AddedUnifiedRateMultiplier()
 	case user.FieldConcurrency:
 		return m.AddedConcurrency()
 	}
@@ -29765,6 +30067,13 @@ func (m *UserMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddBalance(v)
+		return nil
+	case user.FieldUnifiedRateMultiplier:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddUnifiedRateMultiplier(v)
 		return nil
 	case user.FieldConcurrency:
 		v, ok := value.(int)
@@ -29841,6 +30150,12 @@ func (m *UserMutation) ResetField(name string) error {
 		return nil
 	case user.FieldBalance:
 		m.ResetBalance()
+		return nil
+	case user.FieldUnifiedRateEnabled:
+		m.ResetUnifiedRateEnabled()
+		return nil
+	case user.FieldUnifiedRateMultiplier:
+		m.ResetUnifiedRateMultiplier()
 		return nil
 	case user.FieldConcurrency:
 		m.ResetConcurrency()

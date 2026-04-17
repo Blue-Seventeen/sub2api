@@ -72,6 +72,10 @@ type UsageLog struct {
 	TotalCost float64 `json:"total_cost,omitempty"`
 	// ActualCost holds the value of the "actual_cost" field.
 	ActualCost float64 `json:"actual_cost,omitempty"`
+	// 管理员真实消费口径（不受统一倍率放大影响）
+	RealActualCost float64 `json:"real_actual_cost,omitempty"`
+	// 写入日志时的用户统一倍率快照
+	UnifiedRateMultiplier float64 `json:"unified_rate_multiplier,omitempty"`
 	// RateMultiplier holds the value of the "rate_multiplier" field.
 	RateMultiplier float64 `json:"rate_multiplier,omitempty"`
 	// AccountRateMultiplier holds the value of the "account_rate_multiplier" field.
@@ -181,7 +185,7 @@ func (*UsageLog) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case usagelog.FieldStream, usagelog.FieldCacheTTLOverridden:
 			values[i] = new(sql.NullBool)
-		case usagelog.FieldInputCost, usagelog.FieldOutputCost, usagelog.FieldCacheCreationCost, usagelog.FieldCacheReadCost, usagelog.FieldTotalCost, usagelog.FieldActualCost, usagelog.FieldRateMultiplier, usagelog.FieldAccountRateMultiplier:
+		case usagelog.FieldInputCost, usagelog.FieldOutputCost, usagelog.FieldCacheCreationCost, usagelog.FieldCacheReadCost, usagelog.FieldTotalCost, usagelog.FieldActualCost, usagelog.FieldRealActualCost, usagelog.FieldUnifiedRateMultiplier, usagelog.FieldRateMultiplier, usagelog.FieldAccountRateMultiplier:
 			values[i] = new(sql.NullFloat64)
 		case usagelog.FieldID, usagelog.FieldUserID, usagelog.FieldAPIKeyID, usagelog.FieldAccountID, usagelog.FieldChannelID, usagelog.FieldGroupID, usagelog.FieldSubscriptionID, usagelog.FieldInputTokens, usagelog.FieldOutputTokens, usagelog.FieldCacheCreationTokens, usagelog.FieldCacheReadTokens, usagelog.FieldCacheCreation5mTokens, usagelog.FieldCacheCreation1hTokens, usagelog.FieldBillingType, usagelog.FieldDurationMs, usagelog.FieldFirstTokenMs, usagelog.FieldImageCount:
 			values[i] = new(sql.NullInt64)
@@ -367,6 +371,18 @@ func (_m *UsageLog) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field actual_cost", values[i])
 			} else if value.Valid {
 				_m.ActualCost = value.Float64
+			}
+		case usagelog.FieldRealActualCost:
+			if value, ok := values[i].(*sql.NullFloat64); !ok {
+				return fmt.Errorf("unexpected type %T for field real_actual_cost", values[i])
+			} else if value.Valid {
+				_m.RealActualCost = value.Float64
+			}
+		case usagelog.FieldUnifiedRateMultiplier:
+			if value, ok := values[i].(*sql.NullFloat64); !ok {
+				return fmt.Errorf("unexpected type %T for field unified_rate_multiplier", values[i])
+			} else if value.Valid {
+				_m.UnifiedRateMultiplier = value.Float64
 			}
 		case usagelog.FieldRateMultiplier:
 			if value, ok := values[i].(*sql.NullFloat64); !ok {
@@ -597,6 +613,12 @@ func (_m *UsageLog) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("actual_cost=")
 	builder.WriteString(fmt.Sprintf("%v", _m.ActualCost))
+	builder.WriteString(", ")
+	builder.WriteString("real_actual_cost=")
+	builder.WriteString(fmt.Sprintf("%v", _m.RealActualCost))
+	builder.WriteString(", ")
+	builder.WriteString("unified_rate_multiplier=")
+	builder.WriteString(fmt.Sprintf("%v", _m.UnifiedRateMultiplier))
 	builder.WriteString(", ")
 	builder.WriteString("rate_multiplier=")
 	builder.WriteString(fmt.Sprintf("%v", _m.RateMultiplier))

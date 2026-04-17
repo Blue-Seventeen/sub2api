@@ -28,7 +28,7 @@ import (
 	gocache "github.com/patrickmn/go-cache"
 )
 
-const usageLogSelectColumns = "id, user_id, api_key_id, account_id, request_id, model, requested_model, upstream_model, group_id, subscription_id, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cache_creation_5m_tokens, cache_creation_1h_tokens, image_output_tokens, image_output_cost, input_cost, output_cost, cache_creation_cost, cache_read_cost, total_cost, actual_cost, rate_multiplier, account_rate_multiplier, billing_type, request_type, stream, openai_ws_mode, duration_ms, first_token_ms, user_agent, ip_address, image_count, image_size, service_tier, reasoning_effort, inbound_endpoint, upstream_endpoint, cache_ttl_overridden, channel_id, model_mapping_chain, billing_tier, billing_mode, created_at"
+const usageLogSelectColumns = "id, user_id, api_key_id, account_id, request_id, model, requested_model, upstream_model, group_id, subscription_id, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cache_creation_5m_tokens, cache_creation_1h_tokens, image_output_tokens, image_output_cost, input_cost, output_cost, cache_creation_cost, cache_read_cost, total_cost, actual_cost, real_actual_cost, unified_rate_multiplier, rate_multiplier, account_rate_multiplier, billing_type, request_type, stream, openai_ws_mode, duration_ms, first_token_ms, user_agent, ip_address, image_count, image_size, service_tier, reasoning_effort, inbound_endpoint, upstream_endpoint, cache_ttl_overridden, channel_id, model_mapping_chain, billing_tier, billing_mode, created_at"
 
 // usageLogInsertArgTypes must stay in the same order as:
 //  1. prepareUsageLogInsert().args
@@ -61,6 +61,8 @@ var usageLogInsertArgTypes = [...]string{
 	"numeric",     // cache_read_cost
 	"numeric",     // total_cost
 	"numeric",     // actual_cost
+	"numeric",     // real_actual_cost
+	"numeric",     // unified_rate_multiplier
 	"numeric",     // rate_multiplier
 	"numeric",     // account_rate_multiplier
 	"smallint",    // billing_type
@@ -339,6 +341,8 @@ func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,
 			cache_read_cost,
 			total_cost,
 			actual_cost,
+			real_actual_cost,
+			unified_rate_multiplier,
 			rate_multiplier,
 			account_rate_multiplier,
 			billing_type,
@@ -367,7 +371,7 @@ func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,
 			$10, $11, $12, $13,
 			$14, $15, $16, $17,
 			$18, $19, $20, $21, $22, $23,
-			$24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45
+			$24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 		RETURNING id, created_at
@@ -776,6 +780,8 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 			cache_read_cost,
 			total_cost,
 			actual_cost,
+			real_actual_cost,
+			unified_rate_multiplier,
 			rate_multiplier,
 			account_rate_multiplier,
 			billing_type,
@@ -852,6 +858,8 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				cache_read_cost,
 				total_cost,
 				actual_cost,
+				real_actual_cost,
+				unified_rate_multiplier,
 				rate_multiplier,
 				account_rate_multiplier,
 				billing_type,
@@ -899,6 +907,8 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				cache_read_cost,
 				total_cost,
 				actual_cost,
+				real_actual_cost,
+				unified_rate_multiplier,
 				rate_multiplier,
 				account_rate_multiplier,
 				billing_type,
@@ -986,6 +996,8 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			cache_read_cost,
 			total_cost,
 			actual_cost,
+			real_actual_cost,
+			unified_rate_multiplier,
 			rate_multiplier,
 			account_rate_multiplier,
 			billing_type,
@@ -1059,6 +1071,8 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			cache_read_cost,
 			total_cost,
 			actual_cost,
+			real_actual_cost,
+			unified_rate_multiplier,
 			rate_multiplier,
 			account_rate_multiplier,
 			billing_type,
@@ -1106,6 +1120,8 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			cache_read_cost,
 			total_cost,
 			actual_cost,
+			real_actual_cost,
+			unified_rate_multiplier,
 			rate_multiplier,
 			account_rate_multiplier,
 			billing_type,
@@ -1161,6 +1177,8 @@ func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared 
 			cache_read_cost,
 			total_cost,
 			actual_cost,
+			real_actual_cost,
+			unified_rate_multiplier,
 			rate_multiplier,
 			account_rate_multiplier,
 			billing_type,
@@ -1189,7 +1207,7 @@ func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared 
 			$10, $11, $12, $13,
 			$14, $15, $16, $17,
 			$18, $19, $20, $21, $22, $23,
-			$24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45
+			$24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 	`, prepared.args...)
@@ -1264,6 +1282,8 @@ func prepareUsageLogInsert(log *service.UsageLog) usageLogInsertPrepared {
 			log.CacheReadCost,
 			log.TotalCost,
 			log.ActualCost,
+			log.RealActualCost,
+			log.UnifiedRateMultiplier,
 			rateMultiplier,
 			log.AccountRateMultiplier,
 			log.BillingType,
@@ -1518,6 +1538,7 @@ func (r *usageLogRepository) fillDashboardUsageStatsAggregated(ctx context.Conte
 			COALESCE(SUM(cache_read_tokens), 0) as total_cache_read_tokens,
 			COALESCE(SUM(total_cost), 0) as total_cost,
 			COALESCE(SUM(actual_cost), 0) as total_actual_cost,
+			COALESCE(SUM(real_actual_cost), 0) as real_total_actual_cost,
 			COALESCE(SUM(total_duration_ms), 0) as total_duration_ms
 		FROM usage_dashboard_daily
 	`
@@ -1534,6 +1555,7 @@ func (r *usageLogRepository) fillDashboardUsageStatsAggregated(ctx context.Conte
 		&stats.TotalCacheReadTokens,
 		&stats.TotalCost,
 		&stats.TotalActualCost,
+		&stats.RealTotalActualCost,
 		&totalDurationMs,
 	); err != nil {
 		return err
@@ -1552,6 +1574,7 @@ func (r *usageLogRepository) fillDashboardUsageStatsAggregated(ctx context.Conte
 			cache_read_tokens as today_cache_read_tokens,
 			total_cost as today_cost,
 			actual_cost as today_actual_cost,
+			real_actual_cost as real_today_actual_cost,
 			active_users as active_users
 		FROM usage_dashboard_daily
 		WHERE bucket_date = $1::date
@@ -1568,6 +1591,7 @@ func (r *usageLogRepository) fillDashboardUsageStatsAggregated(ctx context.Conte
 		&stats.TodayCacheReadTokens,
 		&stats.TodayCost,
 		&stats.TodayActualCost,
+		&stats.RealTodayActualCost,
 		&stats.ActiveUsers,
 	); err != nil {
 		if err != sql.ErrNoRows {
@@ -1603,6 +1627,7 @@ func (r *usageLogRepository) fillDashboardUsageStatsFromUsageLogs(ctx context.Co
 				cache_read_tokens,
 				total_cost,
 				actual_cost,
+				real_actual_cost,
 				COALESCE(duration_ms, 0) AS duration_ms
 			FROM usage_logs
 			WHERE created_at >= LEAST($1::timestamptz, $3::timestamptz)
@@ -1616,6 +1641,7 @@ func (r *usageLogRepository) fillDashboardUsageStatsFromUsageLogs(ctx context.Co
 			COALESCE(SUM(cache_read_tokens) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz), 0) AS total_cache_read_tokens,
 			COALESCE(SUM(total_cost) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz), 0) AS total_cost,
 			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz), 0) AS total_actual_cost,
+			COALESCE(SUM(real_actual_cost) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz), 0) AS real_total_actual_cost,
 			COALESCE(SUM(duration_ms) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz), 0) AS total_duration_ms,
 			COUNT(*) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz) AS today_requests,
 			COALESCE(SUM(input_tokens) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS today_input_tokens,
@@ -1623,7 +1649,8 @@ func (r *usageLogRepository) fillDashboardUsageStatsFromUsageLogs(ctx context.Co
 			COALESCE(SUM(cache_creation_tokens) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS today_cache_creation_tokens,
 			COALESCE(SUM(cache_read_tokens) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS today_cache_read_tokens,
 			COALESCE(SUM(total_cost) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS today_cost,
-			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS today_actual_cost
+			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS today_actual_cost,
+			COALESCE(SUM(real_actual_cost) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS real_today_actual_cost
 		FROM scoped
 	`
 	var totalDurationMs int64
@@ -1639,6 +1666,7 @@ func (r *usageLogRepository) fillDashboardUsageStatsFromUsageLogs(ctx context.Co
 		&stats.TotalCacheReadTokens,
 		&stats.TotalCost,
 		&stats.TotalActualCost,
+		&stats.RealTotalActualCost,
 		&totalDurationMs,
 		&stats.TodayRequests,
 		&stats.TodayInputTokens,
@@ -1647,6 +1675,7 @@ func (r *usageLogRepository) fillDashboardUsageStatsFromUsageLogs(ctx context.Co
 		&stats.TodayCacheReadTokens,
 		&stats.TodayCost,
 		&stats.TodayActualCost,
+		&stats.RealTodayActualCost,
 	); err != nil {
 		return err
 	}
@@ -1698,6 +1727,7 @@ func (r *usageLogRepository) GetUserStatsAggregated(ctx context.Context, userID 
 			COALESCE(SUM(cache_creation_tokens + cache_read_tokens), 0) as total_cache_tokens,
 			COALESCE(SUM(total_cost), 0) as total_cost,
 			COALESCE(SUM(actual_cost), 0) as total_actual_cost,
+			COALESCE(SUM(real_actual_cost), 0) as real_total_actual_cost,
 			COALESCE(AVG(COALESCE(duration_ms, 0)), 0) as avg_duration_ms
 		FROM usage_logs
 		WHERE user_id = $1 AND created_at >= $2 AND created_at < $3
@@ -1715,6 +1745,7 @@ func (r *usageLogRepository) GetUserStatsAggregated(ctx context.Context, userID 
 		&stats.TotalCacheTokens,
 		&stats.TotalCost,
 		&stats.TotalActualCost,
+		&stats.RealTotalActualCost,
 		&stats.AverageDurationMs,
 	); err != nil {
 		return nil, err
@@ -1733,6 +1764,7 @@ func (r *usageLogRepository) GetAPIKeyStatsAggregated(ctx context.Context, apiKe
 			COALESCE(SUM(cache_creation_tokens + cache_read_tokens), 0) as total_cache_tokens,
 			COALESCE(SUM(total_cost), 0) as total_cost,
 			COALESCE(SUM(actual_cost), 0) as total_actual_cost,
+			COALESCE(SUM(real_actual_cost), 0) as real_total_actual_cost,
 			COALESCE(AVG(COALESCE(duration_ms, 0)), 0) as avg_duration_ms
 		FROM usage_logs
 		WHERE api_key_id = $1 AND created_at >= $2 AND created_at < $3
@@ -1750,6 +1782,7 @@ func (r *usageLogRepository) GetAPIKeyStatsAggregated(ctx context.Context, apiKe
 		&stats.TotalCacheTokens,
 		&stats.TotalCost,
 		&stats.TotalActualCost,
+		&stats.RealTotalActualCost,
 		&stats.AverageDurationMs,
 	); err != nil {
 		return nil, err
@@ -1778,6 +1811,7 @@ func (r *usageLogRepository) GetAccountStatsAggregated(ctx context.Context, acco
 			COALESCE(SUM(cache_creation_tokens + cache_read_tokens), 0) as total_cache_tokens,
 			COALESCE(SUM(total_cost), 0) as total_cost,
 			COALESCE(SUM(actual_cost), 0) as total_actual_cost,
+			COALESCE(SUM(real_actual_cost), 0) as real_total_actual_cost,
 			COALESCE(AVG(COALESCE(duration_ms, 0)), 0) as avg_duration_ms
 		FROM usage_logs
 		WHERE account_id = $1 AND created_at >= $2 AND created_at < $3
@@ -1795,6 +1829,7 @@ func (r *usageLogRepository) GetAccountStatsAggregated(ctx context.Context, acco
 		&stats.TotalCacheTokens,
 		&stats.TotalCost,
 		&stats.TotalActualCost,
+		&stats.RealTotalActualCost,
 		&stats.AverageDurationMs,
 	); err != nil {
 		return nil, err
@@ -1814,6 +1849,7 @@ func (r *usageLogRepository) GetModelStatsAggregated(ctx context.Context, modelN
 			COALESCE(SUM(cache_creation_tokens + cache_read_tokens), 0) as total_cache_tokens,
 			COALESCE(SUM(total_cost), 0) as total_cost,
 			COALESCE(SUM(actual_cost), 0) as total_actual_cost,
+			COALESCE(SUM(real_actual_cost), 0) as real_total_actual_cost,
 			COALESCE(AVG(COALESCE(duration_ms, 0)), 0) as avg_duration_ms
 		FROM usage_logs
 		WHERE %s = $1 AND created_at >= $2 AND created_at < $3
@@ -1831,6 +1867,7 @@ func (r *usageLogRepository) GetModelStatsAggregated(ctx context.Context, modelN
 		&stats.TotalCacheTokens,
 		&stats.TotalCost,
 		&stats.TotalActualCost,
+		&stats.RealTotalActualCost,
 		&stats.AverageDurationMs,
 	); err != nil {
 		return nil, err
@@ -2213,7 +2250,8 @@ func (r *usageLogRepository) GetUserUsageTrend(ctx context.Context, startTime, e
 			COUNT(*) as requests,
 			COALESCE(SUM(u.input_tokens + u.output_tokens + u.cache_creation_tokens + u.cache_read_tokens), 0) as tokens,
 			COALESCE(SUM(u.total_cost), 0) as cost,
-			COALESCE(SUM(u.actual_cost), 0) as actual_cost
+			COALESCE(SUM(u.actual_cost), 0) as actual_cost,
+			COALESCE(SUM(u.real_actual_cost), 0) as real_actual_cost
 		FROM usage_logs u
 		LEFT JOIN users us ON u.user_id = us.id
 		WHERE u.user_id IN (SELECT user_id FROM top_users)
@@ -2238,7 +2276,7 @@ func (r *usageLogRepository) GetUserUsageTrend(ctx context.Context, startTime, e
 	results = make([]UserUsageTrendPoint, 0)
 	for rows.Next() {
 		var row UserUsageTrendPoint
-		if err = rows.Scan(&row.Date, &row.UserID, &row.Email, &row.Username, &row.Requests, &row.Tokens, &row.Cost, &row.ActualCost); err != nil {
+		if err = rows.Scan(&row.Date, &row.UserID, &row.Email, &row.Username, &row.Requests, &row.Tokens, &row.Cost, &row.ActualCost, &row.RealActualCost); err != nil {
 			return nil, err
 		}
 		results = append(results, row)
@@ -2262,6 +2300,7 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 				u.user_id,
 				COALESCE(us.email, '') as email,
 				COALESCE(SUM(u.actual_cost), 0) as actual_cost,
+				COALESCE(SUM(u.real_actual_cost), 0) as real_actual_cost,
 				COUNT(*) as requests,
 				COALESCE(SUM(u.input_tokens + u.output_tokens + u.cache_creation_tokens + u.cache_read_tokens), 0) as tokens
 			FROM usage_logs u
@@ -2274,26 +2313,30 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 				user_id,
 				email,
 				actual_cost,
+				real_actual_cost,
 				requests,
 				tokens,
 				COALESCE(SUM(actual_cost) OVER (), 0) as total_actual_cost,
+				COALESCE(SUM(real_actual_cost) OVER (), 0) as real_total_actual_cost,
 				COALESCE(SUM(requests) OVER (), 0) as total_requests,
 				COALESCE(SUM(tokens) OVER (), 0) as total_tokens
 			FROM user_spend
-			ORDER BY actual_cost DESC, tokens DESC, user_id ASC
+			ORDER BY real_actual_cost DESC, tokens DESC, user_id ASC
 			LIMIT $3
 		)
 		SELECT
 			user_id,
 			email,
 			actual_cost,
+			real_actual_cost,
 			requests,
 			tokens,
 			total_actual_cost,
+			real_total_actual_cost,
 			total_requests,
 			total_tokens
 		FROM ranked
-		ORDER BY actual_cost DESC, tokens DESC, user_id ASC
+		ORDER BY real_actual_cost DESC, tokens DESC, user_id ASC
 	`
 
 	rows, err := r.sql.QueryContext(ctx, query, startTime, endTime, limit)
@@ -2309,11 +2352,12 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 
 	ranking := make([]UserSpendingRankingItem, 0)
 	totalActualCost := 0.0
+	realTotalActualCost := 0.0
 	totalRequests := int64(0)
 	totalTokens := int64(0)
 	for rows.Next() {
 		var row UserSpendingRankingItem
-		if err = rows.Scan(&row.UserID, &row.Email, &row.ActualCost, &row.Requests, &row.Tokens, &totalActualCost, &totalRequests, &totalTokens); err != nil {
+		if err = rows.Scan(&row.UserID, &row.Email, &row.ActualCost, &row.RealActualCost, &row.Requests, &row.Tokens, &totalActualCost, &realTotalActualCost, &totalRequests, &totalTokens); err != nil {
 			return nil, err
 		}
 		ranking = append(ranking, row)
@@ -2323,10 +2367,11 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 	}
 
 	return &UserSpendingRankingResponse{
-		Ranking:         ranking,
-		TotalActualCost: totalActualCost,
-		TotalRequests:   totalRequests,
-		TotalTokens:     totalTokens,
+		Ranking:             ranking,
+		TotalActualCost:     totalActualCost,
+		RealTotalActualCost: realTotalActualCost,
+		TotalRequests:       totalRequests,
+		TotalTokens:         totalTokens,
 	}, nil
 }
 
@@ -2546,7 +2591,8 @@ func (r *usageLogRepository) GetUserUsageTrendByUserID(ctx context.Context, user
 			COALESCE(SUM(cache_read_tokens), 0) as cache_read_tokens,
 			COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens), 0) as total_tokens,
 			COALESCE(SUM(total_cost), 0) as cost,
-			COALESCE(SUM(actual_cost), 0) as actual_cost
+			COALESCE(SUM(actual_cost), 0) as actual_cost,
+			COALESCE(SUM(real_actual_cost), 0) as real_actual_cost
 		FROM usage_logs
 		WHERE user_id = $1 AND created_at >= $2 AND created_at < $3
 		GROUP BY date
@@ -2585,7 +2631,8 @@ func (r *usageLogRepository) GetUserModelStats(ctx context.Context, userID int64
 			COALESCE(SUM(cache_read_tokens), 0) as cache_read_tokens,
 			COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens), 0) as total_tokens,
 			COALESCE(SUM(total_cost), 0) as cost,
-			COALESCE(SUM(actual_cost), 0) as actual_cost
+			COALESCE(SUM(actual_cost), 0) as actual_cost,
+			COALESCE(SUM(real_actual_cost), 0) as real_actual_cost
 		FROM usage_logs
 		WHERE user_id = $1 AND created_at >= $2 AND created_at < $3
 		GROUP BY model
@@ -2734,7 +2781,9 @@ func (r *usageLogRepository) GetBatchUserUsageStats(ctx context.Context, userIDs
 		SELECT
 			user_id,
 			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $2 AND created_at < $3), 0) as total_cost,
-			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $4), 0) as today_cost
+			COALESCE(SUM(real_actual_cost) FILTER (WHERE created_at >= $2 AND created_at < $3), 0) as real_total_cost,
+			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $4), 0) as today_cost,
+			COALESCE(SUM(real_actual_cost) FILTER (WHERE created_at >= $4), 0) as real_today_cost
 		FROM usage_logs
 		WHERE user_id = ANY($1)
 		  AND created_at >= LEAST($2, $4)
@@ -2748,14 +2797,18 @@ func (r *usageLogRepository) GetBatchUserUsageStats(ctx context.Context, userIDs
 	for rows.Next() {
 		var userID int64
 		var total float64
+		var realTotal float64
 		var todayTotal float64
-		if err := rows.Scan(&userID, &total, &todayTotal); err != nil {
+		var realTodayTotal float64
+		if err := rows.Scan(&userID, &total, &realTotal, &todayTotal, &realTodayTotal); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
 		if stats, ok := result[userID]; ok {
 			stats.TotalActualCost = total
+			stats.RealTotalActualCost = realTotal
 			stats.TodayActualCost = todayTotal
+			stats.RealTodayActualCost = realTodayTotal
 		}
 	}
 	if err := rows.Close(); err != nil {
@@ -2796,7 +2849,9 @@ func (r *usageLogRepository) GetBatchAPIKeyUsageStats(ctx context.Context, apiKe
 		SELECT
 			api_key_id,
 			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $2 AND created_at < $3), 0) as total_cost,
-			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $4), 0) as today_cost
+			COALESCE(SUM(real_actual_cost) FILTER (WHERE created_at >= $2 AND created_at < $3), 0) as real_total_cost,
+			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $4), 0) as today_cost,
+			COALESCE(SUM(real_actual_cost) FILTER (WHERE created_at >= $4), 0) as real_today_cost
 		FROM usage_logs
 		WHERE api_key_id = ANY($1)
 		  AND created_at >= LEAST($2, $4)
@@ -2810,14 +2865,18 @@ func (r *usageLogRepository) GetBatchAPIKeyUsageStats(ctx context.Context, apiKe
 	for rows.Next() {
 		var apiKeyID int64
 		var total float64
+		var realTotal float64
 		var todayTotal float64
-		if err := rows.Scan(&apiKeyID, &total, &todayTotal); err != nil {
+		var realTodayTotal float64
+		if err := rows.Scan(&apiKeyID, &total, &realTotal, &todayTotal, &realTodayTotal); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
 		if stats, ok := result[apiKeyID]; ok {
 			stats.TotalActualCost = total
+			stats.RealTotalActualCost = realTotal
 			stats.TodayActualCost = todayTotal
+			stats.RealTodayActualCost = realTodayTotal
 		}
 	}
 	if err := rows.Close(); err != nil {
@@ -2932,7 +2991,8 @@ func (r *usageLogRepository) getUsageTrendFromAggregates(ctx context.Context, st
 				cache_read_tokens,
 				(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens) as total_tokens,
 				total_cost as cost,
-				actual_cost
+				actual_cost,
+				real_actual_cost
 			FROM usage_dashboard_hourly
 			WHERE bucket_start >= $1 AND bucket_start < $2
 			ORDER BY bucket_start ASC
@@ -2948,7 +3008,8 @@ func (r *usageLogRepository) getUsageTrendFromAggregates(ctx context.Context, st
 				cache_read_tokens,
 				(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens) as total_tokens,
 				total_cost as cost,
-				actual_cost
+				actual_cost,
+				real_actual_cost
 			FROM usage_dashboard_daily
 			WHERE bucket_date >= $1::date AND bucket_date < $2::date
 			ORDER BY bucket_date ASC
@@ -2988,6 +3049,7 @@ func (r *usageLogRepository) GetModelStatsWithFiltersBySource(ctx context.Contex
 
 func (r *usageLogRepository) getModelStatsWithFiltersBySource(ctx context.Context, startTime, endTime time.Time, userID, apiKeyID, accountID, groupID int64, requestType *int16, stream *bool, billingType *int8, source string) (results []ModelStat, err error) {
 	actualCostExpr := "COALESCE(SUM(actual_cost), 0) as actual_cost"
+	realActualCostExpr := "COALESCE(SUM(real_actual_cost), 0) as real_actual_cost"
 	// 当仅按 account_id 聚合时，实际费用使用账号倍率（total_cost * account_rate_multiplier）。
 	if accountID > 0 && userID == 0 && apiKeyID == 0 {
 		actualCostExpr = "COALESCE(SUM(total_cost * COALESCE(account_rate_multiplier, 1)), 0) as actual_cost"
@@ -3004,10 +3066,11 @@ func (r *usageLogRepository) getModelStatsWithFiltersBySource(ctx context.Contex
 			COALESCE(SUM(cache_read_tokens), 0) as cache_read_tokens,
 			COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens), 0) as total_tokens,
 			COALESCE(SUM(total_cost), 0) as cost,
+			%s,
 			%s
 		FROM usage_logs
 		WHERE created_at >= $1 AND created_at < $2
-	`, modelExpr, actualCostExpr)
+	`, modelExpr, actualCostExpr, realActualCostExpr)
 
 	args := []any{startTime, endTime}
 	if userID > 0 {
@@ -3062,7 +3125,8 @@ func (r *usageLogRepository) GetGroupStatsWithFilters(ctx context.Context, start
 			COUNT(*) as requests,
 			COALESCE(SUM(ul.input_tokens + ul.output_tokens + ul.cache_creation_tokens + ul.cache_read_tokens), 0) as total_tokens,
 			COALESCE(SUM(ul.total_cost), 0) as cost,
-			COALESCE(SUM(ul.actual_cost), 0) as actual_cost
+			COALESCE(SUM(ul.actual_cost), 0) as actual_cost,
+			COALESCE(SUM(ul.real_actual_cost), 0) as real_actual_cost
 		FROM usage_logs ul
 		LEFT JOIN groups g ON g.id = ul.group_id
 		WHERE ul.created_at >= $1 AND ul.created_at < $2
@@ -3113,6 +3177,7 @@ func (r *usageLogRepository) GetGroupStatsWithFilters(ctx context.Context, start
 			&row.TotalTokens,
 			&row.Cost,
 			&row.ActualCost,
+			&row.RealActualCost,
 		); err != nil {
 			return nil, err
 		}
@@ -3133,7 +3198,8 @@ func (r *usageLogRepository) GetUserBreakdownStats(ctx context.Context, startTim
 			COUNT(*) as requests,
 			COALESCE(SUM(ul.input_tokens + ul.output_tokens + ul.cache_creation_tokens + ul.cache_read_tokens), 0) as total_tokens,
 			COALESCE(SUM(ul.total_cost), 0) as cost,
-			COALESCE(SUM(ul.actual_cost), 0) as actual_cost
+			COALESCE(SUM(ul.actual_cost), 0) as actual_cost,
+			COALESCE(SUM(ul.real_actual_cost), 0) as real_actual_cost
 		FROM usage_logs ul
 		LEFT JOIN users u ON u.id = ul.user_id
 		WHERE ul.created_at >= $1 AND ul.created_at < $2
@@ -3178,7 +3244,7 @@ func (r *usageLogRepository) GetUserBreakdownStats(ctx context.Context, startTim
 		args = append(args, *dim.BillingType)
 	}
 
-	query += " GROUP BY ul.user_id, u.email ORDER BY actual_cost DESC"
+	query += " GROUP BY ul.user_id, u.email ORDER BY real_actual_cost DESC"
 	if limit > 0 {
 		query += fmt.Sprintf(" LIMIT %d", limit)
 	}
@@ -3204,6 +3270,7 @@ func (r *usageLogRepository) GetUserBreakdownStats(ctx context.Context, startTim
 			&row.TotalTokens,
 			&row.Cost,
 			&row.ActualCost,
+			&row.RealActualCost,
 		); err != nil {
 			return nil, err
 		}
@@ -3225,7 +3292,9 @@ func (r *usageLogRepository) GetAllGroupUsageSummary(ctx context.Context, todayS
 		SELECT
 			g.id AS group_id,
 			COALESCE(SUM(ul.actual_cost), 0) AS total_cost,
-			COALESCE(SUM(CASE WHEN ul.created_at >= $1 THEN ul.actual_cost ELSE 0 END), 0) AS today_cost
+			COALESCE(SUM(CASE WHEN ul.created_at >= $1 THEN ul.actual_cost ELSE 0 END), 0) AS today_cost,
+			COALESCE(SUM(ul.real_actual_cost), 0) AS real_total_cost,
+			COALESCE(SUM(CASE WHEN ul.created_at >= $1 THEN ul.real_actual_cost ELSE 0 END), 0) AS real_today_cost
 		FROM groups g
 		LEFT JOIN usage_logs ul ON ul.group_id = g.id
 		GROUP BY g.id
@@ -3239,7 +3308,7 @@ func (r *usageLogRepository) GetAllGroupUsageSummary(ctx context.Context, todayS
 	var results []usagestats.GroupUsageSummary
 	for rows.Next() {
 		var row usagestats.GroupUsageSummary
-		if err := rows.Scan(&row.GroupID, &row.TotalCost, &row.TodayCost); err != nil {
+		if err := rows.Scan(&row.GroupID, &row.TotalCost, &row.TodayCost, &row.RealTotalCost, &row.RealTodayCost); err != nil {
 			return nil, err
 		}
 		results = append(results, row)
@@ -3285,6 +3354,7 @@ func (r *usageLogRepository) GetGlobalStats(ctx context.Context, startTime, endT
 			COALESCE(SUM(cache_creation_tokens + cache_read_tokens), 0) as total_cache_tokens,
 			COALESCE(SUM(total_cost), 0) as total_cost,
 			COALESCE(SUM(actual_cost), 0) as total_actual_cost,
+			COALESCE(SUM(real_actual_cost), 0) as real_total_actual_cost,
 			COALESCE(AVG(duration_ms), 0) as avg_duration_ms
 		FROM usage_logs
 		WHERE created_at >= $1 AND created_at < $2
@@ -3302,6 +3372,7 @@ func (r *usageLogRepository) GetGlobalStats(ctx context.Context, startTime, endT
 		&stats.TotalCacheTokens,
 		&stats.TotalCost,
 		&stats.TotalActualCost,
+		&stats.RealTotalActualCost,
 		&stats.AverageDurationMs,
 	); err != nil {
 		return nil, err
@@ -3358,6 +3429,7 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 			COALESCE(SUM(cache_creation_tokens + cache_read_tokens), 0) as total_cache_tokens,
 			COALESCE(SUM(total_cost), 0) as total_cost,
 			COALESCE(SUM(actual_cost), 0) as total_actual_cost,
+			COALESCE(SUM(real_actual_cost), 0) as real_total_actual_cost,
 			COALESCE(SUM(total_cost * COALESCE(account_rate_multiplier, 1)), 0) as total_account_cost,
 			COALESCE(AVG(duration_ms), 0) as avg_duration_ms
 		FROM usage_logs
@@ -3377,6 +3449,7 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 		&stats.TotalCacheTokens,
 		&stats.TotalCost,
 		&stats.TotalActualCost,
+		&stats.RealTotalActualCost,
 		&totalAccountCost,
 		&stats.AverageDurationMs,
 	); err != nil {
@@ -3432,6 +3505,7 @@ type EndpointStat = usagestats.EndpointStat
 
 func (r *usageLogRepository) getEndpointStatsByColumnWithFilters(ctx context.Context, endpointColumn string, startTime, endTime time.Time, userID, apiKeyID, accountID, groupID int64, model string, requestType *int16, stream *bool, billingType *int8) (results []EndpointStat, err error) {
 	actualCostExpr := "COALESCE(SUM(actual_cost), 0) as actual_cost"
+	realActualCostExpr := "COALESCE(SUM(real_actual_cost), 0) as real_actual_cost"
 	if accountID > 0 && userID == 0 && apiKeyID == 0 {
 		actualCostExpr = "COALESCE(SUM(total_cost * COALESCE(account_rate_multiplier, 1)), 0) as actual_cost"
 	}
@@ -3442,10 +3516,11 @@ func (r *usageLogRepository) getEndpointStatsByColumnWithFilters(ctx context.Con
 			COUNT(*) AS requests,
 			COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens), 0) AS total_tokens,
 			COALESCE(SUM(total_cost), 0) as cost,
+			%s,
 			%s
 		FROM usage_logs
 		WHERE created_at >= $1 AND created_at < $2
-	`, endpointColumn, actualCostExpr)
+	`, endpointColumn, actualCostExpr, realActualCostExpr)
 
 	args := []any{startTime, endTime}
 	if userID > 0 {
@@ -3486,7 +3561,7 @@ func (r *usageLogRepository) getEndpointStatsByColumnWithFilters(ctx context.Con
 	results = make([]EndpointStat, 0)
 	for rows.Next() {
 		var row EndpointStat
-		if err := rows.Scan(&row.Endpoint, &row.Requests, &row.TotalTokens, &row.Cost, &row.ActualCost); err != nil {
+		if err := rows.Scan(&row.Endpoint, &row.Requests, &row.TotalTokens, &row.Cost, &row.ActualCost, &row.RealActualCost); err != nil {
 			return nil, err
 		}
 		results = append(results, row)
@@ -3499,6 +3574,7 @@ func (r *usageLogRepository) getEndpointStatsByColumnWithFilters(ctx context.Con
 
 func (r *usageLogRepository) getEndpointPathStatsWithFilters(ctx context.Context, startTime, endTime time.Time, userID, apiKeyID, accountID, groupID int64, model string, requestType *int16, stream *bool, billingType *int8) (results []EndpointStat, err error) {
 	actualCostExpr := "COALESCE(SUM(actual_cost), 0) as actual_cost"
+	realActualCostExpr := "COALESCE(SUM(real_actual_cost), 0) as real_actual_cost"
 	if accountID > 0 && userID == 0 && apiKeyID == 0 {
 		actualCostExpr = "COALESCE(SUM(total_cost * COALESCE(account_rate_multiplier, 1)), 0) as actual_cost"
 	}
@@ -3513,10 +3589,11 @@ func (r *usageLogRepository) getEndpointPathStatsWithFilters(ctx context.Context
 			COUNT(*) AS requests,
 			COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens), 0) AS total_tokens,
 			COALESCE(SUM(total_cost), 0) as cost,
+			%s,
 			%s
 		FROM usage_logs
 		WHERE created_at >= $1 AND created_at < $2
-	`, actualCostExpr)
+	`, actualCostExpr, realActualCostExpr)
 
 	args := []any{startTime, endTime}
 	if userID > 0 {
@@ -3557,7 +3634,7 @@ func (r *usageLogRepository) getEndpointPathStatsWithFilters(ctx context.Context
 	results = make([]EndpointStat, 0)
 	for rows.Next() {
 		var row EndpointStat
-		if err := rows.Scan(&row.Endpoint, &row.Requests, &row.TotalTokens, &row.Cost, &row.ActualCost); err != nil {
+		if err := rows.Scan(&row.Endpoint, &row.Requests, &row.TotalTokens, &row.Cost, &row.ActualCost, &row.RealActualCost); err != nil {
 			return nil, err
 		}
 		results = append(results, row)
@@ -4048,6 +4125,8 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 		cacheReadCost         float64
 		totalCost             float64
 		actualCost            float64
+		realActualCost        float64
+		unifiedRateMultiplier float64
 		rateMultiplier        float64
 		accountRateMultiplier sql.NullFloat64
 		billingType           int16
@@ -4097,6 +4176,8 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 		&cacheReadCost,
 		&totalCost,
 		&actualCost,
+		&realActualCost,
+		&unifiedRateMultiplier,
 		&rateMultiplier,
 		&accountRateMultiplier,
 		&billingType,
@@ -4144,6 +4225,8 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 		CacheReadCost:         cacheReadCost,
 		TotalCost:             totalCost,
 		ActualCost:            actualCost,
+		RealActualCost:        realActualCost,
+		UnifiedRateMultiplier: unifiedRateMultiplier,
 		RateMultiplier:        rateMultiplier,
 		AccountRateMultiplier: nullFloat64Ptr(accountRateMultiplier),
 		BillingType:           int8(billingType),
@@ -4232,6 +4315,7 @@ func scanTrendRows(rows *sql.Rows) ([]TrendDataPoint, error) {
 			&row.TotalTokens,
 			&row.Cost,
 			&row.ActualCost,
+			&row.RealActualCost,
 		); err != nil {
 			return nil, err
 		}
@@ -4257,6 +4341,7 @@ func scanModelStatsRows(rows *sql.Rows) ([]ModelStat, error) {
 			&row.TotalTokens,
 			&row.Cost,
 			&row.ActualCost,
+			&row.RealActualCost,
 		); err != nil {
 			return nil, err
 		}

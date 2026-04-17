@@ -73,7 +73,7 @@
                   {{ formatTokens(group.total_tokens) }}
                 </td>
                 <td class="py-1.5 text-right text-green-600 dark:text-green-400">
-                  ${{ formatCost(group.actual_cost) }}
+                  ${{ formatCost(getGroupActualCost(group)) }}
                 </td>
                 <td class="py-1.5 text-right text-gray-400 dark:text-gray-500">
                   ${{ formatCost(group.cost) }}
@@ -164,6 +164,8 @@ const toggleBreakdown = async (type: string, id: number | string) => {
   }
 }
 
+const getGroupActualCost = (item: GroupStat) => item.real_actual_cost ?? item.actual_cost ?? 0
+
 const chartColors = [
   '#3b82f6',
   '#10b981',
@@ -179,9 +181,10 @@ const chartColors = [
 
 const displayGroupStats = computed(() => {
   if (!props.groupStats?.length) return []
-
-  const metricKey = props.metric === 'actual_cost' ? 'actual_cost' : 'total_tokens'
-  return [...props.groupStats].sort((a, b) => b[metricKey] - a[metricKey])
+  if (props.metric === 'actual_cost') {
+    return [...props.groupStats].sort((a, b) => getGroupActualCost(b) - getGroupActualCost(a))
+  }
+  return [...props.groupStats].sort((a, b) => b.total_tokens - a.total_tokens)
 })
 
 const chartData = computed(() => {
@@ -191,7 +194,7 @@ const chartData = computed(() => {
     labels: displayGroupStats.value.map((g) => g.group_name || String(g.group_id)),
     datasets: [
       {
-        data: displayGroupStats.value.map((g) => props.metric === 'actual_cost' ? g.actual_cost : g.total_tokens),
+        data: displayGroupStats.value.map((g) => props.metric === 'actual_cost' ? getGroupActualCost(g) : g.total_tokens),
         backgroundColor: chartColors.slice(0, displayGroupStats.value.length),
         borderWidth: 0
       }

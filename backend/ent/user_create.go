@@ -113,6 +113,34 @@ func (_c *UserCreate) SetNillableBalance(v *float64) *UserCreate {
 	return _c
 }
 
+// SetUnifiedRateEnabled sets the "unified_rate_enabled" field.
+func (_c *UserCreate) SetUnifiedRateEnabled(v bool) *UserCreate {
+	_c.mutation.SetUnifiedRateEnabled(v)
+	return _c
+}
+
+// SetNillableUnifiedRateEnabled sets the "unified_rate_enabled" field if the given value is not nil.
+func (_c *UserCreate) SetNillableUnifiedRateEnabled(v *bool) *UserCreate {
+	if v != nil {
+		_c.SetUnifiedRateEnabled(*v)
+	}
+	return _c
+}
+
+// SetUnifiedRateMultiplier sets the "unified_rate_multiplier" field.
+func (_c *UserCreate) SetUnifiedRateMultiplier(v float64) *UserCreate {
+	_c.mutation.SetUnifiedRateMultiplier(v)
+	return _c
+}
+
+// SetNillableUnifiedRateMultiplier sets the "unified_rate_multiplier" field if the given value is not nil.
+func (_c *UserCreate) SetNillableUnifiedRateMultiplier(v *float64) *UserCreate {
+	if v != nil {
+		_c.SetUnifiedRateMultiplier(*v)
+	}
+	return _c
+}
+
 // SetConcurrency sets the "concurrency" field.
 func (_c *UserCreate) SetConcurrency(v int) *UserCreate {
 	_c.mutation.SetConcurrency(v)
@@ -420,6 +448,14 @@ func (_c *UserCreate) defaults() error {
 		v := user.DefaultBalance
 		_c.mutation.SetBalance(v)
 	}
+	if _, ok := _c.mutation.UnifiedRateEnabled(); !ok {
+		v := user.DefaultUnifiedRateEnabled
+		_c.mutation.SetUnifiedRateEnabled(v)
+	}
+	if _, ok := _c.mutation.UnifiedRateMultiplier(); !ok {
+		v := user.DefaultUnifiedRateMultiplier
+		_c.mutation.SetUnifiedRateMultiplier(v)
+	}
 	if _, ok := _c.mutation.Concurrency(); !ok {
 		v := user.DefaultConcurrency
 		_c.mutation.SetConcurrency(v)
@@ -477,6 +513,12 @@ func (_c *UserCreate) check() error {
 	}
 	if _, ok := _c.mutation.Balance(); !ok {
 		return &ValidationError{Name: "balance", err: errors.New(`ent: missing required field "User.balance"`)}
+	}
+	if _, ok := _c.mutation.UnifiedRateEnabled(); !ok {
+		return &ValidationError{Name: "unified_rate_enabled", err: errors.New(`ent: missing required field "User.unified_rate_enabled"`)}
+	}
+	if _, ok := _c.mutation.UnifiedRateMultiplier(); !ok {
+		return &ValidationError{Name: "unified_rate_multiplier", err: errors.New(`ent: missing required field "User.unified_rate_multiplier"`)}
 	}
 	if _, ok := _c.mutation.Concurrency(); !ok {
 		return &ValidationError{Name: "concurrency", err: errors.New(`ent: missing required field "User.concurrency"`)}
@@ -557,6 +599,14 @@ func (_c *UserCreate) createSpec() (*User, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Balance(); ok {
 		_spec.SetField(user.FieldBalance, field.TypeFloat64, value)
 		_node.Balance = value
+	}
+	if value, ok := _c.mutation.UnifiedRateEnabled(); ok {
+		_spec.SetField(user.FieldUnifiedRateEnabled, field.TypeBool, value)
+		_node.UnifiedRateEnabled = value
+	}
+	if value, ok := _c.mutation.UnifiedRateMultiplier(); ok {
+		_spec.SetField(user.FieldUnifiedRateMultiplier, field.TypeFloat64, value)
+		_node.UnifiedRateMultiplier = value
 	}
 	if value, ok := _c.mutation.Concurrency(); ok {
 		_spec.SetField(user.FieldConcurrency, field.TypeInt, value)
@@ -886,6 +936,36 @@ func (u *UserUpsert) AddBalance(v float64) *UserUpsert {
 	return u
 }
 
+// SetUnifiedRateEnabled sets the "unified_rate_enabled" field.
+func (u *UserUpsert) SetUnifiedRateEnabled(v bool) *UserUpsert {
+	u.Set(user.FieldUnifiedRateEnabled, v)
+	return u
+}
+
+// UpdateUnifiedRateEnabled sets the "unified_rate_enabled" field to the value that was provided on create.
+func (u *UserUpsert) UpdateUnifiedRateEnabled() *UserUpsert {
+	u.SetExcluded(user.FieldUnifiedRateEnabled)
+	return u
+}
+
+// SetUnifiedRateMultiplier sets the "unified_rate_multiplier" field.
+func (u *UserUpsert) SetUnifiedRateMultiplier(v float64) *UserUpsert {
+	u.Set(user.FieldUnifiedRateMultiplier, v)
+	return u
+}
+
+// UpdateUnifiedRateMultiplier sets the "unified_rate_multiplier" field to the value that was provided on create.
+func (u *UserUpsert) UpdateUnifiedRateMultiplier() *UserUpsert {
+	u.SetExcluded(user.FieldUnifiedRateMultiplier)
+	return u
+}
+
+// AddUnifiedRateMultiplier adds v to the "unified_rate_multiplier" field.
+func (u *UserUpsert) AddUnifiedRateMultiplier(v float64) *UserUpsert {
+	u.Add(user.FieldUnifiedRateMultiplier, v)
+	return u
+}
+
 // SetConcurrency sets the "concurrency" field.
 func (u *UserUpsert) SetConcurrency(v int) *UserUpsert {
 	u.Set(user.FieldConcurrency, v)
@@ -1128,6 +1208,41 @@ func (u *UserUpsertOne) AddBalance(v float64) *UserUpsertOne {
 func (u *UserUpsertOne) UpdateBalance() *UserUpsertOne {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateBalance()
+	})
+}
+
+// SetUnifiedRateEnabled sets the "unified_rate_enabled" field.
+func (u *UserUpsertOne) SetUnifiedRateEnabled(v bool) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.SetUnifiedRateEnabled(v)
+	})
+}
+
+// UpdateUnifiedRateEnabled sets the "unified_rate_enabled" field to the value that was provided on create.
+func (u *UserUpsertOne) UpdateUnifiedRateEnabled() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateUnifiedRateEnabled()
+	})
+}
+
+// SetUnifiedRateMultiplier sets the "unified_rate_multiplier" field.
+func (u *UserUpsertOne) SetUnifiedRateMultiplier(v float64) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.SetUnifiedRateMultiplier(v)
+	})
+}
+
+// AddUnifiedRateMultiplier adds v to the "unified_rate_multiplier" field.
+func (u *UserUpsertOne) AddUnifiedRateMultiplier(v float64) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.AddUnifiedRateMultiplier(v)
+	})
+}
+
+// UpdateUnifiedRateMultiplier sets the "unified_rate_multiplier" field to the value that was provided on create.
+func (u *UserUpsertOne) UpdateUnifiedRateMultiplier() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateUnifiedRateMultiplier()
 	})
 }
 
@@ -1556,6 +1671,41 @@ func (u *UserUpsertBulk) AddBalance(v float64) *UserUpsertBulk {
 func (u *UserUpsertBulk) UpdateBalance() *UserUpsertBulk {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateBalance()
+	})
+}
+
+// SetUnifiedRateEnabled sets the "unified_rate_enabled" field.
+func (u *UserUpsertBulk) SetUnifiedRateEnabled(v bool) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.SetUnifiedRateEnabled(v)
+	})
+}
+
+// UpdateUnifiedRateEnabled sets the "unified_rate_enabled" field to the value that was provided on create.
+func (u *UserUpsertBulk) UpdateUnifiedRateEnabled() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateUnifiedRateEnabled()
+	})
+}
+
+// SetUnifiedRateMultiplier sets the "unified_rate_multiplier" field.
+func (u *UserUpsertBulk) SetUnifiedRateMultiplier(v float64) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.SetUnifiedRateMultiplier(v)
+	})
+}
+
+// AddUnifiedRateMultiplier adds v to the "unified_rate_multiplier" field.
+func (u *UserUpsertBulk) AddUnifiedRateMultiplier(v float64) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.AddUnifiedRateMultiplier(v)
+	})
+}
+
+// UpdateUnifiedRateMultiplier sets the "unified_rate_multiplier" field to the value that was provided on create.
+func (u *UserUpsertBulk) UpdateUnifiedRateMultiplier() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateUnifiedRateMultiplier()
 	})
 }
 

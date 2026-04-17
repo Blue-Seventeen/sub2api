@@ -66,6 +66,7 @@ type APIKeyRepository interface {
 	// UpdateGroupIDByUserAndGroup 将用户下绑定 oldGroupID 的所有 Key 迁移到 newGroupID
 	UpdateGroupIDByUserAndGroup(ctx context.Context, userID, oldGroupID, newGroupID int64) (int64, error)
 	CountByGroupID(ctx context.Context, groupID int64) (int64, error)
+	ListGroupIDsByUserID(ctx context.Context, userID int64) ([]int64, error)
 	ListKeysByUserID(ctx context.Context, userID int64) ([]string, error)
 	ListKeysByGroupID(ctx context.Context, groupID int64) ([]string, error)
 
@@ -740,38 +741,10 @@ func (s *APIKeyService) IncrementUsage(ctx context.Context, keyID int64) error {
 // - 标准类型分组：公开的（非专属）或用户被明确允许的
 // - 订阅类型分组：用户有有效订阅的
 func (s *APIKeyService) GetAvailableGroups(ctx context.Context, userID int64) ([]Group, error) {
-	// 获取用户信息
-	user, err := s.userRepo.GetByID(ctx, userID)
+	_, availableGroups, err := s.loadUserAvailableGroups(ctx, userID)
 	if err != nil {
-		return nil, fmt.Errorf("get user: %w", err)
+		return nil, err
 	}
-
-	// 获取所有活跃分组
-	allGroups, err := s.groupRepo.ListActive(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list active groups: %w", err)
-	}
-
-	// 获取用户的所有有效订阅
-	activeSubscriptions, err := s.userSubRepo.ListActiveByUserID(ctx, userID)
-	if err != nil {
-		return nil, fmt.Errorf("list active subscriptions: %w", err)
-	}
-
-	// 构建订阅分组 ID 集合
-	subscribedGroupIDs := make(map[int64]bool)
-	for _, sub := range activeSubscriptions {
-		subscribedGroupIDs[sub.GroupID] = true
-	}
-
-	// 过滤出用户有权限的分组
-	availableGroups := make([]Group, 0)
-	for _, group := range allGroups {
-		if s.canUserBindGroupInternal(user, &group, subscribedGroupIDs) {
-			availableGroups = append(availableGroups, group)
-		}
-	}
-
 	return availableGroups, nil
 }
 
@@ -793,17 +766,100 @@ func (s *APIKeyService) SearchAPIKeys(ctx context.Context, userID int64, keyword
 	return keys, nil
 }
 
-// GetUserGroupRates 获取用户的专属分组倍率配置
-// 返回 map[groupID]rateMultiplier
+// GetUserGroupRates 获取当前用户所有可绑定分组的最终倍率。
+// 返回密集 map[groupID]finalRateMultiplier。
 func (s *APIKeyService) GetUserGroupRates(ctx context.Context, userID int64) (map[int64]float64, error) {
-	if s.userGroupRateRepo == nil {
-		return nil, nil
-	}
-	rates, err := s.userGroupRateRepo.GetByUserID(ctx, userID)
+	user, groupsForRates, err := s.loadUserGroupsForRates(ctx, userID)
 	if err != nil {
-		return nil, fmt.Errorf("get user group rates: %w", err)
+		return nil, err
 	}
-	return rates, nil
+
+	customRates := make(map[int64]float64)
+	if s.userGroupRateRepo != nil {
+		customRates, err = s.userGroupRateRepo.GetByUserID(ctx, userID)
+		if err != nil {
+			return nil, fmt.Errorf("get user group rates: %w", err)
+		}
+	}
+
+	finalRates := make(map[int64]float64, len(groupsForRates))
+	for _, group := range groupsForRates {
+		baseRate := group.RateMultiplier
+		if customRate, ok := customRates[group.ID]; ok {
+			baseRate = customRate
+		}
+		finalRates[group.ID] = finalRateFromBaseMultiplier(baseRate, user)
+	}
+	return finalRates, nil
+}
+
+func (s *APIKeyService) loadUserGroupsForRates(ctx context.Context, userID int64) (*User, []Group, error) {
+	user, availableGroups, err := s.loadUserAvailableGroups(ctx, userID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	groupMap := make(map[int64]Group, len(availableGroups))
+	for _, group := range availableGroups {
+		groupMap[group.ID] = group
+	}
+
+	if s.apiKeyRepo != nil {
+		boundGroupIDs, err := s.apiKeyRepo.ListGroupIDsByUserID(ctx, userID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("list bound api key groups: %w", err)
+		}
+		for _, groupID := range boundGroupIDs {
+			if groupID <= 0 {
+				continue
+			}
+			if _, exists := groupMap[groupID]; exists {
+				continue
+			}
+			group, err := s.groupRepo.GetByID(ctx, groupID)
+			if err != nil || group == nil {
+				continue
+			}
+			groupMap[groupID] = *group
+		}
+	}
+
+	groupsForRates := make([]Group, 0, len(groupMap))
+	for _, group := range groupMap {
+		groupsForRates = append(groupsForRates, group)
+	}
+	return user, groupsForRates, nil
+}
+
+func (s *APIKeyService) loadUserAvailableGroups(ctx context.Context, userID int64) (*User, []Group, error) {
+	user, err := s.userRepo.GetByID(ctx, userID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("get user: %w", err)
+	}
+
+	allGroups, err := s.groupRepo.ListActive(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list active groups: %w", err)
+	}
+
+	activeSubscriptions, err := s.userSubRepo.ListActiveByUserID(ctx, userID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list active subscriptions: %w", err)
+	}
+
+	subscribedGroupIDs := make(map[int64]bool, len(activeSubscriptions))
+	for _, sub := range activeSubscriptions {
+		subscribedGroupIDs[sub.GroupID] = true
+	}
+
+	availableGroups := make([]Group, 0, len(allGroups))
+	for _, group := range allGroups {
+		if s.canUserBindGroupInternal(user, &group, subscribedGroupIDs) {
+			availableGroups = append(availableGroups, group)
+		}
+	}
+
+	return user, availableGroups, nil
 }
 
 // CheckAPIKeyQuotaAndExpiry checks if the API key is valid for use (not expired, quota not exhausted)

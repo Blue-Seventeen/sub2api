@@ -128,6 +128,9 @@ func (s *quotaBaseAPIKeyRepoStub) UpdateGroupIDByUserAndGroup(context.Context, i
 func (s *quotaBaseAPIKeyRepoStub) CountByGroupID(context.Context, int64) (int64, error) {
 	panic("unexpected CountByGroupID call")
 }
+func (s *quotaBaseAPIKeyRepoStub) ListGroupIDsByUserID(context.Context, int64) ([]int64, error) {
+	panic("unexpected ListGroupIDsByUserID call")
+}
 func (s *quotaBaseAPIKeyRepoStub) ListKeysByUserID(context.Context, int64) ([]string, error) {
 	panic("unexpected ListKeysByUserID call")
 }

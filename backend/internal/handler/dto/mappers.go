@@ -13,11 +13,13 @@ func UserFromServiceShallow(u *service.User) *User {
 		return nil
 	}
 	return &User{
-		ID:            u.ID,
-		Email:         u.Email,
-		Username:      u.Username,
-		Role:          u.Role,
-		Balance:       u.Balance,
+		ID:       u.ID,
+		Email:    u.Email,
+		Username: u.Username,
+		Role:     u.Role,
+		// v0.1.114_Beta 增量兼容说明：
+		// 管理员前端默认继续把旧字段 balance 当作“显示余额”读取，以降低升级改动面。
+		Balance:       u.DisplayBalance,
 		Concurrency:   u.Concurrency,
 		Status:        u.Status,
 		AllowedGroups: u.AllowedGroups,
@@ -59,9 +61,16 @@ func UserFromServiceAdmin(u *service.User) *AdminUser {
 		return nil
 	}
 	return &AdminUser{
-		User:       *base,
-		Notes:      u.Notes,
-		GroupRates: u.GroupRates,
+		User:  *base,
+		Notes: u.Notes,
+		// v0.1.114_Beta 增量兼容说明：
+		// RealBalance 明确暴露真实余额；其值等于内部 Balance。
+		RealBalance: u.RealBalance,
+		// DisplayBalance 作为增量兼容新增字段保留；管理员前端当前可以继续优先复用旧 balance。
+		DisplayBalance:        u.DisplayBalance,
+		UnifiedRateEnabled:    u.UnifiedRateEnabled,
+		UnifiedRateMultiplier: u.EffectiveUnifiedRateMultiplier(),
+		GroupRates:            u.GroupRates,
 	}
 }
 
@@ -603,6 +612,8 @@ func UsageLogFromServiceAdmin(l *service.UsageLog) *AdminUsageLog {
 		ModelMappingChain:     l.ModelMappingChain,
 		BillingTier:           l.BillingTier,
 		AccountRateMultiplier: l.AccountRateMultiplier,
+		RealActualCost:        l.RealActualCost,
+		UnifiedRateMultiplier: l.UnifiedRateMultiplier,
 		IPAddress:             l.IPAddress,
 		Account:               AccountSummaryFromService(l.Account),
 	}

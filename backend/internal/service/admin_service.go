@@ -104,24 +104,28 @@ type AdminService interface {
 
 // CreateUserInput represents input for creating a new user via admin operations.
 type CreateUserInput struct {
-	Email         string
-	Password      string
-	Username      string
-	Notes         string
-	Balance       float64
-	Concurrency   int
-	AllowedGroups []int64
+	Email                 string
+	Password              string
+	Username              string
+	Notes                 string
+	Balance               float64
+	UnifiedRateEnabled    bool
+	UnifiedRateMultiplier float64
+	Concurrency           int
+	AllowedGroups         []int64
 }
 
 type UpdateUserInput struct {
-	Email         string
-	Password      string
-	Username      *string
-	Notes         *string
-	Balance       *float64 // 使用指针区分"未提供"和"设置为0"
-	Concurrency   *int     // 使用指针区分"未提供"和"设置为0"
-	Status        string
-	AllowedGroups *[]int64 // 使用指针区分"未提供"和"设置为空数组"
+	Email                 string
+	Password              string
+	Username              *string
+	Notes                 *string
+	Balance               *float64 // 使用指针区分"未提供"和"设置为0"
+	UnifiedRateEnabled    *bool
+	UnifiedRateMultiplier *float64
+	Concurrency           *int // 使用指针区分"未提供"和"设置为0"
+	Status                string
+	AllowedGroups         *[]int64 // 使用指针区分"未提供"和"设置为空数组"
 	// GroupRates 用户专属分组倍率配置
 	// map[groupID]*rate，nil 表示删除该分组的专属倍率
 	GroupRates map[int64]*float64
@@ -549,21 +553,28 @@ func (s *adminServiceImpl) GetUser(ctx context.Context, id int64) (*User, error)
 
 func (s *adminServiceImpl) CreateUser(ctx context.Context, input *CreateUserInput) (*User, error) {
 	user := &User{
-		Email:         input.Email,
-		Username:      input.Username,
-		Notes:         input.Notes,
-		Role:          RoleUser, // Always create as regular user, never admin
-		Balance:       input.Balance,
-		Concurrency:   input.Concurrency,
-		Status:        StatusActive,
-		AllowedGroups: input.AllowedGroups,
+		Email:                 input.Email,
+		Username:              input.Username,
+		Notes:                 input.Notes,
+		Role:                  RoleUser, // Always create as regular user, never admin
+		Balance:               input.Balance,
+		UnifiedRateEnabled:    input.UnifiedRateEnabled,
+		UnifiedRateMultiplier: input.UnifiedRateMultiplier,
+		Concurrency:           input.Concurrency,
+		Status:                StatusActive,
+		AllowedGroups:         input.AllowedGroups,
 	}
+	if user.UnifiedRateMultiplier < 0 {
+		return nil, infraerrors.BadRequest("INVALID_UNIFIED_RATE_MULTIPLIER", "unified_rate_multiplier must be >= 0")
+	}
+	user.UnifiedRateMultiplier = NormalizePersistedUnifiedRateMultiplier(user.UnifiedRateEnabled, user.UnifiedRateMultiplier)
 	if err := user.SetPassword(input.Password); err != nil {
 		return nil, err
 	}
 	if err := s.userRepo.Create(ctx, user); err != nil {
 		return nil, err
 	}
+	user.RefreshBalanceViews()
 	s.assignDefaultSubscriptions(ctx, user.ID)
 	return user, nil
 }
@@ -599,6 +610,8 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	oldConcurrency := user.Concurrency
 	oldStatus := user.Status
 	oldRole := user.Role
+	oldUnifiedRateEnabled := user.UnifiedRateEnabled
+	oldUnifiedRateMultiplier := user.UnifiedRateMultiplier
 
 	if input.Email != "" {
 		user.Email = input.Email
@@ -620,6 +633,17 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		user.Status = input.Status
 	}
 
+	if input.UnifiedRateEnabled != nil {
+		user.UnifiedRateEnabled = *input.UnifiedRateEnabled
+	}
+	if input.UnifiedRateMultiplier != nil {
+		if *input.UnifiedRateMultiplier < 0 {
+			return nil, infraerrors.BadRequest("INVALID_UNIFIED_RATE_MULTIPLIER", "unified_rate_multiplier must be >= 0")
+		}
+		user.UnifiedRateMultiplier = *input.UnifiedRateMultiplier
+	}
+	user.UnifiedRateMultiplier = NormalizePersistedUnifiedRateMultiplier(user.UnifiedRateEnabled, user.UnifiedRateMultiplier)
+
 	if input.Concurrency != nil {
 		user.Concurrency = *input.Concurrency
 	}
@@ -631,6 +655,7 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	if err := s.userRepo.Update(ctx, user); err != nil {
 		return nil, err
 	}
+	user.RefreshBalanceViews()
 
 	// 同步用户专属分组倍率
 	if input.GroupRates != nil && s.userGroupRateRepo != nil {
@@ -640,7 +665,11 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	}
 
 	if s.authCacheInvalidator != nil {
-		if user.Concurrency != oldConcurrency || user.Status != oldStatus || user.Role != oldRole {
+		if user.Concurrency != oldConcurrency ||
+			user.Status != oldStatus ||
+			user.Role != oldRole ||
+			user.UnifiedRateEnabled != oldUnifiedRateEnabled ||
+			user.UnifiedRateMultiplier != oldUnifiedRateMultiplier {
 			s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, user.ID)
 		}
 	}
@@ -694,6 +723,9 @@ func (s *adminServiceImpl) UpdateUserBalance(ctx context.Context, userID int64, 
 		return nil, err
 	}
 
+	// v0.1.114_Beta 增量兼容说明：
+	// 此处操作的是 user.Balance，而 Balance 在当前版本中就是“真实余额”的唯一结算口径。
+	// 因此管理员的 set / add / subtract、以及对应的“充值和并发变动记录”中的余额变化量，均基于真实余额。
 	oldBalance := user.Balance
 
 	switch operation {
@@ -712,6 +744,7 @@ func (s *adminServiceImpl) UpdateUserBalance(ctx context.Context, userID int64, 
 	if err := s.userRepo.Update(ctx, user); err != nil {
 		return nil, err
 	}
+	user.RefreshBalanceViews()
 	balanceDiff := user.Balance - oldBalance
 	if s.authCacheInvalidator != nil && balanceDiff != 0 {
 		s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, userID)

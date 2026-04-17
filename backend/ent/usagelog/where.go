@@ -180,6 +180,16 @@ func ActualCost(v float64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldActualCost, v))
 }
 
+// RealActualCost applies equality check predicate on the "real_actual_cost" field. It's identical to RealActualCostEQ.
+func RealActualCost(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldRealActualCost, v))
+}
+
+// UnifiedRateMultiplier applies equality check predicate on the "unified_rate_multiplier" field. It's identical to UnifiedRateMultiplierEQ.
+func UnifiedRateMultiplier(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldUnifiedRateMultiplier, v))
+}
+
 // RateMultiplier applies equality check predicate on the "rate_multiplier" field. It's identical to RateMultiplierEQ.
 func RateMultiplier(v float64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldRateMultiplier, v))
@@ -1393,6 +1403,86 @@ func ActualCostLT(v float64) predicate.UsageLog {
 // ActualCostLTE applies the LTE predicate on the "actual_cost" field.
 func ActualCostLTE(v float64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldLTE(FieldActualCost, v))
+}
+
+// RealActualCostEQ applies the EQ predicate on the "real_actual_cost" field.
+func RealActualCostEQ(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldRealActualCost, v))
+}
+
+// RealActualCostNEQ applies the NEQ predicate on the "real_actual_cost" field.
+func RealActualCostNEQ(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldRealActualCost, v))
+}
+
+// RealActualCostIn applies the In predicate on the "real_actual_cost" field.
+func RealActualCostIn(vs ...float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldRealActualCost, vs...))
+}
+
+// RealActualCostNotIn applies the NotIn predicate on the "real_actual_cost" field.
+func RealActualCostNotIn(vs ...float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldRealActualCost, vs...))
+}
+
+// RealActualCostGT applies the GT predicate on the "real_actual_cost" field.
+func RealActualCostGT(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldRealActualCost, v))
+}
+
+// RealActualCostGTE applies the GTE predicate on the "real_actual_cost" field.
+func RealActualCostGTE(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldRealActualCost, v))
+}
+
+// RealActualCostLT applies the LT predicate on the "real_actual_cost" field.
+func RealActualCostLT(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldRealActualCost, v))
+}
+
+// RealActualCostLTE applies the LTE predicate on the "real_actual_cost" field.
+func RealActualCostLTE(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldRealActualCost, v))
+}
+
+// UnifiedRateMultiplierEQ applies the EQ predicate on the "unified_rate_multiplier" field.
+func UnifiedRateMultiplierEQ(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldUnifiedRateMultiplier, v))
+}
+
+// UnifiedRateMultiplierNEQ applies the NEQ predicate on the "unified_rate_multiplier" field.
+func UnifiedRateMultiplierNEQ(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldUnifiedRateMultiplier, v))
+}
+
+// UnifiedRateMultiplierIn applies the In predicate on the "unified_rate_multiplier" field.
+func UnifiedRateMultiplierIn(vs ...float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldUnifiedRateMultiplier, vs...))
+}
+
+// UnifiedRateMultiplierNotIn applies the NotIn predicate on the "unified_rate_multiplier" field.
+func UnifiedRateMultiplierNotIn(vs ...float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldUnifiedRateMultiplier, vs...))
+}
+
+// UnifiedRateMultiplierGT applies the GT predicate on the "unified_rate_multiplier" field.
+func UnifiedRateMultiplierGT(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldUnifiedRateMultiplier, v))
+}
+
+// UnifiedRateMultiplierGTE applies the GTE predicate on the "unified_rate_multiplier" field.
+func UnifiedRateMultiplierGTE(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldUnifiedRateMultiplier, v))
+}
+
+// UnifiedRateMultiplierLT applies the LT predicate on the "unified_rate_multiplier" field.
+func UnifiedRateMultiplierLT(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldUnifiedRateMultiplier, v))
+}
+
+// UnifiedRateMultiplierLTE applies the LTE predicate on the "unified_rate_multiplier" field.
+func UnifiedRateMultiplierLTE(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldUnifiedRateMultiplier, v))
 }
 
 // RateMultiplierEQ applies the EQ predicate on the "rate_multiplier" field.

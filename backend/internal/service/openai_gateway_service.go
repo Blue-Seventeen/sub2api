@@ -4440,18 +4440,20 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		ImageOutputTokens:   result.Usage.ImageOutputTokens,
 	}
 
-	// Get rate multiplier
-	multiplier := 1.0
+	// Get base group multiplier first, then apply user unified multiplier.
+	baseMultiplier := 1.0
 	if s.cfg != nil && s.cfg.Default.RateMultiplier > 0 {
-		multiplier = s.cfg.Default.RateMultiplier
+		baseMultiplier = s.cfg.Default.RateMultiplier
 	}
 	if apiKey.GroupID != nil && apiKey.Group != nil {
 		resolver := s.userGroupRateResolver
 		if resolver == nil {
 			resolver = newUserGroupRateResolver(nil, nil, resolveUserGroupRateCacheTTL(s.cfg), nil, "service.openai_gateway")
 		}
-		multiplier = resolver.Resolve(ctx, user.ID, *apiKey.GroupID, apiKey.Group.RateMultiplier)
+		baseMultiplier = resolver.Resolve(ctx, user.ID, *apiKey.GroupID, apiKey.Group.RateMultiplier)
 	}
+	unifiedMultiplier := effectiveUnifiedMultiplier(user)
+	multiplier := baseMultiplier * unifiedMultiplier
 
 	var cost *CostBreakdown
 	var err error
@@ -4486,6 +4488,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}
 	if err != nil {
 		cost = &CostBreakdown{ActualCost: 0}
+	}
+	if cost != nil {
+		cost.RealActualCost = realCostFromBase(cost.TotalCost, baseMultiplier, user)
 	}
 
 	// Determine billing type
@@ -4532,8 +4537,10 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		usageLog.CacheReadCost = cost.CacheReadCost
 		usageLog.TotalCost = cost.TotalCost
 		usageLog.ActualCost = cost.ActualCost
+		usageLog.RealActualCost = cost.RealActualCost
 	}
 	usageLog.RateMultiplier = multiplier
+	usageLog.UnifiedRateMultiplier = unifiedMultiplier
 	usageLog.AccountRateMultiplier = &accountRateMultiplier
 	usageLog.BillingType = billingType
 	usageLog.Stream = result.Stream

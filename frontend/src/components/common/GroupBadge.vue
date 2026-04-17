@@ -11,10 +11,10 @@
     <span class="truncate">{{ name }}</span>
     <!-- Right side label -->
     <span v-if="showLabel" :class="labelClass">
-      <template v-if="hasCustomRate">
-        <!-- 原倍率删除线 + 专属倍率高亮 -->
+      <template v-if="hasEffectiveRate">
+        <!-- 默认倍率删除线 + 最终倍率高亮 -->
         <span class="line-through opacity-50 mr-0.5">{{ rateMultiplier }}x</span>
-        <span class="font-bold">{{ userRateMultiplier }}x</span>
+        <span class="font-bold">{{ effectiveRateMultiplier }}x</span>
       </template>
       <template v-else>
         {{ labelText }}
@@ -34,7 +34,7 @@ interface Props {
   platform?: GroupPlatform
   subscriptionType?: SubscriptionType
   rateMultiplier?: number
-  userRateMultiplier?: number | null // 用户专属倍率
+  effectiveRateMultiplier?: number | null // 用户最终倍率
   showRate?: boolean
   daysRemaining?: number | null // 剩余天数（订阅类型时使用）
 }
@@ -43,20 +43,20 @@ const props = withDefaults(defineProps<Props>(), {
   subscriptionType: 'standard',
   showRate: true,
   daysRemaining: null,
-  userRateMultiplier: null
+  effectiveRateMultiplier: null
 })
 
 const { t } = useI18n()
 
 const isSubscription = computed(() => props.subscriptionType === 'subscription')
 
-// 是否有专属倍率（且与默认倍率不同）
-const hasCustomRate = computed(() => {
+// 是否存在与默认倍率不同的最终倍率。
+const hasEffectiveRate = computed(() => {
   return (
-    props.userRateMultiplier !== null &&
-    props.userRateMultiplier !== undefined &&
+    props.effectiveRateMultiplier !== null &&
+    props.effectiveRateMultiplier !== undefined &&
     props.rateMultiplier !== undefined &&
-    props.userRateMultiplier !== props.rateMultiplier
+    props.effectiveRateMultiplier !== props.rateMultiplier
   )
 })
 
@@ -65,8 +65,8 @@ const showLabel = computed(() => {
   if (!props.showRate) return false
   // 订阅类型：显示天数或"订阅"
   if (isSubscription.value) return true
-  // 标准类型：显示倍率（包括专属倍率）
-  return props.rateMultiplier !== undefined || hasCustomRate.value
+  // 标准类型：显示默认倍率或最终倍率。
+  return props.rateMultiplier !== undefined || hasEffectiveRate.value
 })
 
 // Label text

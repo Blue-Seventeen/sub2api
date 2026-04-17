@@ -28,11 +28,11 @@
       <div class="min-w-0 flex-1">
         <p class="text-xs font-medium text-gray-500">{{ t('usage.totalCost') }}</p>
         <p class="text-xl font-bold text-green-600">
-          ${{ ((stats?.total_account_cost ?? stats?.total_actual_cost) || 0).toFixed(4) }}
+          ${{ getPrimaryCost().toFixed(4) }}
         </p>
         <p class="text-xs text-gray-400" v-if="stats?.total_account_cost != null">
           {{ t('usage.userBilled') }}:
-          <span class="text-gray-300">${{ (stats?.total_actual_cost || 0).toFixed(4) }}</span>
+          <span class="text-gray-300">${{ getRealUserCost().toFixed(4) }}</span>
           · {{ t('usage.standardCost') }}:
           <span class="text-gray-300">${{ (stats?.total_cost || 0).toFixed(4) }}</span>
         </p>
@@ -56,7 +56,7 @@ import { useI18n } from 'vue-i18n'
 import type { AdminUsageStatsResponse } from '@/api/admin/usage'
 import Icon from '@/components/icons/Icon.vue'
 
-defineProps<{ stats: AdminUsageStatsResponse | null }>()
+const props = defineProps<{ stats: AdminUsageStatsResponse | null }>()
 
 const { t } = useI18n()
 
@@ -69,4 +69,8 @@ const formatTokens = (value: number) => {
   if (value >= 1e3) return (value / 1e3).toFixed(2) + 'K'
   return value.toLocaleString()
 }
+
+const getRealUserCost = () => props.stats?.real_total_actual_cost ?? props.stats?.total_actual_cost ?? 0
+
+const getPrimaryCost = () => props.stats?.total_account_cost ?? getRealUserCost()
 </script>

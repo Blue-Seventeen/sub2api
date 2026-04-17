@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <AppLayout>
     <TablePageLayout>
       <!-- Single Row: Search, Filters, and Actions -->
@@ -241,8 +241,8 @@
           :loading="loading"
           :actions-count="7"
           :server-side-sort="true"
-          default-sort-key="created_at"
-          default-sort-order="desc"
+          :default-sort-key="sortState.sort_by"
+          :default-sort-order="sortState.sort_order"
           :sort-storage-key="USER_SORT_STORAGE_KEY"
           @sort="handleSort"
         >
@@ -300,7 +300,7 @@
 
           <template #cell-groups="{ row }">
             <div v-if="allGroups.length > 0" class="flex flex-col gap-1">
-              <!-- 专属分组行 -->
+              <!-- 涓撳睘鍒嗙粍琛?-->
               <span
                 v-if="getUserGroups(row).exclusive.length > 0"
                 class="group/ex relative inline-flex cursor-pointer items-center gap-1 whitespace-nowrap text-xs"
@@ -309,7 +309,7 @@
                 <Icon name="shield" size="xs" class="h-3.5 w-3.5 text-purple-500 dark:text-purple-400" />
                 <span class="font-medium text-purple-600 dark:text-purple-400">{{ getUserGroups(row).exclusive.length }}</span>
                 <span class="text-gray-500 dark:text-dark-400">{{ t('admin.users.exclusiveLabel') }}</span>
-                <!-- Hover tooltip（操作菜单未打开时显示） -->
+                <!-- Hover tooltip锛堟搷浣滆彍鍗曟湭鎵撳紑鏃舵樉绀猴級 -->
                 <div
                   v-if="expandedGroupUserId !== row.id"
                   class="pointer-events-none absolute left-0 top-full z-50 mt-1.5 rounded bg-gray-900 px-2.5 py-1.5 text-xs text-white opacity-0 shadow-lg transition-opacity duration-75 group-hover/ex:opacity-100 dark:bg-dark-600"
@@ -319,7 +319,7 @@
                     <span v-for="g in getUserGroups(row).exclusive" :key="g.id">{{ g.name }}</span>
                   </div>
                 </div>
-                <!-- 点击展开分组操作菜单 -->
+                <!-- 鐐瑰嚮灞曞紑鍒嗙粍鎿嶄綔鑿滃崟 -->
                 <div
                   v-if="expandedGroupUserId === row.id"
                   class="absolute left-0 top-full z-50 mt-1.5 min-w-[160px] overflow-hidden rounded-lg border border-gray-200 bg-white py-1 text-xs shadow-xl dark:border-dark-600 dark:bg-dark-700"
@@ -338,7 +338,7 @@
                   </div>
                 </div>
               </span>
-              <!-- 公开分组行 -->
+              <!-- 鍏紑鍒嗙粍琛?-->
               <span
                 v-if="getUserGroups(row).publicGroups.length > 0"
                 class="group/pub relative inline-flex cursor-default items-center gap-1 whitespace-nowrap text-xs"
@@ -346,7 +346,7 @@
                 <Icon name="globe" size="xs" class="h-3.5 w-3.5 text-gray-400 dark:text-dark-500" />
                 <span class="font-medium text-gray-600 dark:text-dark-300">{{ getUserGroups(row).publicGroups.length }}</span>
                 <span class="text-gray-400 dark:text-dark-500">{{ t('admin.users.publicLabel') }}</span>
-                <!-- Tooltip: 向下弹出 -->
+                <!-- Tooltip: 鍚戜笅寮瑰嚭 -->
                 <div class="pointer-events-none absolute left-0 top-full z-50 mt-1.5 rounded bg-gray-900 px-2.5 py-1.5 text-xs text-white opacity-0 shadow-lg transition-opacity duration-75 group-hover/pub:opacity-100 dark:bg-dark-600">
                   <div class="absolute left-4 bottom-full border-4 border-transparent border-b-gray-900 dark:border-b-dark-600"></div>
                   <div class="flex flex-col gap-0.5 whitespace-nowrap">
@@ -354,7 +354,7 @@
                   </div>
                 </div>
               </span>
-              <!-- 都没有 -->
+              <!-- 閮芥病鏈?-->
               <span
                 v-if="getUserGroups(row).exclusive.length === 0 && getUserGroups(row).publicGroups.length === 0"
                 class="text-xs text-gray-400 dark:text-dark-500"
@@ -388,14 +388,14 @@
             </span>
           </template>
 
-          <template #cell-balance="{ value, row }">
+          <template #cell-real_balance="{ row }">
             <div class="flex items-center gap-2">
               <div class="group relative">
                 <button
                   class="font-medium text-gray-900 underline decoration-dashed decoration-gray-300 underline-offset-4 transition-colors hover:text-primary-600 dark:text-white dark:decoration-dark-500 dark:hover:text-primary-400"
                   @click="handleBalanceHistory(row)"
                 >
-                  ${{ value.toFixed(2) }}
+                  ${{ getAdminRealBalance(row).toFixed(2) }}
                 </button>
                 <!-- Instant tooltip -->
                 <div class="pointer-events-none absolute bottom-full left-1/2 z-50 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded bg-gray-900 px-2 py-1 text-xs text-white opacity-0 shadow-lg transition-opacity duration-75 group-hover:opacity-100 dark:bg-dark-600">
@@ -413,18 +413,24 @@
             </div>
           </template>
 
+          <template #cell-balance="{ row }">
+            <span class="font-medium text-gray-900 dark:text-white">
+              ${{ getAdminDisplayBalance(row).toFixed(2) }}
+            </span>
+          </template>
+
           <template #cell-usage="{ row }">
             <div class="text-sm">
               <div class="flex items-center gap-1.5">
                 <span class="text-gray-500 dark:text-gray-400">{{ t('admin.users.today') }}:</span>
                 <span class="font-medium text-gray-900 dark:text-white">
-                  ${{ (usageStats[row.id]?.today_actual_cost ?? 0).toFixed(4) }}
+                  ${{ getBatchRealTodayCost(row.id).toFixed(4) }}
                 </span>
               </div>
               <div class="mt-0.5 flex items-center gap-1.5">
                 <span class="text-gray-500 dark:text-gray-400">{{ t('admin.users.total') }}:</span>
                 <span class="font-medium text-gray-900 dark:text-white">
-                  ${{ (usageStats[row.id]?.total_actual_cost ?? 0).toFixed(4) }}
+                  ${{ getBatchRealTotalCost(row.id).toFixed(4) }}
                 </span>
               </div>
             </div>
@@ -696,7 +702,8 @@ const allColumns = computed<Column[]>(() => [
   { key: 'role', label: t('admin.users.columns.role'), sortable: true },
   { key: 'groups', label: t('admin.users.columns.groups'), sortable: false },
   { key: 'subscriptions', label: t('admin.users.columns.subscriptions'), sortable: false },
-  { key: 'balance', label: t('admin.users.columns.balance'), sortable: true },
+  { key: 'real_balance', label: t('admin.users.columns.realBalance'), sortable: true },
+  { key: 'balance', label: t('admin.users.columns.displayBalance'), sortable: true },
   { key: 'usage', label: t('admin.users.columns.usage'), sortable: false },
   { key: 'concurrency', label: t('admin.users.columns.concurrency'), sortable: true },
   { key: 'status', label: t('admin.users.columns.status'), sortable: true },
@@ -725,7 +732,21 @@ const loadSavedColumns = () => {
     const saved = localStorage.getItem(HIDDEN_COLUMNS_KEY)
     if (saved) {
       const parsed = JSON.parse(saved) as string[]
-      parsed.forEach(key => hiddenColumns.add(key))
+      const normalized = new Set(parsed)
+      let migrated = false
+      if (normalized.has('display_balance')) {
+        normalized.delete('display_balance')
+        normalized.add('balance')
+        migrated = true
+      }
+      if (normalized.has('balance') && !normalized.has('real_balance')) {
+        normalized.add('real_balance')
+        migrated = true
+      }
+      if (migrated) {
+        localStorage.setItem(HIDDEN_COLUMNS_KEY, JSON.stringify([...normalized]))
+      }
+      normalized.forEach(key => hiddenColumns.add(key))
     } else {
       // Use default hidden columns on first load
       DEFAULT_HIDDEN_COLUMNS.forEach(key => hiddenColumns.add(key))
@@ -787,12 +808,19 @@ const searchQuery = ref('')
 const USER_SORT_STORAGE_KEY = 'admin-users-table-sort'
 const loadInitialSortState = (): { sort_by: string; sort_order: 'asc' | 'desc' } => {
   const fallback = { sort_by: 'created_at', sort_order: 'desc' as 'asc' | 'desc' }
-  const sortable = new Set(['email', 'id', 'username', 'role', 'balance', 'concurrency', 'status', 'created_at'])
+  const sortable = new Set(['email', 'id', 'username', 'role', 'balance', 'real_balance', 'concurrency', 'status', 'created_at'])
   try {
     const raw = localStorage.getItem(USER_SORT_STORAGE_KEY)
     if (!raw) return fallback
     const parsed = JSON.parse(raw) as { key?: string; order?: string }
-    const key = typeof parsed.key === 'string' ? parsed.key : ''
+    let key = typeof parsed.key === 'string' ? parsed.key : ''
+    if (key === 'display_balance') {
+      key = 'balance'
+      localStorage.setItem(USER_SORT_STORAGE_KEY, JSON.stringify({
+        key,
+        order: parsed.order === 'asc' ? 'asc' : 'desc'
+      }))
+    }
     if (!sortable.has(key)) return fallback
     return {
       sort_by: key,
@@ -927,6 +955,14 @@ const getAttributeDefinition = (attrId: number): UserAttributeDefinition | undef
   return attributeDefinitions.value.find(d => d.id === attrId)
 }
 const usageStats = ref<Record<string, BatchUserUsageStats>>({})
+// v0.1.114_Beta 增量兼容说明：
+// 管理员表格中“真实余额”列使用新增 real_balance；
+// “显示余额”列继续优先复用旧字段 balance，以减少升级改动。
+const getAdminRealBalance = (user: AdminUser) => user.real_balance ?? user.balance ?? 0
+// 管理员“显示余额”优先复用兼容旧字段 balance；display_balance 仅作为增量兼容回退字段。
+const getAdminDisplayBalance = (user: AdminUser) => user.balance ?? user.display_balance ?? getAdminRealBalance(user)
+const getBatchRealTodayCost = (userId: number) => usageStats.value[userId]?.real_today_actual_cost ?? usageStats.value[userId]?.today_actual_cost ?? 0
+const getBatchRealTotalCost = (userId: number) => usageStats.value[userId]?.real_total_actual_cost ?? usageStats.value[userId]?.total_actual_cost ?? 0
 // User attribute definitions and values
 const attributeDefinitions = ref<UserAttributeDefinition[]>([])
 const userAttributeValues = ref<Record<number, Record<number, string>>>({})
@@ -1025,19 +1061,19 @@ const openActionMenu = (user: AdminUser, e: MouseEvent) => {
     let left, top
 
     if (viewportWidth < 768) {
-      // 居中显示,水平位置
+      // 灞呬腑鏄剧ず,姘村钩浣嶇疆
       left = Math.max(padding, Math.min(
         rect.left + rect.width / 2 - menuWidth / 2,
         viewportWidth - menuWidth - padding
       ))
 
-      // 优先显示在按钮下方
+      // 浼樺厛鏄剧ず鍦ㄦ寜閽笅鏂?
       top = rect.bottom + 4
 
-      // 如果下方空间不够,显示在上方
+      // 濡傛灉涓嬫柟绌洪棿涓嶅,鏄剧ず鍦ㄤ笂鏂?
       if (top + menuHeight > viewportHeight - padding) {
         top = rect.top - menuHeight - 4
-        // 如果上方也不够,就贴在视口顶部
+        // 濡傛灉涓婃柟涔熶笉澶?灏辫创鍦ㄨ鍙ｉ《閮?
         if (top < padding) {
           top = padding
         }
@@ -1107,7 +1143,7 @@ const balanceOperation = ref<'add' | 'subtract'>('add')
 const showBalanceHistoryModal = ref(false)
 const balanceHistoryUser = ref<AdminUser | null>(null)
 
-// 计算剩余天数
+// 璁＄畻鍓╀綑澶╂暟
 const getDaysRemaining = (expiresAt: string): number => {
   const now = new Date()
   const expires = new Date(expiresAt)
@@ -1203,7 +1239,7 @@ const handleSearch = () => {
 }
 
 const handlePageChange = (page: number) => {
-  // 确保页码在有效范围内
+  // 纭繚椤电爜鍦ㄦ湁鏁堣寖鍥村唴
   const validPage = Math.max(1, Math.min(page, pagination.pages || 1))
   pagination.page = validPage
   loadUsers()
@@ -1386,7 +1422,7 @@ const handleWithdrawFromHistory = () => {
   }
 }
 
-// 滚动时关闭菜单
+// 婊氬姩鏃跺叧闂彍鍗?
 const handleScroll = () => {
   closeActionMenu()
 }
@@ -1410,3 +1446,4 @@ onUnmounted(() => {
   abortController?.abort()
 })
 </script>
+

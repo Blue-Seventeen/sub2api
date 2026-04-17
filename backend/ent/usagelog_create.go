@@ -337,6 +337,34 @@ func (_c *UsageLogCreate) SetNillableActualCost(v *float64) *UsageLogCreate {
 	return _c
 }
 
+// SetRealActualCost sets the "real_actual_cost" field.
+func (_c *UsageLogCreate) SetRealActualCost(v float64) *UsageLogCreate {
+	_c.mutation.SetRealActualCost(v)
+	return _c
+}
+
+// SetNillableRealActualCost sets the "real_actual_cost" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableRealActualCost(v *float64) *UsageLogCreate {
+	if v != nil {
+		_c.SetRealActualCost(*v)
+	}
+	return _c
+}
+
+// SetUnifiedRateMultiplier sets the "unified_rate_multiplier" field.
+func (_c *UsageLogCreate) SetUnifiedRateMultiplier(v float64) *UsageLogCreate {
+	_c.mutation.SetUnifiedRateMultiplier(v)
+	return _c
+}
+
+// SetNillableUnifiedRateMultiplier sets the "unified_rate_multiplier" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableUnifiedRateMultiplier(v *float64) *UsageLogCreate {
+	if v != nil {
+		_c.SetUnifiedRateMultiplier(*v)
+	}
+	return _c
+}
+
 // SetRateMultiplier sets the "rate_multiplier" field.
 func (_c *UsageLogCreate) SetRateMultiplier(v float64) *UsageLogCreate {
 	_c.mutation.SetRateMultiplier(v)
@@ -613,6 +641,14 @@ func (_c *UsageLogCreate) defaults() {
 		v := usagelog.DefaultActualCost
 		_c.mutation.SetActualCost(v)
 	}
+	if _, ok := _c.mutation.RealActualCost(); !ok {
+		v := usagelog.DefaultRealActualCost
+		_c.mutation.SetRealActualCost(v)
+	}
+	if _, ok := _c.mutation.UnifiedRateMultiplier(); !ok {
+		v := usagelog.DefaultUnifiedRateMultiplier
+		_c.mutation.SetUnifiedRateMultiplier(v)
+	}
 	if _, ok := _c.mutation.RateMultiplier(); !ok {
 		v := usagelog.DefaultRateMultiplier
 		_c.mutation.SetRateMultiplier(v)
@@ -726,6 +762,12 @@ func (_c *UsageLogCreate) check() error {
 	}
 	if _, ok := _c.mutation.ActualCost(); !ok {
 		return &ValidationError{Name: "actual_cost", err: errors.New(`ent: missing required field "UsageLog.actual_cost"`)}
+	}
+	if _, ok := _c.mutation.RealActualCost(); !ok {
+		return &ValidationError{Name: "real_actual_cost", err: errors.New(`ent: missing required field "UsageLog.real_actual_cost"`)}
+	}
+	if _, ok := _c.mutation.UnifiedRateMultiplier(); !ok {
+		return &ValidationError{Name: "unified_rate_multiplier", err: errors.New(`ent: missing required field "UsageLog.unified_rate_multiplier"`)}
 	}
 	if _, ok := _c.mutation.RateMultiplier(); !ok {
 		return &ValidationError{Name: "rate_multiplier", err: errors.New(`ent: missing required field "UsageLog.rate_multiplier"`)}
@@ -875,6 +917,14 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.ActualCost(); ok {
 		_spec.SetField(usagelog.FieldActualCost, field.TypeFloat64, value)
 		_node.ActualCost = value
+	}
+	if value, ok := _c.mutation.RealActualCost(); ok {
+		_spec.SetField(usagelog.FieldRealActualCost, field.TypeFloat64, value)
+		_node.RealActualCost = value
+	}
+	if value, ok := _c.mutation.UnifiedRateMultiplier(); ok {
+		_spec.SetField(usagelog.FieldUnifiedRateMultiplier, field.TypeFloat64, value)
+		_node.UnifiedRateMultiplier = value
 	}
 	if value, ok := _c.mutation.RateMultiplier(); ok {
 		_spec.SetField(usagelog.FieldRateMultiplier, field.TypeFloat64, value)
@@ -1484,6 +1534,42 @@ func (u *UsageLogUpsert) UpdateActualCost() *UsageLogUpsert {
 // AddActualCost adds v to the "actual_cost" field.
 func (u *UsageLogUpsert) AddActualCost(v float64) *UsageLogUpsert {
 	u.Add(usagelog.FieldActualCost, v)
+	return u
+}
+
+// SetRealActualCost sets the "real_actual_cost" field.
+func (u *UsageLogUpsert) SetRealActualCost(v float64) *UsageLogUpsert {
+	u.Set(usagelog.FieldRealActualCost, v)
+	return u
+}
+
+// UpdateRealActualCost sets the "real_actual_cost" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateRealActualCost() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldRealActualCost)
+	return u
+}
+
+// AddRealActualCost adds v to the "real_actual_cost" field.
+func (u *UsageLogUpsert) AddRealActualCost(v float64) *UsageLogUpsert {
+	u.Add(usagelog.FieldRealActualCost, v)
+	return u
+}
+
+// SetUnifiedRateMultiplier sets the "unified_rate_multiplier" field.
+func (u *UsageLogUpsert) SetUnifiedRateMultiplier(v float64) *UsageLogUpsert {
+	u.Set(usagelog.FieldUnifiedRateMultiplier, v)
+	return u
+}
+
+// UpdateUnifiedRateMultiplier sets the "unified_rate_multiplier" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateUnifiedRateMultiplier() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldUnifiedRateMultiplier)
+	return u
+}
+
+// AddUnifiedRateMultiplier adds v to the "unified_rate_multiplier" field.
+func (u *UsageLogUpsert) AddUnifiedRateMultiplier(v float64) *UsageLogUpsert {
+	u.Add(usagelog.FieldUnifiedRateMultiplier, v)
 	return u
 }
 
@@ -2230,6 +2316,48 @@ func (u *UsageLogUpsertOne) AddActualCost(v float64) *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) UpdateActualCost() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateActualCost()
+	})
+}
+
+// SetRealActualCost sets the "real_actual_cost" field.
+func (u *UsageLogUpsertOne) SetRealActualCost(v float64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetRealActualCost(v)
+	})
+}
+
+// AddRealActualCost adds v to the "real_actual_cost" field.
+func (u *UsageLogUpsertOne) AddRealActualCost(v float64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddRealActualCost(v)
+	})
+}
+
+// UpdateRealActualCost sets the "real_actual_cost" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateRealActualCost() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateRealActualCost()
+	})
+}
+
+// SetUnifiedRateMultiplier sets the "unified_rate_multiplier" field.
+func (u *UsageLogUpsertOne) SetUnifiedRateMultiplier(v float64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetUnifiedRateMultiplier(v)
+	})
+}
+
+// AddUnifiedRateMultiplier adds v to the "unified_rate_multiplier" field.
+func (u *UsageLogUpsertOne) AddUnifiedRateMultiplier(v float64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddUnifiedRateMultiplier(v)
+	})
+}
+
+// UpdateUnifiedRateMultiplier sets the "unified_rate_multiplier" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateUnifiedRateMultiplier() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateUnifiedRateMultiplier()
 	})
 }
 
@@ -3176,6 +3304,48 @@ func (u *UsageLogUpsertBulk) AddActualCost(v float64) *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) UpdateActualCost() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateActualCost()
+	})
+}
+
+// SetRealActualCost sets the "real_actual_cost" field.
+func (u *UsageLogUpsertBulk) SetRealActualCost(v float64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetRealActualCost(v)
+	})
+}
+
+// AddRealActualCost adds v to the "real_actual_cost" field.
+func (u *UsageLogUpsertBulk) AddRealActualCost(v float64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddRealActualCost(v)
+	})
+}
+
+// UpdateRealActualCost sets the "real_actual_cost" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateRealActualCost() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateRealActualCost()
+	})
+}
+
+// SetUnifiedRateMultiplier sets the "unified_rate_multiplier" field.
+func (u *UsageLogUpsertBulk) SetUnifiedRateMultiplier(v float64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetUnifiedRateMultiplier(v)
+	})
+}
+
+// AddUnifiedRateMultiplier adds v to the "unified_rate_multiplier" field.
+func (u *UsageLogUpsertBulk) AddUnifiedRateMultiplier(v float64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddUnifiedRateMultiplier(v)
+	})
+}
+
+// UpdateUnifiedRateMultiplier sets the "unified_rate_multiplier" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateUnifiedRateMultiplier() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateUnifiedRateMultiplier()
 	})
 }
 

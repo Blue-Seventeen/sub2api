@@ -47,6 +47,13 @@ func (User) Fields() []ent.Field {
 		field.Float("balance").
 			SchemaType(map[string]string{dialect.Postgres: "decimal(20,8)"}).
 			Default(0),
+		field.Bool("unified_rate_enabled").
+			Default(false).
+			Comment("是否启用用户专属统一倍率"),
+		field.Float("unified_rate_multiplier").
+			SchemaType(map[string]string{dialect.Postgres: "decimal(10,4)"}).
+			Default(1.0).
+			Comment("用户专属统一倍率（允许 0）"),
 		field.Int("concurrency").
 			Default(5),
 		field.String("status").

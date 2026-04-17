@@ -106,7 +106,9 @@ type CostBreakdown struct {
 	CacheCreationCost float64
 	CacheReadCost     float64
 	TotalCost         float64
-	ActualCost        float64 // 应用倍率后的实际费用
+	ActualCost        float64 // 应用最终显示倍率后的用户显示扣费
+	// RealActualCost is the admin-facing real billed cost.
+	RealActualCost float64
 	BillingMode       string  // 计费模式（"token"/"per_request"/"image"），由 CalculateCostUnified 填充
 }
 

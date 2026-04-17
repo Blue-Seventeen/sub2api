@@ -26,9 +26,9 @@
     <div class="flex shrink-0 items-center gap-2 pt-0.5">
       <!-- Rate pill (platform color) -->
       <span v-if="rateMultiplier !== undefined" :class="['inline-flex items-center whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold', ratePillClass]">
-        <template v-if="hasCustomRate">
+        <template v-if="hasEffectiveRate">
           <span class="mr-1 line-through opacity-50">{{ rateMultiplier }}x</span>
-          <span class="font-bold">{{ userRateMultiplier }}x</span>
+          <span class="font-bold">{{ effectiveRateMultiplier }}x</span>
         </template>
         <template v-else>
           {{ rateMultiplier }}x 倍率
@@ -59,7 +59,7 @@ interface Props {
   platform: GroupPlatform
   subscriptionType?: SubscriptionType
   rateMultiplier?: number
-  userRateMultiplier?: number | null
+  effectiveRateMultiplier?: number | null
   description?: string | null
   selected?: boolean
   showCheckmark?: boolean
@@ -69,16 +69,16 @@ const props = withDefaults(defineProps<Props>(), {
   subscriptionType: 'standard',
   selected: false,
   showCheckmark: true,
-  userRateMultiplier: null
+  effectiveRateMultiplier: null
 })
 
-// Whether user has a custom rate different from default
-const hasCustomRate = computed(() => {
+// Whether effective/final rate differs from the default group rate.
+const hasEffectiveRate = computed(() => {
   return (
-    props.userRateMultiplier !== null &&
-    props.userRateMultiplier !== undefined &&
+    props.effectiveRateMultiplier !== null &&
+    props.effectiveRateMultiplier !== undefined &&
     props.rateMultiplier !== undefined &&
-    props.userRateMultiplier !== props.rateMultiplier
+    props.effectiveRateMultiplier !== props.rateMultiplier
   )
 })
 

@@ -97,6 +97,14 @@ func (UsageLog) Fields() []ent.Field {
 		field.Float("actual_cost").
 			Default(0).
 			SchemaType(map[string]string{dialect.Postgres: "decimal(20,10)"}),
+		field.Float("real_actual_cost").
+			Default(0).
+			SchemaType(map[string]string{dialect.Postgres: "decimal(20,10)"}).
+			Comment("管理员真实消费口径（不受统一倍率放大影响）"),
+		field.Float("unified_rate_multiplier").
+			Default(1).
+			SchemaType(map[string]string{dialect.Postgres: "decimal(10,4)"}).
+			Comment("写入日志时的用户统一倍率快照"),
 		field.Float("rate_multiplier").
 			Default(1).
 			SchemaType(map[string]string{dialect.Postgres: "decimal(10,4)"}),

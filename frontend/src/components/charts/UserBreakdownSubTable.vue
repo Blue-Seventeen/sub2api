@@ -23,7 +23,7 @@
             {{ formatTokens(user.total_tokens) }}
           </td>
           <td class="py-1 text-right text-green-600 dark:text-green-400">
-            ${{ formatCost(user.actual_cost) }}
+            ${{ formatCost(user.real_actual_cost ?? user.actual_cost) }}
           </td>
           <td class="py-1 pr-1 text-right text-gray-400 dark:text-gray-500">
             ${{ formatCost(user.cost) }}

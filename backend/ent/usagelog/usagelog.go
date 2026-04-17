@@ -64,6 +64,10 @@ const (
 	FieldTotalCost = "total_cost"
 	// FieldActualCost holds the string denoting the actual_cost field in the database.
 	FieldActualCost = "actual_cost"
+	// FieldRealActualCost holds the string denoting the real_actual_cost field in the database.
+	FieldRealActualCost = "real_actual_cost"
+	// FieldUnifiedRateMultiplier holds the string denoting the unified_rate_multiplier field in the database.
+	FieldUnifiedRateMultiplier = "unified_rate_multiplier"
 	// FieldRateMultiplier holds the string denoting the rate_multiplier field in the database.
 	FieldRateMultiplier = "rate_multiplier"
 	// FieldAccountRateMultiplier holds the string denoting the account_rate_multiplier field in the database.
@@ -165,6 +169,8 @@ var Columns = []string{
 	FieldCacheReadCost,
 	FieldTotalCost,
 	FieldActualCost,
+	FieldRealActualCost,
+	FieldUnifiedRateMultiplier,
 	FieldRateMultiplier,
 	FieldAccountRateMultiplier,
 	FieldBillingType,
@@ -228,6 +234,10 @@ var (
 	DefaultTotalCost float64
 	// DefaultActualCost holds the default value on creation for the "actual_cost" field.
 	DefaultActualCost float64
+	// DefaultRealActualCost holds the default value on creation for the "real_actual_cost" field.
+	DefaultRealActualCost float64
+	// DefaultUnifiedRateMultiplier holds the default value on creation for the "unified_rate_multiplier" field.
+	DefaultUnifiedRateMultiplier float64
 	// DefaultRateMultiplier holds the default value on creation for the "rate_multiplier" field.
 	DefaultRateMultiplier float64
 	// DefaultBillingType holds the default value on creation for the "billing_type" field.
@@ -379,6 +389,16 @@ func ByTotalCost(opts ...sql.OrderTermOption) OrderOption {
 // ByActualCost orders the results by the actual_cost field.
 func ByActualCost(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldActualCost, opts...).ToFunc()
+}
+
+// ByRealActualCost orders the results by the real_actual_cost field.
+func ByRealActualCost(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldRealActualCost, opts...).ToFunc()
+}
+
+// ByUnifiedRateMultiplier orders the results by the unified_rate_multiplier field.
+func ByUnifiedRateMultiplier(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldUnifiedRateMultiplier, opts...).ToFunc()
 }
 
 // ByRateMultiplier orders the results by the rate_multiplier field.

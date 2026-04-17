@@ -29,6 +29,10 @@ const (
 	FieldRole = "role"
 	// FieldBalance holds the string denoting the balance field in the database.
 	FieldBalance = "balance"
+	// FieldUnifiedRateEnabled holds the string denoting the unified_rate_enabled field in the database.
+	FieldUnifiedRateEnabled = "unified_rate_enabled"
+	// FieldUnifiedRateMultiplier holds the string denoting the unified_rate_multiplier field in the database.
+	FieldUnifiedRateMultiplier = "unified_rate_multiplier"
 	// FieldConcurrency holds the string denoting the concurrency field in the database.
 	FieldConcurrency = "concurrency"
 	// FieldStatus holds the string denoting the status field in the database.
@@ -154,6 +158,8 @@ var Columns = []string{
 	FieldPasswordHash,
 	FieldRole,
 	FieldBalance,
+	FieldUnifiedRateEnabled,
+	FieldUnifiedRateMultiplier,
 	FieldConcurrency,
 	FieldStatus,
 	FieldUsername,
@@ -203,6 +209,10 @@ var (
 	RoleValidator func(string) error
 	// DefaultBalance holds the default value on creation for the "balance" field.
 	DefaultBalance float64
+	// DefaultUnifiedRateEnabled holds the default value on creation for the "unified_rate_enabled" field.
+	DefaultUnifiedRateEnabled bool
+	// DefaultUnifiedRateMultiplier holds the default value on creation for the "unified_rate_multiplier" field.
+	DefaultUnifiedRateMultiplier float64
 	// DefaultConcurrency holds the default value on creation for the "concurrency" field.
 	DefaultConcurrency int
 	// DefaultStatus holds the default value on creation for the "status" field.
@@ -260,6 +270,16 @@ func ByRole(opts ...sql.OrderTermOption) OrderOption {
 // ByBalance orders the results by the balance field.
 func ByBalance(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldBalance, opts...).ToFunc()
+}
+
+// ByUnifiedRateEnabled orders the results by the unified_rate_enabled field.
+func ByUnifiedRateEnabled(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldUnifiedRateEnabled, opts...).ToFunc()
+}
+
+// ByUnifiedRateMultiplier orders the results by the unified_rate_multiplier field.
+func ByUnifiedRateMultiplier(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldUnifiedRateMultiplier, opts...).ToFunc()
 }
 
 // ByConcurrency orders the results by the concurrency field.

@@ -13,7 +13,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 3
+const apiKeyAuthSnapshotVersion = 4
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -219,11 +219,13 @@ func (s *APIKeyService) snapshotFromAPIKey(apiKey *APIKey) *APIKeyAuthSnapshot {
 		RateLimit1d: apiKey.RateLimit1d,
 		RateLimit7d: apiKey.RateLimit7d,
 		User: APIKeyAuthUserSnapshot{
-			ID:          apiKey.User.ID,
-			Status:      apiKey.User.Status,
-			Role:        apiKey.User.Role,
-			Balance:     apiKey.User.Balance,
-			Concurrency: apiKey.User.Concurrency,
+			ID:                    apiKey.User.ID,
+			Status:                apiKey.User.Status,
+			Role:                  apiKey.User.Role,
+			Balance:               apiKey.User.Balance,
+			UnifiedRateEnabled:    apiKey.User.UnifiedRateEnabled,
+			UnifiedRateMultiplier: NormalizePersistedUnifiedRateMultiplier(apiKey.User.UnifiedRateEnabled, apiKey.User.UnifiedRateMultiplier),
+			Concurrency:           apiKey.User.Concurrency,
 		},
 	}
 	if apiKey.Group != nil {
@@ -274,11 +276,13 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 		RateLimit1d: snapshot.RateLimit1d,
 		RateLimit7d: snapshot.RateLimit7d,
 		User: &User{
-			ID:          snapshot.User.ID,
-			Status:      snapshot.User.Status,
-			Role:        snapshot.User.Role,
-			Balance:     snapshot.User.Balance,
-			Concurrency: snapshot.User.Concurrency,
+			ID:                    snapshot.User.ID,
+			Status:                snapshot.User.Status,
+			Role:                  snapshot.User.Role,
+			Balance:               snapshot.User.Balance,
+			UnifiedRateEnabled:    snapshot.User.UnifiedRateEnabled,
+			UnifiedRateMultiplier: NormalizePersistedUnifiedRateMultiplier(snapshot.User.UnifiedRateEnabled, snapshot.User.UnifiedRateMultiplier),
+			Concurrency:           snapshot.User.Concurrency,
 		},
 	}
 	if snapshot.Group != nil {

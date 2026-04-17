@@ -1348,6 +1348,8 @@ export default {
         role: 'Role',
         groups: 'Groups',
         subscriptions: 'Subscriptions',
+        realBalance: 'Real Balance',
+        displayBalance: 'Display Balance',
         balance: 'Balance',
         usage: 'Usage',
         concurrency: 'Concurrency',
@@ -1429,6 +1431,9 @@ export default {
       depositAmount: 'Deposit Amount',
       withdrawAmount: 'Withdraw Amount',
       withdrawAll: 'All',
+      realBalanceLabel: 'Real Balance',
+      displayBalanceLabel: 'Display Balance',
+      balanceOperationsUseReal: 'This action uses real balance',
       currentBalance: 'Current Balance',
       depositNotesPlaceholder:
         'e.g., New user registration bonus, promotional credit, compensation, etc.',

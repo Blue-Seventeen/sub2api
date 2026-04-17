@@ -142,7 +142,7 @@
         <template #cell-cost="{ row }">
           <div class="text-sm">
             <div class="flex items-center gap-1.5">
-              <span class="font-medium text-green-600 dark:text-green-400">${{ row.actual_cost?.toFixed(6) || '0.000000' }}</span>
+              <span class="font-medium text-green-600 dark:text-green-400">${{ getAdminActualCost(row).toFixed(6) }}</span>
               <!-- Cost Detail Tooltip -->
               <div
                 class="group relative"
@@ -303,7 +303,7 @@
           </div>
           <div class="flex items-center justify-between gap-6">
             <span class="text-gray-400">{{ t('usage.rate') }}</span>
-            <span class="font-semibold text-blue-400">{{ formatMultiplier(tooltipData?.rate_multiplier || 1) }}x</span>
+            <span class="font-semibold text-blue-400">{{ formatAdminDisplayBaseRate(tooltipData) }}x</span>
           </div>
           <div class="flex items-center justify-between gap-6">
             <span class="text-gray-400">{{ t('usage.accountMultiplier') }}</span>
@@ -314,8 +314,12 @@
             <span class="font-medium text-white">${{ tooltipData?.total_cost?.toFixed(6) || '0.000000' }}</span>
           </div>
           <div class="flex items-center justify-between gap-6">
-            <span class="text-gray-400">{{ t('usage.userBilled') }}</span>
-            <span class="font-semibold text-green-400">${{ tooltipData?.actual_cost?.toFixed(6) || '0.000000' }}</span>
+            <span class="text-gray-400">真实扣费</span>
+            <span class="font-semibold text-green-400">${{ getAdminActualCost(tooltipData).toFixed(6) }}</span>
+          </div>
+          <div v-if="tooltipData && tooltipData.real_actual_cost != null && Math.abs((tooltipData.real_actual_cost || 0) - (tooltipData.actual_cost || 0)) > 1e-9" class="flex items-center justify-between gap-6">
+            <span class="text-gray-400">显示扣费</span>
+            <span class="font-medium text-white">${{ tooltipData?.actual_cost?.toFixed(6) || '0.000000' }}</span>
           </div>
           <div class="flex items-center justify-between gap-6 border-t border-gray-700 pt-1.5">
             <span class="text-gray-400">{{ t('usage.accountBilled') }}</span>
@@ -336,6 +340,7 @@ import { useI18n } from 'vue-i18n'
 import { formatDateTime, formatReasoningEffort } from '@/utils/format'
 import { formatCacheTokens, formatMultiplier } from '@/utils/formatters'
 import { formatTokenPricePerMillion } from '@/utils/usagePricing'
+import { formatAdminDisplayBaseRateMultiplier } from '@/utils/usageRate'
 import { getUsageServiceTierLabel } from '@/utils/usageServiceTier'
 import { resolveUsageRequestType } from '@/utils/usageRequestType'
 import DataTable from '@/components/common/DataTable.vue'
@@ -364,6 +369,10 @@ defineEmits<{
   sort: [key: string, order: 'asc' | 'desc']
 }>()
 const { t } = useI18n()
+
+const getAdminActualCost = (row: any) => row?.real_actual_cost ?? row?.actual_cost ?? 0
+const formatAdminDisplayBaseRate = (row: AdminUsageLog | null | undefined) =>
+  formatAdminDisplayBaseRateMultiplier(row?.rate_multiplier, row?.unified_rate_multiplier)
 
 // Tooltip state - cost
 const tooltipVisible = ref(false)

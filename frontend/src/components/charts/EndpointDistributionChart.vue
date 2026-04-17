@@ -106,7 +106,7 @@
                   {{ formatTokens(item.total_tokens) }}
                 </td>
                 <td class="py-1.5 text-right text-green-600 dark:text-green-400">
-                  ${{ formatCost(item.actual_cost) }}
+                  ${{ formatCost(getEndpointActualCost(item)) }}
                 </td>
                 <td class="py-1.5 text-right text-gray-400 dark:text-gray-500">
                   ${{ formatCost(item.cost) }}
@@ -208,6 +208,8 @@ const toggleBreakdown = async (endpoint: string) => {
   }
 }
 
+const getEndpointActualCost = (item: EndpointStat) => item.real_actual_cost ?? item.actual_cost ?? 0
+
 const chartColors = [
   '#3b82f6',
   '#10b981',
@@ -230,9 +232,10 @@ const displayEndpointStats = computed(() => {
       ? props.endpointPathStats
       : props.endpointStats
   if (!sourceStats?.length) return []
-
-  const metricKey = props.metric === 'actual_cost' ? 'actual_cost' : 'total_tokens'
-  return [...sourceStats].sort((a, b) => b[metricKey] - a[metricKey])
+  if (props.metric === 'actual_cost') {
+    return [...sourceStats].sort((a, b) => getEndpointActualCost(b) - getEndpointActualCost(a))
+  }
+  return [...sourceStats].sort((a, b) => b.total_tokens - a.total_tokens)
 })
 
 const chartData = computed(() => {
@@ -243,7 +246,7 @@ const chartData = computed(() => {
     datasets: [
       {
         data: displayEndpointStats.value.map((item) =>
-          props.metric === 'actual_cost' ? item.actual_cost : item.total_tokens
+          props.metric === 'actual_cost' ? getEndpointActualCost(item) : item.total_tokens
         ),
         backgroundColor: chartColors.slice(0, displayEndpointStats.value.length),
         borderWidth: 0

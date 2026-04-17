@@ -24,6 +24,15 @@ func NormalizePersistedUnifiedRateMultiplier(enabled bool, multiplier float64) f
 	return multiplier
 }
 
+// finalRateFromBaseMultiplier converts a base group multiplier to the effective
+// user-facing final multiplier by applying the user's unified multiplier.
+func finalRateFromBaseMultiplier(baseMultiplier float64, user *User) float64 {
+	if baseMultiplier < 0 {
+		baseMultiplier = 1
+	}
+	return baseMultiplier * effectiveUnifiedMultiplier(user)
+}
+
 // displayBalanceFromReal converts real balance to display balance.
 func displayBalanceFromReal(realBalance float64, user *User) float64 {
 	return realBalance * effectiveUnifiedMultiplier(user)

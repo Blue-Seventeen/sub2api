@@ -90,6 +90,16 @@ func Balance(v float64) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldBalance, v))
 }
 
+// UnifiedRateEnabled applies equality check predicate on the "unified_rate_enabled" field. It's identical to UnifiedRateEnabledEQ.
+func UnifiedRateEnabled(v bool) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldUnifiedRateEnabled, v))
+}
+
+// UnifiedRateMultiplier applies equality check predicate on the "unified_rate_multiplier" field. It's identical to UnifiedRateMultiplierEQ.
+func UnifiedRateMultiplier(v float64) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldUnifiedRateMultiplier, v))
+}
+
 // Concurrency applies equality check predicate on the "concurrency" field. It's identical to ConcurrencyEQ.
 func Concurrency(v int) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldConcurrency, v))
@@ -488,6 +498,56 @@ func BalanceLT(v float64) predicate.User {
 // BalanceLTE applies the LTE predicate on the "balance" field.
 func BalanceLTE(v float64) predicate.User {
 	return predicate.User(sql.FieldLTE(FieldBalance, v))
+}
+
+// UnifiedRateEnabledEQ applies the EQ predicate on the "unified_rate_enabled" field.
+func UnifiedRateEnabledEQ(v bool) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldUnifiedRateEnabled, v))
+}
+
+// UnifiedRateEnabledNEQ applies the NEQ predicate on the "unified_rate_enabled" field.
+func UnifiedRateEnabledNEQ(v bool) predicate.User {
+	return predicate.User(sql.FieldNEQ(FieldUnifiedRateEnabled, v))
+}
+
+// UnifiedRateMultiplierEQ applies the EQ predicate on the "unified_rate_multiplier" field.
+func UnifiedRateMultiplierEQ(v float64) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldUnifiedRateMultiplier, v))
+}
+
+// UnifiedRateMultiplierNEQ applies the NEQ predicate on the "unified_rate_multiplier" field.
+func UnifiedRateMultiplierNEQ(v float64) predicate.User {
+	return predicate.User(sql.FieldNEQ(FieldUnifiedRateMultiplier, v))
+}
+
+// UnifiedRateMultiplierIn applies the In predicate on the "unified_rate_multiplier" field.
+func UnifiedRateMultiplierIn(vs ...float64) predicate.User {
+	return predicate.User(sql.FieldIn(FieldUnifiedRateMultiplier, vs...))
+}
+
+// UnifiedRateMultiplierNotIn applies the NotIn predicate on the "unified_rate_multiplier" field.
+func UnifiedRateMultiplierNotIn(vs ...float64) predicate.User {
+	return predicate.User(sql.FieldNotIn(FieldUnifiedRateMultiplier, vs...))
+}
+
+// UnifiedRateMultiplierGT applies the GT predicate on the "unified_rate_multiplier" field.
+func UnifiedRateMultiplierGT(v float64) predicate.User {
+	return predicate.User(sql.FieldGT(FieldUnifiedRateMultiplier, v))
+}
+
+// UnifiedRateMultiplierGTE applies the GTE predicate on the "unified_rate_multiplier" field.
+func UnifiedRateMultiplierGTE(v float64) predicate.User {
+	return predicate.User(sql.FieldGTE(FieldUnifiedRateMultiplier, v))
+}
+
+// UnifiedRateMultiplierLT applies the LT predicate on the "unified_rate_multiplier" field.
+func UnifiedRateMultiplierLT(v float64) predicate.User {
+	return predicate.User(sql.FieldLT(FieldUnifiedRateMultiplier, v))
+}
+
+// UnifiedRateMultiplierLTE applies the LTE predicate on the "unified_rate_multiplier" field.
+func UnifiedRateMultiplierLTE(v float64) predicate.User {
+	return predicate.User(sql.FieldLTE(FieldUnifiedRateMultiplier, v))
 }
 
 // ConcurrencyEQ applies the EQ predicate on the "concurrency" field.

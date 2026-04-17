@@ -521,6 +521,48 @@ func (_u *UsageLogUpdate) AddActualCost(v float64) *UsageLogUpdate {
 	return _u
 }
 
+// SetRealActualCost sets the "real_actual_cost" field.
+func (_u *UsageLogUpdate) SetRealActualCost(v float64) *UsageLogUpdate {
+	_u.mutation.ResetRealActualCost()
+	_u.mutation.SetRealActualCost(v)
+	return _u
+}
+
+// SetNillableRealActualCost sets the "real_actual_cost" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableRealActualCost(v *float64) *UsageLogUpdate {
+	if v != nil {
+		_u.SetRealActualCost(*v)
+	}
+	return _u
+}
+
+// AddRealActualCost adds value to the "real_actual_cost" field.
+func (_u *UsageLogUpdate) AddRealActualCost(v float64) *UsageLogUpdate {
+	_u.mutation.AddRealActualCost(v)
+	return _u
+}
+
+// SetUnifiedRateMultiplier sets the "unified_rate_multiplier" field.
+func (_u *UsageLogUpdate) SetUnifiedRateMultiplier(v float64) *UsageLogUpdate {
+	_u.mutation.ResetUnifiedRateMultiplier()
+	_u.mutation.SetUnifiedRateMultiplier(v)
+	return _u
+}
+
+// SetNillableUnifiedRateMultiplier sets the "unified_rate_multiplier" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableUnifiedRateMultiplier(v *float64) *UsageLogUpdate {
+	if v != nil {
+		_u.SetUnifiedRateMultiplier(*v)
+	}
+	return _u
+}
+
+// AddUnifiedRateMultiplier adds value to the "unified_rate_multiplier" field.
+func (_u *UsageLogUpdate) AddUnifiedRateMultiplier(v float64) *UsageLogUpdate {
+	_u.mutation.AddUnifiedRateMultiplier(v)
+	return _u
+}
+
 // SetRateMultiplier sets the "rate_multiplier" field.
 func (_u *UsageLogUpdate) SetRateMultiplier(v float64) *UsageLogUpdate {
 	_u.mutation.ResetRateMultiplier()
@@ -1032,6 +1074,18 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedActualCost(); ok {
 		_spec.AddField(usagelog.FieldActualCost, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.RealActualCost(); ok {
+		_spec.SetField(usagelog.FieldRealActualCost, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedRealActualCost(); ok {
+		_spec.AddField(usagelog.FieldRealActualCost, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.UnifiedRateMultiplier(); ok {
+		_spec.SetField(usagelog.FieldUnifiedRateMultiplier, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedUnifiedRateMultiplier(); ok {
+		_spec.AddField(usagelog.FieldUnifiedRateMultiplier, field.TypeFloat64, value)
 	}
 	if value, ok := _u.mutation.RateMultiplier(); ok {
 		_spec.SetField(usagelog.FieldRateMultiplier, field.TypeFloat64, value)
@@ -1756,6 +1810,48 @@ func (_u *UsageLogUpdateOne) AddActualCost(v float64) *UsageLogUpdateOne {
 	return _u
 }
 
+// SetRealActualCost sets the "real_actual_cost" field.
+func (_u *UsageLogUpdateOne) SetRealActualCost(v float64) *UsageLogUpdateOne {
+	_u.mutation.ResetRealActualCost()
+	_u.mutation.SetRealActualCost(v)
+	return _u
+}
+
+// SetNillableRealActualCost sets the "real_actual_cost" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableRealActualCost(v *float64) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetRealActualCost(*v)
+	}
+	return _u
+}
+
+// AddRealActualCost adds value to the "real_actual_cost" field.
+func (_u *UsageLogUpdateOne) AddRealActualCost(v float64) *UsageLogUpdateOne {
+	_u.mutation.AddRealActualCost(v)
+	return _u
+}
+
+// SetUnifiedRateMultiplier sets the "unified_rate_multiplier" field.
+func (_u *UsageLogUpdateOne) SetUnifiedRateMultiplier(v float64) *UsageLogUpdateOne {
+	_u.mutation.ResetUnifiedRateMultiplier()
+	_u.mutation.SetUnifiedRateMultiplier(v)
+	return _u
+}
+
+// SetNillableUnifiedRateMultiplier sets the "unified_rate_multiplier" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableUnifiedRateMultiplier(v *float64) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetUnifiedRateMultiplier(*v)
+	}
+	return _u
+}
+
+// AddUnifiedRateMultiplier adds value to the "unified_rate_multiplier" field.
+func (_u *UsageLogUpdateOne) AddUnifiedRateMultiplier(v float64) *UsageLogUpdateOne {
+	_u.mutation.AddUnifiedRateMultiplier(v)
+	return _u
+}
+
 // SetRateMultiplier sets the "rate_multiplier" field.
 func (_u *UsageLogUpdateOne) SetRateMultiplier(v float64) *UsageLogUpdateOne {
 	_u.mutation.ResetRateMultiplier()
@@ -2297,6 +2393,18 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if value, ok := _u.mutation.AddedActualCost(); ok {
 		_spec.AddField(usagelog.FieldActualCost, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.RealActualCost(); ok {
+		_spec.SetField(usagelog.FieldRealActualCost, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedRealActualCost(); ok {
+		_spec.AddField(usagelog.FieldRealActualCost, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.UnifiedRateMultiplier(); ok {
+		_spec.SetField(usagelog.FieldUnifiedRateMultiplier, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedUnifiedRateMultiplier(); ok {
+		_spec.AddField(usagelog.FieldUnifiedRateMultiplier, field.TypeFloat64, value)
 	}
 	if value, ok := _u.mutation.RateMultiplier(); ok {
 		_spec.SetField(usagelog.FieldRateMultiplier, field.TypeFloat64, value)

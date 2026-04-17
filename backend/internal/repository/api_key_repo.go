@@ -141,6 +141,8 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 				user.FieldStatus,
 				user.FieldRole,
 				user.FieldBalance,
+				user.FieldUnifiedRateEnabled,
+				user.FieldUnifiedRateMultiplier,
 				user.FieldConcurrency,
 			)
 		}).
@@ -346,6 +348,25 @@ func (r *apiKeyRepository) VerifyOwnership(ctx context.Context, userID int64, ap
 		return nil, err
 	}
 	return ids, nil
+}
+
+func (r *apiKeyRepository) ListGroupIDsByUserID(ctx context.Context, userID int64) ([]int64, error) {
+	rows, err := r.activeQuery().
+		Where(apikey.UserIDEQ(userID), apikey.GroupIDNotNil()).
+		Unique(true).
+		Select(apikey.FieldGroupID).
+		Ints(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	groupIDs := make([]int64, 0, len(rows))
+	for _, id := range rows {
+		if id > 0 {
+			groupIDs = append(groupIDs, int64(id))
+		}
+	}
+	return groupIDs, nil
 }
 
 func (r *apiKeyRepository) CountByUserID(ctx context.Context, userID int64) (int64, error) {
@@ -639,22 +660,26 @@ func userEntityToService(u *dbent.User) *service.User {
 	if u == nil {
 		return nil
 	}
-	return &service.User{
-		ID:                  u.ID,
-		Email:               u.Email,
-		Username:            u.Username,
-		Notes:               u.Notes,
-		PasswordHash:        u.PasswordHash,
-		Role:                u.Role,
-		Balance:             u.Balance,
-		Concurrency:         u.Concurrency,
-		Status:              u.Status,
-		TotpSecretEncrypted: u.TotpSecretEncrypted,
-		TotpEnabled:         u.TotpEnabled,
-		TotpEnabledAt:       u.TotpEnabledAt,
-		CreatedAt:           u.CreatedAt,
-		UpdatedAt:           u.UpdatedAt,
+	out := &service.User{
+		ID:                    u.ID,
+		Email:                 u.Email,
+		Username:              u.Username,
+		Notes:                 u.Notes,
+		PasswordHash:          u.PasswordHash,
+		Role:                  u.Role,
+		Balance:               u.Balance,
+		UnifiedRateEnabled:    u.UnifiedRateEnabled,
+		UnifiedRateMultiplier: service.NormalizePersistedUnifiedRateMultiplier(u.UnifiedRateEnabled, u.UnifiedRateMultiplier),
+		Concurrency:           u.Concurrency,
+		Status:                u.Status,
+		TotpSecretEncrypted:   u.TotpSecretEncrypted,
+		TotpEnabled:           u.TotpEnabled,
+		TotpEnabledAt:         u.TotpEnabledAt,
+		CreatedAt:             u.CreatedAt,
+		UpdatedAt:             u.UpdatedAt,
 	}
+	out.RefreshBalanceViews()
+	return out
 }
 
 func groupEntityToService(g *dbent.Group) *service.Group {

@@ -78,6 +78,8 @@ export async function create(userData: {
   email: string
   password: string
   balance?: number
+  unified_rate_enabled?: boolean
+  unified_rate_multiplier?: number
   concurrency?: number
   allowed_groups?: number[] | null
 }): Promise<AdminUser> {

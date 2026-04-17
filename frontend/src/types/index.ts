@@ -29,7 +29,10 @@ export interface User {
   username: string
   email: string
   role: 'admin' | 'user' // User role for authorization
-  balance: number // User balance for API usage
+  // v0.1.114_Beta 增量兼容说明：
+  // 旧字段 balance 继续保留，不改名不删除。
+  // 管理员端默认将它视为“显示余额”；真实余额请读取新增字段 real_balance。
+  balance: number // 兼容旧字段：对外展示余额（显示余额）
   concurrency: number // Allowed concurrent requests
   status: 'active' | 'disabled' // Account status
   allowed_groups: number[] | null // Allowed group IDs (null = all non-exclusive groups)
@@ -41,6 +44,17 @@ export interface User {
 export interface AdminUser extends User {
   // 管理员备注（普通用户接口不返回）
   notes: string
+  // v0.1.114_Beta 增量兼容说明：
+  // real_balance = 后端内部 Balance（真实余额）；
+  // display_balance 为增量兼容新增字段，但管理员前端允许继续直接复用旧 balance 作为显示余额。
+  // 管理员真实余额口径（数据库实际结算余额）
+  real_balance?: number
+  // 管理员显示余额口径（真实余额 × 统一倍率）
+  display_balance?: number
+  // 是否启用用户专属统一倍率
+  unified_rate_enabled?: boolean
+  // 用户专属统一倍率（允许 0）
+  unified_rate_multiplier?: number
   // 用户专属分组倍率配置 (group_id -> rate_multiplier)
   group_rates?: Record<number, number>
   // 当前并发数（仅管理员列表接口返回）
@@ -1050,6 +1064,10 @@ export interface AdminUsageLog extends UsageLog {
 
   // 账号计费倍率（仅管理员可见）
   account_rate_multiplier?: number | null
+  // Real admin billed cost metric.
+  real_actual_cost?: number
+  // Unified multiplier snapshot written into the usage log.
+  unified_rate_multiplier?: number
 
   // 用户请求 IP（仅管理员可见）
   ip_address?: string | null
@@ -1145,6 +1163,8 @@ export interface DashboardStats {
   total_tokens: number
   total_cost: number // 累计标准计费
   total_actual_cost: number // 累计实际扣除
+  // Real cumulative billed cost for admin pages.
+  real_total_actual_cost?: number
 
   // 今日 Token 使用统计
   today_requests: number
@@ -1155,6 +1175,8 @@ export interface DashboardStats {
   today_tokens: number
   today_cost: number // 今日标准计费
   today_actual_cost: number // 今日实际扣除
+  // Real today billed cost for admin pages.
+  real_today_actual_cost?: number
 
   // 系统运行统计
   average_duration_ms: number // 平均响应时间
@@ -1174,6 +1196,8 @@ export interface UsageStatsResponse {
   total_tokens: number
   total_cost: number // 标准计费
   total_actual_cost: number // 实际扣除
+  // Real cumulative billed cost for admin pages.
+  real_total_actual_cost?: number
   average_duration_ms: number
   models?: Record<string, number>
 }
@@ -1190,6 +1214,8 @@ export interface TrendDataPoint {
   total_tokens: number
   cost: number // 标准计费
   actual_cost: number // 实际扣除
+  // Real admin billed cost metric.
+  real_actual_cost?: number
 }
 
 export interface ModelStat {
@@ -1202,6 +1228,8 @@ export interface ModelStat {
   total_tokens: number
   cost: number // 标准计费
   actual_cost: number // 实际扣除
+  // Real admin billed cost metric.
+  real_actual_cost?: number
 }
 
 export interface EndpointStat {
@@ -1210,6 +1238,8 @@ export interface EndpointStat {
   total_tokens: number
   cost: number
   actual_cost: number
+  // ??????????????
+  real_actual_cost?: number
 }
 
 export interface GroupStat {
@@ -1219,6 +1249,8 @@ export interface GroupStat {
   total_tokens: number
   cost: number // 标准计费
   actual_cost: number // 实际扣除
+  // Real admin billed cost metric.
+  real_actual_cost?: number
 }
 
 export interface UserBreakdownItem {
@@ -1228,6 +1260,8 @@ export interface UserBreakdownItem {
   total_tokens: number
   cost: number
   actual_cost: number
+  // ??????????????
+  real_actual_cost?: number
 }
 
 export interface UserUsageTrendPoint {
@@ -1239,12 +1273,16 @@ export interface UserUsageTrendPoint {
   tokens: number
   cost: number // 标准计费
   actual_cost: number // 实际扣除
+  // Real admin billed cost metric.
+  real_actual_cost?: number
 }
 
 export interface UserSpendingRankingItem {
   user_id: number
   email: string
   actual_cost: number
+  // ??????????????
+  real_actual_cost?: number
   requests: number
   tokens: number
 }
@@ -1252,6 +1290,8 @@ export interface UserSpendingRankingItem {
 export interface UserSpendingRankingResponse {
   ranking: UserSpendingRankingItem[]
   total_actual_cost: number
+  // ?????????????????
+  real_total_actual_cost?: number
   total_requests: number
   total_tokens: number
   start_date: string
@@ -1275,6 +1315,8 @@ export interface UpdateUserRequest {
   notes?: string
   role?: 'admin' | 'user'
   balance?: number
+  unified_rate_enabled?: boolean
+  unified_rate_multiplier?: number
   concurrency?: number
   status?: 'active' | 'disabled'
   allowed_groups?: number[] | null

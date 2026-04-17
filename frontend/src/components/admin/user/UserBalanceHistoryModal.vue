@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <BaseDialog :show="show" :title="t('admin.users.balanceHistoryTitle')" width="wide" :close-on-click-outside="true" :z-index="40" @close="$emit('close')">
     <div v-if="user" class="space-y-4">
       <!-- User header: two-row layout with full user info -->
@@ -26,10 +26,11 @@
           </div>
           <!-- Current balance: prominent display on the right -->
           <div class="flex-shrink-0 text-right">
-            <p class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.users.currentBalance') }}</p>
+            <p class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.users.displayBalanceLabel') }}</p>
             <p class="text-xl font-bold text-gray-900 dark:text-white">
-              ${{ user.balance?.toFixed(2) || '0.00' }}
+              ${{ formatMoney(getDisplayBalance(user)) }}
             </p>
+            <p class="text-xs text-gray-400 dark:text-dark-500">{{ t('admin.users.realBalanceLabel') }}: ${{ formatMoney(getRealBalance(user)) }} · {{ t('admin.users.balanceOperationsUseReal') }}</p>
           </div>
         </div>
         <!-- Row 2: notes + total recharged -->
@@ -191,6 +192,13 @@ const pageSize = 15
 const typeFilter = ref('')
 
 const totalPages = computed(() => Math.ceil(total.value / pageSize) || 1)
+// v0.1.114_Beta 增量兼容说明：
+// “用户充值和并发变动记录”中的余额头部说明与后续管理员操作，均按真实余额口径理解；
+// 显示余额仅用于展示，继续优先复用旧字段 balance。
+const getRealBalance = (user: AdminUser) => user.real_balance ?? user.balance ?? 0
+// 管理员“显示余额”优先复用兼容旧字段 balance；display_balance 仅作为增量兼容回退字段。
+const getDisplayBalance = (user: AdminUser) => user.balance ?? user.display_balance ?? getRealBalance(user)
+const formatMoney = (value: number) => value.toFixed(2)
 
 // Type filter options
 const typeOptions = computed(() => [
@@ -320,3 +328,4 @@ const formatValue = (item: BalanceHistoryItem) => {
   return `${sign}${item.value}`
 }
 </script>
+
