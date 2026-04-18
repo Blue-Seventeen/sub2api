@@ -2237,6 +2237,7 @@ export default {
         clear: 'Clear selection',
         edit: 'Bulk Edit',
         delete: 'Bulk Delete',
+        autoOps: 'Auto Ops',
         enableScheduling: 'Enable Scheduling',
         disableScheduling: 'Disable Scheduling',
         resetStatus: 'Reset Status',
@@ -2938,7 +2939,11 @@ export default {
       linkCopied: 'Link Copied',
       needsReauth: 'Re-auth Required',
       rateLimited: 'Rate Limited',
-      usageError: 'Fetch Error'
+      usageError: 'Fetch Error',
+      autoOps: 'Auto Ops',
+      autoOpsManualTriggered: 'Auto ops triggered. Run #{runId}, eligible accounts: {count}',
+      autoOpsManualNoEligible: 'Auto ops triggered, but no eligible accounts were found',
+      autoOpsManualFailed: 'Failed to trigger auto ops'
     },
 
     // Scheduled Tests

@@ -46,8 +46,6 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 		payment.ProvideRegistry,
 		payment.ProvideEncryptionKey,
 		payment.ProvideDefaultLoadBalancer,
-		service.ProvidePaymentConfigService,
-		service.ProvidePaymentOrderExpiryService,
 
 		// Privacy client factory for OpenAI training opt-out
 		providePrivacyClientFactory,
@@ -102,6 +100,7 @@ func provideCleanup(
 	antigravityOAuth *service.AntigravityOAuthService,
 	openAIGateway *service.OpenAIGatewayService,
 	scheduledTestRunner *service.ScheduledTestRunnerService,
+	accountAutoOpsRunner *service.AccountAutoOpsRunnerService,
 	backupSvc *service.BackupService,
 	paymentOrderExpiry *service.PaymentOrderExpiryService,
 ) func() {
@@ -237,6 +236,12 @@ func provideCleanup(
 			{"ScheduledTestRunnerService", func() error {
 				if scheduledTestRunner != nil {
 					scheduledTestRunner.Stop()
+				}
+				return nil
+			}},
+			{"AccountAutoOpsRunnerService", func() error {
+				if accountAutoOpsRunner != nil {
+					accountAutoOpsRunner.Stop()
 				}
 				return nil
 			}},

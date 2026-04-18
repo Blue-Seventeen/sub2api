@@ -17,7 +17,12 @@ import type {
   AdminDataPayload,
   AdminDataImportResult,
   CheckMixedChannelRequest,
-  CheckMixedChannelResponse
+  CheckMixedChannelResponse,
+  AccountAutoOpsConfig,
+  AccountAutoOpsRun,
+  AccountAutoOpsSample,
+  AccountAutoOpsModelOption,
+  AccountAutoOpsManualRunRequest
 } from '@/types'
 
 /**
@@ -627,6 +632,56 @@ export async function setPrivacy(id: number): Promise<Account> {
   return data
 }
 
+export async function getAutoOpsConfig(): Promise<AccountAutoOpsConfig> {
+  const { data } = await apiClient.get<AccountAutoOpsConfig>('/admin/accounts/auto-ops')
+  return data
+}
+
+export async function updateAutoOpsConfig(config: AccountAutoOpsConfig): Promise<AccountAutoOpsConfig> {
+  const { data } = await apiClient.put<AccountAutoOpsConfig>('/admin/accounts/auto-ops', config)
+  return data
+}
+
+export async function manualRunAutoOps(
+  payload: AccountAutoOpsManualRunRequest
+): Promise<{
+  run_id: number
+  requested_accounts: number
+  eligible_accounts: number
+}> {
+  const { data } = await apiClient.post<{
+    run_id: number
+    requested_accounts: number
+    eligible_accounts: number
+  }>('/admin/accounts/auto-ops/manual-run', payload, {
+    timeout: 120000
+  })
+  return data
+}
+
+export async function getAutoOpsLogs(limit: number = 20): Promise<{ runs: AccountAutoOpsRun[] }> {
+  const { data } = await apiClient.get<{ runs: AccountAutoOpsRun[] }>('/admin/accounts/auto-ops/logs', {
+    params: { limit }
+  })
+  return data
+}
+
+export async function getAutoOpsSamples(limit: number = 20): Promise<{ samples: AccountAutoOpsSample[] }> {
+  const { data } = await apiClient.get<{ samples: AccountAutoOpsSample[] }>('/admin/accounts/auto-ops/samples', {
+    params: { limit }
+  })
+  return data
+}
+
+export async function getAutoOpsModelOptions(): Promise<{
+  model_options: Record<string, AccountAutoOpsModelOption[]>
+}> {
+  const { data } = await apiClient.get<{
+    model_options: Record<string, AccountAutoOpsModelOption[]>
+  }>('/admin/accounts/auto-ops/model-options')
+  return data
+}
+
 export const accountsAPI = {
   list,
   listWithEtag,
@@ -663,7 +718,13 @@ export const accountsAPI = {
   getAntigravityDefaultModelMapping,
   batchClearError,
   batchRefresh,
-  setPrivacy
+  setPrivacy,
+  getAutoOpsConfig,
+  updateAutoOpsConfig,
+  manualRunAutoOps,
+  getAutoOpsLogs,
+  getAutoOpsSamples,
+  getAutoOpsModelOptions
 }
 
 export default accountsAPI

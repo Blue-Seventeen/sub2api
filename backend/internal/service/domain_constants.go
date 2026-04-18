@@ -214,6 +214,13 @@ const (
 	SettingKeyStreamTimeoutSettings = "stream_timeout_settings"
 
 	// =========================
+	// Account Auto Ops
+	// =========================
+
+	// SettingKeyAccountAutoOpsConfig stores JSON config for account automatic maintenance.
+	SettingKeyAccountAutoOpsConfig = "account_auto_ops_config"
+
+	// =========================
 	// Request Rectifier (请求整流器)
 	// =========================
 

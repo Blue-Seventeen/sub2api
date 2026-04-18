@@ -354,6 +354,55 @@ func ProvideScheduledTestRunnerService(
 	return svc
 }
 
+func ProvideAccountRefreshService(
+	adminService AdminService,
+	oauthService *OAuthService,
+	openaiOAuthService *OpenAIOAuthService,
+	geminiOAuthService *GeminiOAuthService,
+	antigravityOAuthService *AntigravityOAuthService,
+	tokenCacheInvalidator TokenCacheInvalidator,
+) *AccountRefreshService {
+	return NewAccountRefreshService(
+		adminService,
+		oauthService,
+		openaiOAuthService,
+		geminiOAuthService,
+		antigravityOAuthService,
+		tokenCacheInvalidator,
+	)
+}
+
+func ProvideAccountAutoOpsService(
+	settingService *SettingService,
+	accountRepo AccountRepository,
+	autoOpsRepo AccountAutoOpsRepository,
+	accountTestSvc *AccountTestService,
+	accountRefreshSvc *AccountRefreshService,
+	rateLimitSvc *RateLimitService,
+	adminService AdminService,
+	rdb *redis.Client,
+) *AccountAutoOpsService {
+	return NewAccountAutoOpsService(
+		settingService,
+		accountRepo,
+		autoOpsRepo,
+		accountTestSvc,
+		accountRefreshSvc,
+		rateLimitSvc,
+		adminService,
+		rdb,
+	)
+}
+
+func ProvideAccountAutoOpsRunnerService(
+	autoOpsService *AccountAutoOpsService,
+	cfg *config.Config,
+) *AccountAutoOpsRunnerService {
+	svc := NewAccountAutoOpsRunnerService(autoOpsService, cfg)
+	svc.Start()
+	return svc
+}
+
 // ProvideOpsScheduledReportService creates and starts OpsScheduledReportService.
 func ProvideOpsScheduledReportService(
 	opsService *OpsService,
@@ -413,6 +462,7 @@ var ProviderSet = wire.NewSet(
 	NewBillingCacheService,
 	NewAnnouncementService,
 	NewAdminService,
+	ProvideAccountRefreshService,
 	NewGatewayService,
 	NewOpenAIGatewayService,
 	NewOAuthService,
@@ -474,6 +524,8 @@ var ProviderSet = wire.NewSet(
 	ProvideIdempotencyCleanupService,
 	ProvideScheduledTestService,
 	ProvideScheduledTestRunnerService,
+	ProvideAccountAutoOpsService,
+	ProvideAccountAutoOpsRunnerService,
 	NewGroupCapacityService,
 	NewChannelService,
 	NewModelPricingResolver,

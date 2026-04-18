@@ -53,6 +53,8 @@ type AccountHandler struct {
 	rateLimitService        *service.RateLimitService
 	accountUsageService     *service.AccountUsageService
 	accountTestService      *service.AccountTestService
+	accountRefreshService   *service.AccountRefreshService
+	accountAutoOpsService   *service.AccountAutoOpsService
 	concurrencyService      *service.ConcurrencyService
 	crsSyncService          *service.CRSSyncService
 	sessionLimitCache       service.SessionLimitCache
@@ -70,6 +72,8 @@ func NewAccountHandler(
 	rateLimitService *service.RateLimitService,
 	accountUsageService *service.AccountUsageService,
 	accountTestService *service.AccountTestService,
+	accountRefreshService *service.AccountRefreshService,
+	accountAutoOpsService *service.AccountAutoOpsService,
 	concurrencyService *service.ConcurrencyService,
 	crsSyncService *service.CRSSyncService,
 	sessionLimitCache service.SessionLimitCache,
@@ -85,6 +89,8 @@ func NewAccountHandler(
 		rateLimitService:        rateLimitService,
 		accountUsageService:     accountUsageService,
 		accountTestService:      accountTestService,
+		accountRefreshService:   accountRefreshService,
+		accountAutoOpsService:   accountAutoOpsService,
 		concurrencyService:      concurrencyService,
 		crsSyncService:          crsSyncService,
 		sessionLimitCache:       sessionLimitCache,
@@ -780,125 +786,17 @@ func (h *AccountHandler) PreviewFromCRS(c *gin.Context) {
 // refreshSingleAccount refreshes credentials for a single OAuth account.
 // Returns (updatedAccount, warning, error) where warning is used for Antigravity ProjectIDMissing scenario.
 func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *service.Account) (*service.Account, string, error) {
-	if !account.IsOAuth() {
-		return nil, "", infraerrors.BadRequest("NOT_OAUTH", "cannot refresh non-OAuth account")
+	if h.accountRefreshService == nil {
+		return nil, "", infraerrors.InternalServer("ACCOUNT_REFRESH_SERVICE_NOT_CONFIGURED", "account refresh service is not configured")
 	}
-
-	var newCredentials map[string]any
-
-	if account.IsOpenAI() {
-		updatedAccount, err := h.openaiOAuthService.ForceRefreshAccount(ctx, account)
-		if err != nil {
-			// Refresh failed, but the current access token may still be usable; try privacy sync best-effort.
-			h.adminService.EnsureOpenAIPrivacy(ctx, account)
-			return nil, "", err
-		}
-
-		if h.tokenCacheInvalidator != nil {
-			if invalidateErr := h.tokenCacheInvalidator.InvalidateToken(ctx, updatedAccount); invalidateErr != nil {
-				log.Printf("[WARN] Failed to invalidate token cache for account %d: %v", updatedAccount.ID, invalidateErr)
-			}
-		}
-		h.adminService.EnsureOpenAIPrivacy(ctx, updatedAccount)
-		h.adminService.EnsureAntigravityPrivacy(ctx, updatedAccount)
-		return updatedAccount, "", nil
-	} else if account.Platform == service.PlatformGemini {
-		tokenInfo, err := h.geminiOAuthService.RefreshAccountToken(ctx, account)
-		if err != nil {
-			return nil, "", fmt.Errorf("failed to refresh credentials: %w", err)
-		}
-
-		newCredentials = h.geminiOAuthService.BuildAccountCredentials(tokenInfo)
-		for k, v := range account.Credentials {
-			if _, exists := newCredentials[k]; !exists {
-				newCredentials[k] = v
-			}
-		}
-	} else if account.Platform == service.PlatformAntigravity {
-		tokenInfo, err := h.antigravityOAuthService.RefreshAccountToken(ctx, account)
-		if err != nil {
-			return nil, "", err
-		}
-
-		newCredentials = h.antigravityOAuthService.BuildAccountCredentials(tokenInfo)
-		for k, v := range account.Credentials {
-			if _, exists := newCredentials[k]; !exists {
-				newCredentials[k] = v
-			}
-		}
-
-		// 特殊处理 project_id：如果新值为空但旧值非空，保留旧值
-		// 这确保了即使 LoadCodeAssist 失败，project_id 也不会丢失
-		if newProjectID, _ := newCredentials["project_id"].(string); newProjectID == "" {
-			if oldProjectID := strings.TrimSpace(account.GetCredential("project_id")); oldProjectID != "" {
-				newCredentials["project_id"] = oldProjectID
-			}
-		}
-
-		// 如果 project_id 获取失败，更新凭证但不标记为 error
-		if tokenInfo.ProjectIDMissing {
-			updatedAccount, updateErr := h.adminService.UpdateAccount(ctx, account.ID, &service.UpdateAccountInput{
-				Credentials: newCredentials,
-			})
-			if updateErr != nil {
-				return nil, "", fmt.Errorf("failed to update credentials: %w", updateErr)
-			}
-			h.adminService.EnsureAntigravityPrivacy(ctx, updatedAccount)
-			return updatedAccount, "missing_project_id_temporary", nil
-		}
-
-		// 成功获取到 project_id，如果之前是 missing_project_id 错误则清除
-		if account.Status == service.StatusError && strings.Contains(account.ErrorMessage, "missing_project_id:") {
-			if _, clearErr := h.adminService.ClearAccountError(ctx, account.ID); clearErr != nil {
-				return nil, "", fmt.Errorf("failed to clear account error: %w", clearErr)
-			}
-		}
-	} else {
-		// Use Anthropic/Claude OAuth service to refresh token
-		tokenInfo, err := h.oauthService.RefreshAccountToken(ctx, account)
-		if err != nil {
-			return nil, "", err
-		}
-
-		// Copy existing credentials to preserve non-token settings (e.g., intercept_warmup_requests)
-		newCredentials = make(map[string]any)
-		for k, v := range account.Credentials {
-			newCredentials[k] = v
-		}
-
-		// Update token-related fields
-		newCredentials["access_token"] = tokenInfo.AccessToken
-		newCredentials["token_type"] = tokenInfo.TokenType
-		newCredentials["expires_in"] = strconv.FormatInt(tokenInfo.ExpiresIn, 10)
-		newCredentials["expires_at"] = strconv.FormatInt(tokenInfo.ExpiresAt, 10)
-		if strings.TrimSpace(tokenInfo.RefreshToken) != "" {
-			newCredentials["refresh_token"] = tokenInfo.RefreshToken
-		}
-		if strings.TrimSpace(tokenInfo.Scope) != "" {
-			newCredentials["scope"] = tokenInfo.Scope
-		}
-	}
-
-	updatedAccount, err := h.adminService.UpdateAccount(ctx, account.ID, &service.UpdateAccountInput{
-		Credentials: newCredentials,
-	})
+	result, err := h.accountRefreshService.RefreshAccount(ctx, account)
 	if err != nil {
 		return nil, "", err
 	}
-
-	// 刷新成功后，清除 token 缓存，确保下次请求使用新 token
-	if h.tokenCacheInvalidator != nil {
-		if invalidateErr := h.tokenCacheInvalidator.InvalidateToken(ctx, updatedAccount); invalidateErr != nil {
-			log.Printf("[WARN] Failed to invalidate token cache for account %d: %v", updatedAccount.ID, invalidateErr)
-		}
+	if result == nil {
+		return account, "", nil
 	}
-
-	// OpenAI OAuth: 刷新成功后检查并设置 privacy_mode
-	h.adminService.EnsureOpenAIPrivacy(ctx, updatedAccount)
-	// Antigravity OAuth: 刷新成功后检查并设置 privacy_mode
-	h.adminService.EnsureAntigravityPrivacy(ctx, updatedAccount)
-
-	return updatedAccount, "", nil
+	return result.Account, result.Warning, nil
 }
 
 // Refresh handles refreshing account credentials
@@ -1151,6 +1049,129 @@ func (h *AccountHandler) BatchRefresh(c *gin.Context) {
 		"errors":   errors,
 		"warnings": warnings,
 	})
+}
+
+type UpdateAccountAutoOpsConfigRequest struct {
+	Enabled              bool                         `json:"enabled"`
+	IntervalMinutes      int                          `json:"interval_minutes"`
+	Rules                []service.AccountAutoOpsRule `json:"rules"`
+	TestModelsByPlatform map[string][]string          `json:"test_models_by_platform"`
+}
+
+type ManualAccountAutoOpsRunRequest struct {
+	AccountIDs []int64 `json:"account_ids" binding:"required,min=1"`
+}
+
+// GetAutoOpsConfig handles fetching account auto ops configuration.
+// GET /api/v1/admin/accounts/auto-ops
+func (h *AccountHandler) GetAutoOpsConfig(c *gin.Context) {
+	if h.accountAutoOpsService == nil {
+		response.InternalError(c, "Account auto ops service is not configured")
+		return
+	}
+	cfg, err := h.accountAutoOpsService.GetConfig(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, cfg)
+}
+
+// UpdateAutoOpsConfig handles updating account auto ops configuration.
+// PUT /api/v1/admin/accounts/auto-ops
+func (h *AccountHandler) UpdateAutoOpsConfig(c *gin.Context) {
+	if h.accountAutoOpsService == nil {
+		response.InternalError(c, "Account auto ops service is not configured")
+		return
+	}
+	var req UpdateAccountAutoOpsConfigRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	cfg, err := h.accountAutoOpsService.UpdateConfig(c.Request.Context(), &service.AccountAutoOpsConfig{
+		Enabled:              req.Enabled,
+		IntervalMinutes:      req.IntervalMinutes,
+		Rules:                req.Rules,
+		TestModelsByPlatform: req.TestModelsByPlatform,
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, cfg)
+}
+
+// ManualRunAutoOps handles manual triggering for selected accounts.
+// POST /api/v1/admin/accounts/auto-ops/manual-run
+func (h *AccountHandler) ManualRunAutoOps(c *gin.Context) {
+	if h.accountAutoOpsService == nil {
+		response.InternalError(c, "Account auto ops service is not configured")
+		return
+	}
+	var req ManualAccountAutoOpsRunRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	result, err := h.accountAutoOpsService.RunManual(c.Request.Context(), req.AccountIDs)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+// ListAutoOpsLogs handles listing recent auto ops logs.
+// GET /api/v1/admin/accounts/auto-ops/logs
+func (h *AccountHandler) ListAutoOpsLogs(c *gin.Context) {
+	if h.accountAutoOpsService == nil {
+		response.InternalError(c, "Account auto ops service is not configured")
+		return
+	}
+	limit := 20
+	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 100 {
+			limit = parsed
+		}
+	}
+	runs, err := h.accountAutoOpsService.ListLogs(c.Request.Context(), limit)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"runs": runs})
+}
+
+// ListAutoOpsSamples handles listing deduplicated captured response samples.
+// GET /api/v1/admin/accounts/auto-ops/samples
+func (h *AccountHandler) ListAutoOpsSamples(c *gin.Context) {
+	if h.accountAutoOpsService == nil {
+		response.InternalError(c, "Account auto ops service is not configured")
+		return
+	}
+	limit := 20
+	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 100 {
+			limit = parsed
+		}
+	}
+	samples, err := h.accountAutoOpsService.ListSamples(c.Request.Context(), limit)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"samples": samples})
+}
+
+// GetAutoOpsModelOptions handles listing available model options per platform.
+// GET /api/v1/admin/accounts/auto-ops/model-options
+func (h *AccountHandler) GetAutoOpsModelOptions(c *gin.Context) {
+	if h.accountAutoOpsService == nil {
+		response.InternalError(c, "Account auto ops service is not configured")
+		return
+	}
+	response.Success(c, gin.H{"model_options": h.accountAutoOpsService.GetModelOptions()})
 }
 
 // BatchCreate handles batch creating accounts

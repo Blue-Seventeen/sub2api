@@ -251,6 +251,12 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	accounts := admin.Group("/accounts")
 	{
 		accounts.GET("", h.Admin.Account.List)
+		accounts.GET("/auto-ops", h.Admin.Account.GetAutoOpsConfig)
+		accounts.PUT("/auto-ops", h.Admin.Account.UpdateAutoOpsConfig)
+		accounts.POST("/auto-ops/manual-run", h.Admin.Account.ManualRunAutoOps)
+		accounts.GET("/auto-ops/logs", h.Admin.Account.ListAutoOpsLogs)
+		accounts.GET("/auto-ops/samples", h.Admin.Account.ListAutoOpsSamples)
+		accounts.GET("/auto-ops/model-options", h.Admin.Account.GetAutoOpsModelOptions)
 		accounts.GET("/:id", h.Admin.Account.GetByID)
 		accounts.POST("", h.Admin.Account.Create)
 		accounts.POST("/check-mixed-channel", h.Admin.Account.CheckMixedChannel)

@@ -83,6 +83,15 @@
                 <span class="hidden md:inline">{{ t('admin.tlsFingerprintProfiles.title') }}</span>
               </button>
 
+              <button
+                @click="openAutoOpsModal()"
+                class="btn btn-secondary"
+                :title="t('admin.accounts.autoOps')"
+              >
+                <Icon name="cog" size="md" class="mr-1.5" />
+                <span class="hidden md:inline">{{ t('admin.accounts.autoOps') }}</span>
+              </button>
+
               <!-- Column Settings Dropdown -->
               <div class="relative" ref="columnDropdownRef">
                 <button
@@ -141,7 +150,7 @@
         </div>
       </template>
       <template #table>
-        <AccountBulkActionsBar :selected-ids="selIds" @delete="handleBulkDelete" @reset-status="handleBulkResetStatus" @refresh-token="handleBulkRefreshToken" @edit="showBulkEdit = true" @clear="clearSelection" @select-page="selectPage" @toggle-schedulable="handleBulkToggleSchedulable" />
+        <AccountBulkActionsBar :selected-ids="selIds" @delete="handleBulkDelete" @reset-status="handleBulkResetStatus" @refresh-token="handleBulkRefreshToken" @auto-ops="handleBulkAutoOps" @edit="showBulkEdit = true" @clear="clearSelection" @select-page="selectPage" @toggle-schedulable="handleBulkToggleSchedulable" />
         <div ref="accountTableRef" class="flex min-h-0 flex-1 flex-col overflow-hidden">
         <DataTable
           :columns="cols"
@@ -308,6 +317,7 @@
     </ConfirmDialog>
     <ErrorPassthroughRulesModal :show="showErrorPassthrough" @close="showErrorPassthrough = false" />
     <TLSFingerprintProfilesModal :show="showTLSFingerprintProfiles" @close="showTLSFingerprintProfiles = false" />
+    <AccountAutoOpsModal :show="showAutoOps" :highlight-run-id="autoOpsHighlightRunId" @close="showAutoOps = false" @saved="handleAutoOpsSaved" />
   </AppLayout>
 </template>
 
@@ -346,6 +356,7 @@ import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ErrorPassthroughRulesModal from '@/components/admin/ErrorPassthroughRulesModal.vue'
 import TLSFingerprintProfilesModal from '@/components/admin/TLSFingerprintProfilesModal.vue'
+import AccountAutoOpsModal from '@/components/admin/account/AccountAutoOpsModal.vue'
 import { buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
 import { formatDateTime, formatRelativeTime } from '@/utils/format'
 import type { Account, AccountPlatform, AccountType, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel } from '@/types'
@@ -387,6 +398,8 @@ const showTest = ref(false)
 const showStats = ref(false)
 const showErrorPassthrough = ref(false)
 const showTLSFingerprintProfiles = ref(false)
+const showAutoOps = ref(false)
+const autoOpsHighlightRunId = ref<number | null>(null)
 const edAcc = ref<Account | null>(null)
 const tempUnschedAcc = ref<Account | null>(null)
 const deletingAcc = ref<Account | null>(null)
@@ -1060,6 +1073,32 @@ const handleBulkRefreshToken = async () => {
   } catch (error) {
     console.error('Failed to bulk refresh token:', error)
     appStore.showError(String(error))
+  }
+}
+const openAutoOpsModal = (highlightRunId?: number | null) => {
+  autoOpsHighlightRunId.value = highlightRunId ?? null
+  showAutoOps.value = true
+}
+const handleAutoOpsSaved = () => {
+  openAutoOpsModal()
+}
+const handleBulkAutoOps = async () => {
+  if (selIds.value.length === 0) return
+  try {
+    const result = await adminAPI.accounts.manualRunAutoOps({
+      account_ids: [...selIds.value]
+    })
+    appStore.showSuccess(
+      result.run_id
+        ? t('admin.accounts.autoOpsManualTriggered', { runId: result.run_id, count: result.eligible_accounts })
+        : t('admin.accounts.autoOpsManualNoEligible')
+    )
+    clearSelection()
+    openAutoOpsModal(result.run_id || null)
+    reload()
+  } catch (error: any) {
+    console.error('Failed to trigger account auto ops:', error)
+    appStore.showError(error?.message || t('admin.accounts.autoOpsManualFailed'))
   }
 }
 const updateSchedulableInList = (accountIds: number[], schedulable: boolean) => {

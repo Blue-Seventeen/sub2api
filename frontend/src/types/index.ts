@@ -1688,5 +1688,84 @@ export interface UpdateScheduledTestPlanRequest {
   auto_recover?: boolean
 }
 
+// ==================== Account Auto Ops Types ====================
+
+export type AccountAutoOpsSubject = 'account_name' | 'test_response' | 'refresh_response'
+export type AccountAutoOpsMatchType = 'contains' | 'not_contains'
+export type AccountAutoOpsAction =
+  | 'retest'
+  | 'refresh_token'
+  | 'recover_state'
+  | 'enable_schedulable'
+  | 'disable_schedulable'
+  | 'delete_account'
+
+export interface AccountAutoOpsRule {
+  id: string
+  name: string
+  subjects: AccountAutoOpsSubject[]
+  match_type: AccountAutoOpsMatchType
+  pattern: string
+  action: AccountAutoOpsAction
+}
+
+export interface AccountAutoOpsConfig {
+  enabled: boolean
+  interval_minutes: number
+  rules: AccountAutoOpsRule[]
+  test_models_by_platform: Record<string, string[]>
+  configured?: boolean
+}
+
+export interface AccountAutoOpsStep {
+  id: number
+  run_id: number
+  account_id: number
+  account_name: string
+  step_index: number
+  subject: string
+  action: string
+  status: string
+  matched_rule_id: string
+  matched_rule_name: string
+  response_text: string
+  response_hash: string
+  action_result_text: string
+  created_at: string
+}
+
+export interface AccountAutoOpsRun {
+  id: number
+  trigger_mode: 'automatic' | 'manual'
+  status: string
+  requested_account_ids: number[]
+  total_accounts: number
+  eligible_accounts: number
+  completed_accounts: number
+  error_message: string
+  started_at: string
+  finished_at: string | null
+  created_at: string
+  updated_at: string
+  steps?: AccountAutoOpsStep[]
+}
+
+export interface AccountAutoOpsSample {
+  subject: 'test_response' | 'refresh_response' | string
+  response_hash: string
+  response_text: string
+  occurrences: number
+  last_seen_at: string
+}
+
+export interface AccountAutoOpsModelOption {
+  id: string
+  display_name: string
+}
+
+export interface AccountAutoOpsManualRunRequest {
+  account_ids: number[]
+}
+
 // Payment types
 export type { SubscriptionPlan, PaymentOrder, CheckoutInfoResponse } from './payment'
