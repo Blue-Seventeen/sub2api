@@ -233,7 +233,7 @@ describe('BulkEditAccountModal', () => {
   })
 
 
-  it('???????????????? auto_select_proxy', async () => {
+  it('批量编辑可选择自动最优代理并提交 auto_select_proxy', async () => {
     const wrapper = mountModal({
       proxies: [{ id: 9, name: 'proxy-9' }]
     })

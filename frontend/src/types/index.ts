@@ -1252,7 +1252,7 @@ export interface EndpointStat {
   total_tokens: number
   cost: number
   actual_cost: number
-  // ??????????????
+  // 管理端真实计费金额指标
   real_actual_cost?: number
 }
 
@@ -1274,7 +1274,7 @@ export interface UserBreakdownItem {
   total_tokens: number
   cost: number
   actual_cost: number
-  // ??????????????
+  // 管理端真实计费金额指标
   real_actual_cost?: number
 }
 
@@ -1295,7 +1295,7 @@ export interface UserSpendingRankingItem {
   user_id: number
   email: string
   actual_cost: number
-  // ??????????????
+  // 管理端真实计费金额指标
   real_actual_cost?: number
   requests: number
   tokens: number
@@ -1304,7 +1304,7 @@ export interface UserSpendingRankingItem {
 export interface UserSpendingRankingResponse {
   ranking: UserSpendingRankingItem[]
   total_actual_cost: number
-  // ?????????????????
+  // 管理端真实计费总金额指标
   real_total_actual_cost?: number
   total_requests: number
   total_tokens: number
