@@ -635,30 +635,36 @@ func (s *ProxyAutoProbeService) probeProxy(ctx context.Context, proxyID int64) p
 		logger.LegacyPrintf("service.proxy_auto_probe", "[ProxyAutoProbe] quality check failed: proxy=%d err=%v", proxyID, err)
 		return outcome
 	}
-	qualityStatus := summarizeProxyQualityStatus(qualityResult)
+	qualityStatus := classifyAutoProbeQueueFromQuality(qualityResult)
 	outcome.QualityStatus = qualityStatus
 	if qualityResult != nil && qualityResult.BaseLatencyMs > 0 {
 		latency := qualityResult.BaseLatencyMs
 		outcome.LatencyMs = &latency
 	}
-	outcome.Success = qualityStatus == "healthy"
+	outcome.Success = qualityStatus == "healthy" || qualityStatus == "warn"
 	return outcome
 }
 
-func summarizeProxyQualityStatus(result *ProxyQualityCheckResult) string {
+func classifyAutoProbeQueueFromQuality(result *ProxyQualityCheckResult) string {
 	if result == nil {
 		return "failed"
 	}
-	if result.ChallengeCount > 0 {
-		return "challenge"
+	for _, item := range result.Items {
+		if item.Target != "openai" {
+			continue
+		}
+		switch item.Status {
+		case "pass":
+			return "healthy"
+		case "warn":
+			return "warn"
+		case "challenge":
+			return "challenge"
+		default:
+			return "failed"
+		}
 	}
-	if result.FailedCount > 0 {
-		return "failed"
-	}
-	if result.WarnCount > 0 {
-		return "warn"
-	}
-	return "healthy"
+	return "failed"
 }
 
 func (s *ProxyAutoProbeService) finishProbe(proxyID int64, outcome proxyAutoProbeOutcome, finishedAt time.Time) {

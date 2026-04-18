@@ -236,6 +236,75 @@ func TestProxyAutoProbeServiceFinishProbeTransitionsQueue(t *testing.T) {
 	require.Equal(t, latency, *svc.entries[7].LastLatencyMs)
 }
 
+func TestClassifyAutoProbeQueueFromQuality_OpenAIStatusRules(t *testing.T) {
+	tests := []struct {
+		name   string
+		result *ProxyQualityCheckResult
+		want   string
+	}{
+		{
+			name: "openai pass wins even if others fail",
+			result: &ProxyQualityCheckResult{
+				Items: []ProxyQualityCheckItem{
+					{Target: "anthropic", Status: "fail"},
+					{Target: "openai", Status: "pass"},
+				},
+			},
+			want: "healthy",
+		},
+		{
+			name: "openai warn is success queue",
+			result: &ProxyQualityCheckResult{
+				Items: []ProxyQualityCheckItem{
+					{Target: "gemini", Status: "fail"},
+					{Target: "openai", Status: "warn"},
+				},
+			},
+			want: "warn",
+		},
+		{
+			name: "openai fail is failed queue",
+			result: &ProxyQualityCheckResult{
+				Items: []ProxyQualityCheckItem{
+					{Target: "anthropic", Status: "pass"},
+					{Target: "openai", Status: "fail"},
+				},
+			},
+			want: "failed",
+		},
+		{
+			name: "openai challenge is failed queue",
+			result: &ProxyQualityCheckResult{
+				Items: []ProxyQualityCheckItem{
+					{Target: "gemini", Status: "pass"},
+					{Target: "openai", Status: "challenge"},
+				},
+			},
+			want: "challenge",
+		},
+		{
+			name: "missing openai item is failed queue",
+			result: &ProxyQualityCheckResult{
+				Items: []ProxyQualityCheckItem{
+					{Target: "anthropic", Status: "pass"},
+				},
+			},
+			want: "failed",
+		},
+		{
+			name:   "nil result is failed queue",
+			result: nil,
+			want:   "failed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, classifyAutoProbeQueueFromQuality(tt.result))
+		})
+	}
+}
+
 func ptrInt64(v int64) *int64 {
 	return &v
 }
