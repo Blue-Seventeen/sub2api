@@ -75,6 +75,27 @@
             <Icon v-if="modelValue === null" name="check" size="sm" class="text-primary-500" />
           </div>
 
+          <div
+            v-if="showAutoBestOption"
+            @click="selectOption(autoBestValue)"
+            :class="['select-option', modelValue === autoBestValue && 'select-option-selected']"
+          >
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2">
+                <span class="truncate font-medium">{{ t('admin.accounts.autoBestProxy') }}</span>
+                <span
+                  class="inline-flex flex-shrink-0 items-center rounded bg-primary-50 px-1.5 py-0.5 text-xs text-primary-600 dark:bg-primary-900/20 dark:text-primary-300"
+                >
+                  AUTO
+                </span>
+              </div>
+              <div class="truncate text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.accounts.autoBestProxyDesc') }}
+              </div>
+            </div>
+            <Icon v-if="modelValue === autoBestValue" name="check" size="sm" class="text-primary-500" />
+          </div>
+
           <!-- Proxy options -->
           <div
             v-for="proxy in filteredProxies"
@@ -190,10 +211,14 @@ interface Props {
   modelValue: number | null
   proxies: Proxy[]
   disabled?: boolean
+  showAutoBestOption?: boolean
+  autoBestValue?: number
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  disabled: false
+  disabled: false,
+  showAutoBestOption: false,
+  autoBestValue: -1
 })
 
 const emit = defineEmits<{
@@ -211,11 +236,14 @@ const testingProxyIds = reactive(new Set<number>())
 const batchTesting = ref(false)
 
 const selectedProxy = computed(() => {
-  if (props.modelValue === null) return null
+  if (props.modelValue === null || props.modelValue === props.autoBestValue) return null
   return props.proxies.find((p) => p.id === props.modelValue) || null
 })
 
 const selectedLabel = computed(() => {
+  if (props.showAutoBestOption && props.modelValue === props.autoBestValue) {
+    return t('admin.accounts.autoBestProxy')
+  }
   if (!selectedProxy.value) {
     return t('admin.accounts.noProxy')
   }

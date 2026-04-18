@@ -1029,7 +1029,7 @@
 
       <div>
         <label class="input-label">{{ t('admin.accounts.proxy') }}</label>
-        <ProxySelector v-model="form.proxy_id" :proxies="proxies" />
+        <ProxySelector v-model="form.proxy_id" :proxies="proxies" :show-auto-best-option="true" :auto-best-value="AUTO_PROXY_BEST_SENTINEL" />
       </div>
 
       <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -1981,6 +1981,8 @@ const mixedChannelWarningMessageText = computed(() => {
   return mixedChannelWarningRawMessage.value
 })
 
+const AUTO_PROXY_BEST_SENTINEL = -1
+
 const form = reactive({
   name: '',
   notes: '',
@@ -2038,7 +2040,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   mixedChannelWarningAction.value = null
   form.name = newAccount.name
   form.notes = newAccount.notes || ''
-  form.proxy_id = newAccount.proxy_id
+  form.proxy_id = newAccount.proxy_auto_select_best ? AUTO_PROXY_BEST_SENTINEL : newAccount.proxy_id
   form.concurrency = newAccount.concurrency
   form.load_factor = newAccount.load_factor ?? null
   form.priority = newAccount.priority
@@ -2729,7 +2731,7 @@ const handleSubmit = async () => {
   const updatePayload: Record<string, unknown> = { ...form }
   try {
     // 后端期望 proxy_id: 0 表示清除代理，而不是 null
-    if (updatePayload.proxy_id === null) {
+    if (updatePayload.proxy_id === null || updatePayload.proxy_id === AUTO_PROXY_BEST_SENTINEL) {
       updatePayload.proxy_id = 0
     }
     if (form.expires_at === null) {
@@ -3125,6 +3127,19 @@ const handleSubmit = async () => {
         newExtra.quota_reset_timezone = editResetTimezone.value || 'UTC'
       } else {
         delete newExtra.quota_reset_timezone
+      }
+      updatePayload.extra = newExtra
+    }
+
+    {
+      const currentExtra = (props.account.extra as Record<string, unknown>) || {}
+      const newExtra: Record<string, unknown> = {
+        ...((updatePayload.extra as Record<string, unknown>) || currentExtra)
+      }
+      if (form.proxy_id === AUTO_PROXY_BEST_SENTINEL) {
+        newExtra.auto_select_proxy = true
+      } else {
+        delete newExtra.auto_select_proxy
       }
       updatePayload.extra = newExtra
     }

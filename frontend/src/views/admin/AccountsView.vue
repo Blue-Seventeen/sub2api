@@ -229,6 +229,12 @@
                 ({{ row.proxy.country_code }})
               </span>
             </div>
+            <span
+              v-else-if="row.proxy_auto_select_best"
+              class="inline-flex items-center rounded bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700 dark:bg-primary-900/20 dark:text-primary-300"
+            >
+              {{ t('admin.accounts.autoBestProxy') }}
+            </span>
             <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
           </template>
           <template #cell-rate_multiplier="{ row }">

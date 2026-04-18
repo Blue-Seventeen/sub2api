@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -15,12 +16,14 @@ import (
 // ProxyHandler handles admin proxy management
 type ProxyHandler struct {
 	adminService service.AdminService
+	autoProbe    *service.ProxyAutoProbeService
 }
 
 // NewProxyHandler creates a new admin proxy handler
-func NewProxyHandler(adminService service.AdminService) *ProxyHandler {
+func NewProxyHandler(adminService service.AdminService, autoProbe *service.ProxyAutoProbeService) *ProxyHandler {
 	return &ProxyHandler{
 		adminService: adminService,
+		autoProbe:    autoProbe,
 	}
 }
 
@@ -43,6 +46,12 @@ type UpdateProxyRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 	Status   string `json:"status" binding:"omitempty,oneof=active inactive"`
+}
+
+type ProxyAutoProbeConfigRequest struct {
+	Enabled            bool `json:"enabled"`
+	DefaultIntervalSec int  `json:"default_interval_sec"`
+	RetryIntervalSec   int  `json:"retry_interval_sec"`
 }
 
 // List handles listing all proxies with pagination
@@ -104,6 +113,43 @@ func (h *ProxyHandler) GetAll(c *gin.Context) {
 		out = append(out, *dto.ProxyFromServiceAdmin(&proxies[i]))
 	}
 	response.Success(c, out)
+}
+
+// GetAutoProbeConfig handles getting proxy auto probe config and runtime status.
+// GET /api/v1/admin/proxies/auto-probe/config
+func (h *ProxyHandler) GetAutoProbeConfig(c *gin.Context) {
+	if h.autoProbe == nil {
+		response.Error(c, http.StatusServiceUnavailable, "proxy auto probe service unavailable")
+		return
+	}
+	response.Success(c, h.autoProbe.GetStatus())
+}
+
+// UpdateAutoProbeConfig handles updating proxy auto probe config.
+// PUT /api/v1/admin/proxies/auto-probe/config
+func (h *ProxyHandler) UpdateAutoProbeConfig(c *gin.Context) {
+	if h.autoProbe == nil {
+		response.Error(c, http.StatusServiceUnavailable, "proxy auto probe service unavailable")
+		return
+	}
+
+	var req ProxyAutoProbeConfigRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	status, err := h.autoProbe.UpdateConfig(c.Request.Context(), &service.ProxyAutoProbeUpdateInput{
+		Enabled:            req.Enabled,
+		DefaultIntervalSec: req.DefaultIntervalSec,
+		RetryIntervalSec:   req.RetryIntervalSec,
+	})
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	response.Success(c, status)
 }
 
 // GetByID handles getting a proxy by ID

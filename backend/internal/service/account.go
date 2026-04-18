@@ -953,6 +953,20 @@ func (a *Account) IsMixedSchedulingEnabled() bool {
 	return false
 }
 
+// IsAutoSelectProxyEnabled 检查账号是否启用“自动选择最优代理”。
+// 启用后，请求会优先从代理自动探测模块中选择当前健康且延迟最低的代理。
+func (a *Account) IsAutoSelectProxyEnabled() bool {
+	if a == nil || a.Extra == nil {
+		return false
+	}
+	if v, ok := a.Extra["auto_select_proxy"]; ok {
+		if enabled, ok := v.(bool); ok {
+			return enabled
+		}
+	}
+	return false
+}
+
 // IsOveragesEnabled 检查 Antigravity 账号是否启用 AI Credits 超量请求。
 func (a *Account) IsOveragesEnabled() bool {
 	if a.Platform != PlatformAntigravity {

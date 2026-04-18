@@ -316,13 +316,7 @@ func (s *OpenAIOAuthService) RefreshAccountToken(ctx context.Context, account *A
 		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_OAUTH_NO_REFRESH_TOKEN", "no refresh token available")
 	}
 
-	var proxyURL string
-	if account.ProxyID != nil {
-		proxy, err := s.proxyRepo.GetByID(ctx, *account.ProxyID)
-		if err == nil && proxy != nil {
-			proxyURL = proxy.URL()
-		}
-	}
+	proxyURL := resolveAccountProxyURL(ctx, account, s.proxyRepo)
 
 	clientID := account.GetCredential("client_id")
 	return s.RefreshTokenWithClientID(ctx, refreshToken, proxyURL, clientID)

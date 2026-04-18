@@ -87,6 +87,7 @@ func provideCleanup(
 	schedulerSnapshot *service.SchedulerSnapshotService,
 	tokenRefresh *service.TokenRefreshService,
 	accountExpiry *service.AccountExpiryService,
+	proxyAutoProbe *service.ProxyAutoProbeService,
 	subscriptionExpiry *service.SubscriptionExpiryService,
 	usageCleanup *service.UsageCleanupService,
 	idempotencyCleanup *service.IdempotencyCleanupService,
@@ -175,6 +176,12 @@ func provideCleanup(
 			}},
 			{"AccountExpiryService", func() error {
 				accountExpiry.Stop()
+				return nil
+			}},
+			{"ProxyAutoProbeService", func() error {
+				if proxyAutoProbe != nil {
+					proxyAutoProbe.Stop()
+				}
 				return nil
 			}},
 			{"SubscriptionExpiryService", func() error {

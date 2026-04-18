@@ -144,6 +144,19 @@ func ProvideAccountExpiryService(accountRepo AccountRepository) *AccountExpirySe
 	return svc
 }
 
+// ProvideProxyAutoProbeService creates and starts ProxyAutoProbeService.
+func ProvideProxyAutoProbeService(
+	adminService AdminService,
+	proxyRepo ProxyRepository,
+	settingRepo SettingRepository,
+	proxyLatencyCache ProxyLatencyCache,
+) *ProxyAutoProbeService {
+	svc := NewProxyAutoProbeService(adminService, proxyRepo, settingRepo, proxyLatencyCache)
+	SetDefaultProxyAutoProbeService(svc)
+	svc.Start()
+	return svc
+}
+
 // ProvideSubscriptionExpiryService creates and starts SubscriptionExpiryService.
 func ProvideSubscriptionExpiryService(userSubRepo UserSubscriptionRepository) *SubscriptionExpiryService {
 	svc := NewSubscriptionExpiryService(userSubRepo, time.Minute)
@@ -442,6 +455,7 @@ var ProviderSet = wire.NewSet(
 	ProvideUpdateService,
 	ProvideTokenRefreshService,
 	ProvideAccountExpiryService,
+	ProvideProxyAutoProbeService,
 	ProvideSubscriptionExpiryService,
 	ProvideTimingWheelService,
 	ProvideDashboardAggregationService,

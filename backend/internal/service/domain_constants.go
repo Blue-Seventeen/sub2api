@@ -4,12 +4,13 @@ import "github.com/Wei-Shaw/sub2api/internal/domain"
 
 // Status constants
 const (
-	StatusActive   = domain.StatusActive
-	StatusDisabled = domain.StatusDisabled
-	StatusError    = domain.StatusError
-	StatusUnused   = domain.StatusUnused
-	StatusUsed     = domain.StatusUsed
-	StatusExpired  = domain.StatusExpired
+	StatusActive                   = domain.StatusActive
+	StatusDisabled                 = domain.StatusDisabled
+	StatusError                    = domain.StatusError
+	StatusUnused                   = domain.StatusUnused
+	StatusUsed                     = domain.StatusUsed
+	StatusExpired                  = domain.StatusExpired
+	SettingKeyProxyAutoProbeConfig = "proxy_auto_probe_config"
 )
 
 // Role constants

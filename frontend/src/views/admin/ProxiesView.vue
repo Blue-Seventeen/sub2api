@@ -65,6 +65,14 @@
               {{ t('admin.proxies.batchQualityCheck') }}
             </button>
             <button
+              @click="openAutoProbeDialog"
+              class="btn btn-secondary"
+              :title="t('admin.proxies.autoProbe.button')"
+            >
+              <Icon name="clock" size="md" class="mr-2" :class="autoProbeStatus?.enabled ? 'animate-pulse text-primary-500' : ''" />
+              {{ t('admin.proxies.autoProbe.button') }}
+            </button>
+            <button
               @click="openBatchDelete"
               :disabled="selectedCount === 0"
               class="btn btn-danger"
@@ -749,6 +757,97 @@
     />
 
     <BaseDialog
+      :show="showAutoProbeDialog"
+      :title="t('admin.proxies.autoProbe.title')"
+      width="normal"
+      @close="closeAutoProbeDialog"
+    >
+      <div class="space-y-4">
+        <div class="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-dark-600 dark:bg-dark-700">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div class="text-sm font-medium text-gray-900 dark:text-white">
+                {{ autoProbeStatusLabel }}
+              </div>
+              <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.proxies.autoProbe.summary', { success: autoProbeStatus?.success_queue_count ?? 0, failed: autoProbeStatus?.failed_queue_count ?? 0 }) }}
+              </div>
+              <div
+                v-if="typeof autoProbeStatus?.current_proxy_id === 'number'"
+                class="mt-1 text-xs text-gray-500 dark:text-gray-400"
+              >
+                {{ t('admin.proxies.autoProbe.currentProxy', { id: autoProbeStatus?.current_proxy_id }) }}
+              </div>
+            </div>
+            <span class="badge" :class="autoProbeStatus?.enabled ? 'badge-success' : 'badge-gray'">
+              {{ autoProbeStatus?.enabled ? t('common.enabled') : t('common.disabled') }}
+            </span>
+          </div>
+        </div>
+
+        <label class="flex items-center justify-between gap-4 rounded-lg border border-gray-200 px-4 py-3 dark:border-dark-600">
+          <div>
+            <div class="text-sm font-medium text-gray-900 dark:text-white">
+              {{ t('admin.proxies.autoProbe.enable') }}
+            </div>
+            <div class="text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.proxies.autoProbe.enableHint') }}
+            </div>
+          </div>
+          <input
+            v-model="autoProbeForm.enabled"
+            type="checkbox"
+            class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+          />
+        </label>
+
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label class="input-label">{{ t('admin.proxies.autoProbe.defaultInterval') }}</label>
+            <input
+              v-model.number="autoProbeForm.default_interval_sec"
+              type="number"
+              min="1"
+              step="1"
+              class="input"
+            />
+            <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.proxies.autoProbe.defaultIntervalHint') }}
+            </div>
+          </div>
+          <div>
+            <label class="input-label">{{ t('admin.proxies.autoProbe.retryInterval') }}</label>
+            <input
+              v-model.number="autoProbeForm.retry_interval_sec"
+              type="number"
+              min="1"
+              step="1"
+              class="input"
+            />
+            <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.proxies.autoProbe.retryIntervalHint') }}
+            </div>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <button @click="closeAutoProbeDialog" class="btn btn-secondary">
+            {{ t('common.cancel') }}
+          </button>
+          <button
+            @click="saveAutoProbeConfig"
+            :disabled="autoProbeSaving"
+            class="btn btn-primary"
+          >
+            <Icon v-if="autoProbeSaving" name="refresh" size="sm" class="mr-2 animate-spin" />
+            {{ autoProbeSaving ? t('common.saving') : t('common.save') }}
+          </button>
+        </div>
+      </template>
+    </BaseDialog>
+
+    <BaseDialog
       :show="showQualityReportDialog"
       :title="t('admin.proxies.qualityReportTitle')"
       width="normal"
@@ -876,7 +975,7 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
-import type { Proxy, ProxyAccountSummary, ProxyProtocol, ProxyQualityCheckResult } from '@/types'
+import type { Proxy, ProxyAccountSummary, ProxyAutoProbeConfig, ProxyAutoProbeStatus, ProxyProtocol, ProxyQualityCheckResult } from '@/types'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
@@ -939,6 +1038,14 @@ const editStatusOptions = computed(() => [
   { value: 'inactive', label: t('admin.accounts.status.inactive') }
 ])
 
+const autoProbeStatusLabel = computed(() => {
+  if (!autoProbeStatus.value?.enabled) return t('admin.proxies.autoProbe.stopped')
+  if (typeof autoProbeStatus.value.current_proxy_id === 'number') {
+    return t('admin.proxies.autoProbe.runningWithProxy', { id: autoProbeStatus.value.current_proxy_id })
+  }
+  return t('admin.proxies.autoProbe.running')
+})
+
 const proxies = ref<Proxy[]>([])
 const visiblePasswordIds = reactive(new Set<number>())
 const copyMenuProxyId = ref<number | null>(null)
@@ -965,12 +1072,14 @@ const showEditModal = ref(false)
 const editPasswordVisible = ref(false)
 const editPasswordDirty = ref(false)
 const showImportData = ref(false)
+const showAutoProbeDialog = ref(false)
 const showDeleteDialog = ref(false)
 const showBatchDeleteDialog = ref(false)
 const showExportDataDialog = ref(false)
 const showAccountsModal = ref(false)
 const submitting = ref(false)
 const exportingData = ref(false)
+const autoProbeSaving = ref(false)
 const testingProxyIds = ref<Set<number>>(new Set())
 const qualityCheckingProxyIds = ref<Set<number>>(new Set())
 const batchTesting = ref(false)
@@ -1003,6 +1112,13 @@ const deletingProxy = ref<Proxy | null>(null)
 const showQualityReportDialog = ref(false)
 const qualityReportProxy = ref<Proxy | null>(null)
 const qualityReport = ref<ProxyQualityCheckResult | null>(null)
+const autoProbeStatus = ref<ProxyAutoProbeStatus | null>(null)
+const autoProbePolling = ref(false)
+const autoProbeForm = reactive<ProxyAutoProbeConfig>({
+  enabled: false,
+  default_interval_sec: 60,
+  retry_interval_sec: 5
+})
 
 // Batch import state
 const createMode = ref<'standard' | 'batch'>('standard')
@@ -1041,6 +1157,8 @@ const editForm = reactive({
 })
 
 let abortController: AbortController | null = null
+let autoProbePollTimer: ReturnType<typeof setInterval> | null = null
+let autoProbePollInFlight = false
 
 const isAbortError = (error: unknown) => {
   if (!error || typeof error !== 'object') return false
@@ -1101,6 +1219,93 @@ const loadProxies = async () => {
       loading.value = false
       abortController = null
     }
+  }
+}
+
+const syncAutoProbePolling = () => {
+  const shouldPoll = autoProbeStatus.value?.enabled === true
+  if (!shouldPoll) {
+    if (autoProbePollTimer) {
+      clearInterval(autoProbePollTimer)
+      autoProbePollTimer = null
+    }
+    autoProbePolling.value = false
+    return
+  }
+  if (autoProbePollTimer) return
+
+  autoProbePolling.value = true
+  autoProbePollTimer = setInterval(() => {
+    if (autoProbePollInFlight) return
+    autoProbePollInFlight = true
+    Promise.all([
+      loadAutoProbeConfig(false),
+      loadProxies()
+    ]).finally(() => {
+      autoProbePollInFlight = false
+    })
+  }, 5000)
+}
+
+const loadAutoProbeConfig = async (notifyOnError: boolean = true) => {
+  try {
+    const status = await adminAPI.proxies.getAutoProbeConfig()
+    autoProbeStatus.value = status
+    syncAutoProbePolling()
+  } catch (error: any) {
+    if (notifyOnError) {
+      appStore.showError(error.response?.data?.detail || t('admin.proxies.autoProbe.loadFailed'))
+    }
+    console.error('Error loading proxy auto probe config:', error)
+  }
+}
+
+const openAutoProbeDialog = async () => {
+  if (!autoProbeStatus.value) {
+    await loadAutoProbeConfig()
+  }
+  const status = autoProbeStatus.value
+  if (status) {
+    autoProbeForm.enabled = status.enabled
+    autoProbeForm.default_interval_sec = status.default_interval_sec
+    autoProbeForm.retry_interval_sec = status.retry_interval_sec
+  }
+  showAutoProbeDialog.value = true
+}
+
+const closeAutoProbeDialog = () => {
+  showAutoProbeDialog.value = false
+}
+
+const saveAutoProbeConfig = async () => {
+  const defaultInterval = Number(autoProbeForm.default_interval_sec)
+  const retryInterval = Number(autoProbeForm.retry_interval_sec)
+  if (!Number.isFinite(defaultInterval) || defaultInterval < 1) {
+    appStore.showError(t('admin.proxies.autoProbe.invalidDefaultInterval'))
+    return
+  }
+  if (!Number.isFinite(retryInterval) || retryInterval < 1) {
+    appStore.showError(t('admin.proxies.autoProbe.invalidRetryInterval'))
+    return
+  }
+
+  autoProbeSaving.value = true
+  try {
+    const status = await adminAPI.proxies.updateAutoProbeConfig({
+      enabled: autoProbeForm.enabled,
+      default_interval_sec: Math.trunc(defaultInterval),
+      retry_interval_sec: Math.trunc(retryInterval)
+    })
+    autoProbeStatus.value = status
+    syncAutoProbePolling()
+    appStore.showSuccess(t('admin.proxies.autoProbe.saved'))
+    showAutoProbeDialog.value = false
+    await loadProxies()
+  } catch (error: any) {
+    appStore.showError(error.response?.data?.detail || t('admin.proxies.autoProbe.saveFailed'))
+    console.error('Error updating proxy auto probe config:', error)
+  } finally {
+    autoProbeSaving.value = false
   }
 }
 
@@ -1869,11 +2074,16 @@ function closeCopyMenu() {
 
 onMounted(() => {
   loadProxies()
+  loadAutoProbeConfig(false)
   document.addEventListener('click', closeCopyMenu)
 })
 
 onUnmounted(() => {
   clearTimeout(searchTimeout)
+  if (autoProbePollTimer) {
+    clearInterval(autoProbePollTimer)
+    autoProbePollTimer = null
+  }
   abortController?.abort()
   document.removeEventListener('click', closeCopyMenu)
 })

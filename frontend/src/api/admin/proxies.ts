@@ -6,6 +6,8 @@
 import { apiClient } from '../client'
 import type {
   Proxy,
+  ProxyAutoProbeConfig,
+  ProxyAutoProbeStatus,
   ProxyAccountSummary,
   ProxyQualityCheckResult,
   CreateProxyRequest,
@@ -188,6 +190,16 @@ export async function getProxyAccounts(id: number): Promise<ProxyAccountSummary[
   return data
 }
 
+export async function getAutoProbeConfig(): Promise<ProxyAutoProbeStatus> {
+  const { data } = await apiClient.get<ProxyAutoProbeStatus>('/admin/proxies/auto-probe/config')
+  return data
+}
+
+export async function updateAutoProbeConfig(payload: ProxyAutoProbeConfig): Promise<ProxyAutoProbeStatus> {
+  const { data } = await apiClient.put<ProxyAutoProbeStatus>('/admin/proxies/auto-probe/config', payload)
+  return data
+}
+
 /**
  * Batch create proxies
  * @param proxies - Array of proxy data to create
@@ -268,6 +280,8 @@ export const proxiesAPI = {
   checkProxyQuality,
   getStats,
   getProxyAccounts,
+  getAutoProbeConfig,
+  updateAutoProbeConfig,
   batchCreate,
   batchDelete,
   exportData,

@@ -596,6 +596,19 @@ export interface Proxy {
   updated_at: string
 }
 
+export interface ProxyAutoProbeConfig {
+  enabled: boolean
+  default_interval_sec: number
+  retry_interval_sec: number
+}
+
+export interface ProxyAutoProbeStatus extends ProxyAutoProbeConfig {
+  running: boolean
+  success_queue_count: number
+  failed_queue_count: number
+  current_proxy_id?: number | null
+}
+
 export interface ProxyAccountSummary {
   id: number
   name: string
@@ -691,6 +704,7 @@ export interface Account {
     model_rate_limits?: Record<string, { rate_limited_at: string; rate_limit_reset_at: string }>
   } & Record<string, unknown>)
   proxy_id: number | null
+  proxy_auto_select_best?: boolean
   concurrency: number
   load_factor?: number | null
   current_concurrency?: number // Real-time concurrency count from Redis

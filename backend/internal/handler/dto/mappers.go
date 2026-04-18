@@ -204,6 +204,7 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		Credentials:             a.Credentials,
 		Extra:                   a.Extra,
 		ProxyID:                 a.ProxyID,
+		ProxyAutoSelectBest:     a.IsAutoSelectProxyEnabled(),
 		Concurrency:             a.Concurrency,
 		LoadFactor:              a.LoadFactor,
 		Priority:                a.Priority,

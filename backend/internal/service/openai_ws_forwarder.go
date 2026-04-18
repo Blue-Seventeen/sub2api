@@ -1822,7 +1822,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		hasOpenAIWSHeader(wsHeaders, "authorization"),
 		hasOpenAIWSHeader(wsHeaders, "session_id"),
 		hasOpenAIWSHeader(wsHeaders, "conversation_id"),
-		account.ProxyID != nil && account.Proxy != nil,
+		resolveAccountProxyURL(ctx, account, nil) != "",
 	)
 
 	acquireCtx, acquireCancel := context.WithTimeout(ctx, s.openAIWSAcquireTimeout())
@@ -1834,12 +1834,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		Headers:         wsHeaders,
 		PreferredConnID: preferredConnID,
 		ForceNewConn:    forceNewConn,
-		ProxyURL: func() string {
-			if account.ProxyID != nil && account.Proxy != nil {
-				return account.Proxy.URL()
-			}
-			return ""
-		}(),
+		ProxyURL:        resolveAccountProxyURL(ctx, account, nil),
 	})
 	if err != nil {
 		dialStatus, dialClass, dialCloseStatus, dialCloseReason, dialRespServer, dialRespVia, dialRespCFRay, dialRespReqID := summarizeOpenAIWSDialError(err)
@@ -1862,7 +1857,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			forceNewConn,
 			wsHost,
 			wsPath,
-			account.ProxyID != nil && account.Proxy != nil,
+			resolveAccountProxyURL(ctx, account, nil) != "",
 		)
 		var dialErr *openAIWSDialError
 		if errors.As(err, &dialErr) && dialErr != nil && dialErr.StatusCode == http.StatusTooManyRequests {
@@ -2567,15 +2562,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	isCodexCLI := openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) || (s.cfg != nil && s.cfg.Gateway.ForceCodexCLI)
 	wsHeaders, _ := s.buildOpenAIWSHeaders(c, account, token, wsDecision, isCodexCLI, turnState, strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader)), firstPayload.promptCacheKey)
 	baseAcquireReq := openAIWSAcquireRequest{
-		Account: account,
-		WSURL:   wsURL,
-		Headers: wsHeaders,
-		ProxyURL: func() string {
-			if account.ProxyID != nil && account.Proxy != nil {
-				return account.Proxy.URL()
-			}
-			return ""
-		}(),
+		Account:      account,
+		WSURL:        wsURL,
+		Headers:      wsHeaders,
+		ProxyURL:     resolveAccountProxyURL(ctx, account, nil),
 		ForceNewConn: false,
 	}
 	pool := s.getOpenAIWSConnPool()
@@ -2662,7 +2652,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				forcePreferredConn,
 				wsHost,
 				wsPath,
-				account.ProxyID != nil && account.Proxy != nil,
+				resolveAccountProxyURL(ctx, account, nil) != "",
 			)
 			var dialErr *openAIWSDialError
 			if errors.As(acquireErr, &dialErr) && dialErr != nil && dialErr.StatusCode == http.StatusTooManyRequests {
