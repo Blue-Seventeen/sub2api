@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/subtle"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -17,8 +18,12 @@ type OpenAIOAuthService struct {
 	sessionStore         *openai.SessionStore
 	proxyRepo            ProxyRepository
 	oauthClient          OpenAIOAuthClient
-	privacyClientFactory PrivacyClientFactory // 用于调用 chatgpt.com/backend-api（ImpersonateChrome）
+	privacyClientFactory PrivacyClientFactory // used for chatgpt.com/backend-api calls (ImpersonateChrome)
+	refreshAPI           *OAuthRefreshAPI
+	refreshExecutor      OAuthRefreshExecutor
 }
+
+const openAIRefreshMaxAttempts = 3
 
 // NewOpenAIOAuthService creates a new OpenAI OAuth service
 func NewOpenAIOAuthService(proxyRepo ProxyRepository, oauthClient OpenAIOAuthClient) *OpenAIOAuthService {
@@ -29,10 +34,16 @@ func NewOpenAIOAuthService(proxyRepo ProxyRepository, oauthClient OpenAIOAuthCli
 	}
 }
 
-// SetPrivacyClientFactory 注入 ImpersonateChrome 客户端工厂，
-// 用于调用 chatgpt.com/backend-api 获取账号信息（plan_type 等）。
+// SetPrivacyClientFactory injects the ImpersonateChrome client factory used for
+// chatgpt.com/backend-api calls that enrich account metadata such as plan_type.
 func (s *OpenAIOAuthService) SetPrivacyClientFactory(factory PrivacyClientFactory) {
 	s.privacyClientFactory = factory
+}
+
+// SetRefreshAPI injects the shared OAuth refresh infrastructure for manual refresh flows.
+func (s *OpenAIOAuthService) SetRefreshAPI(api *OAuthRefreshAPI, executor OAuthRefreshExecutor) {
+	s.refreshAPI = api
+	s.refreshExecutor = executor
 }
 
 // OpenAIAuthURLResult contains the authorization URL and session info
@@ -212,9 +223,92 @@ func (s *OpenAIOAuthService) RefreshToken(ctx context.Context, refreshToken stri
 
 // RefreshTokenWithClientID refreshes an OpenAI OAuth token with optional client_id.
 func (s *OpenAIOAuthService) RefreshTokenWithClientID(ctx context.Context, refreshToken string, proxyURL string, clientID string) (*OpenAITokenInfo, error) {
-	tokenResp, err := s.oauthClient.RefreshTokenWithClientID(ctx, refreshToken, proxyURL, clientID)
+	tokenResp, usedClientID, err := s.refreshTokenWithPolicy(ctx, refreshToken, proxyURL, clientID)
 	if err != nil {
+		statusCode, reason, oauthErr, oauthCode, upstreamStatus := openAIRefreshErrorDetails(err)
+		slog.Warn("openai_oauth_refresh_failed",
+			"status_code", statusCode,
+			"reason", reason,
+			"oauth_error", oauthErr,
+			"oauth_code", oauthCode,
+			"upstream_status", upstreamStatus,
+			"client_id", strings.TrimSpace(clientID),
+			"proxy_configured", strings.TrimSpace(proxyURL) != "",
+		)
 		return nil, err
+	}
+
+	return s.buildTokenInfoFromResponse(ctx, tokenResp, proxyURL, usedClientID), nil
+}
+
+func (s *OpenAIOAuthService) refreshTokenWithPolicy(ctx context.Context, refreshToken string, proxyURL string, clientID string) (*openai.TokenResponse, string, error) {
+	preferredClientID := strings.TrimSpace(clientID)
+	if preferredClientID == "" {
+		preferredClientID = openai.ClientID
+	}
+
+	tokenResp, err := s.refreshTokenWithRetry(ctx, refreshToken, proxyURL, preferredClientID)
+	if err == nil {
+		return tokenResp, preferredClientID, nil
+	}
+
+	if shouldFallbackToOpenAIOfficialClient(err, preferredClientID) {
+		statusCode, reason, oauthErr, oauthCode, upstreamStatus := openAIRefreshErrorDetails(err)
+		slog.Warn("openai_oauth_refresh_client_fallback",
+			"client_id", preferredClientID,
+			"fallback_client_id", openai.ClientID,
+			"status_code", statusCode,
+			"reason", reason,
+			"oauth_error", oauthErr,
+			"oauth_code", oauthCode,
+			"upstream_status", upstreamStatus,
+		)
+
+		tokenResp, fallbackErr := s.refreshTokenWithRetry(ctx, refreshToken, proxyURL, openai.ClientID)
+		if fallbackErr == nil {
+			return tokenResp, openai.ClientID, nil
+		}
+		return nil, "", fallbackErr
+	}
+
+	return nil, "", err
+}
+
+func (s *OpenAIOAuthService) refreshTokenWithRetry(ctx context.Context, refreshToken string, proxyURL string, clientID string) (*openai.TokenResponse, error) {
+	var lastErr error
+	for attempt := 1; attempt <= openAIRefreshMaxAttempts; attempt++ {
+		tokenResp, err := s.oauthClient.RefreshTokenWithClientID(ctx, refreshToken, proxyURL, clientID)
+		if err == nil {
+			return tokenResp, nil
+		}
+		lastErr = err
+		if !isRetryableOpenAIRefreshError(err) || attempt == openAIRefreshMaxAttempts {
+			return nil, err
+		}
+
+		statusCode, reason, oauthErr, oauthCode, upstreamStatus := openAIRefreshErrorDetails(err)
+		slog.Warn("openai_oauth_refresh_retry",
+			"attempt", attempt,
+			"max_attempts", openAIRefreshMaxAttempts,
+			"client_id", clientID,
+			"status_code", statusCode,
+			"reason", reason,
+			"oauth_error", oauthErr,
+			"oauth_code", oauthCode,
+			"upstream_status", upstreamStatus,
+		)
+
+		backoff := time.Duration(attempt) * 100 * time.Millisecond
+		if waitErr := sleepWithContextOpenAI(ctx, backoff); waitErr != nil {
+			return nil, waitErr
+		}
+	}
+	return nil, lastErr
+}
+
+func (s *OpenAIOAuthService) buildTokenInfoFromResponse(ctx context.Context, tokenResp *openai.TokenResponse, proxyURL string, clientID string) *OpenAITokenInfo {
+	if tokenResp == nil {
+		return nil
 	}
 
 	// Parse ID token to get user info
@@ -249,12 +343,12 @@ func (s *OpenAIOAuthService) RefreshTokenWithClientID(ctx context.Context, refre
 
 	s.enrichTokenInfo(ctx, tokenInfo, proxyURL)
 
-	return tokenInfo, nil
+	return tokenInfo
 }
 
-// enrichTokenInfo 通过 ChatGPT backend-api 补全 tokenInfo 并设置隐私（best-effort）。
-// 从 accounts/check 获取最新 plan_type、subscription_expires_at、email，
-// 然后尝试关闭训练数据共享。适用于所有获取/刷新 token 的路径。
+// enrichTokenInfo best-effort enriches tokenInfo through ChatGPT backend-api.
+// It fetches plan_type / subscription_expires_at / email and then tries to
+// disable training-data sharing for the refreshed session.
 func (s *OpenAIOAuthService) enrichTokenInfo(ctx context.Context, tokenInfo *OpenAITokenInfo, proxyURL string) {
 	if tokenInfo.AccessToken == "" || s.privacyClientFactory == nil {
 		return
@@ -322,6 +416,31 @@ func (s *OpenAIOAuthService) RefreshAccountToken(ctx context.Context, account *A
 	return s.RefreshTokenWithClientID(ctx, refreshToken, proxyURL, clientID)
 }
 
+// ForceRefreshAccount persists a manual OpenAI refresh through the shared refresh API.
+func (s *OpenAIOAuthService) ForceRefreshAccount(ctx context.Context, account *Account) (*Account, error) {
+	if account == nil {
+		return nil, infraerrors.BadRequest("OPENAI_OAUTH_INVALID_ACCOUNT", "account is required")
+	}
+	if account.Platform != PlatformOpenAI {
+		return nil, infraerrors.BadRequest("OPENAI_OAUTH_INVALID_ACCOUNT", "account is not an OpenAI account")
+	}
+	if account.Type != AccountTypeOAuth {
+		return nil, infraerrors.BadRequest("OPENAI_OAUTH_INVALID_ACCOUNT_TYPE", "account is not an OAuth account")
+	}
+	if s.refreshAPI == nil || s.refreshExecutor == nil {
+		return nil, infraerrors.InternalServer("OPENAI_OAUTH_REFRESH_API_NOT_CONFIGURED", "openai refresh api is not configured")
+	}
+
+	result, err := s.refreshAPI.RefreshNow(ctx, account, s.refreshExecutor)
+	if err != nil {
+		return nil, err
+	}
+	if result != nil && result.Account != nil {
+		return result.Account, nil
+	}
+	return account, nil
+}
+
 // BuildAccountCredentials builds credentials map from token info
 func (s *OpenAIOAuthService) BuildAccountCredentials(tokenInfo *OpenAITokenInfo) map[string]any {
 	expiresAt := time.Unix(tokenInfo.ExpiresAt, 0).Format(time.RFC3339)
@@ -370,4 +489,60 @@ func (s *OpenAIOAuthService) Stop() {
 
 func normalizeOpenAIOAuthPlatform(platform string) string {
 	return openai.OAuthPlatformOpenAI
+}
+
+func isRetryableOpenAIRefreshError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return infraerrors.Code(err) == http.StatusBadGateway && infraerrors.Reason(err) != "OPENAI_OAUTH_CLIENT_INIT_FAILED"
+}
+
+func shouldFallbackToOpenAIOfficialClient(err error, clientID string) bool {
+	trimmed := strings.TrimSpace(clientID)
+	if trimmed == "" || trimmed == openai.ClientID {
+		return false
+	}
+	switch infraerrors.Reason(err) {
+	case "OPENAI_OAUTH_INVALID_CLIENT", "OPENAI_OAUTH_UNAUTHORIZED_CLIENT":
+		return true
+	default:
+		return false
+	}
+}
+
+func openAIRefreshErrorDetails(err error) (int, string, string, string, string) {
+	if err == nil {
+		return 0, "", "", "", ""
+	}
+	appErr := infraerrors.FromError(err)
+	if appErr == nil {
+		return 0, "", "", "", ""
+	}
+	oauthErr := ""
+	oauthCode := ""
+	upstreamStatus := ""
+	if appErr.Metadata != nil {
+		oauthErr = appErr.Metadata["oauth_error"]
+		oauthCode = appErr.Metadata["oauth_code"]
+		upstreamStatus = appErr.Metadata["upstream_status"]
+	}
+	return int(appErr.Code), appErr.Reason, oauthErr, oauthCode, upstreamStatus
+}
+
+func sleepWithContextOpenAI(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return errors.New("context canceled")
+	case <-timer.C:
+		return nil
+	}
 }

@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"log"
 	"strconv"
 	"strings"
 
@@ -14,8 +15,9 @@ import (
 
 // OpenAIOAuthHandler handles OpenAI OAuth-related operations
 type OpenAIOAuthHandler struct {
-	openaiOAuthService *service.OpenAIOAuthService
-	adminService       service.AdminService
+	openaiOAuthService    *service.OpenAIOAuthService
+	adminService          service.AdminService
+	tokenCacheInvalidator service.TokenCacheInvalidator
 }
 
 func oauthPlatformFromPath(c *gin.Context) string {
@@ -23,10 +25,11 @@ func oauthPlatformFromPath(c *gin.Context) string {
 }
 
 // NewOpenAIOAuthHandler creates a new OpenAI OAuth handler
-func NewOpenAIOAuthHandler(openaiOAuthService *service.OpenAIOAuthService, adminService service.AdminService) *OpenAIOAuthHandler {
+func NewOpenAIOAuthHandler(openaiOAuthService *service.OpenAIOAuthService, adminService service.AdminService, tokenCacheInvalidator service.TokenCacheInvalidator) *OpenAIOAuthHandler {
 	return &OpenAIOAuthHandler{
-		openaiOAuthService: openaiOAuthService,
-		adminService:       adminService,
+		openaiOAuthService:    openaiOAuthService,
+		adminService:          adminService,
+		tokenCacheInvalidator: tokenCacheInvalidator,
 	}
 }
 
@@ -169,30 +172,18 @@ func (h *OpenAIOAuthHandler) RefreshAccountToken(c *gin.Context) {
 		return
 	}
 
-	// Use OpenAI OAuth service to refresh token
-	tokenInfo, err := h.openaiOAuthService.RefreshAccountToken(c.Request.Context(), account)
+	updatedAccount, err := h.openaiOAuthService.ForceRefreshAccount(c.Request.Context(), account)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 
-	// Build new credentials from token info
-	newCredentials := h.openaiOAuthService.BuildAccountCredentials(tokenInfo)
-
-	// Preserve non-token settings from existing credentials
-	for k, v := range account.Credentials {
-		if _, exists := newCredentials[k]; !exists {
-			newCredentials[k] = v
+	if h.tokenCacheInvalidator != nil {
+		if invalidateErr := h.tokenCacheInvalidator.InvalidateToken(c.Request.Context(), updatedAccount); invalidateErr != nil {
+			log.Printf("[WARN] Failed to invalidate token cache for account %d: %v", updatedAccount.ID, invalidateErr)
 		}
 	}
-
-	updatedAccount, err := h.adminService.UpdateAccount(c.Request.Context(), accountID, &service.UpdateAccountInput{
-		Credentials: newCredentials,
-	})
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
+	h.adminService.EnsureOpenAIPrivacy(c.Request.Context(), updatedAccount)
 
 	response.Success(c, dto.AccountFromService(updatedAccount))
 }

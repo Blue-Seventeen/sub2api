@@ -787,19 +787,21 @@ func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *serv
 	var newCredentials map[string]any
 
 	if account.IsOpenAI() {
-		tokenInfo, err := h.openaiOAuthService.RefreshAccountToken(ctx, account)
+		updatedAccount, err := h.openaiOAuthService.ForceRefreshAccount(ctx, account)
 		if err != nil {
-			// 刷新失败但 access_token 可能仍有效，尝试设置隐私
+			// Refresh failed, but the current access token may still be usable; try privacy sync best-effort.
 			h.adminService.EnsureOpenAIPrivacy(ctx, account)
 			return nil, "", err
 		}
 
-		newCredentials = h.openaiOAuthService.BuildAccountCredentials(tokenInfo)
-		for k, v := range account.Credentials {
-			if _, exists := newCredentials[k]; !exists {
-				newCredentials[k] = v
+		if h.tokenCacheInvalidator != nil {
+			if invalidateErr := h.tokenCacheInvalidator.InvalidateToken(ctx, updatedAccount); invalidateErr != nil {
+				log.Printf("[WARN] Failed to invalidate token cache for account %d: %v", updatedAccount.ID, invalidateErr)
 			}
 		}
+		h.adminService.EnsureOpenAIPrivacy(ctx, updatedAccount)
+		h.adminService.EnsureAntigravityPrivacy(ctx, updatedAccount)
+		return updatedAccount, "", nil
 	} else if account.Platform == service.PlatformGemini {
 		tokenInfo, err := h.geminiOAuthService.RefreshAccountToken(ctx, account)
 		if err != nil {

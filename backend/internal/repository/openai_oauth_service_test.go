@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"testing"
 
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -311,7 +312,55 @@ func (s *OpenAIOAuthServiceSuite) TestRefreshToken_NonSuccessStatus() {
 
 	_, err := s.svc.RefreshToken(s.ctx, "rt", "")
 	require.Error(s.T(), err, "expected error for non-2xx status")
-	require.ErrorContains(s.T(), err, "status 401")
+	require.Equal(s.T(), http.StatusUnauthorized, infraerrors.Code(err))
+}
+
+func (s *OpenAIOAuthServiceSuite) TestRefreshToken_InvalidGrantMappedToUnauthorized() {
+	s.setupServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"error":"invalid_grant","error_description":"refresh token expired"}`)
+	}))
+
+	_, err := s.svc.RefreshToken(s.ctx, "rt", "")
+	require.Error(s.T(), err)
+	require.Equal(s.T(), http.StatusUnauthorized, infraerrors.Code(err))
+	require.Equal(s.T(), "OPENAI_OAUTH_INVALID_GRANT", infraerrors.Reason(err))
+}
+
+func (s *OpenAIOAuthServiceSuite) TestRefreshToken_RefreshTokenReusedMappedToUnauthorized() {
+	s.setupServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"error":"invalid_grant","code":"refresh_token_reused","error_description":"reused"}`)
+	}))
+
+	_, err := s.svc.RefreshToken(s.ctx, "rt", "")
+	require.Error(s.T(), err)
+	require.Equal(s.T(), http.StatusUnauthorized, infraerrors.Code(err))
+	require.Equal(s.T(), "OPENAI_OAUTH_REFRESH_TOKEN_REUSED", infraerrors.Reason(err))
+}
+
+func (s *OpenAIOAuthServiceSuite) TestRefreshToken_InvalidClientMappedToBadRequest() {
+	s.setupServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"error":"invalid_client","error_description":"bad client"}`)
+	}))
+
+	_, err := s.svc.RefreshTokenWithClientID(s.ctx, "rt", "", "custom-client-id")
+	require.Error(s.T(), err)
+	require.Equal(s.T(), http.StatusBadRequest, infraerrors.Code(err))
+	require.Equal(s.T(), "OPENAI_OAUTH_INVALID_CLIENT", infraerrors.Reason(err))
+}
+
+func (s *OpenAIOAuthServiceSuite) TestRefreshToken_5xxMappedToBadGateway() {
+	s.setupServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = io.WriteString(w, `{"error":"server_error","error_description":"upstream down"}`)
+	}))
+
+	_, err := s.svc.RefreshToken(s.ctx, "rt", "")
+	require.Error(s.T(), err)
+	require.Equal(s.T(), http.StatusBadGateway, infraerrors.Code(err))
+	require.Equal(s.T(), "OPENAI_OAUTH_UPSTREAM_ERROR", infraerrors.Reason(err))
 }
 
 func TestNewOpenAIOAuthClient_DefaultTokenURL(t *testing.T) {

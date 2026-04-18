@@ -2,8 +2,11 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +23,12 @@ func NewOpenAIOAuthClient() service.OpenAIOAuthClient {
 
 type openaiOAuthService struct {
 	tokenURL string
+}
+
+type openAIOAuthErrorResponse struct {
+	Error            string `json:"error"`
+	ErrorDescription string `json:"error_description"`
+	Code             string `json:"code"`
 }
 
 func (s *openaiOAuthService) ExchangeCode(ctx context.Context, code, codeVerifier, redirectURI, proxyURL, clientID string) (*openai.TokenResponse, error) {
@@ -68,7 +77,7 @@ func (s *openaiOAuthService) RefreshToken(ctx context.Context, refreshToken, pro
 }
 
 func (s *openaiOAuthService) RefreshTokenWithClientID(ctx context.Context, refreshToken, proxyURL string, clientID string) (*openai.TokenResponse, error) {
-	// 调用方应始终传入正确的 client_id；为兼容旧数据，未指定时默认使用 OpenAI ClientID
+	// Keep honoring a caller-provided client_id, but default to the official Codex client.
 	clientID = strings.TrimSpace(clientID)
 	if clientID == "" {
 		clientID = openai.ClientID
@@ -102,7 +111,7 @@ func (s *openaiOAuthService) refreshTokenWithClientID(ctx context.Context, refre
 	}
 
 	if !resp.IsSuccessState() {
-		return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_OAUTH_TOKEN_REFRESH_FAILED", "token refresh failed: status %d, body: %s", resp.StatusCode, resp.String())
+		return nil, mapOpenAIRefreshHTTPError(resp.StatusCode, resp.String())
 	}
 
 	return &tokenResp, nil
@@ -113,4 +122,78 @@ func createOpenAIReqClient(proxyURL string) (*req.Client, error) {
 		ProxyURL: proxyURL,
 		Timeout:  120 * time.Second,
 	})
+}
+
+func mapOpenAIRefreshHTTPError(statusCode int, body string) error {
+	oauthErr := parseOpenAIOAuthError(body)
+	metadata := map[string]string{
+		"upstream_status": strconv.Itoa(statusCode),
+	}
+	if oauthErr != nil {
+		if v := strings.TrimSpace(oauthErr.Error); v != "" {
+			metadata["oauth_error"] = v
+		}
+		if v := strings.TrimSpace(oauthErr.Code); v != "" {
+			metadata["oauth_code"] = v
+		}
+	}
+
+	message := fmt.Sprintf("token refresh failed: status %d", statusCode)
+	if oauthErr != nil {
+		if desc := strings.TrimSpace(oauthErr.ErrorDescription); desc != "" {
+			message = desc
+		} else if raw := strings.TrimSpace(oauthErr.Error); raw != "" {
+			message = raw
+		}
+	} else if trimmed := strings.TrimSpace(body); trimmed != "" {
+		message = fmt.Sprintf("token refresh failed: status %d, body: %s", statusCode, trimmed)
+	}
+
+	if statusCode >= http.StatusInternalServerError {
+		return infraerrors.New(http.StatusBadGateway, "OPENAI_OAUTH_UPSTREAM_ERROR", message).WithMetadata(metadata)
+	}
+
+	oauthError := ""
+	oauthCode := ""
+	if oauthErr != nil {
+		oauthError = strings.ToLower(strings.TrimSpace(oauthErr.Error))
+		oauthCode = strings.ToLower(strings.TrimSpace(oauthErr.Code))
+	} else {
+		lowerBody := strings.ToLower(body)
+		if strings.Contains(lowerBody, "refresh_token_reused") {
+			oauthCode = "refresh_token_reused"
+		}
+	}
+
+	switch {
+	case oauthCode == "refresh_token_reused":
+		return infraerrors.Unauthorized("OPENAI_OAUTH_REFRESH_TOKEN_REUSED", message).WithMetadata(metadata)
+	case oauthError == "invalid_grant":
+		return infraerrors.Unauthorized("OPENAI_OAUTH_INVALID_GRANT", message).WithMetadata(metadata)
+	case oauthError == "invalid_client":
+		return infraerrors.BadRequest("OPENAI_OAUTH_INVALID_CLIENT", message).WithMetadata(metadata)
+	case oauthError == "unauthorized_client":
+		return infraerrors.BadRequest("OPENAI_OAUTH_UNAUTHORIZED_CLIENT", message).WithMetadata(metadata)
+	case statusCode == http.StatusUnauthorized:
+		return infraerrors.Unauthorized("OPENAI_OAUTH_TOKEN_REFRESH_FAILED", message).WithMetadata(metadata)
+	case statusCode >= http.StatusBadRequest && statusCode < http.StatusInternalServerError:
+		return infraerrors.BadRequest("OPENAI_OAUTH_TOKEN_REFRESH_FAILED", message).WithMetadata(metadata)
+	default:
+		return infraerrors.New(http.StatusBadGateway, "OPENAI_OAUTH_TOKEN_REFRESH_FAILED", message).WithMetadata(metadata)
+	}
+}
+
+func parseOpenAIOAuthError(body string) *openAIOAuthErrorResponse {
+	trimmed := strings.TrimSpace(body)
+	if trimmed == "" {
+		return nil
+	}
+	var resp openAIOAuthErrorResponse
+	if err := json.Unmarshal([]byte(trimmed), &resp); err != nil {
+		return nil
+	}
+	if strings.TrimSpace(resp.Error) == "" && strings.TrimSpace(resp.Code) == "" && strings.TrimSpace(resp.ErrorDescription) == "" {
+		return nil
+	}
+	return &resp
 }

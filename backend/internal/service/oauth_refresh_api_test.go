@@ -219,6 +219,25 @@ func TestRefreshIfNeeded_AlreadyRefreshed(t *testing.T) {
 	require.Equal(t, 0, executor.refreshCalls)
 }
 
+func TestRefreshNow_ForcesRefreshEvenWhenNeedsRefreshFalse(t *testing.T) {
+	account := &Account{ID: 51, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	repo := &refreshAPIAccountRepo{account: account}
+	cache := &refreshAPICacheStub{lockResult: true}
+	executor := &refreshAPIExecutorStub{
+		needsRefresh: false,
+		credentials:  map[string]any{"access_token": "forced-token"},
+	}
+
+	api := NewOAuthRefreshAPI(repo, cache)
+	result, err := api.RefreshNow(context.Background(), account, executor)
+
+	require.NoError(t, err)
+	require.True(t, result.Refreshed)
+	require.Equal(t, "forced-token", result.NewCredentials["access_token"])
+	require.Equal(t, 1, executor.refreshCalls)
+	require.Equal(t, 1, repo.updateCalls)
+}
+
 func TestRefreshIfNeeded_RefreshError(t *testing.T) {
 	account := &Account{ID: 6, Platform: PlatformAnthropic}
 	repo := &refreshAPIAccountRepo{account: account}
@@ -467,6 +486,38 @@ func TestRefreshIfNeeded_InvalidGrantGenuine(t *testing.T) {
 	require.Error(t, err, "genuine invalid_grant should propagate error")
 	require.Nil(t, result)
 	require.Contains(t, err.Error(), "invalid_grant")
+}
+
+func TestRefreshIfNeeded_RefreshTokenReusedRaceRecovered(t *testing.T) {
+	account := &Account{
+		ID:          111,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Credentials: map[string]any{"refresh_token": "old-rt", "access_token": "old-at"},
+	}
+	racedAccount := &Account{
+		ID:          111,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Credentials: map[string]any{"refresh_token": "new-rt", "access_token": "new-at"},
+	}
+	repo := &refreshAPIAccountRepoWithRace{
+		refreshAPIAccountRepo: refreshAPIAccountRepo{account: account},
+		raceAccount:           racedAccount,
+	}
+	cache := &refreshAPICacheStub{lockResult: true}
+	executor := &refreshAPIExecutorStub{
+		needsRefresh: true,
+		err:          errors.New("invalid_grant: refresh_token_reused"),
+	}
+
+	api := NewOAuthRefreshAPI(repo, cache)
+	result, err := api.RefreshIfNeeded(context.Background(), account, executor, 3*time.Minute)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "new-rt", result.Account.GetCredential("refresh_token"))
+	require.Equal(t, 0, repo.updateCalls)
 }
 
 func TestRefreshIfNeeded_InvalidGrantDBRereadFailsOnRecovery(t *testing.T) {

@@ -89,6 +89,7 @@ func ProvideOpenAITokenProvider(
 	p := NewOpenAITokenProvider(accountRepo, tokenCache, openaiOAuthService)
 	executor := NewOpenAITokenRefresher(openaiOAuthService, accountRepo)
 	p.SetRefreshAPI(refreshAPI, executor)
+	openaiOAuthService.SetRefreshAPI(refreshAPI, executor)
 	p.SetRefreshPolicy(OpenAIProviderRefreshPolicy())
 	return p
 }

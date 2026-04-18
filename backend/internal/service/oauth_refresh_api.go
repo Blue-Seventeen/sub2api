@@ -78,73 +78,89 @@ func (api *OAuthRefreshAPI) RefreshIfNeeded(
 	executor OAuthRefreshExecutor,
 	refreshWindow time.Duration,
 ) (*OAuthRefreshResult, error) {
+	return api.refresh(ctx, account, executor, refreshWindow, false)
+}
+
+// RefreshNow forces a refresh attempt while still preserving locking, DB re-read, and race recovery.
+func (api *OAuthRefreshAPI) RefreshNow(
+	ctx context.Context,
+	account *Account,
+	executor OAuthRefreshExecutor,
+) (*OAuthRefreshResult, error) {
+	return api.refresh(ctx, account, executor, 0, true)
+}
+
+func (api *OAuthRefreshAPI) refresh(
+	ctx context.Context,
+	account *Account,
+	executor OAuthRefreshExecutor,
+	refreshWindow time.Duration,
+	force bool,
+) (*OAuthRefreshResult, error) {
 	cacheKey := executor.CacheKey(account)
 
-	// 0. 获取进程内互斥锁（防止同一进程内的并发刷新竞争）
+	// 0. Acquire the in-process mutex first to serialize concurrent refreshes in the same process.
 	localMu := api.getLocalLock(cacheKey)
 	localMu.Lock()
 	defer localMu.Unlock()
 
-	// 1. 获取分布式锁
+	// 1. Acquire the distributed refresh lock when available.
 	lockAcquired := false
 	if api.tokenCache != nil {
 		acquired, lockErr := api.tokenCache.AcquireRefreshLock(ctx, cacheKey, api.lockTTL)
 		if lockErr != nil {
-			// Redis 错误，降级为无锁刷新（进程内互斥锁仍生效）
 			slog.Warn("oauth_refresh_lock_failed_degraded",
 				"account_id", account.ID,
 				"cache_key", cacheKey,
 				"error", lockErr,
 			)
 		} else if !acquired {
-			// 锁被其他 worker 持有
-			return &OAuthRefreshResult{LockHeld: true}, nil
+			latestAccount := account
+			if api.accountRepo != nil && account != nil {
+				if reReadAccount, err := api.accountRepo.GetByID(ctx, account.ID); err == nil && reReadAccount != nil {
+					latestAccount = reReadAccount
+				}
+			}
+			return &OAuthRefreshResult{LockHeld: true, Account: latestAccount}, nil
 		} else {
 			lockAcquired = true
 			defer func() { _ = api.tokenCache.ReleaseRefreshLock(ctx, cacheKey) }()
 		}
 	}
 
-	// 2. 从 DB 重读最新 account（锁保护下，确保使用最新的 refresh_token）
+	// 2. Re-read the latest account from DB so we always use the freshest refresh_token.
 	freshAccount, err := api.accountRepo.GetByID(ctx, account.ID)
 	if err != nil {
 		slog.Warn("oauth_refresh_db_reread_failed",
 			"account_id", account.ID,
 			"error", err,
 		)
-		// 降级使用传入的 account
 		freshAccount = account
 	} else if freshAccount == nil {
 		freshAccount = account
 	}
 
-	// 3. 二次检查是否仍需刷新（另一条路径可能已刷新）
-	if !executor.NeedsRefresh(freshAccount, refreshWindow) {
-		return &OAuthRefreshResult{
-			Account: freshAccount,
-		}, nil
+	// 3. Skip refresh only for non-forced calls when the account is already fresh.
+	if !force && !executor.NeedsRefresh(freshAccount, refreshWindow) {
+		return &OAuthRefreshResult{Account: freshAccount}, nil
 	}
 
-	// 4. 执行平台特定刷新逻辑
+	// 4. Execute provider-specific refresh logic.
 	newCredentials, refreshErr := executor.Refresh(ctx, freshAccount)
 	if refreshErr != nil {
-		// 竞争恢复：invalid_grant 可能是另一个 worker 已消费了旧 refresh_token
-		// 重新读取 DB，如果 refresh_token 已更新则说明是竞争，返回成功
-		if isInvalidGrantError(refreshErr) {
+		if isRefreshRaceRecoverableError(refreshErr) {
 			if recoveredAccount, recovered := api.tryRecoverFromRefreshRace(ctx, freshAccount); recovered {
 				slog.Info("oauth_refresh_race_recovered",
 					"account_id", freshAccount.ID,
 					"platform", freshAccount.Platform,
 				)
-				return &OAuthRefreshResult{
-					Account: recoveredAccount,
-				}, nil
+				return &OAuthRefreshResult{Account: recoveredAccount}, nil
 			}
 		}
 		return nil, refreshErr
 	}
 
-	// 5. 设置版本号 + 更新 DB
+	// 5. Stamp token version and persist the refreshed credentials.
 	if newCredentials != nil {
 		newCredentials["_token_version"] = time.Now().UnixMilli()
 		if updateErr := persistAccountCredentials(ctx, api.accountRepo, freshAccount, newCredentials); updateErr != nil {
@@ -165,9 +181,13 @@ func (api *OAuthRefreshAPI) RefreshIfNeeded(
 	}, nil
 }
 
-// isInvalidGrantError 检查错误是否为 invalid_grant
-func isInvalidGrantError(err error) bool {
-	return err != nil && strings.Contains(strings.ToLower(err.Error()), "invalid_grant")
+// isRefreshRaceRecoverableError checks errors that may indicate another worker has already rotated the RT.
+func isRefreshRaceRecoverableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "invalid_grant") || strings.Contains(msg, "refresh_token_reused")
 }
 
 // tryRecoverFromRefreshRace 在 invalid_grant 错误后尝试竞争恢复
