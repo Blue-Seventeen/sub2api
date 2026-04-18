@@ -1703,7 +1703,8 @@ export type AccountAutoOpsAction =
 export interface AccountAutoOpsRule {
   id: string
   name: string
-  subjects: AccountAutoOpsSubject[]
+  subject: AccountAutoOpsSubject
+  priority: number
   match_type: AccountAutoOpsMatchType
   pattern: string
   action: AccountAutoOpsAction

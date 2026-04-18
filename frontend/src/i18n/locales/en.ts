@@ -2943,7 +2943,109 @@ export default {
       autoOps: 'Auto Ops',
       autoOpsManualTriggered: 'Auto ops triggered. Run #{runId}, eligible accounts: {count}',
       autoOpsManualNoEligible: 'Auto ops triggered, but no eligible accounts were found',
-      autoOpsManualFailed: 'Failed to trigger auto ops'
+      autoOpsManualFailed: 'Failed to trigger auto ops',
+      autoOpsDialog: {
+        title: 'Auto Ops',
+        summaryTitle: 'Global Auto Ops Configuration',
+        summaryDescription: 'Only accounts with error status and schedulable=true are processed. Saving an enabled config triggers an immediate run.',
+        runtimeTitle: 'Runtime',
+        enabledLabel: 'Enable Auto Ops',
+        enabledHint: 'Run once immediately after saving, then continue on the configured interval.',
+        intervalLabel: 'Automatic Interval (minutes)',
+        intervalPlaceholder: 'e.g. 10',
+        intervalHint: 'Use a positive integer in minutes. Automatic runs only apply to globally eligible accounts.',
+        statusTitle: 'Current Status',
+        configStatus: 'Configuration',
+        configured: 'Saved',
+        notConfigured: 'Not Saved',
+        ruleCount: 'Rules',
+        logCount: 'Runs',
+        sampleCount: 'Samples',
+        modelsTitle: 'Test Model Configuration',
+        modelsDescription: 'When auto ops performs retest, models are tried in order by platform.',
+        modelsEmpty: 'No models configured. The system default test model will be used.',
+        selectSystemModel: 'Select a built-in model',
+        addSystemModel: 'Add Built-in Model',
+        customModelPlaceholder: 'Enter custom model ID',
+        addCustomModel: 'Add Custom Model',
+        rulesTitle: 'Rule Orchestration',
+        rulesDescription: 'Rules are evaluated in ascending priority order. Dragging rewrites priorities by order.',
+        addRule: 'Add Rule',
+        rulesEmpty: 'No rules configured. If account name rules do not match, auto ops will retest by default.',
+        unnamedRule: 'Unnamed Rule',
+        clear: 'Clear',
+        collapse: 'Collapse',
+        columns: {
+          priority: 'Priority',
+          name: 'Rule Name',
+          subject: 'Rule Subject',
+          matchType: 'Match',
+          pattern: 'Pattern',
+          action: 'Action',
+          operation: 'Actions'
+        },
+        edit: {
+          priority: 'Priority',
+          name: 'Rule Name',
+          namePlaceholder: 'e.g. Pause scheduling when test response contains deactivated',
+          subject: 'Rule Subject',
+          action: 'Action',
+          matchType: 'Match Type',
+          pattern: 'Pattern',
+          patternPlaceholder: 'Enter keyword or substring'
+        },
+        samplesTitle: 'Response Samples',
+        samplesDescription: 'Deduplicated test/refresh samples captured in the last 24 hours.',
+        sampleOccurrences: 'Seen {count} times',
+        samplesEmpty: 'No response samples yet',
+        logsTitle: 'Ops Records',
+        logsDescription: 'Only matched rules are displayed. Logs are retained for 24 hours.',
+        automaticRun: 'Automatic',
+        manualRun: 'Manual',
+        runSummary: 'Requested {total} account(s), eligible {eligible}, completed {completed}',
+        matchedStepsCount: 'Matched {count} step(s)',
+        matchedRuleLabel: 'Matched Rule',
+        notContainsLabel: 'Keyword not present: {pattern}',
+        responseLabel: 'Response',
+        actionResultLabel: 'Action Result',
+        noMatchedRules: 'No rule matched in this run',
+        logsEmpty: 'No auto ops logs yet',
+        runStatus: {
+          completed: 'Completed',
+          failed: 'Failed',
+          running: 'Running'
+        },
+        stepStatus: {
+          action_executed: 'Action Executed',
+          action_failed: 'Action Failed',
+          loop_guard_stopped: 'Loop Guard Stopped',
+          no_rule_matched: 'No Rule Matched',
+          check_completed: 'Check Completed'
+        },
+        subject: {
+          account_name: 'Account Name',
+          test_response: 'Test Response',
+          refresh_response: 'Refresh Response'
+        },
+        matchType: {
+          contains: 'Contains',
+          not_contains: 'Not Contains'
+        },
+        action: {
+          retest: 'Retest',
+          refresh_token: 'Refresh Token',
+          recover_state: 'Recover State',
+          enable_schedulable: 'Enable Scheduling',
+          disable_schedulable: 'Pause Scheduling',
+          delete_account: 'Delete Account'
+        },
+        toast: {
+          loadFailed: 'Failed to load auto ops data',
+          validationFailed: 'Please complete all required rule fields',
+          saveSuccess: 'Auto ops configuration saved',
+          saveFailed: 'Failed to save auto ops configuration'
+        }
+      },
     },
 
     // Scheduled Tests

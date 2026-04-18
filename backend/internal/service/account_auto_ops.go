@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 const (
@@ -74,10 +76,12 @@ var (
 type AccountAutoOpsRule struct {
 	ID        string   `json:"id"`
 	Name      string   `json:"name"`
-	Subjects  []string `json:"subjects"`
+	Subject   string   `json:"subject"`
+	Priority  int      `json:"priority"`
 	MatchType string   `json:"match_type"`
 	Pattern   string   `json:"pattern"`
 	Action    string   `json:"action"`
+	Subjects  []string `json:"subjects,omitempty"` // legacy compatibility: read old configs only
 }
 
 type AccountAutoOpsConfig struct {
@@ -182,31 +186,40 @@ func NormalizeAccountAutoOpsConfig(cfg *AccountAutoOpsConfig) *AccountAutoOpsCon
 
 	base.Rules = make([]AccountAutoOpsRule, 0, len(cfg.Rules))
 	for idx, rule := range cfg.Rules {
+		subject := strings.TrimSpace(rule.Subject)
+		if subject == "" {
+			for _, candidate := range rule.Subjects {
+				candidate = strings.TrimSpace(candidate)
+				if candidate != "" {
+					subject = candidate
+					break
+				}
+			}
+		}
+		if subject == "" {
+			subject = AccountAutoOpsSubjectTestResponse
+		}
+		priority := rule.Priority
+		if priority <= 0 {
+			priority = (idx + 1) * 10
+		}
 		normalized := AccountAutoOpsRule{
 			ID:        strings.TrimSpace(rule.ID),
 			Name:      strings.TrimSpace(rule.Name),
+			Subject:   subject,
+			Priority:  priority,
 			MatchType: strings.TrimSpace(rule.MatchType),
 			Pattern:   strings.TrimSpace(rule.Pattern),
 			Action:    strings.TrimSpace(rule.Action),
 		}
-		seenSubjects := make(map[string]struct{}, len(rule.Subjects))
-		for _, subject := range rule.Subjects {
-			subject = strings.TrimSpace(subject)
-			if subject == "" {
-				continue
-			}
-			if _, exists := seenSubjects[subject]; exists {
-				continue
-			}
-			seenSubjects[subject] = struct{}{}
-			normalized.Subjects = append(normalized.Subjects, subject)
-		}
-		sort.Strings(normalized.Subjects)
 		if normalized.ID == "" {
 			normalized.ID = fmt.Sprintf("rule_%d", idx+1)
 		}
 		base.Rules = append(base.Rules, normalized)
 	}
+	sort.SliceStable(base.Rules, func(i, j int) bool {
+		return base.Rules[i].Priority < base.Rules[j].Priority
+	})
 
 	if cfg.TestModelsByPlatform != nil {
 		for _, platform := range []string{PlatformAnthropic, PlatformOpenAI, PlatformGemini, PlatformAntigravity} {
@@ -250,13 +263,18 @@ func ValidateAccountAutoOpsConfig(cfg *AccountAutoOpsConfig) error {
 		if strings.TrimSpace(rule.Pattern) == "" {
 			return fmt.Errorf("rules[%d].pattern is required", idx)
 		}
-		if len(rule.Subjects) == 0 {
-			return fmt.Errorf("rules[%d].subjects is required", idx)
+		if rule.Priority <= 0 {
+			return fmt.Errorf("rules[%d].priority must be greater than 0", idx)
 		}
-		for _, subject := range rule.Subjects {
-			if _, ok := accountAutoOpsSupportedSubjects[strings.TrimSpace(subject)]; !ok {
-				return fmt.Errorf("rules[%d].subjects contains unsupported subject %q", idx, subject)
-			}
+		subject := strings.TrimSpace(rule.Subject)
+		if subject == "" {
+			subject = firstAutoOpsSubject(rule.Subjects)
+		}
+		if subject == "" {
+			return fmt.Errorf("rules[%d].subject is required", idx)
+		}
+		if _, ok := accountAutoOpsSupportedSubjects[subject]; !ok {
+			return fmt.Errorf("rules[%d].subject contains unsupported value %q", idx, subject)
 		}
 		if _, ok := accountAutoOpsSupportedMatchTypes[strings.TrimSpace(rule.MatchType)]; !ok {
 			return fmt.Errorf("rules[%d].match_type is invalid", idx)
@@ -269,40 +287,110 @@ func ValidateAccountAutoOpsConfig(cfg *AccountAutoOpsConfig) error {
 }
 
 func MatchAccountAutoOpsRule(rule AccountAutoOpsRule, subject string, input string) bool {
-	if len(rule.Subjects) == 0 {
-		return false
-	}
 	subject = strings.TrimSpace(subject)
-	matchedSubject := false
-	for _, item := range rule.Subjects {
-		if strings.TrimSpace(item) == subject {
-			matchedSubject = true
-			break
-		}
+	ruleSubject := strings.TrimSpace(rule.Subject)
+	if ruleSubject == "" {
+		ruleSubject = firstAutoOpsSubject(rule.Subjects)
 	}
-	if !matchedSubject {
+	if ruleSubject == "" || ruleSubject != subject {
 		return false
 	}
 
-	pattern := strings.ToLower(strings.TrimSpace(rule.Pattern))
+	pattern := strings.TrimSpace(rule.Pattern)
 	if pattern == "" {
 		return false
 	}
-	body := strings.ToLower(input)
+	matched := autoOpsMatchText(pattern, input)
 	switch strings.TrimSpace(rule.MatchType) {
 	case AccountAutoOpsMatchContains:
-		return strings.Contains(body, pattern)
+		return matched
 	case AccountAutoOpsMatchNotContains:
-		return !strings.Contains(body, pattern)
+		return !matched
 	default:
 		return false
 	}
+}
+
+func firstAutoOpsSubject(subjects []string) string {
+	for _, subject := range subjects {
+		subject = strings.TrimSpace(subject)
+		if subject != "" {
+			return subject
+		}
+	}
+	return ""
+}
+
+func autoOpsMatchText(pattern string, input string) bool {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return false
+	}
+	if usesStrictASCIIAutoOpsMatch(pattern) {
+		return matchStrictASCIIAutoOps(pattern, input)
+	}
+	return strings.Contains(strings.ToLower(input), strings.ToLower(pattern))
+}
+
+func usesStrictASCIIAutoOpsMatch(pattern string) bool {
+	hasASCIIWord := false
+	for _, r := range pattern {
+		if r > unicode.MaxASCII {
+			return false
+		}
+		if isAutoOpsWordRune(r) {
+			hasASCIIWord = true
+		}
+	}
+	return hasASCIIWord
+}
+
+func matchStrictASCIIAutoOps(pattern string, input string) bool {
+	needle := strings.ToLower(pattern)
+	haystack := strings.ToLower(input)
+	if needle == "" || haystack == "" {
+		return false
+	}
+	searchFrom := 0
+	for {
+		idx := strings.Index(haystack[searchFrom:], needle)
+		if idx == -1 {
+			return false
+		}
+		start := searchFrom + idx
+		end := start + len(needle)
+		if hasAutoOpsBoundary(haystack, start-1) && hasAutoOpsBoundary(haystack, end) {
+			return true
+		}
+		searchFrom = start + 1
+		if searchFrom >= len(haystack) {
+			return false
+		}
+	}
+}
+
+func isAutoOpsWordRune(r rune) bool {
+	return r == '_' || unicode.IsDigit(r) || unicode.IsLetter(r)
+}
+
+func hasAutoOpsBoundary(text string, index int) bool {
+	if index < 0 || index >= len(text) {
+		return true
+	}
+	r, _ := utf8.DecodeRuneInString(text[index:])
+	return !isAutoOpsWordRune(r)
 }
 
 func NormalizeAutoOpsResponseText(in string, limit int) string {
 	in = strings.TrimSpace(in)
 	if limit <= 0 || len(in) <= limit {
 		return in
+	}
+	for limit > 0 && !utf8.ValidString(in[:limit]) {
+		limit--
+	}
+	if limit <= 0 {
+		return ""
 	}
 	return strings.TrimSpace(in[:limit])
 }
