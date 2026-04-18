@@ -65,7 +65,21 @@ function mountModal(extraProps: Record<string, unknown> = {}) {
             </select>
           `
         },
-        ProxySelector: true,
+        ProxySelector: {
+          props: ['modelValue', 'showAutoBestOption', 'autoBestValue', 'proxies'],
+          emits: ['update:modelValue'],
+          template: `
+            <select
+              data-testid="bulk-edit-proxy-selector"
+              :value="modelValue ?? ''"
+              @change="$emit('update:modelValue', $event.target.value === '' ? null : Number($event.target.value))"
+            >
+              <option value="">none</option>
+              <option v-if="showAutoBestOption" :value="autoBestValue">auto-best</option>
+              <option v-for="proxy in proxies" :key="proxy.id" :value="proxy.id">{{ proxy.name }}</option>
+            </select>
+          `
+        },
         GroupSelector: true,
         Icon: true
       }
@@ -217,4 +231,25 @@ describe('BulkEditAccountModal', () => {
     })
     expect(wrapper.text()).toContain('admin.accounts.openai.modelRestrictionDisabledByPassthrough')
   })
+
+
+  it('???????????????? auto_select_proxy', async () => {
+    const wrapper = mountModal({
+      proxies: [{ id: 9, name: 'proxy-9' }]
+    })
+
+    await wrapper.get('#bulk-edit-proxy-enabled').setValue(true)
+    await wrapper.get('[data-testid="bulk-edit-proxy-selector"]').setValue('-1')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledTimes(1)
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      proxy_id: 0,
+      extra: {
+        auto_select_proxy: true
+      }
+    })
+  })
+
 })

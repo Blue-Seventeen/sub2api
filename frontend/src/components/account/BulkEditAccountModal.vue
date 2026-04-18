@@ -508,6 +508,8 @@
           <ProxySelector
             v-model="proxyId"
             :proxies="proxies"
+            :show-auto-best-option="true"
+            :auto-best-value="AUTO_PROXY_BEST_SENTINEL"
             aria-labelledby="bulk-edit-proxy-label"
           />
         </div>
@@ -942,6 +944,8 @@ const emit = defineEmits<{
   updated: []
 }>()
 
+const AUTO_PROXY_BEST_SENTINEL = -1
+
 const { t } = useI18n()
 const appStore = useAppStore()
 
@@ -1165,7 +1169,20 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
 
   if (enableProxy.value) {
     // 后端期望 proxy_id: 0 表示清除代理，而不是 null
-    updates.proxy_id = proxyId.value === null ? 0 : proxyId.value
+    updates.proxy_id =
+      proxyId.value === null || proxyId.value === AUTO_PROXY_BEST_SENTINEL
+        ? 0
+        : proxyId.value
+
+    const extra = ensureExtra()
+    if (proxyId.value === AUTO_PROXY_BEST_SENTINEL) {
+      extra.auto_select_proxy = true
+    } else {
+      delete extra.auto_select_proxy
+    }
+    if (Object.keys(extra).length === 0) {
+      delete updates.extra
+    }
   }
 
   if (enableConcurrency.value) {

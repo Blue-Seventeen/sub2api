@@ -2205,7 +2205,12 @@
 
       <div>
         <label class="input-label">{{ t('admin.accounts.proxy') }}</label>
-        <ProxySelector v-model="form.proxy_id" :proxies="proxies" />
+        <ProxySelector
+          v-model="form.proxy_id"
+          :proxies="proxies"
+          :show-auto-best-option="true"
+          :auto-best-value="AUTO_PROXY_BEST_SENTINEL"
+        />
       </div>
 
       <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -2464,7 +2469,7 @@
         :loading="currentOAuthLoading"
         :error="currentOAuthError"
         :show-help="form.platform === 'anthropic'"
-        :show-proxy-warning="form.platform !== 'openai' && !!form.proxy_id"
+        :show-proxy-warning="form.platform !== 'openai' && !!selectedCreateProxyId"
         :allow-multiple="form.platform === 'anthropic'"
         :show-cookie-option="form.platform === 'anthropic'"
         :show-refresh-token-option="form.platform === 'openai' || form.platform === 'antigravity'"
@@ -3121,6 +3126,8 @@ const geminiHelpLinks = {
   countryChange: 'https://policies.google.com/country-association-form'
 }
 
+const AUTO_PROXY_BEST_SENTINEL = -1
+
 // Computed: current preset mappings based on platform
 const presetMappings = computed(() => getPresetMappingsByPlatform(form.platform))
 const tempUnschedPresets = computed(() => [
@@ -3167,6 +3174,26 @@ const form = reactive({
   group_ids: [] as number[],
   expires_at: null as number | null
 })
+
+const selectedCreateProxyId = computed(() =>
+  form.proxy_id === AUTO_PROXY_BEST_SENTINEL ? null : form.proxy_id
+)
+
+const isAutoBestProxySelected = computed(() => form.proxy_id === AUTO_PROXY_BEST_SENTINEL)
+
+const buildCreateProxyConfig = () => {
+  return selectedCreateProxyId.value ? { proxy_id: selectedCreateProxyId.value } : {}
+}
+
+const buildCreateExtra = (base?: Record<string, unknown>) => {
+  const extra: Record<string, unknown> = { ...(base || {}) }
+  if (isAutoBestProxySelected.value) {
+    extra.auto_select_proxy = true
+  } else {
+    delete extra.auto_select_proxy
+  }
+  return Object.keys(extra).length > 0 ? extra : undefined
+}
 
 // Helper to check if current type needs OAuth flow
 const isOAuthFlow = computed(() => {
@@ -4009,18 +4036,18 @@ const goBackToBasicInfo = () => {
 
 const handleGenerateUrl = async () => {
   if (form.platform === 'openai') {
-    await openaiOAuth.generateAuthUrl(form.proxy_id)
+    await openaiOAuth.generateAuthUrl(selectedCreateProxyId.value)
   } else if (form.platform === 'gemini') {
     await geminiOAuth.generateAuthUrl(
-      form.proxy_id,
+      selectedCreateProxyId.value,
       oauthFlowRef.value?.projectId,
       geminiOAuthType.value,
       geminiSelectedTier.value
     )
   } else if (form.platform === 'antigravity') {
-    await antigravityOAuth.generateAuthUrl(form.proxy_id)
+    await antigravityOAuth.generateAuthUrl(selectedCreateProxyId.value)
   } else {
-    await oauth.generateAuthUrl(addMethod.value, form.proxy_id)
+    await oauth.generateAuthUrl(addMethod.value, selectedCreateProxyId.value)
   }
 }
 
@@ -4079,6 +4106,7 @@ const createAccountAndFinish = async (
       finalExtra = quotaExtra
     }
   }
+  finalExtra = buildCreateExtra(finalExtra)
   await doCreateAccount({
     name: form.name,
     notes: form.notes,
@@ -4086,7 +4114,7 @@ const createAccountAndFinish = async (
     type,
     credentials,
     extra: finalExtra,
-    proxy_id: form.proxy_id,
+    proxy_id: selectedCreateProxyId.value,
     concurrency: form.concurrency,
     load_factor: form.load_factor ?? undefined,
     priority: form.priority,
@@ -4117,13 +4145,13 @@ const handleOpenAIExchange = async (authCode: string) => {
       authCode.trim(),
       oauthClient.sessionId.value,
       stateToUse,
-      form.proxy_id
+      selectedCreateProxyId.value
     )
     if (!tokenInfo) return
 
     const credentials = oauthClient.buildCredentials(tokenInfo)
     const oauthExtra = oauthClient.buildExtraInfo(tokenInfo) as Record<string, unknown> | undefined
-    const extra = buildOpenAIExtra(oauthExtra)
+    const extra = buildCreateExtra(buildOpenAIExtra(oauthExtra))
     const shouldCreateOpenAI = form.platform === 'openai'
 
     // Add model mapping for OpenAI OAuth accounts（透传模式下不应用）
@@ -4147,7 +4175,7 @@ const handleOpenAIExchange = async (authCode: string) => {
         type: 'oauth',
         credentials,
         extra,
-        proxy_id: form.proxy_id,
+        proxy_id: selectedCreateProxyId.value,
         concurrency: form.concurrency,
         load_factor: form.load_factor ?? undefined,
         priority: form.priority,
@@ -4201,7 +4229,7 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
       try {
         const tokenInfo = await oauthClient.validateRefreshToken(
           refreshTokens[i],
-          form.proxy_id,
+          selectedCreateProxyId.value,
           clientId
         )
         if (!tokenInfo) {
@@ -4216,7 +4244,7 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
           credentials.client_id = clientId
         }
         const oauthExtra = oauthClient.buildExtraInfo(tokenInfo) as Record<string, unknown> | undefined
-        const extra = buildOpenAIExtra(oauthExtra)
+        const extra = buildCreateExtra(buildOpenAIExtra(oauthExtra))
 
         // Add model mapping for OpenAI OAuth accounts（透传模式下不应用）
         if (shouldCreateOpenAI && !isOpenAIModelRestrictionDisabled.value) {
@@ -4238,7 +4266,7 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
             type: 'oauth',
             credentials,
             extra,
-            proxy_id: form.proxy_id,
+            proxy_id: selectedCreateProxyId.value,
             concurrency: form.concurrency,
             load_factor: form.load_factor ?? undefined,
             priority: form.priority,
@@ -4314,7 +4342,7 @@ const handleAntigravityValidateRT = async (refreshTokenInput: string) => {
       try {
         const tokenInfo = await antigravityOAuth.validateRefreshToken(
           refreshTokens[i],
-          form.proxy_id
+          selectedCreateProxyId.value
         )
         if (!tokenInfo) {
           failedCount++
@@ -4335,8 +4363,8 @@ const handleAntigravityValidateRT = async (refreshTokenInput: string) => {
           platform: 'antigravity',
           type: 'oauth',
           credentials,
-          extra: {},
-          proxy_id: form.proxy_id,
+          extra: buildCreateExtra(buildAntigravityExtra()),
+          proxy_id: selectedCreateProxyId.value,
           concurrency: form.concurrency,
           load_factor: form.load_factor ?? undefined,
           priority: form.priority,
@@ -4398,7 +4426,7 @@ const handleGeminiExchange = async (authCode: string) => {
       code: authCode.trim(),
       sessionId: geminiOAuth.sessionId.value,
       state: stateToUse,
-      proxyId: form.proxy_id,
+      proxyId: selectedCreateProxyId.value,
       oauthType: geminiOAuthType.value,
       tierId: geminiSelectedTier.value
     })
@@ -4435,7 +4463,7 @@ const handleAntigravityExchange = async (authCode: string) => {
       code: authCode.trim(),
       sessionId: antigravityOAuth.sessionId.value,
       state: stateToUse,
-      proxyId: form.proxy_id
+      proxyId: selectedCreateProxyId.value
     })
 		if (!tokenInfo) return
 
@@ -4468,7 +4496,7 @@ const handleAnthropicExchange = async (authCode: string) => {
   oauth.error.value = ''
 
   try {
-    const proxyConfig = form.proxy_id ? { proxy_id: form.proxy_id } : {}
+    const proxyConfig = buildCreateProxyConfig()
     const endpoint =
       addMethod.value === 'oauth'
         ? '/admin/accounts/exchange-code'
@@ -4540,7 +4568,7 @@ const handleAnthropicExchange = async (authCode: string) => {
 
     const credentials: Record<string, unknown> = { ...tokenInfo }
     applyInterceptWarmup(credentials, interceptWarmupRequests.value, 'create')
-    await createAccountAndFinish(form.platform, addMethod.value as AccountType, credentials, extra)
+    await createAccountAndFinish(form.platform, addMethod.value as AccountType, credentials, buildCreateExtra(extra))
   } catch (error: any) {
     oauth.error.value = error.response?.data?.detail || t('admin.accounts.oauth.authFailed')
     appStore.showError(oauth.error.value)
@@ -4570,7 +4598,7 @@ const handleCookieAuth = async (sessionKey: string) => {
   oauth.error.value = ''
 
   try {
-    const proxyConfig = form.proxy_id ? { proxy_id: form.proxy_id } : {}
+    const proxyConfig = buildCreateProxyConfig()
     const keys = oauth.parseSessionKeys(sessionKey)
 
     if (keys.length === 0) {
@@ -4676,8 +4704,8 @@ const handleCookieAuth = async (sessionKey: string) => {
           platform: form.platform,
           type: addMethod.value, // Use addMethod as type: 'oauth' or 'setup-token'
           credentials,
-          extra,
-          proxy_id: form.proxy_id,
+          extra: buildCreateExtra(extra),
+          proxy_id: selectedCreateProxyId.value,
           concurrency: form.concurrency,
           load_factor: form.load_factor ?? undefined,
           priority: form.priority,
