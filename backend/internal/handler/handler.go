@@ -32,6 +32,7 @@ type AdminHandlers struct {
 	ScheduledTest         *admin.ScheduledTestHandler
 	Channel               *admin.ChannelHandler
 	Payment               *admin.PaymentHandler
+	Promotion             *admin.PromotionHandler
 }
 
 // Handlers contains all HTTP handlers
@@ -50,6 +51,7 @@ type Handlers struct {
 	Totp           *TotpHandler
 	Payment        *PaymentHandler
 	PaymentWebhook *PaymentWebhookHandler
+	Promotion      *PromotionHandler
 }
 
 // BuildInfo contains build-time information

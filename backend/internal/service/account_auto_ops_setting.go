@@ -28,6 +28,13 @@ func (s *SettingService) GetAccountAutoOpsConfig(ctx context.Context) (*AccountA
 		return nil, false, fmt.Errorf("parse account auto ops config: %w", err)
 	}
 	normalized := NormalizeAccountAutoOpsConfig(&cfg)
+	if ShouldMigrateLegacyAccountAutoOpsTargetRules(normalized) {
+		migrated := WithMigratedLegacyAccountAutoOpsTargetRules(normalized)
+		if err := s.SetAccountAutoOpsConfig(ctx, migrated); err != nil {
+			return nil, false, fmt.Errorf("migrate account auto ops target rules: %w", err)
+		}
+		normalized = migrated
+	}
 	normalized.Configured = true
 	return normalized, true, nil
 }
@@ -37,6 +44,7 @@ func (s *SettingService) SetAccountAutoOpsConfig(ctx context.Context, cfg *Accou
 		return fmt.Errorf("setting service is not ready")
 	}
 	normalized := NormalizeAccountAutoOpsConfig(cfg)
+	normalized.TargetRulesInitialized = true
 	normalized.Configured = false
 	if err := ValidateAccountAutoOpsConfig(normalized); err != nil {
 		return err

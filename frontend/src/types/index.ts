@@ -1700,6 +1700,32 @@ export type AccountAutoOpsAction =
   | 'disable_schedulable'
   | 'delete_account'
 
+export type AccountAutoOpsTargetField =
+  | 'account_name'
+  | 'schedulable'
+  | 'platform'
+  | 'auth_type'
+  | 'account_status'
+  | 'group'
+  | 'last_used_days'
+
+export type AccountAutoOpsTargetOperator = 'eq' | 'neq' | 'contains' | 'not_contains'
+export type AccountAutoOpsTargetAction = 'takeover' | 'manual'
+
+export interface AccountAutoOpsTargetCondition {
+  field: AccountAutoOpsTargetField
+  operator: AccountAutoOpsTargetOperator
+  value: string
+}
+
+export interface AccountAutoOpsTargetRule {
+  id: string
+  name: string
+  priority: number
+  action: AccountAutoOpsTargetAction
+  conditions: AccountAutoOpsTargetCondition[]
+}
+
 export interface AccountAutoOpsRule {
   id: string
   name: string
@@ -1713,6 +1739,8 @@ export interface AccountAutoOpsRule {
 export interface AccountAutoOpsConfig {
   enabled: boolean
   interval_minutes: number
+  target_rules: AccountAutoOpsTargetRule[]
+  target_rules_initialized?: boolean
   rules: AccountAutoOpsRule[]
   test_models_by_platform: Record<string, string[]>
   configured?: boolean

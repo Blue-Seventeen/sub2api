@@ -51,6 +51,7 @@ const (
 const (
 	AdjustmentTypeAdminBalance     = "admin_balance"     // 管理员调整余额
 	AdjustmentTypeAdminConcurrency = "admin_concurrency" // 管理员调整并发数
+	AdjustmentTypePromotionBalance = "promotion_balance" // 推广收益结算/冲回余额流水
 )
 
 // Group subscription type constants

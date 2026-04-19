@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -34,6 +35,28 @@ const (
 	AccountAutoOpsActionDisableSchedulable = "disable_schedulable"
 	AccountAutoOpsActionDeleteAccount      = "delete_account"
 
+	AccountAutoOpsTargetFieldAccountName   = "account_name"
+	AccountAutoOpsTargetFieldSchedulable   = "schedulable"
+	AccountAutoOpsTargetFieldPlatform      = "platform"
+	AccountAutoOpsTargetFieldAuthType      = "auth_type"
+	AccountAutoOpsTargetFieldAccountStatus = "account_status"
+	AccountAutoOpsTargetFieldGroup         = "group"
+	AccountAutoOpsTargetFieldLastUsedDays  = "last_used_days"
+
+	AccountAutoOpsTargetOperatorEQ          = "eq"
+	AccountAutoOpsTargetOperatorNEQ         = "neq"
+	AccountAutoOpsTargetOperatorContains    = "contains"
+	AccountAutoOpsTargetOperatorNotContains = "not_contains"
+
+	AccountAutoOpsTargetActionTakeover = "takeover"
+	AccountAutoOpsTargetActionManual   = "manual"
+
+	AccountAutoOpsTargetStatusNormal            = "normal"
+	AccountAutoOpsTargetStatusRateLimited       = "rate_limited"
+	AccountAutoOpsTargetStatusError             = "error"
+	AccountAutoOpsTargetStatusPaused            = "paused"
+	AccountAutoOpsTargetStatusTempUnschedulable = "temp_unschedulable"
+
 	AccountAutoOpsStepStatusMatched          = "matched"
 	AccountAutoOpsStepStatusNoRuleMatched    = "no_rule_matched"
 	AccountAutoOpsStepStatusActionExecuted   = "action_executed"
@@ -51,6 +74,9 @@ const (
 	accountAutoOpsLoopGuardMaxSteps      = 1000
 	accountAutoOpsRunLockKey             = "account:auto_ops:run_lock"
 	accountAutoOpsRunLockTTL             = 30 * time.Minute
+	accountAutoOpsTargetGroupUngrouped   = "ungrouped"
+	accountAutoOpsLegacyTargetRuleID     = "legacy_default_takeover"
+	accountAutoOpsLegacyTargetRuleName   = "Legacy Auto Ops Target / 旧版自动运维对象"
 )
 
 var (
@@ -71,6 +97,71 @@ var (
 		AccountAutoOpsActionDisableSchedulable: {},
 		AccountAutoOpsActionDeleteAccount:      {},
 	}
+	accountAutoOpsSupportedTargetFields = map[string]struct{}{
+		AccountAutoOpsTargetFieldAccountName:   {},
+		AccountAutoOpsTargetFieldSchedulable:   {},
+		AccountAutoOpsTargetFieldPlatform:      {},
+		AccountAutoOpsTargetFieldAuthType:      {},
+		AccountAutoOpsTargetFieldAccountStatus: {},
+		AccountAutoOpsTargetFieldGroup:         {},
+		AccountAutoOpsTargetFieldLastUsedDays:  {},
+	}
+	accountAutoOpsSupportedTargetActions = map[string]struct{}{
+		AccountAutoOpsTargetActionTakeover: {},
+		AccountAutoOpsTargetActionManual:   {},
+	}
+	accountAutoOpsSupportedTargetStatuses = map[string]struct{}{
+		AccountAutoOpsTargetStatusNormal:            {},
+		AccountAutoOpsTargetStatusRateLimited:       {},
+		AccountAutoOpsTargetStatusError:             {},
+		AccountAutoOpsTargetStatusPaused:            {},
+		AccountAutoOpsTargetStatusTempUnschedulable: {},
+	}
+	accountAutoOpsSupportedTargetPlatforms = map[string]struct{}{
+		PlatformAnthropic:   {},
+		PlatformOpenAI:      {},
+		PlatformGemini:      {},
+		PlatformAntigravity: {},
+	}
+	accountAutoOpsSupportedTargetAuthTypes = map[string]struct{}{
+		AccountTypeOAuth:      {},
+		AccountTypeSetupToken: {},
+		AccountTypeAPIKey:     {},
+		AccountTypeBedrock:    {},
+		AccountTypeUpstream:   {},
+	}
+	accountAutoOpsTargetOperatorsByField = map[string]map[string]struct{}{
+		AccountAutoOpsTargetFieldAccountName: {
+			AccountAutoOpsTargetOperatorEQ:          {},
+			AccountAutoOpsTargetOperatorNEQ:         {},
+			AccountAutoOpsTargetOperatorContains:    {},
+			AccountAutoOpsTargetOperatorNotContains: {},
+		},
+		AccountAutoOpsTargetFieldSchedulable: {
+			AccountAutoOpsTargetOperatorEQ:  {},
+			AccountAutoOpsTargetOperatorNEQ: {},
+		},
+		AccountAutoOpsTargetFieldPlatform: {
+			AccountAutoOpsTargetOperatorEQ:  {},
+			AccountAutoOpsTargetOperatorNEQ: {},
+		},
+		AccountAutoOpsTargetFieldAuthType: {
+			AccountAutoOpsTargetOperatorEQ:  {},
+			AccountAutoOpsTargetOperatorNEQ: {},
+		},
+		AccountAutoOpsTargetFieldAccountStatus: {
+			AccountAutoOpsTargetOperatorEQ:  {},
+			AccountAutoOpsTargetOperatorNEQ: {},
+		},
+		AccountAutoOpsTargetFieldGroup: {
+			AccountAutoOpsTargetOperatorEQ:  {},
+			AccountAutoOpsTargetOperatorNEQ: {},
+		},
+		AccountAutoOpsTargetFieldLastUsedDays: {
+			AccountAutoOpsTargetOperatorEQ:  {},
+			AccountAutoOpsTargetOperatorNEQ: {},
+		},
+	}
 )
 
 type AccountAutoOpsRule struct {
@@ -84,12 +175,28 @@ type AccountAutoOpsRule struct {
 	Subjects  []string `json:"subjects,omitempty"` // legacy compatibility: read old configs only
 }
 
+type AccountAutoOpsTargetCondition struct {
+	Field    string `json:"field"`
+	Operator string `json:"operator"`
+	Value    string `json:"value"`
+}
+
+type AccountAutoOpsTargetRule struct {
+	ID         string                          `json:"id"`
+	Name       string                          `json:"name"`
+	Priority   int                             `json:"priority"`
+	Action     string                          `json:"action"`
+	Conditions []AccountAutoOpsTargetCondition `json:"conditions"`
+}
+
 type AccountAutoOpsConfig struct {
-	Enabled              bool                 `json:"enabled"`
-	IntervalMinutes      int                  `json:"interval_minutes"`
-	Rules                []AccountAutoOpsRule `json:"rules"`
-	TestModelsByPlatform map[string][]string  `json:"test_models_by_platform"`
-	Configured           bool                 `json:"configured,omitempty"`
+	Enabled                bool                       `json:"enabled"`
+	IntervalMinutes        int                        `json:"interval_minutes"`
+	TargetRules            []AccountAutoOpsTargetRule `json:"target_rules"`
+	TargetRulesInitialized bool                       `json:"target_rules_initialized,omitempty"`
+	Rules                  []AccountAutoOpsRule       `json:"rules"`
+	TestModelsByPlatform   map[string][]string        `json:"test_models_by_platform"`
+	Configured             bool                       `json:"configured,omitempty"`
 }
 
 type AccountAutoOpsRun struct {
@@ -163,6 +270,7 @@ func DefaultAccountAutoOpsConfig() *AccountAutoOpsConfig {
 	return &AccountAutoOpsConfig{
 		Enabled:         false,
 		IntervalMinutes: accountAutoOpsDefaultIntervalMinutes,
+		TargetRules:     []AccountAutoOpsTargetRule{},
 		Rules:           []AccountAutoOpsRule{},
 		TestModelsByPlatform: map[string][]string{
 			PlatformAnthropic:   {},
@@ -183,6 +291,39 @@ func NormalizeAccountAutoOpsConfig(cfg *AccountAutoOpsConfig) *AccountAutoOpsCon
 	if cfg.IntervalMinutes > 0 {
 		base.IntervalMinutes = cfg.IntervalMinutes
 	}
+
+	base.TargetRules = make([]AccountAutoOpsTargetRule, 0, len(cfg.TargetRules))
+	for idx, rule := range cfg.TargetRules {
+		priority := rule.Priority
+		if priority <= 0 {
+			priority = (idx + 1) * 10
+		}
+		normalized := AccountAutoOpsTargetRule{
+			ID:       strings.TrimSpace(rule.ID),
+			Name:     strings.TrimSpace(rule.Name),
+			Priority: priority,
+			Action:   strings.TrimSpace(rule.Action),
+		}
+		if normalized.ID == "" {
+			normalized.ID = fmt.Sprintf("target_rule_%d", idx+1)
+		}
+		normalized.Conditions = make([]AccountAutoOpsTargetCondition, 0, len(rule.Conditions))
+		for _, condition := range rule.Conditions {
+			normalized.Conditions = append(normalized.Conditions, AccountAutoOpsTargetCondition{
+				Field:    strings.TrimSpace(condition.Field),
+				Operator: strings.TrimSpace(condition.Operator),
+				Value:    strings.TrimSpace(condition.Value),
+			})
+		}
+		base.TargetRules = append(base.TargetRules, normalized)
+	}
+	sort.SliceStable(base.TargetRules, func(i, j int) bool {
+		if base.TargetRules[i].Priority == base.TargetRules[j].Priority {
+			return base.TargetRules[i].ID < base.TargetRules[j].ID
+		}
+		return base.TargetRules[i].Priority < base.TargetRules[j].Priority
+	})
+	base.TargetRulesInitialized = cfg.TargetRulesInitialized || len(base.TargetRules) > 0
 
 	base.Rules = make([]AccountAutoOpsRule, 0, len(cfg.Rules))
 	for idx, rule := range cfg.Rules {
@@ -256,6 +397,65 @@ func ValidateAccountAutoOpsConfig(cfg *AccountAutoOpsConfig) error {
 	if cfg.IntervalMinutes <= 0 {
 		return fmt.Errorf("interval_minutes must be greater than 0")
 	}
+	for idx, rule := range cfg.TargetRules {
+		if strings.TrimSpace(rule.Name) == "" {
+			return fmt.Errorf("target_rules[%d].name is required", idx)
+		}
+		if rule.Priority <= 0 {
+			return fmt.Errorf("target_rules[%d].priority must be greater than 0", idx)
+		}
+		if _, ok := accountAutoOpsSupportedTargetActions[strings.TrimSpace(rule.Action)]; !ok {
+			return fmt.Errorf("target_rules[%d].action is invalid", idx)
+		}
+		if len(rule.Conditions) == 0 {
+			return fmt.Errorf("target_rules[%d].conditions is required", idx)
+		}
+		for condIdx, condition := range rule.Conditions {
+			field := strings.TrimSpace(condition.Field)
+			if _, ok := accountAutoOpsSupportedTargetFields[field]; !ok {
+				return fmt.Errorf("target_rules[%d].conditions[%d].field is invalid", idx, condIdx)
+			}
+			operator := strings.TrimSpace(condition.Operator)
+			if !isSupportedTargetOperator(field, operator) {
+				return fmt.Errorf("target_rules[%d].conditions[%d].operator is invalid", idx, condIdx)
+			}
+			value := strings.TrimSpace(condition.Value)
+			if value == "" {
+				return fmt.Errorf("target_rules[%d].conditions[%d].value is required", idx, condIdx)
+			}
+			switch field {
+			case AccountAutoOpsTargetFieldSchedulable:
+				if value != "true" && value != "false" {
+					return fmt.Errorf("target_rules[%d].conditions[%d].value must be true or false", idx, condIdx)
+				}
+			case AccountAutoOpsTargetFieldPlatform:
+				if _, ok := accountAutoOpsSupportedTargetPlatforms[value]; !ok {
+					return fmt.Errorf("target_rules[%d].conditions[%d].value contains unsupported platform %q", idx, condIdx, value)
+				}
+			case AccountAutoOpsTargetFieldAuthType:
+				if _, ok := accountAutoOpsSupportedTargetAuthTypes[value]; !ok {
+					return fmt.Errorf("target_rules[%d].conditions[%d].value contains unsupported auth type %q", idx, condIdx, value)
+				}
+			case AccountAutoOpsTargetFieldAccountStatus:
+				if _, ok := accountAutoOpsSupportedTargetStatuses[value]; !ok {
+					return fmt.Errorf("target_rules[%d].conditions[%d].value contains unsupported account status %q", idx, condIdx, value)
+				}
+			case AccountAutoOpsTargetFieldGroup:
+				if value == accountAutoOpsTargetGroupUngrouped {
+					break
+				}
+				groupID, err := strconv.ParseInt(value, 10, 64)
+				if err != nil || groupID <= 0 {
+					return fmt.Errorf("target_rules[%d].conditions[%d].value must be a positive group id or %q", idx, condIdx, accountAutoOpsTargetGroupUngrouped)
+				}
+			case AccountAutoOpsTargetFieldLastUsedDays:
+				days, err := strconv.Atoi(value)
+				if err != nil || days <= 0 {
+					return fmt.Errorf("target_rules[%d].conditions[%d].value must be a positive integer", idx, condIdx)
+				}
+			}
+		}
+	}
 	for idx, rule := range cfg.Rules {
 		if strings.TrimSpace(rule.Name) == "" {
 			return fmt.Errorf("rules[%d].name is required", idx)
@@ -286,6 +486,44 @@ func ValidateAccountAutoOpsConfig(cfg *AccountAutoOpsConfig) error {
 	return nil
 }
 
+func ShouldMigrateLegacyAccountAutoOpsTargetRules(cfg *AccountAutoOpsConfig) bool {
+	if cfg == nil {
+		return false
+	}
+	return !cfg.TargetRulesInitialized && len(cfg.TargetRules) == 0
+}
+
+func WithMigratedLegacyAccountAutoOpsTargetRules(cfg *AccountAutoOpsConfig) *AccountAutoOpsConfig {
+	normalized := NormalizeAccountAutoOpsConfig(cfg)
+	if !ShouldMigrateLegacyAccountAutoOpsTargetRules(normalized) {
+		return normalized
+	}
+	normalized.TargetRules = []AccountAutoOpsTargetRule{DefaultLegacyAccountAutoOpsTargetRule()}
+	normalized.TargetRulesInitialized = true
+	return NormalizeAccountAutoOpsConfig(normalized)
+}
+
+func DefaultLegacyAccountAutoOpsTargetRule() AccountAutoOpsTargetRule {
+	return AccountAutoOpsTargetRule{
+		ID:       accountAutoOpsLegacyTargetRuleID,
+		Name:     accountAutoOpsLegacyTargetRuleName,
+		Priority: 10,
+		Action:   AccountAutoOpsTargetActionTakeover,
+		Conditions: []AccountAutoOpsTargetCondition{
+			{
+				Field:    AccountAutoOpsTargetFieldAccountStatus,
+				Operator: AccountAutoOpsTargetOperatorEQ,
+				Value:    AccountAutoOpsTargetStatusError,
+			},
+			{
+				Field:    AccountAutoOpsTargetFieldSchedulable,
+				Operator: AccountAutoOpsTargetOperatorEQ,
+				Value:    "true",
+			},
+		},
+	}
+}
+
 func MatchAccountAutoOpsRule(rule AccountAutoOpsRule, subject string, input string) bool {
 	subject = strings.TrimSpace(subject)
 	ruleSubject := strings.TrimSpace(rule.Subject)
@@ -311,6 +549,28 @@ func MatchAccountAutoOpsRule(rule AccountAutoOpsRule, subject string, input stri
 	}
 }
 
+func MatchAccountAutoOpsTargetRule(rule AccountAutoOpsTargetRule, account *Account, now time.Time) bool {
+	if account == nil || len(rule.Conditions) == 0 {
+		return false
+	}
+	for _, condition := range rule.Conditions {
+		if !matchAccountAutoOpsTargetCondition(condition, account, now) {
+			return false
+		}
+	}
+	return true
+}
+
+func FindMatchingAccountAutoOpsTargetRule(rules []AccountAutoOpsTargetRule, account *Account, now time.Time) *AccountAutoOpsTargetRule {
+	for idx := range rules {
+		if MatchAccountAutoOpsTargetRule(rules[idx], account, now) {
+			rule := rules[idx]
+			return &rule
+		}
+	}
+	return nil
+}
+
 func firstAutoOpsSubject(subjects []string) string {
 	for _, subject := range subjects {
 		subject = strings.TrimSpace(subject)
@@ -319,6 +579,157 @@ func firstAutoOpsSubject(subjects []string) string {
 		}
 	}
 	return ""
+}
+
+func isSupportedTargetOperator(field string, operator string) bool {
+	operators, ok := accountAutoOpsTargetOperatorsByField[field]
+	if !ok {
+		return false
+	}
+	_, ok = operators[operator]
+	return ok
+}
+
+func matchAccountAutoOpsTargetCondition(condition AccountAutoOpsTargetCondition, account *Account, now time.Time) bool {
+	field := strings.TrimSpace(condition.Field)
+	operator := strings.TrimSpace(condition.Operator)
+	value := strings.TrimSpace(condition.Value)
+	if account == nil || field == "" || operator == "" || value == "" {
+		return false
+	}
+	switch field {
+	case AccountAutoOpsTargetFieldAccountName:
+		switch operator {
+		case AccountAutoOpsTargetOperatorContains:
+			return autoOpsMatchText(value, account.Name)
+		case AccountAutoOpsTargetOperatorNotContains:
+			return !autoOpsMatchText(value, account.Name)
+		case AccountAutoOpsTargetOperatorEQ:
+			return strings.EqualFold(strings.TrimSpace(account.Name), value)
+		case AccountAutoOpsTargetOperatorNEQ:
+			return !strings.EqualFold(strings.TrimSpace(account.Name), value)
+		default:
+			return false
+		}
+	case AccountAutoOpsTargetFieldSchedulable:
+		expected := value == "true"
+		if operator == AccountAutoOpsTargetOperatorEQ {
+			return account.Schedulable == expected
+		}
+		if operator == AccountAutoOpsTargetOperatorNEQ {
+			return account.Schedulable != expected
+		}
+		return false
+	case AccountAutoOpsTargetFieldPlatform:
+		return compareAutoOpsTargetScalar(account.Platform, operator, value)
+	case AccountAutoOpsTargetFieldAuthType:
+		return compareAutoOpsTargetScalar(account.Type, operator, value)
+	case AccountAutoOpsTargetFieldAccountStatus:
+		return compareAutoOpsTargetScalar(resolveAccountAutoOpsTargetStatus(account, now), operator, value)
+	case AccountAutoOpsTargetFieldGroup:
+		return matchAccountAutoOpsTargetGroup(account, operator, value)
+	case AccountAutoOpsTargetFieldLastUsedDays:
+		days, err := strconv.Atoi(value)
+		if err != nil || days <= 0 {
+			return false
+		}
+		return matchAccountAutoOpsTargetLastUsedDays(account, operator, days, now)
+	default:
+		return false
+	}
+}
+
+func compareAutoOpsTargetScalar(actual string, operator string, expected string) bool {
+	switch operator {
+	case AccountAutoOpsTargetOperatorEQ:
+		return actual == expected
+	case AccountAutoOpsTargetOperatorNEQ:
+		return actual != expected
+	default:
+		return false
+	}
+}
+
+func resolveAccountAutoOpsTargetStatus(account *Account, now time.Time) string {
+	if account == nil {
+		return ""
+	}
+	status := strings.TrimSpace(account.Status)
+	switch status {
+	case StatusError:
+		return AccountAutoOpsTargetStatusError
+	case StatusDisabled, "inactive":
+		return AccountAutoOpsTargetStatusPaused
+	}
+	if account.TempUnschedulableUntil != nil && now.Before(*account.TempUnschedulableUntil) {
+		return AccountAutoOpsTargetStatusTempUnschedulable
+	}
+	if account.RateLimitResetAt != nil && now.Before(*account.RateLimitResetAt) {
+		return AccountAutoOpsTargetStatusRateLimited
+	}
+	if status == StatusActive {
+		return AccountAutoOpsTargetStatusNormal
+	}
+	return status
+}
+
+func matchAccountAutoOpsTargetGroup(account *Account, operator string, value string) bool {
+	groupIDs := make([]int64, 0, len(account.GroupIDs))
+	groupIDs = append(groupIDs, account.GroupIDs...)
+	if len(groupIDs) == 0 && len(account.Groups) > 0 {
+		for _, group := range account.Groups {
+			if group == nil {
+				continue
+			}
+			groupIDs = append(groupIDs, group.ID)
+		}
+	}
+	if value == accountAutoOpsTargetGroupUngrouped {
+		isUngrouped := len(groupIDs) == 0
+		if operator == AccountAutoOpsTargetOperatorEQ {
+			return isUngrouped
+		}
+		if operator == AccountAutoOpsTargetOperatorNEQ {
+			return !isUngrouped
+		}
+		return false
+	}
+	groupID, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || groupID <= 0 {
+		return false
+	}
+	hasGroup := false
+	for _, candidate := range groupIDs {
+		if candidate == groupID {
+			hasGroup = true
+			break
+		}
+	}
+	if operator == AccountAutoOpsTargetOperatorEQ {
+		return hasGroup
+	}
+	if operator == AccountAutoOpsTargetOperatorNEQ {
+		return !hasGroup
+	}
+	return false
+}
+
+func matchAccountAutoOpsTargetLastUsedDays(account *Account, operator string, days int, now time.Time) bool {
+	threshold := now.Add(-time.Duration(days) * 24 * time.Hour)
+	switch operator {
+	case AccountAutoOpsTargetOperatorEQ:
+		if account.LastUsedAt == nil {
+			return true
+		}
+		return !account.LastUsedAt.After(threshold)
+	case AccountAutoOpsTargetOperatorNEQ:
+		if account.LastUsedAt == nil {
+			return false
+		}
+		return account.LastUsedAt.After(threshold)
+	default:
+		return false
+	}
 }
 
 func autoOpsMatchText(pattern string, input string) bool {

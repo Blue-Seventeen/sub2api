@@ -443,6 +443,13 @@ func ProvideSettingService(settingRepo SettingRepository, groupRepo GroupReposit
 	return svc
 }
 
+// ProvidePromotionSettlementRunnerService creates and starts PromotionSettlementRunnerService.
+func ProvidePromotionSettlementRunnerService(promotionService *PromotionService, cfg *config.Config) *PromotionSettlementRunnerService {
+	svc := NewPromotionSettlementRunnerService(promotionService, cfg)
+	svc.Start()
+	return svc
+}
+
 // ProviderSet is the Wire provider set for all services
 var ProviderSet = wire.NewSet(
 	// Core services
@@ -497,6 +504,7 @@ var ProviderSet = wire.NewSet(
 	NewTurnstileService,
 	NewSubscriptionService,
 	wire.Bind(new(DefaultSubscriptionAssigner), new(*SubscriptionService)),
+	NewPromotionService,
 	ProvideConcurrencyService,
 	ProvideUserMessageQueueService,
 	NewUsageRecordWorkerPool,
@@ -532,6 +540,7 @@ var ProviderSet = wire.NewSet(
 	ProvidePaymentConfigService,
 	NewPaymentService,
 	ProvidePaymentOrderExpiryService,
+	ProvidePromotionSettlementRunnerService,
 )
 
 // ProvidePaymentConfigService wraps NewPaymentConfigService to accept the named

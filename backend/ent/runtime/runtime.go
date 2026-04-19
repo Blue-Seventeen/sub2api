@@ -18,6 +18,13 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/paymentproviderinstance"
 	"github.com/Wei-Shaw/sub2api/ent/promocode"
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
+	"github.com/Wei-Shaw/sub2api/ent/promotionactivation"
+	"github.com/Wei-Shaw/sub2api/ent/promotioncommissionrecord"
+	"github.com/Wei-Shaw/sub2api/ent/promotionlevelconfig"
+	"github.com/Wei-Shaw/sub2api/ent/promotionscript"
+	"github.com/Wei-Shaw/sub2api/ent/promotionsetting"
+	"github.com/Wei-Shaw/sub2api/ent/promotionsettlementbatch"
+	"github.com/Wei-Shaw/sub2api/ent/promotionuser"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/schema"
@@ -732,6 +739,250 @@ func init() {
 	promocodeusageDescUsedAt := promocodeusageFields[3].Descriptor()
 	// promocodeusage.DefaultUsedAt holds the default value on creation for the used_at field.
 	promocodeusage.DefaultUsedAt = promocodeusageDescUsedAt.Default.(func() time.Time)
+	promotionactivationFields := schema.PromotionActivation{}.Fields()
+	_ = promotionactivationFields
+	// promotionactivationDescCreatedAt is the schema descriptor for created_at field.
+	promotionactivationDescCreatedAt := promotionactivationFields[6].Descriptor()
+	// promotionactivation.DefaultCreatedAt holds the default value on creation for the created_at field.
+	promotionactivation.DefaultCreatedAt = promotionactivationDescCreatedAt.Default.(func() time.Time)
+	// promotionactivationDescUpdatedAt is the schema descriptor for updated_at field.
+	promotionactivationDescUpdatedAt := promotionactivationFields[7].Descriptor()
+	// promotionactivation.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	promotionactivation.DefaultUpdatedAt = promotionactivationDescUpdatedAt.Default.(func() time.Time)
+	// promotionactivation.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	promotionactivation.UpdateDefaultUpdatedAt = promotionactivationDescUpdatedAt.UpdateDefault.(func() time.Time)
+	promotioncommissionrecordFields := schema.PromotionCommissionRecord{}.Fields()
+	_ = promotioncommissionrecordFields
+	// promotioncommissionrecordDescCommissionType is the schema descriptor for commission_type field.
+	promotioncommissionrecordDescCommissionType := promotioncommissionrecordFields[4].Descriptor()
+	// promotioncommissionrecord.CommissionTypeValidator is a validator for the "commission_type" field. It is called by the builders before save.
+	promotioncommissionrecord.CommissionTypeValidator = func() func(string) error {
+		validators := promotioncommissionrecordDescCommissionType.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(commission_type string) error {
+			for _, fn := range fns {
+				if err := fn(commission_type); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// promotioncommissionrecordDescRelationDepth is the schema descriptor for relation_depth field.
+	promotioncommissionrecordDescRelationDepth := promotioncommissionrecordFields[5].Descriptor()
+	// promotioncommissionrecord.DefaultRelationDepth holds the default value on creation for the relation_depth field.
+	promotioncommissionrecord.DefaultRelationDepth = promotioncommissionrecordDescRelationDepth.Default.(int8)
+	// promotioncommissionrecordDescLevelSnapshot is the schema descriptor for level_snapshot field.
+	promotioncommissionrecordDescLevelSnapshot := promotioncommissionrecordFields[7].Descriptor()
+	// promotioncommissionrecord.LevelSnapshotValidator is a validator for the "level_snapshot" field. It is called by the builders before save.
+	promotioncommissionrecord.LevelSnapshotValidator = promotioncommissionrecordDescLevelSnapshot.Validators[0].(func(string) error)
+	// promotioncommissionrecordDescBaseAmount is the schema descriptor for base_amount field.
+	promotioncommissionrecordDescBaseAmount := promotioncommissionrecordFields[9].Descriptor()
+	// promotioncommissionrecord.DefaultBaseAmount holds the default value on creation for the base_amount field.
+	promotioncommissionrecord.DefaultBaseAmount = promotioncommissionrecordDescBaseAmount.Default.(float64)
+	// promotioncommissionrecordDescStatus is the schema descriptor for status field.
+	promotioncommissionrecordDescStatus := promotioncommissionrecordFields[11].Descriptor()
+	// promotioncommissionrecord.DefaultStatus holds the default value on creation for the status field.
+	promotioncommissionrecord.DefaultStatus = promotioncommissionrecordDescStatus.Default.(string)
+	// promotioncommissionrecord.StatusValidator is a validator for the "status" field. It is called by the builders before save.
+	promotioncommissionrecord.StatusValidator = promotioncommissionrecordDescStatus.Validators[0].(func(string) error)
+	// promotioncommissionrecordDescCreatedAt is the schema descriptor for created_at field.
+	promotioncommissionrecordDescCreatedAt := promotioncommissionrecordFields[17].Descriptor()
+	// promotioncommissionrecord.DefaultCreatedAt holds the default value on creation for the created_at field.
+	promotioncommissionrecord.DefaultCreatedAt = promotioncommissionrecordDescCreatedAt.Default.(func() time.Time)
+	// promotioncommissionrecordDescUpdatedAt is the schema descriptor for updated_at field.
+	promotioncommissionrecordDescUpdatedAt := promotioncommissionrecordFields[18].Descriptor()
+	// promotioncommissionrecord.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	promotioncommissionrecord.DefaultUpdatedAt = promotioncommissionrecordDescUpdatedAt.Default.(func() time.Time)
+	// promotioncommissionrecord.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	promotioncommissionrecord.UpdateDefaultUpdatedAt = promotioncommissionrecordDescUpdatedAt.UpdateDefault.(func() time.Time)
+	promotionlevelconfigFields := schema.PromotionLevelConfig{}.Fields()
+	_ = promotionlevelconfigFields
+	// promotionlevelconfigDescLevelName is the schema descriptor for level_name field.
+	promotionlevelconfigDescLevelName := promotionlevelconfigFields[2].Descriptor()
+	// promotionlevelconfig.LevelNameValidator is a validator for the "level_name" field. It is called by the builders before save.
+	promotionlevelconfig.LevelNameValidator = func() func(string) error {
+		validators := promotionlevelconfigDescLevelName.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(level_name string) error {
+			for _, fn := range fns {
+				if err := fn(level_name); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// promotionlevelconfigDescRequiredActivatedInvites is the schema descriptor for required_activated_invites field.
+	promotionlevelconfigDescRequiredActivatedInvites := promotionlevelconfigFields[3].Descriptor()
+	// promotionlevelconfig.DefaultRequiredActivatedInvites holds the default value on creation for the required_activated_invites field.
+	promotionlevelconfig.DefaultRequiredActivatedInvites = promotionlevelconfigDescRequiredActivatedInvites.Default.(int)
+	// promotionlevelconfigDescDirectRate is the schema descriptor for direct_rate field.
+	promotionlevelconfigDescDirectRate := promotionlevelconfigFields[4].Descriptor()
+	// promotionlevelconfig.DefaultDirectRate holds the default value on creation for the direct_rate field.
+	promotionlevelconfig.DefaultDirectRate = promotionlevelconfigDescDirectRate.Default.(float64)
+	// promotionlevelconfigDescIndirectRate is the schema descriptor for indirect_rate field.
+	promotionlevelconfigDescIndirectRate := promotionlevelconfigFields[5].Descriptor()
+	// promotionlevelconfig.DefaultIndirectRate holds the default value on creation for the indirect_rate field.
+	promotionlevelconfig.DefaultIndirectRate = promotionlevelconfigDescIndirectRate.Default.(float64)
+	// promotionlevelconfigDescSortOrder is the schema descriptor for sort_order field.
+	promotionlevelconfigDescSortOrder := promotionlevelconfigFields[6].Descriptor()
+	// promotionlevelconfig.DefaultSortOrder holds the default value on creation for the sort_order field.
+	promotionlevelconfig.DefaultSortOrder = promotionlevelconfigDescSortOrder.Default.(int)
+	// promotionlevelconfigDescEnabled is the schema descriptor for enabled field.
+	promotionlevelconfigDescEnabled := promotionlevelconfigFields[7].Descriptor()
+	// promotionlevelconfig.DefaultEnabled holds the default value on creation for the enabled field.
+	promotionlevelconfig.DefaultEnabled = promotionlevelconfigDescEnabled.Default.(bool)
+	// promotionlevelconfigDescCreatedAt is the schema descriptor for created_at field.
+	promotionlevelconfigDescCreatedAt := promotionlevelconfigFields[8].Descriptor()
+	// promotionlevelconfig.DefaultCreatedAt holds the default value on creation for the created_at field.
+	promotionlevelconfig.DefaultCreatedAt = promotionlevelconfigDescCreatedAt.Default.(func() time.Time)
+	// promotionlevelconfigDescUpdatedAt is the schema descriptor for updated_at field.
+	promotionlevelconfigDescUpdatedAt := promotionlevelconfigFields[9].Descriptor()
+	// promotionlevelconfig.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	promotionlevelconfig.DefaultUpdatedAt = promotionlevelconfigDescUpdatedAt.Default.(func() time.Time)
+	// promotionlevelconfig.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	promotionlevelconfig.UpdateDefaultUpdatedAt = promotionlevelconfigDescUpdatedAt.UpdateDefault.(func() time.Time)
+	promotionscriptFields := schema.PromotionScript{}.Fields()
+	_ = promotionscriptFields
+	// promotionscriptDescName is the schema descriptor for name field.
+	promotionscriptDescName := promotionscriptFields[1].Descriptor()
+	// promotionscript.NameValidator is a validator for the "name" field. It is called by the builders before save.
+	promotionscript.NameValidator = func() func(string) error {
+		validators := promotionscriptDescName.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(name string) error {
+			for _, fn := range fns {
+				if err := fn(name); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// promotionscriptDescCategory is the schema descriptor for category field.
+	promotionscriptDescCategory := promotionscriptFields[2].Descriptor()
+	// promotionscript.DefaultCategory holds the default value on creation for the category field.
+	promotionscript.DefaultCategory = promotionscriptDescCategory.Default.(string)
+	// promotionscript.CategoryValidator is a validator for the "category" field. It is called by the builders before save.
+	promotionscript.CategoryValidator = promotionscriptDescCategory.Validators[0].(func(string) error)
+	// promotionscriptDescUseCount is the schema descriptor for use_count field.
+	promotionscriptDescUseCount := promotionscriptFields[4].Descriptor()
+	// promotionscript.DefaultUseCount holds the default value on creation for the use_count field.
+	promotionscript.DefaultUseCount = promotionscriptDescUseCount.Default.(int64)
+	// promotionscriptDescEnabled is the schema descriptor for enabled field.
+	promotionscriptDescEnabled := promotionscriptFields[5].Descriptor()
+	// promotionscript.DefaultEnabled holds the default value on creation for the enabled field.
+	promotionscript.DefaultEnabled = promotionscriptDescEnabled.Default.(bool)
+	// promotionscriptDescCreatedAt is the schema descriptor for created_at field.
+	promotionscriptDescCreatedAt := promotionscriptFields[7].Descriptor()
+	// promotionscript.DefaultCreatedAt holds the default value on creation for the created_at field.
+	promotionscript.DefaultCreatedAt = promotionscriptDescCreatedAt.Default.(func() time.Time)
+	// promotionscriptDescUpdatedAt is the schema descriptor for updated_at field.
+	promotionscriptDescUpdatedAt := promotionscriptFields[8].Descriptor()
+	// promotionscript.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	promotionscript.DefaultUpdatedAt = promotionscriptDescUpdatedAt.Default.(func() time.Time)
+	// promotionscript.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	promotionscript.UpdateDefaultUpdatedAt = promotionscriptDescUpdatedAt.UpdateDefault.(func() time.Time)
+	promotionsettingFields := schema.PromotionSetting{}.Fields()
+	_ = promotionsettingFields
+	// promotionsettingDescActivationThresholdAmount is the schema descriptor for activation_threshold_amount field.
+	promotionsettingDescActivationThresholdAmount := promotionsettingFields[1].Descriptor()
+	// promotionsetting.DefaultActivationThresholdAmount holds the default value on creation for the activation_threshold_amount field.
+	promotionsetting.DefaultActivationThresholdAmount = promotionsettingDescActivationThresholdAmount.Default.(float64)
+	// promotionsettingDescActivationBonusAmount is the schema descriptor for activation_bonus_amount field.
+	promotionsettingDescActivationBonusAmount := promotionsettingFields[2].Descriptor()
+	// promotionsetting.DefaultActivationBonusAmount holds the default value on creation for the activation_bonus_amount field.
+	promotionsetting.DefaultActivationBonusAmount = promotionsettingDescActivationBonusAmount.Default.(float64)
+	// promotionsettingDescSettlementEnabled is the schema descriptor for settlement_enabled field.
+	promotionsettingDescSettlementEnabled := promotionsettingFields[4].Descriptor()
+	// promotionsetting.DefaultSettlementEnabled holds the default value on creation for the settlement_enabled field.
+	promotionsetting.DefaultSettlementEnabled = promotionsettingDescSettlementEnabled.Default.(bool)
+	// promotionsettingDescCreatedAt is the schema descriptor for created_at field.
+	promotionsettingDescCreatedAt := promotionsettingFields[16].Descriptor()
+	// promotionsetting.DefaultCreatedAt holds the default value on creation for the created_at field.
+	promotionsetting.DefaultCreatedAt = promotionsettingDescCreatedAt.Default.(func() time.Time)
+	// promotionsettingDescUpdatedAt is the schema descriptor for updated_at field.
+	promotionsettingDescUpdatedAt := promotionsettingFields[17].Descriptor()
+	// promotionsetting.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	promotionsetting.DefaultUpdatedAt = promotionsettingDescUpdatedAt.Default.(func() time.Time)
+	// promotionsetting.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	promotionsetting.UpdateDefaultUpdatedAt = promotionsettingDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// promotionsettingDescID is the schema descriptor for id field.
+	promotionsettingDescID := promotionsettingFields[0].Descriptor()
+	// promotionsetting.DefaultID holds the default value on creation for the id field.
+	promotionsetting.DefaultID = promotionsettingDescID.Default.(int64)
+	promotionsettlementbatchFields := schema.PromotionSettlementBatch{}.Fields()
+	_ = promotionsettlementbatchFields
+	// promotionsettlementbatchDescStatus is the schema descriptor for status field.
+	promotionsettlementbatchDescStatus := promotionsettlementbatchFields[2].Descriptor()
+	// promotionsettlementbatch.DefaultStatus holds the default value on creation for the status field.
+	promotionsettlementbatch.DefaultStatus = promotionsettlementbatchDescStatus.Default.(string)
+	// promotionsettlementbatch.StatusValidator is a validator for the "status" field. It is called by the builders before save.
+	promotionsettlementbatch.StatusValidator = promotionsettlementbatchDescStatus.Validators[0].(func(string) error)
+	// promotionsettlementbatchDescTotalRecords is the schema descriptor for total_records field.
+	promotionsettlementbatchDescTotalRecords := promotionsettlementbatchFields[3].Descriptor()
+	// promotionsettlementbatch.DefaultTotalRecords holds the default value on creation for the total_records field.
+	promotionsettlementbatch.DefaultTotalRecords = promotionsettlementbatchDescTotalRecords.Default.(int)
+	// promotionsettlementbatchDescTotalAmount is the schema descriptor for total_amount field.
+	promotionsettlementbatchDescTotalAmount := promotionsettlementbatchFields[4].Descriptor()
+	// promotionsettlementbatch.DefaultTotalAmount holds the default value on creation for the total_amount field.
+	promotionsettlementbatch.DefaultTotalAmount = promotionsettlementbatchDescTotalAmount.Default.(float64)
+	// promotionsettlementbatchDescCreatedAt is the schema descriptor for created_at field.
+	promotionsettlementbatchDescCreatedAt := promotionsettlementbatchFields[8].Descriptor()
+	// promotionsettlementbatch.DefaultCreatedAt holds the default value on creation for the created_at field.
+	promotionsettlementbatch.DefaultCreatedAt = promotionsettlementbatchDescCreatedAt.Default.(func() time.Time)
+	// promotionsettlementbatchDescUpdatedAt is the schema descriptor for updated_at field.
+	promotionsettlementbatchDescUpdatedAt := promotionsettlementbatchFields[9].Descriptor()
+	// promotionsettlementbatch.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	promotionsettlementbatch.DefaultUpdatedAt = promotionsettlementbatchDescUpdatedAt.Default.(func() time.Time)
+	// promotionsettlementbatch.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	promotionsettlementbatch.UpdateDefaultUpdatedAt = promotionsettlementbatchDescUpdatedAt.UpdateDefault.(func() time.Time)
+	promotionuserFields := schema.PromotionUser{}.Fields()
+	_ = promotionuserFields
+	// promotionuserDescInviteCode is the schema descriptor for invite_code field.
+	promotionuserDescInviteCode := promotionuserFields[1].Descriptor()
+	// promotionuser.InviteCodeValidator is a validator for the "invite_code" field. It is called by the builders before save.
+	promotionuser.InviteCodeValidator = func() func(string) error {
+		validators := promotionuserDescInviteCode.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(invite_code string) error {
+			for _, fn := range fns {
+				if err := fn(invite_code); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// promotionuserDescBindingSource is the schema descriptor for binding_source field.
+	promotionuserDescBindingSource := promotionuserFields[3].Descriptor()
+	// promotionuser.DefaultBindingSource holds the default value on creation for the binding_source field.
+	promotionuser.DefaultBindingSource = promotionuserDescBindingSource.Default.(string)
+	// promotionuser.BindingSourceValidator is a validator for the "binding_source" field. It is called by the builders before save.
+	promotionuser.BindingSourceValidator = promotionuserDescBindingSource.Validators[0].(func(string) error)
+	// promotionuserDescCreatedAt is the schema descriptor for created_at field.
+	promotionuserDescCreatedAt := promotionuserFields[6].Descriptor()
+	// promotionuser.DefaultCreatedAt holds the default value on creation for the created_at field.
+	promotionuser.DefaultCreatedAt = promotionuserDescCreatedAt.Default.(func() time.Time)
+	// promotionuserDescUpdatedAt is the schema descriptor for updated_at field.
+	promotionuserDescUpdatedAt := promotionuserFields[7].Descriptor()
+	// promotionuser.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	promotionuser.DefaultUpdatedAt = promotionuserDescUpdatedAt.Default.(func() time.Time)
+	// promotionuser.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	promotionuser.UpdateDefaultUpdatedAt = promotionuserDescUpdatedAt.UpdateDefault.(func() time.Time)
 	proxyMixin := schema.Proxy{}.Mixin()
 	proxyMixinHooks1 := proxyMixin[1].Hooks()
 	proxy.Hooks[0] = proxyMixinHooks1[0]

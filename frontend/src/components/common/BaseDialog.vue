@@ -11,9 +11,9 @@
         @click.self="handleClose"
       >
         <!-- Modal panel -->
-        <div ref="dialogRef" :class="['modal-content', widthClasses]" @click.stop>
+        <div ref="dialogRef" :class="['modal-content', widthClasses, contentClass]" @click.stop>
           <!-- Header -->
-          <div class="modal-header">
+          <div :class="['modal-header', headerClass]">
             <h3 :id="dialogId" class="modal-title">
               {{ title }}
             </h3>
@@ -27,12 +27,12 @@
           </div>
 
           <!-- Body -->
-          <div class="modal-body">
+          <div :class="['modal-body', bodyClass]">
             <slot></slot>
           </div>
 
           <!-- Footer -->
-          <div v-if="$slots.footer" class="modal-footer">
+          <div v-if="$slots.footer" :class="['modal-footer', footerClass]">
             <slot name="footer"></slot>
           </div>
         </div>
@@ -62,6 +62,10 @@ interface Props {
   closeOnEscape?: boolean
   closeOnClickOutside?: boolean
   zIndex?: number
+  contentClass?: string
+  headerClass?: string
+  bodyClass?: string
+  footerClass?: string
 }
 
 interface Emits {

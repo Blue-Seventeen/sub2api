@@ -354,6 +354,8 @@ export default {
     github: 'GitHub',
     mySubscriptions: 'My Subscriptions',
     buySubscription: 'Recharge / Subscription',
+    promotion: 'Promotion Center',
+    promotionAdmin: 'Promotion Admin',
     docs: 'Docs',
     myOrders: 'My Orders',
     orderManagement: 'Orders',
@@ -822,6 +824,8 @@ export default {
     balanceAddedRedeem: 'Balance Added (Redeem)',
     balanceAddedAdmin: 'Balance Added (Admin)',
     balanceDeductedAdmin: 'Balance Deducted (Admin)',
+    balanceAddedPromotion: 'Promotion Reward Added',
+    balanceDeductedPromotion: 'Promotion Reward Reversed',
     concurrencyAddedRedeem: 'Concurrency Added (Redeem)',
     concurrencyAddedAdmin: 'Concurrency Added (Admin)',
     concurrencyReducedAdmin: 'Concurrency Reduced (Admin)',
@@ -2947,7 +2951,7 @@ export default {
       autoOpsDialog: {
         title: 'Auto Ops',
         summaryTitle: 'Global Auto Ops Configuration',
-        summaryDescription: 'Only accounts with error status and schedulable=true are processed. Saving an enabled config triggers an immediate run.',
+        summaryDescription: 'Target rules decide which accounts enter auto ops. Only rules marked as takeover continue into the existing action flow.',
         runtimeTitle: 'Runtime',
         enabledLabel: 'Enable Auto Ops',
         enabledHint: 'Run once immediately after saving, then continue on the configured interval.',
@@ -2958,9 +2962,72 @@ export default {
         configStatus: 'Configuration',
         configured: 'Saved',
         notConfigured: 'Not Saved',
+        targetRuleCount: 'Target Rules',
         ruleCount: 'Rules',
         logCount: 'Runs',
         sampleCount: 'Samples',
+        targetRulesTitle: 'Auto Ops Target Configuration',
+        targetRulesDescription: 'Target rules decide whether an account enters auto ops. Only takeover rules continue to the existing action flow.',
+        addTargetRule: 'Add Target Rule',
+        targetRulesEmpty: 'No target rules configured. Auto ops will not take over any account until a takeover rule matches.',
+        unnamedTargetRule: 'Unnamed Target Rule',
+        addCondition: 'Add Condition',
+        targetColumns: {
+          priority: 'Priority',
+          name: 'Rule Name',
+          conditions: 'Conditions',
+          action: 'Disposition',
+          operation: 'Actions'
+        },
+        targetEdit: {
+          priority: 'Priority',
+          name: 'Rule Name',
+          namePlaceholder: 'e.g. Error and scheduling enabled',
+          action: 'Disposition',
+          conditions: 'Conditions',
+          field: 'Field',
+          operator: 'Operator',
+          value: 'Value',
+          valuePlaceholder: 'Enter match value'
+        },
+        targetAction: {
+          takeover: 'Auto Ops Takeover',
+          manual: 'Manual Handling'
+        },
+        targetField: {
+          account_name: 'Account Name',
+          schedulable: 'Scheduling Status',
+          platform: 'Platform',
+          auth_type: 'Auth Type',
+          account_status: 'Account Status',
+          group: 'Group',
+          last_used_days: 'Last Used Days'
+        },
+        targetOperator: {
+          eq: '==',
+          neq: '!=',
+          contains: 'Contains',
+          not_contains: 'Not Contains'
+        },
+        targetBoolean: {
+          true: 'Enabled',
+          false: 'Disabled'
+        },
+        targetAccountStatus: {
+          normal: 'Normal',
+          rate_limited: 'Rate Limited',
+          error: 'Error',
+          paused: 'Paused',
+          temp_unschedulable: 'Temp Unschedulable'
+        },
+        targetGroup: {
+          ungrouped: 'Ungrouped'
+        },
+        targetLastUsedDays: {
+          placeholder: 'e.g. 8',
+          hint: 'Matches accounts last used N days ago or earlier. Accounts never used also count as matched.',
+          summary: '{days} day(s) ago or earlier'
+        },
         modelsTitle: 'Test Model Configuration',
         modelsDescription: 'When auto ops performs retest, models are tried in order by platform.',
         modelsEmpty: 'No models configured. The system default test model will be used.',

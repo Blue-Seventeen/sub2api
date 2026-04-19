@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/stretchr/testify/require"
 )
 
@@ -11,6 +13,16 @@ func TestNormalizeAccountAutoOpsConfig(t *testing.T) {
 	cfg := NormalizeAccountAutoOpsConfig(&AccountAutoOpsConfig{
 		Enabled:         true,
 		IntervalMinutes: 15,
+		TargetRules: []AccountAutoOpsTargetRule{
+			{
+				Name:     "  target rule  ",
+				Action:   AccountAutoOpsTargetActionTakeover,
+				Priority: 0,
+				Conditions: []AccountAutoOpsTargetCondition{
+					{Field: AccountAutoOpsTargetFieldAccountStatus, Operator: AccountAutoOpsTargetOperatorEQ, Value: " error "},
+				},
+			},
+		},
 		Rules: []AccountAutoOpsRule{
 			{
 				ID:        "",
@@ -29,6 +41,12 @@ func TestNormalizeAccountAutoOpsConfig(t *testing.T) {
 
 	require.True(t, cfg.Enabled)
 	require.Equal(t, 15, cfg.IntervalMinutes)
+	require.Len(t, cfg.TargetRules, 1)
+	require.True(t, cfg.TargetRulesInitialized)
+	require.NotEmpty(t, cfg.TargetRules[0].ID)
+	require.Equal(t, "target rule", cfg.TargetRules[0].Name)
+	require.Equal(t, 10, cfg.TargetRules[0].Priority)
+	require.Equal(t, "error", cfg.TargetRules[0].Conditions[0].Value)
 	require.Len(t, cfg.Rules, 1)
 	require.NotEmpty(t, cfg.Rules[0].ID)
 	require.Equal(t, "rule one", cfg.Rules[0].Name)
@@ -42,6 +60,17 @@ func TestValidateAccountAutoOpsConfig(t *testing.T) {
 	valid := &AccountAutoOpsConfig{
 		Enabled:         true,
 		IntervalMinutes: 10,
+		TargetRules: []AccountAutoOpsTargetRule{
+			{
+				ID:       "target_1",
+				Name:     "Target",
+				Priority: 10,
+				Action:   AccountAutoOpsTargetActionTakeover,
+				Conditions: []AccountAutoOpsTargetCondition{
+					{Field: AccountAutoOpsTargetFieldAccountStatus, Operator: AccountAutoOpsTargetOperatorEQ, Value: AccountAutoOpsTargetStatusError},
+				},
+			},
+		},
 		Rules: []AccountAutoOpsRule{
 			{
 				ID:        "rule_1",
@@ -58,6 +87,16 @@ func TestValidateAccountAutoOpsConfig(t *testing.T) {
 
 	invalid := &AccountAutoOpsConfig{
 		IntervalMinutes: 0,
+		TargetRules: []AccountAutoOpsTargetRule{
+			{
+				Name:     "",
+				Priority: 0,
+				Action:   "bad",
+				Conditions: []AccountAutoOpsTargetCondition{
+					{Field: "bad", Operator: "bad", Value: ""},
+				},
+			},
+		},
 		Rules: []AccountAutoOpsRule{
 			{
 				Name:      "",
@@ -70,6 +109,154 @@ func TestValidateAccountAutoOpsConfig(t *testing.T) {
 		},
 	}
 	require.Error(t, ValidateAccountAutoOpsConfig(invalid))
+}
+
+func TestMatchAccountAutoOpsTargetRule(t *testing.T) {
+	now := time.Date(2026, 4, 19, 12, 0, 0, 0, time.UTC)
+	lastUsed := now.Add(-9 * 24 * time.Hour)
+	account := &Account{
+		ID:                     1,
+		Name:                   "运维-openai",
+		Platform:               PlatformOpenAI,
+		Type:                   AccountTypeOAuth,
+		Status:                 StatusActive,
+		Schedulable:            false,
+		LastUsedAt:             &lastUsed,
+		GroupIDs:               []int64{88},
+		TempUnschedulableUntil: nil,
+	}
+	rateLimitedUntil := now.Add(2 * time.Hour)
+	account.RateLimitResetAt = &rateLimitedUntil
+
+	rule := AccountAutoOpsTargetRule{
+		ID:       "target_1",
+		Name:     "target",
+		Priority: 10,
+		Action:   AccountAutoOpsTargetActionTakeover,
+		Conditions: []AccountAutoOpsTargetCondition{
+			{Field: AccountAutoOpsTargetFieldAccountName, Operator: AccountAutoOpsTargetOperatorContains, Value: "运维"},
+			{Field: AccountAutoOpsTargetFieldSchedulable, Operator: AccountAutoOpsTargetOperatorEQ, Value: "false"},
+			{Field: AccountAutoOpsTargetFieldPlatform, Operator: AccountAutoOpsTargetOperatorEQ, Value: PlatformOpenAI},
+			{Field: AccountAutoOpsTargetFieldAuthType, Operator: AccountAutoOpsTargetOperatorEQ, Value: AccountTypeOAuth},
+			{Field: AccountAutoOpsTargetFieldAccountStatus, Operator: AccountAutoOpsTargetOperatorEQ, Value: AccountAutoOpsTargetStatusRateLimited},
+			{Field: AccountAutoOpsTargetFieldGroup, Operator: AccountAutoOpsTargetOperatorEQ, Value: "88"},
+			{Field: AccountAutoOpsTargetFieldLastUsedDays, Operator: AccountAutoOpsTargetOperatorEQ, Value: "8"},
+		},
+	}
+	require.True(t, MatchAccountAutoOpsTargetRule(rule, account, now))
+
+	rule.Conditions[5] = AccountAutoOpsTargetCondition{Field: AccountAutoOpsTargetFieldGroup, Operator: AccountAutoOpsTargetOperatorNEQ, Value: "88"}
+	require.False(t, MatchAccountAutoOpsTargetRule(rule, account, now))
+}
+
+func TestMatchAccountAutoOpsTargetRule_LastUsedDaysNilMatchesEq(t *testing.T) {
+	now := time.Date(2026, 4, 19, 12, 0, 0, 0, time.UTC)
+	account := &Account{
+		ID:          2,
+		Name:        "manual-account",
+		Platform:    PlatformGemini,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusError,
+		Schedulable: true,
+	}
+	eqRule := AccountAutoOpsTargetRule{
+		ID:       "target_eq",
+		Name:     "eq",
+		Priority: 10,
+		Action:   AccountAutoOpsTargetActionTakeover,
+		Conditions: []AccountAutoOpsTargetCondition{
+			{Field: AccountAutoOpsTargetFieldLastUsedDays, Operator: AccountAutoOpsTargetOperatorEQ, Value: "8"},
+		},
+	}
+	neqRule := AccountAutoOpsTargetRule{
+		ID:       "target_neq",
+		Name:     "neq",
+		Priority: 20,
+		Action:   AccountAutoOpsTargetActionManual,
+		Conditions: []AccountAutoOpsTargetCondition{
+			{Field: AccountAutoOpsTargetFieldLastUsedDays, Operator: AccountAutoOpsTargetOperatorNEQ, Value: "8"},
+		},
+	}
+	require.True(t, MatchAccountAutoOpsTargetRule(eqRule, account, now))
+	require.False(t, MatchAccountAutoOpsTargetRule(neqRule, account, now))
+}
+
+func TestWithMigratedLegacyAccountAutoOpsTargetRules(t *testing.T) {
+	cfg := WithMigratedLegacyAccountAutoOpsTargetRules(&AccountAutoOpsConfig{
+		Enabled:                true,
+		IntervalMinutes:        10,
+		TargetRules:            nil,
+		TargetRulesInitialized: false,
+		Rules: []AccountAutoOpsRule{
+			{
+				ID:        "rule_1",
+				Name:      "Account name match",
+				Subject:   AccountAutoOpsSubjectAccountName,
+				Priority:  10,
+				MatchType: AccountAutoOpsMatchContains,
+				Pattern:   "test",
+				Action:    AccountAutoOpsActionRecoverState,
+			},
+		},
+	})
+	require.Len(t, cfg.TargetRules, 1)
+	require.True(t, cfg.TargetRulesInitialized)
+	require.Equal(t, accountAutoOpsLegacyTargetRuleID, cfg.TargetRules[0].ID)
+	require.Equal(t, AccountAutoOpsTargetActionTakeover, cfg.TargetRules[0].Action)
+	require.Equal(t, AccountAutoOpsTargetFieldAccountStatus, cfg.TargetRules[0].Conditions[0].Field)
+	require.Equal(t, AccountAutoOpsTargetFieldSchedulable, cfg.TargetRules[0].Conditions[1].Field)
+}
+
+type accountAutoOpsRepoStub struct {
+	AccountRepository
+	listItems     []Account
+	selectedItems []*Account
+}
+
+func (s *accountAutoOpsRepoStub) List(_ context.Context, _ pagination.PaginationParams) ([]Account, *pagination.PaginationResult, error) {
+	return s.listItems, &pagination.PaginationResult{Total: int64(len(s.listItems)), Page: 1, PageSize: len(s.listItems), Pages: 1}, nil
+}
+
+func (s *accountAutoOpsRepoStub) GetByIDs(_ context.Context, _ []int64) ([]*Account, error) {
+	return s.selectedItems, nil
+}
+
+func TestAccountAutoOpsServiceFilterTargetRulesForManualAndAutomatic(t *testing.T) {
+	now := time.Date(2026, 4, 19, 12, 0, 0, 0, time.UTC)
+	older := now.Add(-9 * 24 * time.Hour)
+	matching := Account{ID: 1, Name: "ops-openai", Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusError, Schedulable: true, LastUsedAt: &older}
+	manual := Account{ID: 2, Name: "manual-openai", Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusError, Schedulable: false}
+	repo := &accountAutoOpsRepoStub{
+		listItems:     []Account{matching, manual},
+		selectedItems: []*Account{&matching, &manual},
+	}
+	svc := NewAccountAutoOpsService(nil, repo, nil, nil, nil, nil, nil, nil)
+	cfg := &AccountAutoOpsConfig{
+		TargetRules: []AccountAutoOpsTargetRule{
+			{
+				ID:       "takeover",
+				Name:     "takeover",
+				Priority: 10,
+				Action:   AccountAutoOpsTargetActionTakeover,
+				Conditions: []AccountAutoOpsTargetCondition{
+					{Field: AccountAutoOpsTargetFieldAccountStatus, Operator: AccountAutoOpsTargetOperatorEQ, Value: AccountAutoOpsTargetStatusError},
+					{Field: AccountAutoOpsTargetFieldSchedulable, Operator: AccountAutoOpsTargetOperatorEQ, Value: "true"},
+				},
+			},
+			{
+				ID:       "manual",
+				Name:     "manual",
+				Priority: 20,
+				Action:   AccountAutoOpsTargetActionManual,
+				Conditions: []AccountAutoOpsTargetCondition{
+					{Field: AccountAutoOpsTargetFieldAccountStatus, Operator: AccountAutoOpsTargetOperatorEQ, Value: AccountAutoOpsTargetStatusError},
+				},
+			},
+		},
+	}
+	filteredAuto := svc.filterAccountsByTargetRules([]*Account{&matching, &manual}, cfg, now)
+	require.Len(t, filteredAuto, 1)
+	require.Equal(t, int64(1), filteredAuto[0].ID)
 }
 
 func TestMatchAccountAutoOpsRule(t *testing.T) {

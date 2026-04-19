@@ -7,6 +7,7 @@ import { defineStore } from 'pinia'
 import { ref, computed, readonly } from 'vue'
 import { authAPI, isTotp2FARequired, type LoginResponse } from '@/api'
 import type { User, LoginRequest, RegisterRequest, AuthResponse } from '@/types'
+import { tryBindStoredPromotionRef } from '@/composables/usePromotionAttribution'
 
 const AUTH_TOKEN_KEY = 'auth_token'
 const AUTH_USER_KEY = 'auth_user'
@@ -266,6 +267,7 @@ export const useAuthStore = defineStore('auth', () => {
 
       // Use the common helper to set auth state
       setAuthFromResponse(response)
+      await tryBindStoredPromotionRef()
 
       return user.value!
     } catch (error) {
@@ -304,6 +306,7 @@ export const useAuthStore = defineStore('auth', () => {
 
     try {
       const userData = await refreshUser()
+      await tryBindStoredPromotionRef()
       startAutoRefresh()
 
       // Start proactive token refresh if we have refresh token and expiry info

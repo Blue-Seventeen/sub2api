@@ -165,6 +165,90 @@ func (f PromoCodeUsageFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Val
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.PromoCodeUsageMutation", m)
 }
 
+// The PromotionActivationFunc type is an adapter to allow the use of ordinary
+// function as PromotionActivation mutator.
+type PromotionActivationFunc func(context.Context, *ent.PromotionActivationMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f PromotionActivationFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.PromotionActivationMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.PromotionActivationMutation", m)
+}
+
+// The PromotionCommissionRecordFunc type is an adapter to allow the use of ordinary
+// function as PromotionCommissionRecord mutator.
+type PromotionCommissionRecordFunc func(context.Context, *ent.PromotionCommissionRecordMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f PromotionCommissionRecordFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.PromotionCommissionRecordMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.PromotionCommissionRecordMutation", m)
+}
+
+// The PromotionLevelConfigFunc type is an adapter to allow the use of ordinary
+// function as PromotionLevelConfig mutator.
+type PromotionLevelConfigFunc func(context.Context, *ent.PromotionLevelConfigMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f PromotionLevelConfigFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.PromotionLevelConfigMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.PromotionLevelConfigMutation", m)
+}
+
+// The PromotionScriptFunc type is an adapter to allow the use of ordinary
+// function as PromotionScript mutator.
+type PromotionScriptFunc func(context.Context, *ent.PromotionScriptMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f PromotionScriptFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.PromotionScriptMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.PromotionScriptMutation", m)
+}
+
+// The PromotionSettingFunc type is an adapter to allow the use of ordinary
+// function as PromotionSetting mutator.
+type PromotionSettingFunc func(context.Context, *ent.PromotionSettingMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f PromotionSettingFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.PromotionSettingMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.PromotionSettingMutation", m)
+}
+
+// The PromotionSettlementBatchFunc type is an adapter to allow the use of ordinary
+// function as PromotionSettlementBatch mutator.
+type PromotionSettlementBatchFunc func(context.Context, *ent.PromotionSettlementBatchMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f PromotionSettlementBatchFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.PromotionSettlementBatchMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.PromotionSettlementBatchMutation", m)
+}
+
+// The PromotionUserFunc type is an adapter to allow the use of ordinary
+// function as PromotionUser mutator.
+type PromotionUserFunc func(context.Context, *ent.PromotionUserMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f PromotionUserFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.PromotionUserMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.PromotionUserMutation", m)
+}
+
 // The ProxyFunc type is an adapter to allow the use of ordinary
 // function as Proxy mutator.
 type ProxyFunc func(context.Context, *ent.ProxyMutation) (ent.Value, error)

@@ -354,6 +354,8 @@ export default {
     github: 'GitHub',
     mySubscriptions: '我的订阅',
     buySubscription: '充值/订阅',
+    promotion: '推广中心',
+    promotionAdmin: '推广管理',
     docs: '文档',
     myOrders: '我的订单',
     orderManagement: '订单管理',
@@ -826,6 +828,8 @@ export default {
     balanceAddedRedeem: '余额充值（兑换）',
     balanceAddedAdmin: '余额充值（管理员）',
     balanceDeductedAdmin: '余额扣除（管理员）',
+    balanceAddedPromotion: '推广收益发放',
+    balanceDeductedPromotion: '推广收益冲回',
     concurrencyAddedRedeem: '并发增加（兑换）',
     concurrencyAddedAdmin: '并发增加（管理员）',
     concurrencyReducedAdmin: '并发减少（管理员）',
@@ -2352,7 +2356,7 @@ export default {
       autoOpsDialog: {
         title: '\u81ea\u52a8\u8fd0\u7ef4',
         summaryTitle: '\u5168\u5c40\u81ea\u52a8\u8fd0\u7ef4\u914d\u7f6e',
-        summaryDescription: '\u53ea\u5904\u7406\u72b6\u6001\u4e3a\u9519\u8bef\u4e14 schedulable=true \u7684\u8d26\u53f7\u3002\u4fdd\u5b58\u4e14\u542f\u7528\u540e\uff0c\u4f1a\u7acb\u5373\u89e6\u53d1\u4e00\u6b21\u81ea\u52a8\u8fd0\u7ef4\u3002',
+        summaryDescription: '对象规则决定哪些账号会进入自动运维。只有命中“自动运维接管”的规则，才会继续执行现有运维动作流程。',
         runtimeTitle: '\u8fd0\u884c\u72b6\u6001',
         enabledLabel: '\u542f\u7528\u81ea\u52a8\u8fd0\u7ef4',
         enabledHint: '\u4fdd\u5b58\u540e\u7acb\u5373\u6267\u884c\u4e00\u6b21\uff0c\u4e4b\u540e\u6309\u95f4\u9694\u8f6e\u8be2\u3002',
@@ -2363,9 +2367,72 @@ export default {
         configStatus: '\u914d\u7f6e\u72b6\u6001',
         configured: '\u5df2\u4fdd\u5b58',
         notConfigured: '\u672a\u4fdd\u5b58',
+        targetRuleCount: '对象规则',
         ruleCount: '\u89c4\u5219\u6570\u91cf',
         logCount: '\u8fd0\u7ef4\u8bb0\u5f55',
         sampleCount: '\u54cd\u5e94\u6837\u672c',
+        targetRulesTitle: '自动运维对象配置',
+        targetRulesDescription: '对象规则决定账号是否进入自动运维。只有“自动运维接管”才会进入后续动作流程。',
+        addTargetRule: '新增对象规则',
+        targetRulesEmpty: '暂无对象规则。当前不会接管任何账号，只有命中“自动运维接管”规则的账号才会进入自动运维。',
+        unnamedTargetRule: '未命名对象规则',
+        addCondition: '新增条件',
+        targetColumns: {
+          priority: '优先级',
+          name: '规则名称',
+          conditions: '匹配条件',
+          action: '处置手段',
+          operation: '操作'
+        },
+        targetEdit: {
+          priority: '优先级',
+          name: '规则名称',
+          namePlaceholder: '例如：错误且调度开启',
+          action: '处置手段',
+          conditions: '匹配条件',
+          field: '字段',
+          operator: '运算符',
+          value: '匹配值',
+          valuePlaceholder: '请输入匹配值'
+        },
+        targetAction: {
+          takeover: '自动运维接管',
+          manual: '人工运维'
+        },
+        targetField: {
+          account_name: '账号名称',
+          schedulable: '调度状态',
+          platform: '账号平台',
+          auth_type: '认证类型',
+          account_status: '账号状态',
+          group: '账号分组',
+          last_used_days: '最近使用天数'
+        },
+        targetOperator: {
+          eq: '==',
+          neq: '!=',
+          contains: '包含',
+          not_contains: '不包含'
+        },
+        targetBoolean: {
+          true: '启用',
+          false: '未启用'
+        },
+        targetAccountStatus: {
+          normal: '正常',
+          rate_limited: '限流中',
+          error: '错误',
+          paused: '暂停',
+          temp_unschedulable: '临时不可调度'
+        },
+        targetGroup: {
+          ungrouped: '未分组'
+        },
+        targetLastUsedDays: {
+          placeholder: '例如 8',
+          hint: '匹配 N 天前及更早的账号；从未使用过的账号也会视为命中。',
+          summary: '{days} 天前及更早'
+        },
         modelsTitle: '\u6d4b\u8bd5\u6a21\u578b\u914d\u7f6e',
         modelsDescription: '\u81ea\u52a8\u8fd0\u7ef4\u6267\u884c\u201c\u91cd\u65b0\u6d4b\u8bd5\u201d\u65f6\uff0c\u4f1a\u6309\u5e73\u53f0\u914d\u7f6e\u7684\u6a21\u578b\u5217\u8868\u4f9d\u6b21\u5c1d\u8bd5\u3002',
         modelsEmpty: '\u672a\u914d\u7f6e\u6a21\u578b\uff0c\u5c4a\u65f6\u4f1a\u4f7f\u7528\u7cfb\u7edf\u9ed8\u8ba4\u6d4b\u8bd5\u6a21\u578b\u3002',

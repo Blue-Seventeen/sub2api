@@ -40,6 +40,20 @@ type Tx struct {
 	PromoCode *PromoCodeClient
 	// PromoCodeUsage is the client for interacting with the PromoCodeUsage builders.
 	PromoCodeUsage *PromoCodeUsageClient
+	// PromotionActivation is the client for interacting with the PromotionActivation builders.
+	PromotionActivation *PromotionActivationClient
+	// PromotionCommissionRecord is the client for interacting with the PromotionCommissionRecord builders.
+	PromotionCommissionRecord *PromotionCommissionRecordClient
+	// PromotionLevelConfig is the client for interacting with the PromotionLevelConfig builders.
+	PromotionLevelConfig *PromotionLevelConfigClient
+	// PromotionScript is the client for interacting with the PromotionScript builders.
+	PromotionScript *PromotionScriptClient
+	// PromotionSetting is the client for interacting with the PromotionSetting builders.
+	PromotionSetting *PromotionSettingClient
+	// PromotionSettlementBatch is the client for interacting with the PromotionSettlementBatch builders.
+	PromotionSettlementBatch *PromotionSettlementBatchClient
+	// PromotionUser is the client for interacting with the PromotionUser builders.
+	PromotionUser *PromotionUserClient
 	// Proxy is the client for interacting with the Proxy builders.
 	Proxy *ProxyClient
 	// RedeemCode is the client for interacting with the RedeemCode builders.
@@ -210,6 +224,13 @@ func (tx *Tx) init() {
 	tx.PaymentProviderInstance = NewPaymentProviderInstanceClient(tx.config)
 	tx.PromoCode = NewPromoCodeClient(tx.config)
 	tx.PromoCodeUsage = NewPromoCodeUsageClient(tx.config)
+	tx.PromotionActivation = NewPromotionActivationClient(tx.config)
+	tx.PromotionCommissionRecord = NewPromotionCommissionRecordClient(tx.config)
+	tx.PromotionLevelConfig = NewPromotionLevelConfigClient(tx.config)
+	tx.PromotionScript = NewPromotionScriptClient(tx.config)
+	tx.PromotionSetting = NewPromotionSettingClient(tx.config)
+	tx.PromotionSettlementBatch = NewPromotionSettlementBatchClient(tx.config)
+	tx.PromotionUser = NewPromotionUserClient(tx.config)
 	tx.Proxy = NewProxyClient(tx.config)
 	tx.RedeemCode = NewRedeemCodeClient(tx.config)
 	tx.SecuritySecret = NewSecuritySecretClient(tx.config)

@@ -7,6 +7,7 @@ const {
   getAutoOpsLogsMock,
   getAutoOpsSamplesMock,
   getAutoOpsModelOptionsMock,
+  getAllGroupsMock,
   updateAutoOpsConfigMock,
   showErrorMock,
   showSuccessMock
@@ -15,6 +16,7 @@ const {
   getAutoOpsLogsMock: vi.fn(),
   getAutoOpsSamplesMock: vi.fn(),
   getAutoOpsModelOptionsMock: vi.fn(),
+  getAllGroupsMock: vi.fn(),
   updateAutoOpsConfigMock: vi.fn(),
   showErrorMock: vi.fn(),
   showSuccessMock: vi.fn()
@@ -28,6 +30,9 @@ vi.mock('@/api/admin', () => ({
       getAutoOpsSamples: getAutoOpsSamplesMock,
       getAutoOpsModelOptions: getAutoOpsModelOptionsMock,
       updateAutoOpsConfig: updateAutoOpsConfigMock
+    },
+    groups: {
+      getAll: getAllGroupsMock
     }
   }
 }))
@@ -107,9 +112,22 @@ function buildConfig() {
     enabled: true,
     interval_minutes: 15,
     configured: true,
+    target_rules_initialized: true,
     test_models_by_platform: {
       openai: ['gpt-5.4-mini']
     },
+    target_rules: [
+      {
+        id: 'target-rule-a',
+        name: 'Error and schedulable',
+        priority: 10,
+        action: 'takeover',
+        conditions: [
+          { field: 'account_status', operator: 'eq', value: 'error' },
+          { field: 'schedulable', operator: 'eq', value: 'true' }
+        ]
+      }
+    ],
     rules: [
       {
         id: 'rule-b',
@@ -281,6 +299,7 @@ describe('AccountAutoOpsModal', () => {
         openai: [{ id: 'gpt-5.4-mini', display_name: 'GPT 5.4 Mini' }]
       }
     })
+    getAllGroupsMock.mockResolvedValue([{ id: 101, name: 'Group Alpha' }])
     updateAutoOpsConfigMock.mockResolvedValue(buildConfig())
     showErrorMock.mockReset()
     showSuccessMock.mockReset()
@@ -330,5 +349,46 @@ describe('AccountAutoOpsModal', () => {
 
     const emptyRun = wrapper.get('[data-testid="auto-ops-run-102"]')
     expect(emptyRun.text()).toContain('admin.accounts.autoOpsDialog.noMatchedRules')
+  })
+
+  it('支持编辑对象规则条件并在保存时提交 target_rules', async () => {
+    const wrapper = await openModal()
+
+    expect(wrapper.find('[data-testid="auto-ops-target-rule-row-target-rule-a"]').exists()).toBe(true)
+
+    await wrapper.get('[data-testid="auto-ops-target-edit-target-rule-a"]').trigger('click')
+    expect(wrapper.find('[data-testid="auto-ops-target-edit-panel-target-rule-a"]').exists()).toBe(true)
+
+    await wrapper
+      .get('[data-testid="auto-ops-target-condition-field-target-rule-a-0"]')
+      .setValue('group')
+    await flushPromises()
+
+    const valueSelect = wrapper.get('[data-testid="auto-ops-target-condition-value-target-rule-a-0"]')
+    await valueSelect.setValue('101')
+    await flushPromises()
+
+    await wrapper.get('[data-testid="auto-ops-target-condition-field-target-rule-a-1"]').setValue('last_used_days')
+    await flushPromises()
+    const lastUsedInput = wrapper.get('[data-testid="auto-ops-target-condition-value-target-rule-a-1"]')
+    await lastUsedInput.setValue('8')
+
+    await wrapper.get('.btn.btn-primary').trigger('click')
+    await flushPromises()
+
+    expect(updateAutoOpsConfigMock).toHaveBeenCalledTimes(1)
+    expect(updateAutoOpsConfigMock.mock.calls[0][0]).toMatchObject({
+      target_rules_initialized: true,
+      target_rules: [
+        {
+          id: 'target-rule-a',
+          action: 'takeover',
+          conditions: [
+            { field: 'group', operator: 'eq', value: '101' },
+            { field: 'last_used_days', operator: 'eq', value: '8' }
+          ]
+        }
+      ]
+    })
   })
 })

@@ -31,5 +31,8 @@ describe('account locale strings', () => {
     expect(zh.admin.accounts.rateLimitCleared).toBe('限流状态已清除')
     expect(zh.admin.accounts.addModel).toBe('添加')
     expect(zh.admin.accounts.autoOpsDialog.title).toBe('自动运维')
+    expect(zh.admin.accounts.autoOpsDialog.targetRulesTitle).toBe('自动运维对象配置')
+    expect(zh.admin.accounts.autoOpsDialog.targetAction.takeover).toBe('自动运维接管')
+    expect(zh.admin.accounts.autoOpsDialog.targetField.last_used_days).toBe('最近使用天数')
   })
 })

@@ -22,6 +22,13 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
 	"github.com/Wei-Shaw/sub2api/ent/promocode"
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
+	"github.com/Wei-Shaw/sub2api/ent/promotionactivation"
+	"github.com/Wei-Shaw/sub2api/ent/promotioncommissionrecord"
+	"github.com/Wei-Shaw/sub2api/ent/promotionlevelconfig"
+	"github.com/Wei-Shaw/sub2api/ent/promotionscript"
+	"github.com/Wei-Shaw/sub2api/ent/promotionsetting"
+	"github.com/Wei-Shaw/sub2api/ent/promotionsettlementbatch"
+	"github.com/Wei-Shaw/sub2api/ent/promotionuser"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/securitysecret"
@@ -444,6 +451,195 @@ func (f TraversePromoCodeUsage) Traverse(ctx context.Context, q ent.Query) error
 	return fmt.Errorf("unexpected query type %T. expect *ent.PromoCodeUsageQuery", q)
 }
 
+// The PromotionActivationFunc type is an adapter to allow the use of ordinary function as a Querier.
+type PromotionActivationFunc func(context.Context, *ent.PromotionActivationQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f PromotionActivationFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.PromotionActivationQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.PromotionActivationQuery", q)
+}
+
+// The TraversePromotionActivation type is an adapter to allow the use of ordinary function as Traverser.
+type TraversePromotionActivation func(context.Context, *ent.PromotionActivationQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraversePromotionActivation) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraversePromotionActivation) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.PromotionActivationQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.PromotionActivationQuery", q)
+}
+
+// The PromotionCommissionRecordFunc type is an adapter to allow the use of ordinary function as a Querier.
+type PromotionCommissionRecordFunc func(context.Context, *ent.PromotionCommissionRecordQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f PromotionCommissionRecordFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.PromotionCommissionRecordQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.PromotionCommissionRecordQuery", q)
+}
+
+// The TraversePromotionCommissionRecord type is an adapter to allow the use of ordinary function as Traverser.
+type TraversePromotionCommissionRecord func(context.Context, *ent.PromotionCommissionRecordQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraversePromotionCommissionRecord) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraversePromotionCommissionRecord) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.PromotionCommissionRecordQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.PromotionCommissionRecordQuery", q)
+}
+
+// The PromotionLevelConfigFunc type is an adapter to allow the use of ordinary function as a Querier.
+type PromotionLevelConfigFunc func(context.Context, *ent.PromotionLevelConfigQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f PromotionLevelConfigFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.PromotionLevelConfigQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.PromotionLevelConfigQuery", q)
+}
+
+// The TraversePromotionLevelConfig type is an adapter to allow the use of ordinary function as Traverser.
+type TraversePromotionLevelConfig func(context.Context, *ent.PromotionLevelConfigQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraversePromotionLevelConfig) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraversePromotionLevelConfig) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.PromotionLevelConfigQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.PromotionLevelConfigQuery", q)
+}
+
+// The PromotionScriptFunc type is an adapter to allow the use of ordinary function as a Querier.
+type PromotionScriptFunc func(context.Context, *ent.PromotionScriptQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f PromotionScriptFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.PromotionScriptQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.PromotionScriptQuery", q)
+}
+
+// The TraversePromotionScript type is an adapter to allow the use of ordinary function as Traverser.
+type TraversePromotionScript func(context.Context, *ent.PromotionScriptQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraversePromotionScript) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraversePromotionScript) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.PromotionScriptQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.PromotionScriptQuery", q)
+}
+
+// The PromotionSettingFunc type is an adapter to allow the use of ordinary function as a Querier.
+type PromotionSettingFunc func(context.Context, *ent.PromotionSettingQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f PromotionSettingFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.PromotionSettingQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.PromotionSettingQuery", q)
+}
+
+// The TraversePromotionSetting type is an adapter to allow the use of ordinary function as Traverser.
+type TraversePromotionSetting func(context.Context, *ent.PromotionSettingQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraversePromotionSetting) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraversePromotionSetting) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.PromotionSettingQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.PromotionSettingQuery", q)
+}
+
+// The PromotionSettlementBatchFunc type is an adapter to allow the use of ordinary function as a Querier.
+type PromotionSettlementBatchFunc func(context.Context, *ent.PromotionSettlementBatchQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f PromotionSettlementBatchFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.PromotionSettlementBatchQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.PromotionSettlementBatchQuery", q)
+}
+
+// The TraversePromotionSettlementBatch type is an adapter to allow the use of ordinary function as Traverser.
+type TraversePromotionSettlementBatch func(context.Context, *ent.PromotionSettlementBatchQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraversePromotionSettlementBatch) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraversePromotionSettlementBatch) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.PromotionSettlementBatchQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.PromotionSettlementBatchQuery", q)
+}
+
+// The PromotionUserFunc type is an adapter to allow the use of ordinary function as a Querier.
+type PromotionUserFunc func(context.Context, *ent.PromotionUserQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f PromotionUserFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.PromotionUserQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.PromotionUserQuery", q)
+}
+
+// The TraversePromotionUser type is an adapter to allow the use of ordinary function as Traverser.
+type TraversePromotionUser func(context.Context, *ent.PromotionUserQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraversePromotionUser) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraversePromotionUser) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.PromotionUserQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.PromotionUserQuery", q)
+}
+
 // The ProxyFunc type is an adapter to allow the use of ordinary function as a Querier.
 type ProxyFunc func(context.Context, *ent.ProxyQuery) (ent.Value, error)
 
@@ -824,6 +1020,20 @@ func NewQuery(q ent.Query) (Query, error) {
 		return &query[*ent.PromoCodeQuery, predicate.PromoCode, promocode.OrderOption]{typ: ent.TypePromoCode, tq: q}, nil
 	case *ent.PromoCodeUsageQuery:
 		return &query[*ent.PromoCodeUsageQuery, predicate.PromoCodeUsage, promocodeusage.OrderOption]{typ: ent.TypePromoCodeUsage, tq: q}, nil
+	case *ent.PromotionActivationQuery:
+		return &query[*ent.PromotionActivationQuery, predicate.PromotionActivation, promotionactivation.OrderOption]{typ: ent.TypePromotionActivation, tq: q}, nil
+	case *ent.PromotionCommissionRecordQuery:
+		return &query[*ent.PromotionCommissionRecordQuery, predicate.PromotionCommissionRecord, promotioncommissionrecord.OrderOption]{typ: ent.TypePromotionCommissionRecord, tq: q}, nil
+	case *ent.PromotionLevelConfigQuery:
+		return &query[*ent.PromotionLevelConfigQuery, predicate.PromotionLevelConfig, promotionlevelconfig.OrderOption]{typ: ent.TypePromotionLevelConfig, tq: q}, nil
+	case *ent.PromotionScriptQuery:
+		return &query[*ent.PromotionScriptQuery, predicate.PromotionScript, promotionscript.OrderOption]{typ: ent.TypePromotionScript, tq: q}, nil
+	case *ent.PromotionSettingQuery:
+		return &query[*ent.PromotionSettingQuery, predicate.PromotionSetting, promotionsetting.OrderOption]{typ: ent.TypePromotionSetting, tq: q}, nil
+	case *ent.PromotionSettlementBatchQuery:
+		return &query[*ent.PromotionSettlementBatchQuery, predicate.PromotionSettlementBatch, promotionsettlementbatch.OrderOption]{typ: ent.TypePromotionSettlementBatch, tq: q}, nil
+	case *ent.PromotionUserQuery:
+		return &query[*ent.PromotionUserQuery, predicate.PromotionUser, promotionuser.OrderOption]{typ: ent.TypePromotionUser, tq: q}, nil
 	case *ent.ProxyQuery:
 		return &query[*ent.ProxyQuery, predicate.Proxy, proxy.OrderOption]{typ: ent.TypeProxy, tq: q}, nil
 	case *ent.RedeemCodeQuery:

@@ -1052,10 +1052,12 @@ func (h *AccountHandler) BatchRefresh(c *gin.Context) {
 }
 
 type UpdateAccountAutoOpsConfigRequest struct {
-	Enabled              bool                         `json:"enabled"`
-	IntervalMinutes      int                          `json:"interval_minutes"`
-	Rules                []service.AccountAutoOpsRule `json:"rules"`
-	TestModelsByPlatform map[string][]string          `json:"test_models_by_platform"`
+	Enabled                bool                               `json:"enabled"`
+	IntervalMinutes        int                                `json:"interval_minutes"`
+	TargetRules            []service.AccountAutoOpsTargetRule `json:"target_rules"`
+	TargetRulesInitialized bool                               `json:"target_rules_initialized"`
+	Rules                  []service.AccountAutoOpsRule       `json:"rules"`
+	TestModelsByPlatform   map[string][]string                `json:"test_models_by_platform"`
 }
 
 type ManualAccountAutoOpsRunRequest struct {
@@ -1090,10 +1092,12 @@ func (h *AccountHandler) UpdateAutoOpsConfig(c *gin.Context) {
 		return
 	}
 	cfg, err := h.accountAutoOpsService.UpdateConfig(c.Request.Context(), &service.AccountAutoOpsConfig{
-		Enabled:              req.Enabled,
-		IntervalMinutes:      req.IntervalMinutes,
-		Rules:                req.Rules,
-		TestModelsByPlatform: req.TestModelsByPlatform,
+		Enabled:                req.Enabled,
+		IntervalMinutes:        req.IntervalMinutes,
+		TargetRules:            req.TargetRules,
+		TargetRulesInitialized: req.TargetRulesInitialized,
+		Rules:                  req.Rules,
+		TestModelsByPlatform:   req.TestModelsByPlatform,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)

@@ -16,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -114,6 +115,7 @@ func (s *AccountAutoOpsService) UpdateConfig(ctx context.Context, cfg *AccountAu
 		return nil, fmt.Errorf("setting service is not configured")
 	}
 	normalized := NormalizeAccountAutoOpsConfig(cfg)
+	normalized.TargetRulesInitialized = true
 	if err := ValidateAccountAutoOpsConfig(normalized); err != nil {
 		return nil, err
 	}
@@ -228,10 +230,11 @@ func (s *AccountAutoOpsService) RunAutomatic(ctx context.Context) (*AccountAutoO
 	if cfg == nil || !cfg.Enabled || !cfg.Configured {
 		return nil, nil
 	}
-	accounts, err := s.listEligibleAutoAccounts(ctx)
+	accounts, err := s.listCandidateAutoAccounts(ctx)
 	if err != nil {
 		return nil, err
 	}
+	accounts = s.filterAccountsByTargetRules(accounts, cfg, time.Now())
 	return s.runWithAccounts(ctx, AccountAutoOpsTriggerAutomatic, nil, accounts, cfg)
 }
 
@@ -246,9 +249,17 @@ func (s *AccountAutoOpsService) RunManual(ctx context.Context, accountIDs []int6
 	if cfg == nil || !cfg.Configured {
 		return nil, fmt.Errorf("account auto ops config is not set")
 	}
-	accounts, err := s.listEligibleSelectedAccounts(ctx, accountIDs)
+	accounts, err := s.listSelectedAccounts(ctx, accountIDs)
 	if err != nil {
 		return nil, err
+	}
+	accounts = s.filterAccountsByTargetRules(accounts, cfg, time.Now())
+	if len(accounts) == 0 {
+		return &AccountAutoOpsManualRunResult{
+			RunID:             0,
+			RequestedAccounts: len(accountIDs),
+			EligibleAccounts:  0,
+		}, nil
 	}
 	run, err := s.runWithAccounts(ctx, AccountAutoOpsTriggerManual, accountIDs, accounts, cfg)
 	if err != nil {
@@ -633,23 +644,44 @@ func (s *AccountAutoOpsService) cleanupOldLogs(ctx context.Context) {
 	}
 }
 
-func (s *AccountAutoOpsService) listEligibleAutoAccounts(ctx context.Context) ([]*Account, error) {
+func (s *AccountAutoOpsService) listCandidateAutoAccounts(ctx context.Context) ([]*Account, error) {
 	if s.accountRepo == nil {
 		return []*Account{}, nil
 	}
-	accounts, err := s.accountRepo.ListAutoOpsEligible(ctx)
-	if err != nil {
-		return nil, err
+	page := 1
+	result := make([]*Account, 0, 64)
+	for {
+		items, paging, err := s.accountRepo.List(ctx, pagination.PaginationParams{
+			Page:      page,
+			PageSize:  1000,
+			SortBy:    "priority",
+			SortOrder: pagination.SortOrderAsc,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if len(items) == 0 {
+			break
+		}
+		for i := range items {
+			account := items[i]
+			result = append(result, &account)
+		}
+		if paging == nil || page >= paging.Pages {
+			break
+		}
+		page++
 	}
-	result := make([]*Account, 0, len(accounts))
-	for i := range accounts {
-		account := accounts[i]
-		result = append(result, &account)
-	}
+	sort.SliceStable(result, func(i, j int) bool {
+		if result[i].Priority == result[j].Priority {
+			return result[i].ID < result[j].ID
+		}
+		return result[i].Priority < result[j].Priority
+	})
 	return result, nil
 }
 
-func (s *AccountAutoOpsService) listEligibleSelectedAccounts(ctx context.Context, accountIDs []int64) ([]*Account, error) {
+func (s *AccountAutoOpsService) listSelectedAccounts(ctx context.Context, accountIDs []int64) ([]*Account, error) {
 	if s.accountRepo == nil {
 		return []*Account{}, nil
 	}
@@ -662,14 +694,30 @@ func (s *AccountAutoOpsService) listEligibleSelectedAccounts(ctx context.Context
 		if account == nil {
 			continue
 		}
-		if account.Status == StatusError && account.Schedulable {
-			result = append(result, account)
-		}
+		result = append(result, account)
 	}
-	sort.Slice(result, func(i, j int) bool {
+	sort.SliceStable(result, func(i, j int) bool {
 		return result[i].ID < result[j].ID
 	})
 	return result, nil
+}
+
+func (s *AccountAutoOpsService) filterAccountsByTargetRules(accounts []*Account, cfg *AccountAutoOpsConfig, now time.Time) []*Account {
+	if cfg == nil || len(cfg.TargetRules) == 0 {
+		return []*Account{}
+	}
+	result := make([]*Account, 0, len(accounts))
+	for _, account := range accounts {
+		if account == nil {
+			continue
+		}
+		rule := FindMatchingAccountAutoOpsTargetRule(cfg.TargetRules, account, now)
+		if rule == nil || rule.Action != AccountAutoOpsTargetActionTakeover {
+			continue
+		}
+		result = append(result, account)
+	}
+	return result
 }
 
 func (s *AccountAutoOpsService) acquireRunLock(ctx context.Context) (func(), bool, error) {

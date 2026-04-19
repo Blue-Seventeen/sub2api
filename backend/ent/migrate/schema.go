@@ -713,6 +713,223 @@ var (
 			},
 		},
 	}
+	// PromotionActivationsColumns holds the columns for the "promotion_activations" table.
+	PromotionActivationsColumns = []*schema.Column{
+		{Name: "user_id", Type: field.TypeInt64, Increment: true},
+		{Name: "promoter_user_id", Type: field.TypeInt64},
+		{Name: "activated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "threshold_amount", Type: field.TypeFloat64, SchemaType: map[string]string{"postgres": "decimal(20,8)"}},
+		{Name: "trigger_usage_amount", Type: field.TypeFloat64, SchemaType: map[string]string{"postgres": "decimal(20,8)"}},
+		{Name: "commission_record_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// PromotionActivationsTable holds the schema information for the "promotion_activations" table.
+	PromotionActivationsTable = &schema.Table{
+		Name:       "promotion_activations",
+		Columns:    PromotionActivationsColumns,
+		PrimaryKey: []*schema.Column{PromotionActivationsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "promotionactivation_promoter_user_id",
+				Unique:  false,
+				Columns: []*schema.Column{PromotionActivationsColumns[1]},
+			},
+		},
+	}
+	// PromotionCommissionRecordsColumns holds the columns for the "promotion_commission_records" table.
+	PromotionCommissionRecordsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "beneficiary_user_id", Type: field.TypeInt64},
+		{Name: "source_user_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "business_date", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "date"}},
+		{Name: "commission_type", Type: field.TypeString, Size: 20},
+		{Name: "relation_depth", Type: field.TypeInt8, Default: 0},
+		{Name: "level_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "level_snapshot", Type: field.TypeString, Nullable: true, Size: 50},
+		{Name: "rate_snapshot", Type: field.TypeFloat64, Nullable: true, SchemaType: map[string]string{"postgres": "decimal(8,4)"}},
+		{Name: "base_amount", Type: field.TypeFloat64, Default: 0, SchemaType: map[string]string{"postgres": "decimal(20,8)"}},
+		{Name: "amount", Type: field.TypeFloat64, SchemaType: map[string]string{"postgres": "decimal(20,8)"}},
+		{Name: "status", Type: field.TypeString, Size: 20, Default: "pending"},
+		{Name: "settlement_batch_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "note", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "created_by_user_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "settled_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "cancelled_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// PromotionCommissionRecordsTable holds the schema information for the "promotion_commission_records" table.
+	PromotionCommissionRecordsTable = &schema.Table{
+		Name:       "promotion_commission_records",
+		Columns:    PromotionCommissionRecordsColumns,
+		PrimaryKey: []*schema.Column{PromotionCommissionRecordsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "promotioncommissionrecord_beneficiary_user_id_status_business_date",
+				Unique:  false,
+				Columns: []*schema.Column{PromotionCommissionRecordsColumns[1], PromotionCommissionRecordsColumns[11], PromotionCommissionRecordsColumns[3]},
+			},
+			{
+				Name:    "promotioncommissionrecord_status_business_date",
+				Unique:  false,
+				Columns: []*schema.Column{PromotionCommissionRecordsColumns[11], PromotionCommissionRecordsColumns[3]},
+			},
+			{
+				Name:    "promotioncommissionrecord_source_user_id_business_date",
+				Unique:  false,
+				Columns: []*schema.Column{PromotionCommissionRecordsColumns[2], PromotionCommissionRecordsColumns[3]},
+			},
+		},
+	}
+	// PromotionLevelConfigsColumns holds the columns for the "promotion_level_configs" table.
+	PromotionLevelConfigsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "level_no", Type: field.TypeInt, Unique: true},
+		{Name: "level_name", Type: field.TypeString, Size: 50},
+		{Name: "required_activated_invites", Type: field.TypeInt, Default: 0},
+		{Name: "direct_rate", Type: field.TypeFloat64, Default: 0, SchemaType: map[string]string{"postgres": "decimal(8,4)"}},
+		{Name: "indirect_rate", Type: field.TypeFloat64, Default: 0, SchemaType: map[string]string{"postgres": "decimal(8,4)"}},
+		{Name: "sort_order", Type: field.TypeInt, Default: 0},
+		{Name: "enabled", Type: field.TypeBool, Default: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// PromotionLevelConfigsTable holds the schema information for the "promotion_level_configs" table.
+	PromotionLevelConfigsTable = &schema.Table{
+		Name:       "promotion_level_configs",
+		Columns:    PromotionLevelConfigsColumns,
+		PrimaryKey: []*schema.Column{PromotionLevelConfigsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "promotionlevelconfig_level_no",
+				Unique:  false,
+				Columns: []*schema.Column{PromotionLevelConfigsColumns[1]},
+			},
+			{
+				Name:    "promotionlevelconfig_sort_order",
+				Unique:  false,
+				Columns: []*schema.Column{PromotionLevelConfigsColumns[6]},
+			},
+		},
+	}
+	// PromotionScriptsColumns holds the columns for the "promotion_scripts" table.
+	PromotionScriptsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "name", Type: field.TypeString, Size: 100},
+		{Name: "category", Type: field.TypeString, Size: 32, Default: "default"},
+		{Name: "content", Type: field.TypeString, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "use_count", Type: field.TypeInt64, Default: 0},
+		{Name: "enabled", Type: field.TypeBool, Default: true},
+		{Name: "created_by_user_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// PromotionScriptsTable holds the schema information for the "promotion_scripts" table.
+	PromotionScriptsTable = &schema.Table{
+		Name:       "promotion_scripts",
+		Columns:    PromotionScriptsColumns,
+		PrimaryKey: []*schema.Column{PromotionScriptsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "promotionscript_enabled_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{PromotionScriptsColumns[5], PromotionScriptsColumns[7]},
+			},
+			{
+				Name:    "promotionscript_category",
+				Unique:  false,
+				Columns: []*schema.Column{PromotionScriptsColumns[2]},
+			},
+		},
+	}
+	// PromotionSettingsColumns holds the columns for the "promotion_settings" table.
+	PromotionSettingsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true, SchemaType: map[string]string{"postgres": "smallint"}},
+		{Name: "activation_threshold_amount", Type: field.TypeFloat64, Default: 5, SchemaType: map[string]string{"postgres": "decimal(20,8)"}},
+		{Name: "activation_bonus_amount", Type: field.TypeFloat64, Default: 0, SchemaType: map[string]string{"postgres": "decimal(20,8)"}},
+		{Name: "daily_settlement_time", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "time"}},
+		{Name: "settlement_enabled", Type: field.TypeBool, Default: true},
+		{Name: "rule_activation_template", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "rule_direct_template", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "rule_indirect_template", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "rule_level_summary_template", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "invite_base_url", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "poster_logo_url", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "poster_title", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "poster_headline", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "poster_description", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "poster_scan_hint", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "poster_tags_json", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// PromotionSettingsTable holds the schema information for the "promotion_settings" table.
+	PromotionSettingsTable = &schema.Table{
+		Name:       "promotion_settings",
+		Columns:    PromotionSettingsColumns,
+		PrimaryKey: []*schema.Column{PromotionSettingsColumns[0]},
+	}
+	// PromotionSettlementBatchesColumns holds the columns for the "promotion_settlement_batches" table.
+	PromotionSettlementBatchesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "business_date", Type: field.TypeTime, Unique: true, SchemaType: map[string]string{"postgres": "date"}},
+		{Name: "status", Type: field.TypeString, Size: 20, Default: "running"},
+		{Name: "total_records", Type: field.TypeInt, Default: 0},
+		{Name: "total_amount", Type: field.TypeFloat64, Default: 0, SchemaType: map[string]string{"postgres": "decimal(20,8)"}},
+		{Name: "executed_by_user_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "executed_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "note", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// PromotionSettlementBatchesTable holds the schema information for the "promotion_settlement_batches" table.
+	PromotionSettlementBatchesTable = &schema.Table{
+		Name:       "promotion_settlement_batches",
+		Columns:    PromotionSettlementBatchesColumns,
+		PrimaryKey: []*schema.Column{PromotionSettlementBatchesColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "promotionsettlementbatch_business_date",
+				Unique:  false,
+				Columns: []*schema.Column{PromotionSettlementBatchesColumns[1]},
+			},
+			{
+				Name:    "promotionsettlementbatch_status",
+				Unique:  false,
+				Columns: []*schema.Column{PromotionSettlementBatchesColumns[2]},
+			},
+		},
+	}
+	// PromotionUsersColumns holds the columns for the "promotion_users" table.
+	PromotionUsersColumns = []*schema.Column{
+		{Name: "user_id", Type: field.TypeInt64, Increment: true},
+		{Name: "invite_code", Type: field.TypeString, Unique: true, Size: 32},
+		{Name: "parent_user_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "binding_source", Type: field.TypeString, Size: 20, Default: "self"},
+		{Name: "bound_note", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "bound_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// PromotionUsersTable holds the schema information for the "promotion_users" table.
+	PromotionUsersTable = &schema.Table{
+		Name:       "promotion_users",
+		Columns:    PromotionUsersColumns,
+		PrimaryKey: []*schema.Column{PromotionUsersColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "promotionuser_invite_code",
+				Unique:  false,
+				Columns: []*schema.Column{PromotionUsersColumns[1]},
+			},
+			{
+				Name:    "promotionuser_parent_user_id",
+				Unique:  false,
+				Columns: []*schema.Column{PromotionUsersColumns[2]},
+			},
+		},
+	}
 	// ProxiesColumns holds the columns for the "proxies" table.
 	ProxiesColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -1324,6 +1541,13 @@ var (
 		PaymentProviderInstancesTable,
 		PromoCodesTable,
 		PromoCodeUsagesTable,
+		PromotionActivationsTable,
+		PromotionCommissionRecordsTable,
+		PromotionLevelConfigsTable,
+		PromotionScriptsTable,
+		PromotionSettingsTable,
+		PromotionSettlementBatchesTable,
+		PromotionUsersTable,
 		ProxiesTable,
 		RedeemCodesTable,
 		SecuritySecretsTable,
@@ -1389,6 +1613,27 @@ func init() {
 	PromoCodeUsagesTable.ForeignKeys[1].RefTable = UsersTable
 	PromoCodeUsagesTable.Annotation = &entsql.Annotation{
 		Table: "promo_code_usages",
+	}
+	PromotionActivationsTable.Annotation = &entsql.Annotation{
+		Table: "promotion_activations",
+	}
+	PromotionCommissionRecordsTable.Annotation = &entsql.Annotation{
+		Table: "promotion_commission_records",
+	}
+	PromotionLevelConfigsTable.Annotation = &entsql.Annotation{
+		Table: "promotion_level_configs",
+	}
+	PromotionScriptsTable.Annotation = &entsql.Annotation{
+		Table: "promotion_scripts",
+	}
+	PromotionSettingsTable.Annotation = &entsql.Annotation{
+		Table: "promotion_settings",
+	}
+	PromotionSettlementBatchesTable.Annotation = &entsql.Annotation{
+		Table: "promotion_settlement_batches",
+	}
+	PromotionUsersTable.Annotation = &entsql.Annotation{
+		Table: "promotion_users",
 	}
 	ProxiesTable.Annotation = &entsql.Annotation{
 		Table: "proxies",

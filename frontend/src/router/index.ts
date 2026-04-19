@@ -9,6 +9,7 @@ import { useAppStore } from '@/stores/app'
 import { useAdminSettingsStore } from '@/stores/adminSettings'
 import { useNavigationLoadingState } from '@/composables/useNavigationLoading'
 import { useRoutePrefetch } from '@/composables/useRoutePrefetch'
+import { storePromotionRef } from '@/composables/usePromotionAttribution'
 import { resolveDocumentTitle } from './title'
 
 /**
@@ -224,6 +225,16 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/promotion',
+    name: 'PromotionCenter',
+    component: () => import('@/views/user/PromotionCenterView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: '推广中心'
+    }
+  },
+  {
     path: '/payment/qrcode',
     name: 'PaymentQRCode',
     component: () => import('@/views/user/PaymentQRCodeView.vue'),
@@ -432,6 +443,16 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/promotion',
+    name: 'AdminPromotion',
+    component: () => import('@/views/admin/PromotionAdminView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: '推广管理'
+    }
+  },
+  {
     path: '/admin/usage',
     name: 'AdminUsage',
     component: () => import('@/views/admin/UsageView.vue'),
@@ -527,6 +548,11 @@ router.beforeEach((to, _from, next) => {
 
   const authStore = useAuthStore()
 
+  const refCode = typeof to.query.ref === 'string' ? to.query.ref.trim() : ''
+  if (refCode) {
+    storePromotionRef(refCode)
+  }
+
   // Restore auth state from localStorage on first navigation (page refresh)
   if (!authInitialized) {
     authStore.checkAuth()
@@ -615,8 +641,10 @@ router.beforeEach((to, _from, next) => {
       '/admin/groups',
       '/admin/subscriptions',
       '/admin/redeem',
+      '/admin/promotion',
       '/subscriptions',
-      '/redeem'
+      '/redeem',
+      '/promotion'
     ]
 
     if (restrictedPaths.some((path) => to.path.startsWith(path))) {

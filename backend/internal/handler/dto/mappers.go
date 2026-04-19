@@ -515,9 +515,9 @@ func redeemCodeFromServiceBase(rc *service.RedeemCode) RedeemCode {
 		Group:        GroupFromServiceShallow(rc.Group),
 	}
 
-	// For admin_balance/admin_concurrency types, include notes so users can see
-	// why they were charged or credited by admin
-	if (rc.Type == "admin_balance" || rc.Type == "admin_concurrency") && rc.Notes != "" {
+	// For admin/promotion balance adjustments, include notes so users can see
+	// why they were charged or credited.
+	if (rc.Type == "admin_balance" || rc.Type == "admin_concurrency" || rc.Type == "promotion_balance") && rc.Notes != "" {
 		out.Notes = &rc.Notes
 	}
 
