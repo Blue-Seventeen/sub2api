@@ -864,13 +864,14 @@ func renderPromotionRuleTemplates(settings PromotionSettings, overview *Promotio
 	}
 	levelSummaryText := buildPromotionLevelSummaryText(levels)
 	values := map[string]string{
-		"ACTIVATION_THRESHOLD":  formatPromotionRateNumber(overview.ActivationThresholdAmount),
-		"ACTIVATION_BONUS":      formatPromotionRateNumber(overview.ActivationBonusAmount),
-		"CURRENT_DIRECT_RATE":   formatPromotionRateNumber(overview.CurrentDirectRate),
-		"CURRENT_INDIRECT_RATE": formatPromotionRateNumber(overview.CurrentIndirectRate),
-		"CURRENT_TOTAL_RATE":    formatPromotionRateNumber(overview.CurrentTotalRate),
-		"SETTLEMENT_TIME":       fallbackSettlementTime(settings.DailySettlementTime),
-		"LEVEL_RATE_SUMMARY":    levelSummaryText,
+		"ACTIVATION_THRESHOLD":      formatPromotionRateNumber(overview.ActivationThresholdAmount),
+		"ACTIVATION_BONUS":          formatPromotionRateNumber(overview.ActivationBonusAmount),
+		"CURRENT_DIRECT_RATE":       formatPromotionRateNumber(overview.CurrentDirectRate),
+		"CURRENT_INDIRECT_RATE":     formatPromotionRateNumber(overview.CurrentIndirectRate),
+		"CURRENT_SECOND_LEVEL_RATE": formatPromotionRateNumber(overview.CurrentIndirectRate),
+		"CURRENT_TOTAL_RATE":        formatPromotionRateNumber(overview.CurrentTotalRate),
+		"SETTLEMENT_TIME":           fallbackSettlementTime(settings.DailySettlementTime),
+		"LEVEL_RATE_SUMMARY":        levelSummaryText,
 	}
 	return PromotionRenderedRuleTemplates{
 		Activation:   replacePromotionTemplateVars(settings.RuleActivationTemplate, values),

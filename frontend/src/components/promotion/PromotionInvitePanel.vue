@@ -129,7 +129,7 @@
           <div class="flex items-start justify-between gap-4">
             <div>
               <div class="flex flex-wrap items-center gap-2">
-                <span class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300">{{ categoryLabel(item.category) }}</span>
+                <span class="rounded-full border px-3 py-1 text-xs font-medium" :class="tagColorClass(item.category)">{{ displayTag(item.category) }}</span>
                 <span class="text-lg font-medium text-white">{{ item.name }}</span>
               </div>
               <div class="mt-2 text-xs text-slate-500">已使用 {{ item.use_count }} 次</div>
@@ -140,7 +140,7 @@
             </button>
           </div>
           <div class="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm leading-7 whitespace-pre-wrap text-slate-200">
-            {{ item.rendered_preview || item.content }}
+            {{ normalizeScriptPreview(item.rendered_preview || item.content) }}
           </div>
         </article>
       </div>
@@ -227,6 +227,25 @@ const posterHeight = 620
 const posterDownloadScale = 1.2
 const posterExportPixelRatio = 2
 
+const legacyTagMap: Record<string, string> = {
+  default: '默认',
+  wechat: '朋友圈',
+  tech: '技术群',
+  social: '社交平台',
+  email: '邮件'
+}
+
+const tagColorPalette = [
+  'border-purple-400/20 bg-purple-500/10 text-purple-300',
+  'border-cyan-400/20 bg-cyan-500/10 text-cyan-300',
+  'border-emerald-400/20 bg-emerald-500/10 text-emerald-300',
+  'border-amber-400/20 bg-amber-500/10 text-amber-300',
+  'border-pink-400/20 bg-pink-500/10 text-pink-300',
+  'border-indigo-400/20 bg-indigo-500/10 text-indigo-300',
+  'border-sky-400/20 bg-sky-500/10 text-sky-300',
+  'border-rose-400/20 bg-rose-500/10 text-rose-300'
+]
+
 const posterConfig = computed(() => {
   const config = props.overview?.poster_config
   return {
@@ -248,8 +267,10 @@ const posterLogoText = computed(() => {
 
 const posterInviteCode = computed(() => posterConfig.value.primary_invite_code || props.overview?.invite_code || '--')
 
+const rawInviteLink = computed(() => props.overview?.invite_link?.trim() || '')
+
 const resolvedInviteLink = computed(() => {
-  const raw = props.overview?.invite_link?.trim() || ''
+  const raw = rawInviteLink.value
   if (!raw) return ''
   if (/^https?:\/\//i.test(raw)) {
     return raw
@@ -299,7 +320,7 @@ async function copyText(text: string, label: string) {
 }
 
 async function copyScript(script: PromotionScript) {
-  const text = script.rendered_preview || script.content
+  const text = normalizeScriptPreview(script.rendered_preview || script.content)
   try {
     await navigator.clipboard.writeText(text)
     await promotionAPI.markScriptUsed(script.id)
@@ -335,21 +356,28 @@ async function downloadPoster() {
   }
 }
 
-function categoryLabel(category: string) {
-  switch (category) {
-    case 'wechat':
-      return '朋友圈'
-    case 'tech':
-      return '技术群'
-    case 'social':
-      return '社交平台'
-    case 'email':
-      return '邮件'
-    case 'default':
-      return '默认'
-    default:
-      return category || '默认'
+function displayTag(value?: string) {
+  const normalized = String(value || '').trim()
+  if (!normalized) return '默认'
+  return legacyTagMap[normalized] || normalized
+}
+
+function tagColorClass(value?: string) {
+  const label = displayTag(value)
+  let hash = 0
+  for (const char of label) {
+    hash = (hash * 31 + char.charCodeAt(0)) >>> 0
   }
+  return tagColorPalette[hash % tagColorPalette.length]
+}
+
+function normalizeScriptPreview(text?: string) {
+  const source = String(text || '')
+  if (!source) return source
+  if (!rawInviteLink.value || !resolvedInviteLink.value || rawInviteLink.value === resolvedInviteLink.value) {
+    return source
+  }
+  return source.split(rawInviteLink.value).join(resolvedInviteLink.value)
 }
 
 function money(value?: number) {

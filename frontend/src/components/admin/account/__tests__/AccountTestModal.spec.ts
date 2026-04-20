@@ -59,10 +59,10 @@ function createStreamResponse(lines: string[]) {
   } as Response
 }
 
-function mountModal() {
+function mountModal(show = false) {
   return mount(AccountTestModal, {
     props: {
-      show: false,
+      show,
       account: {
         id: 42,
         name: 'Gemini Image Test',
@@ -144,4 +144,35 @@ describe('AccountTestModal', () => {
     expect(preview.exists()).toBe(true)
     expect(preview.attributes('src')).toBe('data:image/png;base64,QUJD')
   })
+
+  it('?? displayName ?????????', async () => {
+    getAvailableModels.mockResolvedValueOnce([
+      { id: 'claude-sonnet-4-5', displayName: 'Claude Sonnet 4.5', type: 'model' }
+    ])
+
+    const wrapper = mountModal()
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    expect(getAvailableModels).toHaveBeenCalled()
+    expect((wrapper.vm as any).availableModels).toEqual([
+      {
+        id: 'claude-sonnet-4-5',
+        display_name: 'Claude Sonnet 4.5',
+        type: 'model',
+        created_at: ''
+      }
+    ])
+    expect((wrapper.vm as any).selectedModelId).toBe('claude-sonnet-4-5')
+  })
+
+
+  it('??? show=true ????????????', async () => {
+    const wrapper = mountModal(true)
+    await flushPromises()
+
+    expect(getAvailableModels).toHaveBeenCalledTimes(1)
+    expect((wrapper.vm as any).selectedModelId).toBe('gemini-3.1-flash-image')
+  })
+
 })

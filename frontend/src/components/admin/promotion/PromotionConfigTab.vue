@@ -457,6 +457,7 @@ const placeholders = [
   '{{ACTIVATION_BONUS}}',
   '{{CURRENT_DIRECT_RATE}}',
   '{{CURRENT_INDIRECT_RATE}}',
+  '{{CURRENT_SECOND_LEVEL_RATE}}',
   '{{CURRENT_TOTAL_RATE}}',
   '{{SETTLEMENT_TIME}}'
 ]
@@ -477,6 +478,7 @@ const previews = computed(() => {
     '{{ACTIVATION_BONUS}}': rate(settings.activation_bonus_amount),
     '{{CURRENT_DIRECT_RATE}}': baseLevel ? rate(baseLevel.direct_rate) : '0',
     '{{CURRENT_INDIRECT_RATE}}': baseLevel ? rate(baseLevel.indirect_rate) : '0',
+    '{{CURRENT_SECOND_LEVEL_RATE}}': baseLevel ? rate(baseLevel.indirect_rate) : '0',
     '{{CURRENT_TOTAL_RATE}}': baseLevel ? rate(totalRate(baseLevel)) : '0',
     '{{SETTLEMENT_TIME}}': settings.daily_settlement_time || '00:00'
   }

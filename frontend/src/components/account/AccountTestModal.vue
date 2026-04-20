@@ -231,6 +231,15 @@ interface PreviewImage {
   mimeType?: string
 }
 
+interface RawModelOption {
+  id: string
+  type?: string
+  display_name?: string
+  displayName?: string
+  created_at?: string
+  createdAt?: string
+}
+
 const props = defineProps<{
   show: boolean
   account: Account | null
@@ -270,19 +279,16 @@ const sortTestModels = (models: ClaudeModel[]) => {
   })
 }
 
-// Load available models when modal opens
-watch(
-  () => props.show,
-  async (newVal) => {
-    if (newVal && props.account) {
-      testPrompt.value = ''
-      resetState()
-      await loadAvailableModels()
-    } else {
-      closeEventSource()
-    }
-  }
-)
+const normalizeModelOptions = (models: RawModelOption[]): ClaudeModel[] => {
+  return models
+    .filter((model) => typeof model?.id === 'string' && model.id.trim() !== '')
+    .map((model) => ({
+      id: model.id,
+      type: model.type || 'model',
+      display_name: model.display_name || model.displayName || model.id,
+      created_at: model.created_at || model.createdAt || ''
+    }))
+}
 
 watch(selectedModelId, () => {
   if (supportsGeminiImageTest.value && !testPrompt.value.trim()) {
@@ -296,7 +302,7 @@ const loadAvailableModels = async () => {
   loadingModels.value = true
   selectedModelId.value = '' // Reset selection before loading
   try {
-    const models = await adminAPI.accounts.getAvailableModels(props.account.id)
+    const models = normalizeModelOptions(await adminAPI.accounts.getAvailableModels(props.account.id) as RawModelOption[])
     availableModels.value = props.account.platform === 'gemini' || props.account.platform === 'antigravity'
       ? sortTestModels(models)
       : models
@@ -343,6 +349,21 @@ const closeEventSource = () => {
     eventSource = null
   }
 }
+
+// Load available models when modal opens or account changes while visible
+watch(
+  [() => props.show, () => props.account?.id],
+  async ([visible, accountID]) => {
+    if (visible && props.account && accountID) {
+      testPrompt.value = ''
+      resetState()
+      await loadAvailableModels()
+    } else if (!visible) {
+      closeEventSource()
+    }
+  },
+  { immediate: true }
+)
 
 const addLine = (text: string, className: string = 'text-gray-300') => {
   outputLines.value.push({ text, class: className })
