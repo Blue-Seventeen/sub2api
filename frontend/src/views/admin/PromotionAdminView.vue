@@ -66,13 +66,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
-import PromotionRelationsTab from '@/components/admin/promotion/PromotionRelationsTab.vue'
-import PromotionCommissionTab from '@/components/admin/promotion/PromotionCommissionTab.vue'
-import PromotionConfigTab from '@/components/admin/promotion/PromotionConfigTab.vue'
-import PromotionScriptsTab from '@/components/admin/promotion/PromotionScriptsTab.vue'
 import { adminPromotionAPI, type PromotionAdminDashboard } from '@/api/admin/promotion'
 import { useAppStore } from '@/stores'
 
@@ -81,6 +77,11 @@ type TabKey = 'relations' | 'commissions' | 'config' | 'scripts'
 const appStore = useAppStore()
 const currentTab = ref<TabKey>('relations')
 const dashboard = ref<PromotionAdminDashboard | null>(null)
+
+const PromotionRelationsTab = defineAsyncComponent(() => import('@/components/admin/promotion/PromotionRelationsTab.vue'))
+const PromotionCommissionTab = defineAsyncComponent(() => import('@/components/admin/promotion/PromotionCommissionTab.vue'))
+const PromotionConfigTab = defineAsyncComponent(() => import('@/components/admin/promotion/PromotionConfigTab.vue'))
+const PromotionScriptsTab = defineAsyncComponent(() => import('@/components/admin/promotion/PromotionScriptsTab.vue'))
 
 const tabs: Array<{ key: TabKey; label: string; icon: 'users' | 'dollar' | 'cog' | 'chatBubble' }> = [
   { key: 'relations', label: '推广关系管理', icon: 'users' },

@@ -367,6 +367,7 @@ type PromotionRepository interface {
 	CountPromotionActivatedDescendants(ctx context.Context, userID int64) (int, error)
 	CountDirectActivatedInvites(ctx context.Context, userID int64) (int, error)
 	GetCurrentPromotionLevel(ctx context.Context, userID int64) (*PromotionLevelConfig, error)
+	GetCurrentPromotionLevels(ctx context.Context, userIDs []int64) (map[int64]*PromotionLevelConfig, error)
 	GetNextPromotionLevel(ctx context.Context, userID int64) (*PromotionLevelConfig, error)
 	GetPromotionOverviewSummary(ctx context.Context, userID int64, businessDate time.Time) (*PromotionOverview, error)
 	ListPromotionLeaderboard(ctx context.Context, limit int) ([]PromotionLeaderboardItem, error)

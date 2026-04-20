@@ -55,15 +55,11 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { defineAsyncComponent, onMounted, ref } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { promotionAPI, type PromotionOverview } from '@/api/promotion'
 import { useAppStore } from '@/stores'
-import PromotionOverviewPanel from '@/components/promotion/PromotionOverviewPanel.vue'
-import PromotionInvitePanel from '@/components/promotion/PromotionInvitePanel.vue'
-import PromotionTeamPanel from '@/components/promotion/PromotionTeamPanel.vue'
-import PromotionEarningsPanel from '@/components/promotion/PromotionEarningsPanel.vue'
 
 type TabKey = 'overview' | 'invite' | 'team' | 'earnings'
 
@@ -71,6 +67,11 @@ const appStore = useAppStore()
 const currentTab = ref<TabKey>('overview')
 const overview = ref<PromotionOverview | null>(null)
 const loadingOverview = ref(false)
+
+const PromotionOverviewPanel = defineAsyncComponent(() => import('@/components/promotion/PromotionOverviewPanel.vue'))
+const PromotionInvitePanel = defineAsyncComponent(() => import('@/components/promotion/PromotionInvitePanel.vue'))
+const PromotionTeamPanel = defineAsyncComponent(() => import('@/components/promotion/PromotionTeamPanel.vue'))
+const PromotionEarningsPanel = defineAsyncComponent(() => import('@/components/promotion/PromotionEarningsPanel.vue'))
 
 const tabs: Array<{ key: TabKey; label: string; icon: 'chartBar' | 'userPlus' | 'users' | 'dollar' }> = [
   { key: 'overview', label: '总览', icon: 'chartBar' },

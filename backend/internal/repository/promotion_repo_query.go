@@ -45,6 +45,79 @@ func (r *promotionRepository) GetCurrentPromotionLevel(ctx context.Context, user
 	return scanPromotionLevelRow(row)
 }
 
+func (r *promotionRepository) GetCurrentPromotionLevels(ctx context.Context, userIDs []int64) (map[int64]*service.PromotionLevelConfig, error) {
+	userIDs = normalizePromotionUserIDs(userIDs)
+	if len(userIDs) == 0 {
+		return map[int64]*service.PromotionLevelConfig{}, nil
+	}
+
+	rows, err := r.db.QueryContext(ctx, `
+		WITH input_users AS (
+			SELECT UNNEST($1::bigint[]) AS user_id
+		),
+		activated AS (
+			SELECT iu.user_id, COUNT(pa.user_id) AS activated_count
+			FROM input_users iu
+			LEFT JOIN promotion_activations pa ON pa.promoter_user_id = iu.user_id
+			GROUP BY iu.user_id
+		),
+		ranked AS (
+			SELECT
+				iu.user_id,
+				plc.id,
+				plc.level_no,
+				plc.level_name,
+				plc.required_activated_invites,
+				plc.direct_rate,
+				plc.indirect_rate,
+				plc.sort_order,
+				plc.enabled,
+				plc.created_at,
+				plc.updated_at,
+				ROW_NUMBER() OVER (
+					PARTITION BY iu.user_id
+					ORDER BY plc.required_activated_invites DESC, plc.level_no DESC
+				) AS rn
+			FROM input_users iu
+			LEFT JOIN activated a ON a.user_id = iu.user_id
+			LEFT JOIN promotion_level_configs plc
+				ON plc.enabled = TRUE
+			   AND plc.required_activated_invites <= COALESCE(a.activated_count, 0)
+		)
+		SELECT user_id, id, level_no, level_name, required_activated_invites, direct_rate, indirect_rate, sort_order, enabled, created_at, updated_at
+		FROM ranked
+		WHERE rn = 1 AND id IS NOT NULL
+	`, pq.Array(userIDs))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make(map[int64]*service.PromotionLevelConfig, len(userIDs))
+	for rows.Next() {
+		var userID int64
+		var item service.PromotionLevelConfig
+		if err := rows.Scan(
+			&userID,
+			&item.ID,
+			&item.LevelNo,
+			&item.LevelName,
+			&item.RequiredActivatedInvites,
+			&item.DirectRate,
+			&item.IndirectRate,
+			&item.SortOrder,
+			&item.Enabled,
+			&item.CreatedAt,
+			&item.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		level := item
+		out[userID] = &level
+	}
+	return out, rows.Err()
+}
+
 func (r *promotionRepository) GetNextPromotionLevel(ctx context.Context, userID int64) (*service.PromotionLevelConfig, error) {
 	row := r.db.QueryRowContext(ctx, `
 		WITH activated AS (
@@ -125,6 +198,7 @@ func (r *promotionRepository) ListPromotionLeaderboard(ctx context.Context, limi
 	}
 	defer rows.Close()
 	items := make([]service.PromotionLeaderboardItem, 0, limit)
+	userIDs := make([]int64, 0, limit)
 	for rows.Next() {
 		var item service.PromotionLeaderboardItem
 		var email string
@@ -132,17 +206,31 @@ func (r *promotionRepository) ListPromotionLeaderboard(ctx context.Context, limi
 			return nil, err
 		}
 		item.MaskedEmail = service.MaskEmail(email)
-		item.InviteCount, _ = r.CountPromotionDescendants(ctx, item.UserID)
-		level, _ := r.GetCurrentPromotionLevel(ctx, item.UserID)
-		if level != nil {
-			item.LevelName = level.LevelName
-			item.CurrentLevelNo = level.LevelNo
-		} else {
-			item.LevelName = "未设置"
-		}
 		items = append(items, item)
+		userIDs = append(userIDs, item.UserID)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	levelMap, err := r.GetCurrentPromotionLevels(ctx, userIDs)
+	if err != nil {
+		return nil, err
+	}
+	inviteCountMap, err := r.countPromotionDescendantsByUserIDs(ctx, userIDs)
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		items[i].InviteCount = inviteCountMap[items[i].UserID]
+		if level := levelMap[items[i].UserID]; level != nil {
+			items[i].LevelName = level.LevelName
+			items[i].CurrentLevelNo = level.LevelNo
+		} else {
+			items[i].LevelName = "\u672a\u8bbe\u7f6e"
+		}
+	}
+	return items, nil
 }
 
 func (r *promotionRepository) ListPromotionTeam(ctx context.Context, rootUserID int64, filter service.PromotionTeamFilter, todayStart, todayEnd time.Time) ([]service.PromotionTeamItem, int64, error) {
@@ -519,6 +607,46 @@ func (r *promotionRepository) countPromotionTree(ctx context.Context, userID int
 	return count, nil
 }
 
+func (r *promotionRepository) countPromotionDescendantsByUserIDs(ctx context.Context, userIDs []int64) (map[int64]int, error) {
+	userIDs = normalizePromotionUserIDs(userIDs)
+	if len(userIDs) == 0 {
+		return map[int64]int{}, nil
+	}
+
+	rows, err := r.db.QueryContext(ctx, `
+		WITH RECURSIVE roots AS (
+			SELECT UNNEST($1::bigint[]) AS root_user_id
+		),
+		tree AS (
+			SELECT r.root_user_id, pu.user_id
+			FROM roots r
+			JOIN promotion_users pu ON pu.parent_user_id = r.root_user_id
+			UNION ALL
+			SELECT tree.root_user_id, pu.user_id
+			FROM promotion_users pu
+			JOIN tree ON pu.parent_user_id = tree.user_id
+		)
+		SELECT root_user_id, COUNT(*) AS descendant_count
+		FROM tree
+		GROUP BY root_user_id
+	`, pq.Array(userIDs))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make(map[int64]int, len(userIDs))
+	for rows.Next() {
+		var userID int64
+		var count int
+		if err := rows.Scan(&userID, &count); err != nil {
+			return nil, err
+		}
+		out[userID] = count
+	}
+	return out, rows.Err()
+}
+
 func (r *promotionRepository) countDirectChildren(ctx context.Context, userID int64) (int, error) {
 	var count int
 	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM promotion_users WHERE parent_user_id = $1`, userID).Scan(&count); err != nil {
@@ -605,6 +733,25 @@ func buildPromotionTeamOrderClause(filter service.PromotionTeamFilter) string {
 func promotionKeywordPattern(keyword string) string {
 	replacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 	return "%" + replacer.Replace(strings.TrimSpace(keyword)) + "%"
+}
+
+func normalizePromotionUserIDs(userIDs []int64) []int64 {
+	if len(userIDs) == 0 {
+		return nil
+	}
+	seen := make(map[int64]struct{}, len(userIDs))
+	out := make([]int64, 0, len(userIDs))
+	for _, userID := range userIDs {
+		if userID <= 0 {
+			continue
+		}
+		if _, ok := seen[userID]; ok {
+			continue
+		}
+		seen[userID] = struct{}{}
+		out = append(out, userID)
+	}
+	return out
 }
 
 func scanPromotionUser(row interface{ Scan(dest ...any) error }) (*service.PromotionUser, error) {

@@ -204,14 +204,8 @@ func (s *PromotionService) ListMyTeam(ctx context.Context, userID int64, filter 
 	if err != nil {
 		return nil, 0, err
 	}
-	for i := range items {
-		level, levelErr := s.repo.GetCurrentPromotionLevel(ctx, items[i].UserID)
-		if levelErr == nil && level != nil {
-			items[i].LevelName = level.LevelName
-		} else if items[i].LevelName == "" {
-			items[i].LevelName = "未设置"
-		}
-		items[i].MaskedEmail = MaskEmail(items[i].Email)
+	if err := s.applyCurrentLevelsToTeamItems(ctx, items, true); err != nil {
+		return nil, 0, err
 	}
 	return items, total, nil
 }
@@ -298,15 +292,8 @@ func (s *PromotionService) ListAdminRelations(ctx context.Context, keyword strin
 	if err != nil {
 		return nil, 0, err
 	}
-	for i := range rows {
-		if rows[i].LevelName == "" {
-			level, levelErr := s.repo.GetCurrentPromotionLevel(ctx, rows[i].UserID)
-			if levelErr == nil && level != nil {
-				rows[i].LevelName = level.LevelName
-			} else {
-				rows[i].LevelName = "未设置"
-			}
-		}
+	if err := s.applyCurrentLevelsToRelationRows(ctx, rows); err != nil {
+		return nil, 0, err
 	}
 	return rows, total, nil
 }
@@ -328,13 +315,8 @@ func (s *PromotionService) ListAdminDownlines(ctx context.Context, userID int64,
 	if err != nil {
 		return nil, 0, err
 	}
-	for i := range items {
-		level, levelErr := s.repo.GetCurrentPromotionLevel(ctx, items[i].UserID)
-		if levelErr == nil && level != nil {
-			items[i].LevelName = level.LevelName
-		} else if items[i].LevelName == "" {
-			items[i].LevelName = "未设置"
-		}
+	if err := s.applyCurrentLevelsToTeamItems(ctx, items, false); err != nil {
+		return nil, 0, err
 	}
 	return items, total, nil
 }
@@ -1016,6 +998,47 @@ func levelNameOrFallback(level *PromotionLevelConfig) string {
 		return "未设置"
 	}
 	return level.LevelName
+}
+
+func (s *PromotionService) applyCurrentLevelsToTeamItems(ctx context.Context, items []PromotionTeamItem, maskEmail bool) error {
+	if len(items) == 0 {
+		return nil
+	}
+	userIDs := make([]int64, 0, len(items))
+	for _, item := range items {
+		userIDs = append(userIDs, item.UserID)
+	}
+	levelMap, err := s.repo.GetCurrentPromotionLevels(ctx, userIDs)
+	if err != nil {
+		return err
+	}
+	for i := range items {
+		items[i].LevelName = levelNameOrFallback(levelMap[items[i].UserID])
+		if maskEmail {
+			items[i].MaskedEmail = MaskEmail(items[i].Email)
+		}
+	}
+	return nil
+}
+
+func (s *PromotionService) applyCurrentLevelsToRelationRows(ctx context.Context, rows []PromotionRelationRow) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	userIDs := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		userIDs = append(userIDs, row.UserID)
+	}
+	levelMap, err := s.repo.GetCurrentPromotionLevels(ctx, userIDs)
+	if err != nil {
+		return err
+	}
+	for i := range rows {
+		if strings.TrimSpace(rows[i].LevelName) == "" {
+			rows[i].LevelName = levelNameOrFallback(levelMap[rows[i].UserID])
+		}
+	}
+	return nil
 }
 
 func beginningOfLocalDay(ts time.Time) time.Time {
