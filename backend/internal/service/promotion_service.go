@@ -199,8 +199,8 @@ func (s *PromotionService) ListMyTeam(ctx context.Context, userID int64, filter 
 		return nil, 0, err
 	}
 	filter = normalizeTeamFilter(filter)
-	start, end := s.currentLocalDayRange()
-	items, total, err := s.repo.ListPromotionTeam(ctx, userID, filter, start, end)
+	businessDate := beginningOfLocalDay(s.nowInAppLocation())
+	items, total, err := s.repo.ListPromotionTeam(ctx, userID, filter, businessDate)
 	if err != nil {
 		return nil, 0, err
 	}

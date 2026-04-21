@@ -371,7 +371,7 @@ type PromotionRepository interface {
 	GetNextPromotionLevel(ctx context.Context, userID int64) (*PromotionLevelConfig, error)
 	GetPromotionOverviewSummary(ctx context.Context, userID int64, businessDate time.Time) (*PromotionOverview, error)
 	ListPromotionLeaderboard(ctx context.Context, limit int) ([]PromotionLeaderboardItem, error)
-	ListPromotionTeam(ctx context.Context, rootUserID int64, filter PromotionTeamFilter, todayStart, todayEnd time.Time) ([]PromotionTeamItem, int64, error)
+	ListPromotionTeam(ctx context.Context, rootUserID int64, filter PromotionTeamFilter, businessDate time.Time) ([]PromotionTeamItem, int64, error)
 	ListPromotionEarnings(ctx context.Context, userID int64, filter PromotionCommissionFilter) ([]PromotionCommissionListItem, int64, error)
 
 	GetPromotionAdminDashboard(ctx context.Context, businessDate time.Time) (*PromotionAdminDashboard, error)

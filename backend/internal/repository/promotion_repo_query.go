@@ -233,8 +233,8 @@ func (r *promotionRepository) ListPromotionLeaderboard(ctx context.Context, limi
 	return items, nil
 }
 
-func (r *promotionRepository) ListPromotionTeam(ctx context.Context, rootUserID int64, filter service.PromotionTeamFilter, todayStart, todayEnd time.Time) ([]service.PromotionTeamItem, int64, error) {
-	return r.listPromotionTree(ctx, rootUserID, filter, todayStart, todayEnd)
+func (r *promotionRepository) ListPromotionTeam(ctx context.Context, rootUserID int64, filter service.PromotionTeamFilter, businessDate time.Time) ([]service.PromotionTeamItem, int64, error) {
+	return r.listPromotionTeamByCommission(ctx, rootUserID, filter, businessDate)
 }
 
 func (r *promotionRepository) ListPromotionEarnings(ctx context.Context, userID int64, filter service.PromotionCommissionFilter) ([]service.PromotionCommissionListItem, int64, error) {
@@ -419,7 +419,7 @@ func (r *promotionRepository) GetPromotionRelationChain(ctx context.Context, use
 }
 
 func (r *promotionRepository) ListPromotionDownlines(ctx context.Context, rootUserID int64, filter service.PromotionTeamFilter, todayStart, todayEnd time.Time) ([]service.PromotionTeamItem, int64, error) {
-	return r.listPromotionTree(ctx, rootUserID, filter, todayStart, todayEnd)
+	return r.listPromotionTreeByUsage(ctx, rootUserID, filter, todayStart, todayEnd)
 }
 
 func (r *promotionRepository) RemovePromotionDirectDownline(ctx context.Context, parentUserID, downlineUserID int64, note string) error {
@@ -476,7 +476,125 @@ func (r *promotionRepository) ListPromotionCommissions(ctx context.Context, filt
 	return items, total, err
 }
 
-func (r *promotionRepository) listPromotionTree(ctx context.Context, rootUserID int64, filter service.PromotionTeamFilter, todayStart, todayEnd time.Time) ([]service.PromotionTeamItem, int64, error) {
+func (r *promotionRepository) listPromotionTeamByCommission(ctx context.Context, rootUserID int64, filter service.PromotionTeamFilter, businessDate time.Time) ([]service.PromotionTeamItem, int64, error) {
+	filter.Page, filter.PageSize = normalizePage(filter.Page, filter.PageSize)
+	totalWhere := ""
+	listWhere := ""
+	switch filter.Status {
+	case "active":
+		totalWhere = "WHERE pa.user_id IS NOT NULL"
+		listWhere = "WHERE pa.user_id IS NOT NULL"
+	case "inactive":
+		totalWhere = "WHERE pa.user_id IS NULL"
+		listWhere = "WHERE pa.user_id IS NULL"
+	}
+	if filter.Keyword != "" {
+		if totalWhere == "" {
+			totalWhere = "WHERE "
+		} else {
+			totalWhere += " AND "
+		}
+		if listWhere == "" {
+			listWhere = "WHERE "
+		} else {
+			listWhere += " AND "
+		}
+		totalWhere += "tree.depth <= 2 AND (u.email ILIKE $2 ESCAPE '\\' OR COALESCE(u.username, '') ILIKE $2 ESCAPE '\\' OR CAST(tree.user_id AS TEXT) ILIKE $2 ESCAPE '\\')"
+		listWhere += "tree.depth <= 2 AND (u.email ILIKE $3 ESCAPE '\\' OR COALESCE(u.username, '') ILIKE $3 ESCAPE '\\' OR CAST(tree.user_id AS TEXT) ILIKE $3 ESCAPE '\\')"
+	}
+	totalArgs := []any{rootUserID}
+	if filter.Keyword != "" {
+		totalArgs = append(totalArgs, promotionKeywordPattern(filter.Keyword))
+	}
+	var total int64
+	if err := r.db.QueryRowContext(ctx, `
+		WITH RECURSIVE tree AS (
+			SELECT pu.user_id, 1 AS depth
+			FROM promotion_users pu
+			WHERE pu.parent_user_id = $1
+			UNION ALL
+			SELECT pu.user_id, tree.depth + 1
+			FROM promotion_users pu
+			JOIN tree ON pu.parent_user_id = tree.user_id
+			WHERE tree.depth < 32
+		)
+		SELECT COUNT(*)
+		FROM tree
+		JOIN users u ON u.id = tree.user_id AND u.deleted_at IS NULL
+		LEFT JOIN promotion_activations pa ON pa.user_id = tree.user_id
+		`+totalWhere, totalArgs...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	listArgs := []any{rootUserID, businessDate.Format("2006-01-02")}
+	if filter.Keyword != "" {
+		listArgs = append(listArgs, promotionKeywordPattern(filter.Keyword))
+	}
+	listArgs = append(listArgs, filter.PageSize, (filter.Page-1)*filter.PageSize)
+	rows, err := r.db.QueryContext(ctx, `
+		WITH RECURSIVE tree AS (
+			SELECT pu.user_id, 1 AS depth
+			FROM promotion_users pu
+			WHERE pu.parent_user_id = $1
+			UNION ALL
+			SELECT pu.user_id, tree.depth + 1
+			FROM promotion_users pu
+			JOIN tree ON pu.parent_user_id = tree.user_id
+			WHERE tree.depth < 32
+		),
+		today_contribution_totals AS (
+			SELECT source_user_id AS user_id, COALESCE(SUM(amount), 0) AS total_amount
+			FROM promotion_commission_records
+			WHERE beneficiary_user_id = $1
+			  AND source_user_id IS NOT NULL
+			  AND status <> 'cancelled'
+			  AND commission_type IN ('commission', 'activation')
+			  AND business_date = $2::date
+			GROUP BY source_user_id
+		),
+		total_contribution_totals AS (
+			SELECT source_user_id AS user_id, COALESCE(SUM(amount), 0) AS total_amount
+			FROM promotion_commission_records
+			WHERE beneficiary_user_id = $1
+			  AND source_user_id IS NOT NULL
+			  AND status <> 'cancelled'
+			  AND commission_type IN ('commission', 'activation')
+			GROUP BY source_user_id
+		)
+		SELECT tree.user_id, u.email, COALESCE(u.username, ''), tree.depth, u.created_at, pa.activated_at,
+		       COALESCE(today_contribution_totals.total_amount, 0) AS today_contribution,
+		       COALESCE(total_contribution_totals.total_amount, 0) AS total_contribution
+		FROM tree
+		JOIN users u ON u.id = tree.user_id AND u.deleted_at IS NULL
+		LEFT JOIN promotion_activations pa ON pa.user_id = tree.user_id
+		LEFT JOIN today_contribution_totals ON today_contribution_totals.user_id = tree.user_id
+		LEFT JOIN total_contribution_totals ON total_contribution_totals.user_id = tree.user_id
+		`+listWhere+`
+		ORDER BY `+buildPromotionTeamOrderClause(filter)+`
+		LIMIT $`+fmt.Sprint(len(listArgs)-1)+` OFFSET $`+fmt.Sprint(len(listArgs))+`
+	`, listArgs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	items := make([]service.PromotionTeamItem, 0)
+	for rows.Next() {
+		var item service.PromotionTeamItem
+		var activatedAt sql.NullTime
+		if err := rows.Scan(&item.UserID, &item.Email, &item.Username, &item.RelationDepth, &item.JoinedAt, &activatedAt, &item.TodayContribution, &item.TotalContribution); err != nil {
+			return nil, 0, err
+		}
+		item.MaskedEmail = service.MaskEmail(item.Email)
+		item.Activated = activatedAt.Valid
+		if activatedAt.Valid {
+			item.ActivatedAt = &activatedAt.Time
+		}
+		items = append(items, item)
+	}
+	return items, total, rows.Err()
+}
+
+func (r *promotionRepository) listPromotionTreeByUsage(ctx context.Context, rootUserID int64, filter service.PromotionTeamFilter, todayStart, todayEnd time.Time) ([]service.PromotionTeamItem, int64, error) {
 	filter.Page, filter.PageSize = normalizePage(filter.Page, filter.PageSize)
 	totalWhere := ""
 	listWhere := ""
@@ -554,7 +672,8 @@ func (r *promotionRepository) listPromotionTree(ctx context.Context, rootUserID 
 			GROUP BY user_id
 		)
 		SELECT tree.user_id, u.email, COALESCE(u.username, ''), tree.depth, u.created_at, pa.activated_at,
-		       COALESCE(today_usage.total_cost, 0), COALESCE(total_usage.total_cost, 0)
+		       COALESCE(today_usage.total_cost, 0) AS today_contribution,
+		       COALESCE(total_usage.total_cost, 0) AS total_contribution
 		FROM tree
 		JOIN users u ON u.id = tree.user_id AND u.deleted_at IS NULL
 		LEFT JOIN promotion_activations pa ON pa.user_id = tree.user_id
@@ -720,13 +839,13 @@ func buildPromotionTeamOrderClause(filter service.PromotionTeamFilter) string {
 	}
 	switch filter.SortBy {
 	case "total_contribution":
-		return "COALESCE(total_usage.total_cost, 0) " + order + ", tree.user_id DESC"
+		return "total_contribution " + order + ", tree.user_id DESC"
 	case "joined_at":
 		return "u.created_at " + order + ", tree.user_id DESC"
 	case "activated_at":
 		return "pa.activated_at " + order + " NULLS LAST, tree.user_id DESC"
 	default:
-		return "COALESCE(today_usage.total_cost, 0) " + order + ", tree.user_id DESC"
+		return "today_contribution " + order + ", tree.user_id DESC"
 	}
 }
 
