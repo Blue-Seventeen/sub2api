@@ -273,11 +273,13 @@ func (r *promotionRepository) UpsertDailyPromotionCommissions(ctx context.Contex
 		       COALESCE(SUM(ul.real_actual_cost), 0) AS base_amount
 		FROM usage_logs ul
 		JOIN promotion_users pu ON pu.user_id = ul.user_id
+		JOIN promotion_activations pa ON pa.user_id = ul.user_id
 		LEFT JOIN promotion_users parent_pu ON parent_pu.user_id = pu.parent_user_id
 		WHERE pu.parent_user_id IS NOT NULL
 		  AND ul.created_at >= $1
 		  AND ul.created_at < $2
 		  AND ul.real_actual_cost > 0
+		  AND ul.created_at >= pa.activated_at
 		GROUP BY ul.user_id, pu.parent_user_id, parent_pu.parent_user_id
 	`, businessStart, businessEnd)
 	if err != nil {
