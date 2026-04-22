@@ -1190,6 +1190,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSCreatePayload(reqBody map[string]any
 		payload[k] = v
 	}
 
+	normalizeOpenAIServiceTierInRequestBodyMap(payload)
 	delete(payload, "background")
 	if _, exists := payload["stream"]; !exists {
 		payload["stream"] = true
@@ -2324,7 +2325,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		Usage:           *usage,
 		Model:           originalModel,
 		UpstreamModel:   mappedModel,
-		ServiceTier:     extractOpenAIServiceTier(reqBody),
+		ServiceTier:     extractOpenAIServiceTier(payload),
 		ReasoningEffort: extractOpenAIReasoningEffort(reqBody, originalModel),
 		Stream:          reqStream,
 		OpenAIWSMode:    true,
@@ -2458,6 +2459,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if !gjson.ValidBytes(trimmed) {
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", errors.New("invalid json"))
 		}
+		rawForHash, _, normalizeErr := normalizeOpenAIServiceTierInBody(trimmed)
+		if normalizeErr != nil {
+			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", normalizeErr)
+		}
 
 		values := gjson.GetManyBytes(trimmed, "type", "model", "prompt_cache_key", "previous_response_id")
 		eventType := strings.TrimSpace(values[0].String())
@@ -2518,10 +2523,15 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			normalized = next
 		}
+		normalizedPayload, _, normalizeErr := normalizeOpenAIServiceTierInBody(normalized)
+		if normalizeErr != nil {
+			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", normalizeErr)
+		}
+		normalized = normalizedPayload
 
 		return openAIWSClientPayload{
 			payloadRaw:         normalized,
-			rawForHash:         trimmed,
+			rawForHash:         rawForHash,
 			promptCacheKey:     promptCacheKey,
 			previousResponseID: previousResponseID,
 			originalModel:      originalModel,

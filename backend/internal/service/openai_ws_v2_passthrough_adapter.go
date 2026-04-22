@@ -18,7 +18,8 @@ import (
 )
 
 type openAIWSClientFrameConn struct {
-	conn *coderws.Conn
+	conn                 *coderws.Conn
+	normalizeServiceTier bool
 }
 
 const openaiWSV2PassthroughModeFields = "ws_mode=passthrough ws_router=v2"
@@ -32,7 +33,18 @@ func (c *openAIWSClientFrameConn) ReadFrame(ctx context.Context) (coderws.Messag
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return c.conn.Read(ctx)
+	msgType, payload, err := c.conn.Read(ctx)
+	if err != nil {
+		return coderws.MessageText, nil, err
+	}
+	if c.normalizeServiceTier {
+		normalizedPayload, _, normalizeErr := normalizeOpenAIServiceTierInBody(payload)
+		if normalizeErr != nil {
+			return msgType, nil, normalizeErr
+		}
+		payload = normalizedPayload
+	}
+	return msgType, payload, nil
 }
 
 func (c *openAIWSClientFrameConn) WriteFrame(ctx context.Context, msgType coderws.MessageType, payload []byte) error {
@@ -76,6 +88,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if strings.TrimSpace(token) == "" {
 		return errors.New("token is empty")
 	}
+	normalizedFirstClientMessage, _, err := normalizeOpenAIServiceTierInBody(firstClientMessage)
+	if err != nil {
+		return fmt.Errorf("normalize first client websocket request: %w", err)
+	}
+	firstClientMessage = normalizedFirstClientMessage
 	requestModel := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "model").String())
 	requestServiceTier := extractOpenAIServiceTierFromBody(firstClientMessage)
 	requestPreviousResponseID := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "previous_response_id").String())
@@ -151,7 +168,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	completedTurns := atomic.Int32{}
 	relayResult, relayExit := openaiwsv2.RunEntry(openaiwsv2.EntryInput{
 		Ctx:                ctx,
-		ClientConn:         &openAIWSClientFrameConn{conn: clientConn},
+		ClientConn:         &openAIWSClientFrameConn{conn: clientConn, normalizeServiceTier: true},
 		UpstreamConn:       upstreamFrameConn,
 		FirstClientMessage: firstClientMessage,
 		Options: openaiwsv2.RelayOptions{

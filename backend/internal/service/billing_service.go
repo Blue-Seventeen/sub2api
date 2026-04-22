@@ -80,8 +80,6 @@ func serviceTierCostMultiplier(serviceTier string) float64 {
 	switch normalizeBillingServiceTier(serviceTier) {
 	case "priority":
 		return 2.0
-	case "flex":
-		return 0.5
 	default:
 		return 1.0
 	}
@@ -109,7 +107,7 @@ type CostBreakdown struct {
 	ActualCost        float64 // 应用最终显示倍率后的用户显示扣费
 	// RealActualCost is the admin-facing real billed cost.
 	RealActualCost float64
-	BillingMode       string  // 计费模式（"token"/"per_request"/"image"），由 CalculateCostUnified 填充
+	BillingMode    string // 计费模式（"token"/"per_request"/"image"），由 CalculateCostUnified 填充
 }
 
 // BillingService 计费服务

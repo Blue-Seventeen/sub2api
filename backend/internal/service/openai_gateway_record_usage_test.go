@@ -10,6 +10,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 type openAIRecordUsageLogRepoStub struct {
@@ -881,7 +882,7 @@ func TestOpenAIGatewayServiceRecordUsage_ServiceTierPriorityUsesFastPricing(t *t
 	require.InDelta(t, baseCost.TotalCost*2, usageRepo.lastLog.TotalCost, 1e-10)
 }
 
-func TestOpenAIGatewayServiceRecordUsage_ServiceTierFlexHalvesCost(t *testing.T) {
+func TestOpenAIGatewayServiceRecordUsage_ServiceTierFlexFallsBackToDefaultCost(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	userRepo := &openAIRecordUsageUserRepoStub{}
 	subRepo := &openAIRecordUsageSubRepoStub{}
@@ -907,7 +908,7 @@ func TestOpenAIGatewayServiceRecordUsage_ServiceTierFlexHalvesCost(t *testing.T)
 
 	baseCost, calcErr := svc.billingService.CalculateCost("gpt-5.4", UsageTokens{InputTokens: 80, OutputTokens: 50, CacheReadTokens: 20}, 1.0)
 	require.NoError(t, calcErr)
-	require.InDelta(t, baseCost.TotalCost*0.5, usageRepo.lastLog.TotalCost, 1e-10)
+	require.InDelta(t, baseCost.TotalCost, usageRepo.lastLog.TotalCost, 1e-10)
 }
 
 func TestNormalizeOpenAIServiceTier(t *testing.T) {
@@ -928,16 +929,39 @@ func TestNormalizeOpenAIServiceTier(t *testing.T) {
 
 func TestExtractOpenAIServiceTier(t *testing.T) {
 	require.Equal(t, "priority", *extractOpenAIServiceTier(map[string]any{"service_tier": "fast"}))
-	require.Equal(t, "flex", *extractOpenAIServiceTier(map[string]any{"service_tier": "flex"}))
+	require.Nil(t, extractOpenAIServiceTier(map[string]any{"service_tier": "flex"}))
 	require.Nil(t, extractOpenAIServiceTier(map[string]any{"service_tier": 1}))
 	require.Nil(t, extractOpenAIServiceTier(nil))
 }
 
 func TestExtractOpenAIServiceTierFromBody(t *testing.T) {
 	require.Equal(t, "priority", *extractOpenAIServiceTierFromBody([]byte(`{"service_tier":"fast"}`)))
-	require.Equal(t, "flex", *extractOpenAIServiceTierFromBody([]byte(`{"service_tier":"flex"}`)))
+	require.Nil(t, extractOpenAIServiceTierFromBody([]byte(`{"service_tier":"flex"}`)))
 	require.Nil(t, extractOpenAIServiceTierFromBody([]byte(`{"service_tier":"default"}`)))
 	require.Nil(t, extractOpenAIServiceTierFromBody(nil))
+}
+
+func TestNormalizeOpenAIServiceTierInRequestBodyMap(t *testing.T) {
+	reqBody := map[string]any{"service_tier": "fast"}
+	require.True(t, normalizeOpenAIServiceTierInRequestBodyMap(reqBody))
+	require.Equal(t, "priority", reqBody["service_tier"])
+
+	reqBody = map[string]any{"service_tier": "flex"}
+	require.True(t, normalizeOpenAIServiceTierInRequestBodyMap(reqBody))
+	_, exists := reqBody["service_tier"]
+	require.False(t, exists)
+}
+
+func TestNormalizeOpenAIServiceTierInBody(t *testing.T) {
+	body, changed, err := normalizeOpenAIServiceTierInBody([]byte(`{"service_tier":"fast"}`))
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, "priority", gjson.GetBytes(body, "service_tier").String())
+
+	body, changed, err = normalizeOpenAIServiceTierInBody([]byte(`{"service_tier":"flex"}`))
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.False(t, gjson.GetBytes(body, "service_tier").Exists())
 }
 
 func TestOpenAIGatewayServiceRecordUsage_UsesRequestedModelAndUpstreamModelMetadataFields(t *testing.T) {

@@ -437,6 +437,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughModeR
 
 	require.Equal(t, 1, captureDialer.DialCount(), "passthrough 模式应直接建立上游 websocket")
 	require.Len(t, upstreamConn.writes, 1, "passthrough 模式应透传首条 response.create")
+	require.Equal(t, "priority", gjson.Get(requestToJSONString(upstreamConn.writes[0]), "service_tier").String())
 }
 
 func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_ModeOffReturnsPolicyViolation(t *testing.T) {
@@ -2618,9 +2619,10 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_ClientDisconnect
 		require.Equal(t, "resp_ingress_disconnect", result.RequestID)
 		require.Equal(t, 2, result.Usage.InputTokens)
 		require.Equal(t, 1, result.Usage.OutputTokens)
-		require.NotNil(t, result.ServiceTier)
-		require.Equal(t, "flex", *result.ServiceTier)
+		require.Nil(t, result.ServiceTier)
 	case <-time.After(2 * time.Second):
 		t.Fatal("未收到断连后的 turn 结果回调")
 	}
+	require.Len(t, captureConn.writes, 1)
+	require.False(t, gjson.Get(requestToJSONString(captureConn.writes[0]), "service_tier").Exists())
 }

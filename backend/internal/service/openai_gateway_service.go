@@ -222,7 +222,7 @@ type OpenAIForwardResult struct {
 	// UpstreamModel is the actual model sent to the upstream provider after mapping.
 	// Empty when no mapping was applied (requested model was used as-is).
 	UpstreamModel string
-	// ServiceTier records the OpenAI Responses API service tier, e.g. "priority" / "flex".
+	// ServiceTier records the OpenAI Responses API service tier, e.g. "priority".
 	// Nil means the request did not specify a recognized tier.
 	ServiceTier *string
 	// ReasoningEffort is extracted from request body (reasoning.effort) or derived from model suffix.
@@ -1976,6 +1976,14 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Normalized reasoning.effort: minimal -> none (account: %s)", account.Name)
 		}
 	}
+	if normalizeOpenAIServiceTierInRequestBodyMap(reqBody) {
+		bodyModified = true
+		if rawServiceTier, exists := reqBody["service_tier"]; exists {
+			markPatchSet("service_tier", rawServiceTier)
+		} else {
+			markPatchDelete("service_tier")
+		}
+	}
 
 	if account.Type == AccountTypeOAuth {
 		codexResult := applyCodexOAuthTransform(reqBody, isCodexCLI, isOpenAIResponsesCompactPath(c))
@@ -2483,6 +2491,11 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		}
 		reqStream = gjson.GetBytes(body, "stream").Bool()
 	}
+	normalizedServiceTierBody, _, normalizeServiceTierErr := normalizeOpenAIServiceTierInBody(body)
+	if normalizeServiceTierErr != nil {
+		return nil, normalizeServiceTierErr
+	}
+	body = normalizedServiceTierBody
 
 	sanitizedBody, sanitized, err := sanitizeEmptyBase64InputImagesInOpenAIBody(body)
 	if err != nil {
@@ -5060,6 +5073,57 @@ func extractOpenAIServiceTierFromBody(body []byte) *string {
 	return normalizeOpenAIServiceTier(gjson.GetBytes(body, "service_tier").String())
 }
 
+func normalizeOpenAIServiceTierInRequestBodyMap(reqBody map[string]any) bool {
+	if reqBody == nil {
+		return false
+	}
+	rawServiceTier, exists := reqBody["service_tier"]
+	if !exists {
+		return false
+	}
+	serviceTier, ok := rawServiceTier.(string)
+	if !ok {
+		delete(reqBody, "service_tier")
+		return true
+	}
+	normalized := normalizeOpenAIServiceTier(serviceTier)
+	if normalized == nil {
+		delete(reqBody, "service_tier")
+		return true
+	}
+	if serviceTier == *normalized {
+		return false
+	}
+	reqBody["service_tier"] = *normalized
+	return true
+}
+
+func normalizeOpenAIServiceTierInBody(body []byte) ([]byte, bool, error) {
+	if len(body) == 0 {
+		return body, false, nil
+	}
+	rawServiceTier := gjson.GetBytes(body, "service_tier")
+	if !rawServiceTier.Exists() {
+		return body, false, nil
+	}
+	normalized := normalizeOpenAIServiceTier(rawServiceTier.String())
+	if normalized == nil {
+		next, err := sjson.DeleteBytes(body, "service_tier")
+		if err != nil {
+			return body, false, fmt.Errorf("normalize service_tier delete: %w", err)
+		}
+		return next, true, nil
+	}
+	if rawServiceTier.Type == gjson.String && rawServiceTier.String() == *normalized {
+		return body, false, nil
+	}
+	next, err := sjson.SetBytes(body, "service_tier", *normalized)
+	if err != nil {
+		return body, false, fmt.Errorf("normalize service_tier set: %w", err)
+	}
+	return next, true, nil
+}
+
 func normalizeOpenAIServiceTier(raw string) *string {
 	value := strings.ToLower(strings.TrimSpace(raw))
 	if value == "" {
@@ -5069,7 +5133,7 @@ func normalizeOpenAIServiceTier(raw string) *string {
 		value = "priority"
 	}
 	switch value {
-	case "priority", "flex":
+	case "priority":
 		return &value
 	default:
 		return nil
