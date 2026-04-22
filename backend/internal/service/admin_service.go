@@ -485,6 +485,11 @@ type adminServiceImpl struct {
 	defaultSubAssigner   DefaultSubscriptionAssigner
 	userSubRepo          UserSubscriptionRepository
 	privacyClientFactory PrivacyClientFactory
+	endpointModeCache    compatibleEndpointModeCacheInvalidator
+}
+
+type compatibleEndpointModeCacheInvalidator interface {
+	InvalidateEndpointModeCacheForAccount(accountID int64)
 }
 
 type userGroupRateBatchReader interface {
@@ -528,6 +533,27 @@ func NewAdminService(
 		userSubRepo:          userSubRepo,
 		privacyClientFactory: privacyClientFactory,
 	}
+}
+
+func (s *adminServiceImpl) SetCompatibleEndpointModeCacheInvalidator(invalidator compatibleEndpointModeCacheInvalidator) {
+	if s == nil {
+		return
+	}
+	s.endpointModeCache = invalidator
+}
+
+func AttachCompatibleEndpointModeCacheInvalidatorToAdmin(adminService AdminService, invalidator compatibleEndpointModeCacheInvalidator) AdminService {
+	if impl, ok := adminService.(*adminServiceImpl); ok {
+		impl.SetCompatibleEndpointModeCacheInvalidator(invalidator)
+	}
+	return adminService
+}
+
+func (s *adminServiceImpl) invalidateCompatibleEndpointModeCache(accountID int64) {
+	if s == nil || s.endpointModeCache == nil || accountID <= 0 {
+		return
+	}
+	s.endpointModeCache.InvalidateEndpointModeCacheForAccount(accountID)
 }
 
 // User management implementations
@@ -2164,6 +2190,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if err != nil {
 		return nil, err
 	}
+	s.invalidateCompatibleEndpointModeCache(id)
 	return updated, nil
 }
 
@@ -2260,6 +2287,9 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	if _, err := s.accountRepo.BulkUpdate(ctx, input.AccountIDs, repoUpdates); err != nil {
 		return nil, err
 	}
+	for _, accountID := range input.AccountIDs {
+		s.invalidateCompatibleEndpointModeCache(accountID)
+	}
 
 	// Handle group bindings per account (requires individual operations).
 	for _, accountID := range input.AccountIDs {
@@ -2289,6 +2319,7 @@ func (s *adminServiceImpl) DeleteAccount(ctx context.Context, id int64) error {
 	if err := s.accountRepo.Delete(ctx, id); err != nil {
 		return err
 	}
+	s.invalidateCompatibleEndpointModeCache(id)
 	return nil
 }
 

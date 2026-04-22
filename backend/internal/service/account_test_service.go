@@ -1065,14 +1065,30 @@ func (s *AccountTestService) testCompatibleAccountConnection(c *gin.Context, acc
 
 	var apiURL string
 	var payloadBytes []byte
+	upstreamKind := compatibleUpstreamChat
 	if preset.SupportsResponses {
 		apiURL = preset.BuildResponsesURL(normalizedBaseURL, testModelID)
 		payload := createOpenAITestPayload(testModelID, false)
 		payloadBytes, _ = json.Marshal(payload)
+		upstreamKind = compatibleUpstreamResponses
 	} else {
 		apiURL = preset.BuildChatURL(normalizedBaseURL, testModelID)
 		payload := createCompatibleChatTestPayload(testModelID)
 		payloadBytes, _ = json.Marshal(payload)
+	}
+
+	if preset.SupportsResponses {
+		if preset.PatchResponsesBody != nil {
+			if payloadBytes, err = preset.PatchResponsesBody(payloadBytes, account, testModelID); err != nil {
+				return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to patch request body: %s", err.Error()))
+			}
+		}
+	} else {
+		if preset.PatchChatBody != nil {
+			if payloadBytes, err = preset.PatchChatBody(payloadBytes, account, testModelID); err != nil {
+				return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to patch request body: %s", err.Error()))
+			}
+		}
 	}
 
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
@@ -1083,48 +1099,57 @@ func (s *AccountTestService) testCompatibleAccountConnection(c *gin.Context, acc
 
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
-	if err != nil {
-		return s.sendErrorAndEnd(c, "Failed to create request")
-	}
-	req.Header.Set("Content-Type", "application/json")
 	token := getCompatibleAuthToken(account, preset.AuthMode)
 	if token == "" {
 		return s.sendErrorAndEnd(c, "No API key available")
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	if preset.SupportsResponses {
-		if preset.PatchResponsesHeaders != nil {
-			preset.PatchResponsesHeaders(req, account, testModelID)
-		}
-		if preset.PatchResponsesBody != nil {
-			if payloadBytes, err = preset.PatchResponsesBody(payloadBytes, account, testModelID); err == nil {
-				req.Body = io.NopCloser(bytes.NewReader(payloadBytes))
-				req.ContentLength = int64(len(payloadBytes))
-			}
-		}
-	} else {
-		if preset.PatchChatHeaders != nil {
-			preset.PatchChatHeaders(req, account, testModelID)
-		}
-		if preset.PatchChatBody != nil {
-			if payloadBytes, err = preset.PatchChatBody(payloadBytes, account, testModelID); err == nil {
-				req.Body = io.NopCloser(bytes.NewReader(payloadBytes))
-				req.ContentLength = int64(len(payloadBytes))
-			}
-		}
-	}
 
 	proxyURL := resolveAccountProxyURL(ctx, account, nil)
-	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
-	if err != nil {
-		return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
+	urlCandidates := []string{apiURL}
+	if fallbackURL := buildRelayCompatibleFallbackURL(normalizedBaseURL, upstreamKind); fallbackURL != "" && fallbackURL != apiURL {
+		urlCandidates = append(urlCandidates, fallbackURL)
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode >= 400 {
+
+	var resp *http.Response
+	for idx, candidateURL := range urlCandidates {
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, candidateURL, bytes.NewReader(payloadBytes))
+		if reqErr != nil {
+			return s.sendErrorAndEnd(c, "Failed to create request")
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.ContentLength = int64(len(payloadBytes))
+		if preset.SupportsResponses {
+			if preset.PatchResponsesHeaders != nil {
+				preset.PatchResponsesHeaders(req, account, testModelID)
+			}
+		} else {
+			if preset.PatchChatHeaders != nil {
+				preset.PatchChatHeaders(req, account, testModelID)
+			}
+		}
+
+		resp, err = s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+		if err != nil {
+			return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
+		}
+		if resp.StatusCode < 400 {
+			break
+		}
+
+		statusCode := resp.StatusCode
 		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		resp = nil
+		if idx == 0 && shouldRetryViaRelayCompatibleEndpoint(&compatiblePreparedRequest{UpstreamKind: upstreamKind}, statusCode, body) {
+			continue
+		}
 		return s.sendErrorAndEnd(c, strings.TrimSpace(extractUpstreamErrorMessage(body)))
 	}
+	if resp == nil {
+		return s.sendErrorAndEnd(c, "No upstream response")
+	}
+	defer func() { _ = resp.Body.Close() }()
 	if preset.SupportsResponses {
 		return s.processOpenAIStream(c, resp.Body)
 	}

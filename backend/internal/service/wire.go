@@ -456,6 +456,18 @@ func ProvideOAuthRefreshAPI(accountRepo AccountRepository, tokenCache GeminiToke
 	return NewOAuthRefreshAPI(accountRepo, tokenCache)
 }
 
+func ProvideCompatibleGatewayService(
+	gatewayService *GatewayService,
+	httpUpstream HTTPUpstream,
+	cfg *config.Config,
+	tlsFingerprintProfileService *TLSFingerprintProfileService,
+	adminService AdminService,
+) *CompatibleGatewayService {
+	svc := NewCompatibleGatewayService(gatewayService, httpUpstream, cfg, tlsFingerprintProfileService)
+	AttachCompatibleEndpointModeCacheInvalidatorToAdmin(adminService, svc)
+	return svc
+}
+
 // ProviderSet is the Wire provider set for all services
 var ProviderSet = wire.NewSet(
 	// Core services
@@ -478,7 +490,7 @@ var ProviderSet = wire.NewSet(
 	ProvideAccountRefreshService,
 	NewGatewayService,
 	NewOpenAIGatewayService,
-	NewCompatibleGatewayService,
+	ProvideCompatibleGatewayService,
 	NewOAuthService,
 	NewOpenAIOAuthService,
 	NewGeminiOAuthService,

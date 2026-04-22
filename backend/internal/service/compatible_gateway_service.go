@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
@@ -24,6 +26,7 @@ type CompatibleGatewayService struct {
 	httpUpstream        HTTPUpstream
 	cfg                 *config.Config
 	tlsFPProfileService *TLSFingerprintProfileService
+	endpointModeCache   sync.Map
 }
 
 type CompatibleUpstreamError struct {
@@ -46,6 +49,23 @@ const (
 	compatibleUpstreamResponses compatibleUpstreamKind = "responses"
 	compatibleUpstreamMessages  compatibleUpstreamKind = "messages"
 )
+
+type compatibleEndpointMode string
+
+const (
+	compatibleEndpointModeNative compatibleEndpointMode = "native"
+	compatibleEndpointModeRelay  compatibleEndpointMode = "relay"
+)
+
+type compatibleEndpointModeCacheEntry struct {
+	Mode      compatibleEndpointMode
+	UpdatedAt time.Time
+}
+
+type compatibleURLCandidate struct {
+	URL  string
+	Mode compatibleEndpointMode
+}
 
 type compatiblePreparedRequest struct {
 	OriginalModel    string
@@ -128,49 +148,72 @@ func (s *CompatibleGatewayService) Forward(
 	if err != nil {
 		return nil, prepared.UpstreamEndpoint, err
 	}
-	prepared.URL = s.buildURLForPreparedRequest(account, prepared, baseURL)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, prepared.URL, bytes.NewReader(prepared.RequestBody))
-	if err != nil {
-		return nil, prepared.UpstreamEndpoint, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if prepared.ClientStream {
-		req.Header.Set("Accept", "text/event-stream")
-	}
-	if err := s.applyAuth(req, account); err != nil {
-		return nil, prepared.UpstreamEndpoint, err
-	}
-	s.applyHeaderPatches(req, account, prepared)
-
 	proxyURL := resolveAccountProxyURL(ctx, account, nil)
-	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
-	if err != nil {
-		return nil, prepared.UpstreamEndpoint, &CompatibleUpstreamError{
-			StatusCode: http.StatusBadGateway,
-			Message:    sanitizeUpstreamErrorMessage(err.Error()),
-		}
-	}
-	defer func() { _ = resp.Body.Close() }()
+	urlCandidates := s.buildURLCandidatesForPreparedRequest(account, prepared, baseURL)
 
-	if resp.StatusCode >= 400 {
+	var resp *http.Response
+	for idx, candidate := range urlCandidates {
+		prepared.URL = candidate.URL
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, prepared.URL, bytes.NewReader(prepared.RequestBody))
+		if err != nil {
+			return nil, prepared.UpstreamEndpoint, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if prepared.ClientStream {
+			req.Header.Set("Accept", "text/event-stream")
+		}
+		if err := s.applyAuth(req, account); err != nil {
+			return nil, prepared.UpstreamEndpoint, err
+		}
+		s.applyHeaderPatches(req, account, prepared)
+
+		resp, err = s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+		if err != nil {
+			return nil, prepared.UpstreamEndpoint, &CompatibleUpstreamError{
+				StatusCode: http.StatusBadGateway,
+				Message:    sanitizeUpstreamErrorMessage(err.Error()),
+			}
+		}
+
+		if resp.StatusCode < 400 {
+			s.recordEndpointMode(account, prepared, baseURL, candidate.Mode)
+			break
+		}
+
+		statusCode := resp.StatusCode
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+		_ = resp.Body.Close()
+		resp = nil
+
+		if idx == 0 && shouldRetryViaRelayCompatibleEndpoint(prepared, statusCode, respBody) {
+			continue
+		}
+
 		upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
 		if upstreamMsg == "" {
-			upstreamMsg = http.StatusText(resp.StatusCode)
+			upstreamMsg = http.StatusText(statusCode)
 		}
-		if s.gatewayService.shouldFailoverUpstreamError(resp.StatusCode) {
+		if s.gatewayService.shouldFailoverUpstreamError(statusCode) {
 			return nil, prepared.UpstreamEndpoint, &UpstreamFailoverError{
-				StatusCode:   resp.StatusCode,
+				StatusCode:   statusCode,
 				ResponseBody: respBody,
 			}
 		}
 		return nil, prepared.UpstreamEndpoint, &CompatibleUpstreamError{
-			StatusCode:   mapUpstreamStatusCode(resp.StatusCode),
+			StatusCode:   mapUpstreamStatusCode(statusCode),
 			Message:      upstreamMsg,
 			ResponseBody: respBody,
 		}
 	}
+
+	if resp == nil {
+		return nil, prepared.UpstreamEndpoint, &CompatibleUpstreamError{
+			StatusCode: http.StatusBadGateway,
+			Message:    "compatible upstream error",
+		}
+	}
+	defer func() { _ = resp.Body.Close() }()
 
 	switch prepared.UpstreamKind {
 	case compatibleUpstreamMessages:
@@ -341,6 +384,130 @@ func (s *CompatibleGatewayService) buildURLForPreparedRequest(account *Account, 
 	default:
 		return preset.BuildChatURL(baseURL, prepared.UpstreamModel)
 	}
+}
+
+func (s *CompatibleGatewayService) buildURLCandidatesForPreparedRequest(account *Account, prepared *compatiblePreparedRequest, baseURL string) []compatibleURLCandidate {
+	primary := s.buildURLForPreparedRequest(account, prepared, baseURL)
+	fallback := buildRelayCompatibleFallbackURL(baseURL, prepared.UpstreamKind)
+	if fallback == "" || fallback == primary {
+		return []compatibleURLCandidate{{URL: primary, Mode: compatibleEndpointModeNative}}
+	}
+	if s.preferredEndpointMode(account, prepared, baseURL) == compatibleEndpointModeRelay {
+		return []compatibleURLCandidate{
+			{URL: fallback, Mode: compatibleEndpointModeRelay},
+			{URL: primary, Mode: compatibleEndpointModeNative},
+		}
+	}
+	return []compatibleURLCandidate{
+		{URL: primary, Mode: compatibleEndpointModeNative},
+		{URL: fallback, Mode: compatibleEndpointModeRelay},
+	}
+}
+
+func buildRelayCompatibleFallbackURL(baseURL string, kind compatibleUpstreamKind) string {
+	switch kind {
+	case compatibleUpstreamMessages:
+		return joinRelayCompatibleURL(baseURL, "/v1/messages")
+	case compatibleUpstreamResponses:
+		return joinRelayCompatibleURL(baseURL, "/v1/responses")
+	default:
+		return joinRelayCompatibleURL(baseURL, "/v1/chat/completions")
+	}
+}
+
+func joinRelayCompatibleURL(baseURL, endpoint string) string {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" {
+		return ""
+	}
+
+	lowerBase := strings.ToLower(baseURL)
+	lowerEndpoint := strings.ToLower(endpoint)
+	if strings.HasSuffix(lowerBase, lowerEndpoint) {
+		return baseURL
+	}
+	if strings.HasSuffix(lowerBase, "/v1") && strings.HasPrefix(lowerEndpoint, "/v1/") {
+		return baseURL + endpoint[len("/v1"):]
+	}
+	return baseURL + endpoint
+}
+
+func shouldRetryViaRelayCompatibleEndpoint(prepared *compatiblePreparedRequest, statusCode int, respBody []byte) bool {
+	if prepared == nil {
+		return false
+	}
+	switch statusCode {
+	case http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusNotImplemented:
+		return true
+	}
+	if statusCode != http.StatusBadRequest {
+		return false
+	}
+	msg := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
+	if msg == "" {
+		msg = strings.ToLower(strings.TrimSpace(string(respBody)))
+	}
+	return strings.Contains(msg, "path") ||
+		strings.Contains(msg, "route") ||
+		strings.Contains(msg, "endpoint") ||
+		strings.Contains(msg, "not found") ||
+		strings.Contains(msg, "unsupported")
+}
+
+func (s *CompatibleGatewayService) endpointModeCacheKey(account *Account, prepared *compatiblePreparedRequest, baseURL string) string {
+	accountID := int64(0)
+	if account != nil {
+		accountID = account.ID
+	}
+	upstreamKind := compatibleUpstreamChat
+	if prepared != nil {
+		upstreamKind = prepared.UpstreamKind
+	}
+	return fmt.Sprintf("%d|%s|%s", accountID, strings.TrimSpace(baseURL), upstreamKind)
+}
+
+func (s *CompatibleGatewayService) preferredEndpointMode(account *Account, prepared *compatiblePreparedRequest, baseURL string) compatibleEndpointMode {
+	if s == nil {
+		return compatibleEndpointModeNative
+	}
+	key := s.endpointModeCacheKey(account, prepared, baseURL)
+	raw, ok := s.endpointModeCache.Load(key)
+	if !ok {
+		return compatibleEndpointModeNative
+	}
+	entry, ok := raw.(compatibleEndpointModeCacheEntry)
+	if !ok {
+		s.endpointModeCache.Delete(key)
+		return compatibleEndpointModeNative
+	}
+	if entry.Mode == compatibleEndpointModeRelay {
+		return compatibleEndpointModeRelay
+	}
+	return compatibleEndpointModeNative
+}
+
+func (s *CompatibleGatewayService) recordEndpointMode(account *Account, prepared *compatiblePreparedRequest, baseURL string, mode compatibleEndpointMode) {
+	if s == nil {
+		return
+	}
+	s.endpointModeCache.Store(s.endpointModeCacheKey(account, prepared, baseURL), compatibleEndpointModeCacheEntry{
+		Mode:      mode,
+		UpdatedAt: time.Now(),
+	})
+}
+
+func (s *CompatibleGatewayService) InvalidateEndpointModeCacheForAccount(accountID int64) {
+	if s == nil || accountID <= 0 {
+		return
+	}
+	prefix := fmt.Sprintf("%d|", accountID)
+	s.endpointModeCache.Range(func(key, _ any) bool {
+		keyStr, ok := key.(string)
+		if ok && strings.HasPrefix(keyStr, prefix) {
+			s.endpointModeCache.Delete(key)
+		}
+		return true
+	})
 }
 
 func (s *CompatibleGatewayService) applyAuth(req *http.Request, account *Account) error {

@@ -234,6 +234,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	gatewayHandler := handler.NewGatewayHandler(gatewayService, geminiMessagesCompatService, antigravityGatewayService, userService, concurrencyService, billingCacheService, usageService, apiKeyService, usageRecordWorkerPool, errorPassthroughService, userMessageQueueService, configConfig, settingService)
 	openAIGatewayHandler := handler.NewOpenAIGatewayHandler(openAIGatewayService, concurrencyService, billingCacheService, apiKeyService, usageRecordWorkerPool, errorPassthroughService, configConfig)
 	compatibleGatewayService := service.NewCompatibleGatewayService(gatewayService, httpUpstream, configConfig, tlsFingerprintProfileService)
+	adminService = service.AttachCompatibleEndpointModeCacheInvalidatorToAdmin(adminService, compatibleGatewayService)
 	compatibleGatewayHandler := handler.NewCompatibleGatewayHandler(compatibleGatewayService, gatewayHandler)
 	handlerSettingHandler := handler.ProvideSettingHandler(settingService, buildInfo)
 	totpHandler := handler.NewTotpHandler(totpService)
