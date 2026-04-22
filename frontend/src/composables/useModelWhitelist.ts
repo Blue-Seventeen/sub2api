@@ -368,8 +368,10 @@ export function getModelsByPlatform(platform: string): string[] {
     case 'gemini': return geminiModels
     case 'antigravity': return antigravityModels
     case 'zhipu': return zhipuModels
+    case 'ali': return qwenModels
     case 'qwen': return qwenModels
     case 'deepseek': return deepseekModels
+    case 'volcengine': return doubaoModels
     case 'mistral': return mistralModels
     case 'meta': return metaModels
     case 'xai': return xaiModels

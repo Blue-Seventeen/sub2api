@@ -45,9 +45,12 @@ var opsRetryRequestHeaderAllowlist = map[string]bool{
 type opsRetryRequestType string
 
 const (
-	opsRetryTypeMessages  opsRetryRequestType = "messages"
-	opsRetryTypeOpenAI    opsRetryRequestType = "openai_responses"
-	opsRetryTypeGeminiV1B opsRetryRequestType = "gemini_v1beta"
+	opsRetryTypeMessages          opsRetryRequestType = "messages"
+	opsRetryTypeOpenAI            opsRetryRequestType = "openai_responses"
+	opsRetryTypeGeminiV1B         opsRetryRequestType = "gemini_v1beta"
+	opsRetryTypeCompatibleMessage opsRetryRequestType = "compatible_messages"
+	opsRetryTypeCompatibleChat    opsRetryRequestType = "compatible_chat_completions"
+	opsRetryTypeCompatibleResp    opsRetryRequestType = "compatible_responses"
 )
 
 type limitedResponseWriter struct {
@@ -356,11 +359,11 @@ func (s *OpsService) executeRetry(ctx context.Context, errorLog *OpsErrorLogDeta
 		}
 	}
 
-	reqType := detectOpsRetryType(errorLog.RequestPath)
+	reqType := detectOpsRetryType(errorLog.RequestPath, errorLog.Platform)
 	bodyBytes := []byte(errorLog.RequestBody)
 
 	switch reqType {
-	case opsRetryTypeMessages:
+	case opsRetryTypeMessages, opsRetryTypeCompatibleMessage:
 		bodyBytes = FilterThinkingBlocksForRetry(bodyBytes)
 	case opsRetryTypeOpenAI, opsRetryTypeGeminiV1B:
 		// No-op
@@ -385,8 +388,18 @@ func (s *OpsService) executeRetry(ctx context.Context, errorLog *OpsErrorLogDeta
 	}
 }
 
-func detectOpsRetryType(path string) opsRetryRequestType {
+func detectOpsRetryType(path string, platform string) opsRetryRequestType {
 	p := strings.ToLower(strings.TrimSpace(path))
+	if IsCompatiblePlatform(platform) {
+		switch {
+		case strings.Contains(p, "/responses"):
+			return opsRetryTypeCompatibleResp
+		case strings.Contains(p, "/chat/completions"):
+			return opsRetryTypeCompatibleChat
+		default:
+			return opsRetryTypeCompatibleMessage
+		}
+	}
 	switch {
 	case strings.Contains(p, "/responses"):
 		return opsRetryTypeOpenAI
@@ -515,6 +528,11 @@ func (s *OpsService) selectAccountForRetry(ctx context.Context, reqType opsRetry
 			return nil, fmt.Errorf("openai gateway service not available")
 		}
 		return s.openAIGatewayService.SelectAccountWithLoadAwareness(ctx, groupID, "", model, excludedIDs)
+	case opsRetryTypeCompatibleMessage, opsRetryTypeCompatibleChat, opsRetryTypeCompatibleResp:
+		if s.gatewayService == nil {
+			return nil, fmt.Errorf("gateway service not available")
+		}
+		return s.gatewayService.SelectAccountWithLoadAwareness(ctx, groupID, "", model, excludedIDs, "", int64(0))
 	case opsRetryTypeGeminiV1B, opsRetryTypeMessages:
 		if s.gatewayService == nil {
 			return nil, fmt.Errorf("gateway service not available")
@@ -527,13 +545,13 @@ func (s *OpsService) selectAccountForRetry(ctx context.Context, reqType opsRetry
 
 func extractRetryModelAndStream(reqType opsRetryRequestType, errorLog *OpsErrorLogDetail, body []byte) (model string, stream bool, err error) {
 	switch reqType {
-	case opsRetryTypeMessages:
+	case opsRetryTypeMessages, opsRetryTypeCompatibleMessage:
 		parsed, parseErr := ParseGatewayRequest(body, domain.PlatformAnthropic)
 		if parseErr != nil {
 			return "", false, fmt.Errorf("failed to parse messages request body: %w", parseErr)
 		}
 		return parsed.Model, parsed.Stream, nil
-	case opsRetryTypeOpenAI:
+	case opsRetryTypeOpenAI, opsRetryTypeCompatibleChat, opsRetryTypeCompatibleResp:
 		var v struct {
 			Model  string `json:"model"`
 			Stream bool   `json:"stream"`
@@ -566,6 +584,18 @@ func (s *OpsService) executeWithAccount(ctx context.Context, reqType opsRetryReq
 			return &opsRetryExecution{status: opsRetryStatusFailed, errorMessage: "openai gateway service not available"}
 		}
 		_, err = s.openAIGatewayService.Forward(ctx, c, account, body)
+	case opsRetryTypeCompatibleMessage, opsRetryTypeCompatibleChat, opsRetryTypeCompatibleResp:
+		if s.compatibleGatewayService == nil {
+			return &opsRetryExecution{status: opsRetryStatusFailed, errorMessage: "compatible gateway service not available"}
+		}
+		route := CompatibleRouteMessages
+		switch reqType {
+		case opsRetryTypeCompatibleChat:
+			route = CompatibleRouteChatCompletions
+		case opsRetryTypeCompatibleResp:
+			route = CompatibleRouteResponses
+		}
+		_, _, err = s.compatibleGatewayService.Forward(ctx, c, account, route, body)
 	case opsRetryTypeGeminiV1B:
 		if s.geminiCompatService == nil || s.antigravityGatewayService == nil {
 			return &opsRetryExecution{status: opsRetryStatusFailed, errorMessage: "gemini services not available"}

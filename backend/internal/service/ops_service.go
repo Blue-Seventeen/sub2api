@@ -51,6 +51,7 @@ type OpsService struct {
 	concurrencyService        *ConcurrencyService
 	gatewayService            *GatewayService
 	openAIGatewayService      *OpenAIGatewayService
+	compatibleGatewayService  *CompatibleGatewayService
 	geminiCompatService       *GeminiMessagesCompatService
 	antigravityGatewayService *AntigravityGatewayService
 	systemLogSink             *OpsSystemLogSink
@@ -86,6 +87,13 @@ func NewOpsService(
 	}
 	svc.applyRuntimeLogConfigOnStartup(context.Background())
 	return svc
+}
+
+func (s *OpsService) SetCompatibleGatewayService(compatibleGatewayService *CompatibleGatewayService) {
+	if s == nil {
+		return
+	}
+	s.compatibleGatewayService = compatibleGatewayService
 }
 
 func (s *OpsService) RequireMonitoringEnabled(ctx context.Context) error {

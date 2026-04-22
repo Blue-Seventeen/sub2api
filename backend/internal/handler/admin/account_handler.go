@@ -103,7 +103,7 @@ func NewAccountHandler(
 type CreateAccountRequest struct {
 	Name                    string         `json:"name" binding:"required"`
 	Notes                   *string        `json:"notes"`
-	Platform                string         `json:"platform" binding:"required"`
+	Platform                string         `json:"platform" binding:"required,oneof=anthropic openai gemini antigravity zhipu deepseek volcengine ali moonshot"`
 	Type                    string         `json:"type" binding:"required,oneof=oauth setup-token apikey upstream bedrock"`
 	Credentials             map[string]any `json:"credentials" binding:"required"`
 	Extra                   map[string]any `json:"extra"`
@@ -1904,6 +1904,11 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 		return
 	}
 
+	if account.IsCompatiblePlatform() {
+		response.Success(c, h.compatibleModelsForAccount(account))
+		return
+	}
+
 	// Handle Claude/Anthropic accounts
 	// For OAuth and Setup-Token accounts: return default models
 	if account.IsOAuth() {
@@ -1943,6 +1948,32 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 	}
 
 	response.Success(c, models)
+}
+
+func (h *AccountHandler) compatibleModelsForAccount(account *service.Account) []claude.Model {
+	models := service.CompatibleDefaultModels(account.Platform)
+	mapping := account.GetModelMapping()
+	if len(mapping) == 0 {
+		return models
+	}
+	index := make(map[string]claude.Model, len(models))
+	for _, model := range models {
+		index[model.ID] = model
+	}
+	out := make([]claude.Model, 0, len(mapping))
+	for requestedModel := range mapping {
+		if model, ok := index[requestedModel]; ok {
+			out = append(out, model)
+			continue
+		}
+		out = append(out, claude.Model{
+			ID:          requestedModel,
+			Type:        "model",
+			DisplayName: requestedModel,
+			CreatedAt:   "",
+		})
+	}
+	return out
 }
 
 // SetPrivacy handles setting privacy for a single OpenAI/Antigravity OAuth account

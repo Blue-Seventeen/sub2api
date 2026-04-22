@@ -25,7 +25,21 @@ const (
 	PlatformOpenAI      = domain.PlatformOpenAI
 	PlatformGemini      = domain.PlatformGemini
 	PlatformAntigravity = domain.PlatformAntigravity
+	PlatformZhipu       = domain.PlatformZhipu
+	PlatformDeepSeek    = domain.PlatformDeepSeek
+	PlatformVolcEngine  = domain.PlatformVolcEngine
+	PlatformAli         = domain.PlatformAli
+	PlatformMoonshot    = domain.PlatformMoonshot
 )
+
+func groupRequireOAuthOnlyApplies(platform string) bool {
+	switch platform {
+	case PlatformOpenAI, PlatformAntigravity, PlatformAnthropic, PlatformGemini:
+		return true
+	default:
+		return IsCompatiblePlatform(platform)
+	}
+}
 
 // Account type constants
 const (

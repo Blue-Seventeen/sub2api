@@ -19,6 +19,26 @@
   <svg v-else-if="platform === 'antigravity'" :class="sizeClass" viewBox="0 0 24 24" fill="currentColor">
     <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z" />
   </svg>
+  <!-- Zhipu / GLM -->
+  <svg v-else-if="platform === 'zhipu'" :class="sizeClass" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M5 4h14v3H8v4h9v3H8v6H5V4z" />
+  </svg>
+  <!-- DeepSeek -->
+  <svg v-else-if="platform === 'deepseek'" :class="sizeClass" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M4 12c0-4.418 3.582-8 8-8h6v4h-6a4 4 0 100 8h8v4h-8c-4.418 0-8-3.582-8-8z" />
+  </svg>
+  <!-- VolcEngine / Doubao -->
+  <svg v-else-if="platform === 'volcengine'" :class="sizeClass" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M4 6h16l-8 12H4l8-12zm8 3.5L9.5 14h5L12 9.5z" />
+  </svg>
+  <!-- Ali / Qwen -->
+  <svg v-else-if="platform === 'ali'" :class="sizeClass" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M12 3l7 4v10l-7 4-7-4V7l7-4zm0 4.2L8.5 9.2v5.6l3.5 2 3.5-2V9.2L12 7.2z" />
+  </svg>
+  <!-- Moonshot / Kimi -->
+  <svg v-else-if="platform === 'moonshot'" :class="sizeClass" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M12 2a10 10 0 109.95 11H13V2.05A8 8 0 0112 2z" />
+  </svg>
   <!-- Fallback: generic platform icon -->
   <svg v-else :class="sizeClass" fill="currentColor" viewBox="0 0 24 24">
     <path

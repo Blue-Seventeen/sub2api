@@ -122,6 +122,11 @@ var (
 		PlatformOpenAI:      {},
 		PlatformGemini:      {},
 		PlatformAntigravity: {},
+		PlatformZhipu:       {},
+		PlatformDeepSeek:    {},
+		PlatformVolcEngine:  {},
+		PlatformAli:         {},
+		PlatformMoonshot:    {},
 	}
 	accountAutoOpsSupportedTargetAuthTypes = map[string]struct{}{
 		AccountTypeOAuth:      {},
@@ -277,6 +282,11 @@ func DefaultAccountAutoOpsConfig() *AccountAutoOpsConfig {
 			PlatformOpenAI:      {},
 			PlatformGemini:      {},
 			PlatformAntigravity: {},
+			PlatformZhipu:       {},
+			PlatformDeepSeek:    {},
+			PlatformVolcEngine:  {},
+			PlatformAli:         {},
+			PlatformMoonshot:    {},
 		},
 	}
 }
@@ -363,7 +373,7 @@ func NormalizeAccountAutoOpsConfig(cfg *AccountAutoOpsConfig) *AccountAutoOpsCon
 	})
 
 	if cfg.TestModelsByPlatform != nil {
-		for _, platform := range []string{PlatformAnthropic, PlatformOpenAI, PlatformGemini, PlatformAntigravity} {
+		for _, platform := range []string{PlatformAnthropic, PlatformOpenAI, PlatformGemini, PlatformAntigravity, PlatformZhipu, PlatformDeepSeek, PlatformVolcEngine, PlatformAli, PlatformMoonshot} {
 			rawModels := cfg.TestModelsByPlatform[platform]
 			base.TestModelsByPlatform[platform] = normalizeAutoOpsModels(rawModels)
 		}

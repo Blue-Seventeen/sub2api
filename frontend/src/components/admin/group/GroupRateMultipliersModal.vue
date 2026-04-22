@@ -284,6 +284,11 @@ const platformColorClass = computed(() => {
     case 'anthropic': return 'text-orange-700 dark:text-orange-400'
     case 'openai': return 'text-emerald-700 dark:text-emerald-400'
     case 'antigravity': return 'text-purple-700 dark:text-purple-400'
+    case 'zhipu': return 'text-emerald-700 dark:text-emerald-400'
+    case 'deepseek': return 'text-cyan-700 dark:text-cyan-400'
+    case 'volcengine': return 'text-rose-700 dark:text-rose-400'
+    case 'ali': return 'text-amber-700 dark:text-amber-400'
+    case 'moonshot': return 'text-fuchsia-700 dark:text-fuchsia-400'
     default: return 'text-blue-700 dark:text-blue-400'
   }
 })

@@ -5,7 +5,7 @@
  * instead of defining their own color mappings.
  */
 
-export type Platform = 'anthropic' | 'openai' | 'antigravity' | 'gemini'
+export type Platform = 'anthropic' | 'openai' | 'antigravity' | 'gemini' | 'zhipu' | 'deepseek' | 'volcengine' | 'ali' | 'moonshot'
 
 // ── Badge (bg + text + border, for inline badges with border) ───────
 const BADGE: Record<Platform, string> = {
@@ -13,6 +13,11 @@ const BADGE: Record<Platform, string> = {
   openai: 'bg-green-500/10 text-green-600 border-green-500/30 dark:text-green-400',
   antigravity: 'bg-purple-500/10 text-purple-600 border-purple-500/30 dark:text-purple-400',
   gemini: 'bg-blue-500/10 text-blue-600 border-blue-500/30 dark:text-blue-400',
+  zhipu: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30 dark:text-emerald-400',
+  deepseek: 'bg-cyan-500/10 text-cyan-600 border-cyan-500/30 dark:text-cyan-400',
+  volcengine: 'bg-rose-500/10 text-rose-600 border-rose-500/30 dark:text-rose-400',
+  ali: 'bg-amber-500/10 text-amber-600 border-amber-500/30 dark:text-amber-400',
+  moonshot: 'bg-fuchsia-500/10 text-fuchsia-600 border-fuchsia-500/30 dark:text-fuchsia-400',
 }
 const BADGE_DEFAULT = 'bg-slate-500/10 text-slate-600 border-slate-500/30 dark:text-slate-400'
 
@@ -22,6 +27,11 @@ const BADGE_LIGHT: Record<Platform, string> = {
   openai: 'bg-green-500/10 text-green-600 dark:bg-green-500/10 dark:text-green-300',
   antigravity: 'bg-purple-500/10 text-purple-600 dark:bg-purple-500/10 dark:text-purple-300',
   gemini: 'bg-blue-500/10 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300',
+  zhipu: 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-300',
+  deepseek: 'bg-cyan-500/10 text-cyan-600 dark:bg-cyan-500/10 dark:text-cyan-300',
+  volcengine: 'bg-rose-500/10 text-rose-600 dark:bg-rose-500/10 dark:text-rose-300',
+  ali: 'bg-amber-500/10 text-amber-600 dark:bg-amber-500/10 dark:text-amber-300',
+  moonshot: 'bg-fuchsia-500/10 text-fuchsia-600 dark:bg-fuchsia-500/10 dark:text-fuchsia-300',
 }
 
 // ── Border ──────────────────────────────────────────────────────────
@@ -30,6 +40,11 @@ const BORDER: Record<Platform, string> = {
   openai: 'border-green-500/20 dark:border-green-500/20',
   antigravity: 'border-purple-500/20 dark:border-purple-500/20',
   gemini: 'border-blue-500/20 dark:border-blue-500/20',
+  zhipu: 'border-emerald-500/20 dark:border-emerald-500/20',
+  deepseek: 'border-cyan-500/20 dark:border-cyan-500/20',
+  volcengine: 'border-rose-500/20 dark:border-rose-500/20',
+  ali: 'border-amber-500/20 dark:border-amber-500/20',
+  moonshot: 'border-fuchsia-500/20 dark:border-fuchsia-500/20',
 }
 const BORDER_DEFAULT = 'border-gray-200 dark:border-dark-700'
 
@@ -39,6 +54,11 @@ const ACCENT_BAR: Record<Platform, string> = {
   openai: 'bg-gradient-to-r from-emerald-400 to-emerald-500',
   antigravity: 'bg-gradient-to-r from-purple-400 to-purple-500',
   gemini: 'bg-gradient-to-r from-blue-400 to-blue-500',
+  zhipu: 'bg-gradient-to-r from-emerald-400 to-emerald-500',
+  deepseek: 'bg-gradient-to-r from-cyan-400 to-cyan-500',
+  volcengine: 'bg-gradient-to-r from-rose-400 to-rose-500',
+  ali: 'bg-gradient-to-r from-amber-400 to-amber-500',
+  moonshot: 'bg-gradient-to-r from-fuchsia-400 to-fuchsia-500',
 }
 const ACCENT_BAR_DEFAULT = 'bg-gradient-to-r from-primary-400 to-primary-500'
 
@@ -48,6 +68,11 @@ const TEXT: Record<Platform, string> = {
   openai: 'text-emerald-600 dark:text-emerald-400',
   antigravity: 'text-purple-600 dark:text-purple-400',
   gemini: 'text-blue-600 dark:text-blue-400',
+  zhipu: 'text-emerald-600 dark:text-emerald-400',
+  deepseek: 'text-cyan-600 dark:text-cyan-400',
+  volcengine: 'text-rose-600 dark:text-rose-400',
+  ali: 'text-amber-600 dark:text-amber-400',
+  moonshot: 'text-fuchsia-600 dark:text-fuchsia-400',
 }
 const TEXT_DEFAULT = 'text-primary-600 dark:text-primary-400'
 
@@ -57,8 +82,26 @@ const ICON: Record<Platform, string> = {
   openai: 'text-emerald-500 dark:text-emerald-400',
   antigravity: 'text-purple-500 dark:text-purple-400',
   gemini: 'text-blue-500 dark:text-blue-400',
+  zhipu: 'text-emerald-500 dark:text-emerald-400',
+  deepseek: 'text-cyan-500 dark:text-cyan-400',
+  volcengine: 'text-rose-500 dark:text-rose-400',
+  ali: 'text-amber-500 dark:text-amber-400',
+  moonshot: 'text-fuchsia-500 dark:text-fuchsia-400',
 }
 const ICON_DEFAULT = 'text-primary-500 dark:text-primary-400'
+
+const DOT: Record<Platform, string> = {
+  anthropic: 'bg-orange-500',
+  openai: 'bg-emerald-500',
+  antigravity: 'bg-purple-500',
+  gemini: 'bg-blue-500',
+  zhipu: 'bg-emerald-500',
+  deepseek: 'bg-cyan-500',
+  volcengine: 'bg-rose-500',
+  ali: 'bg-amber-500',
+  moonshot: 'bg-fuchsia-500',
+}
+const DOT_DEFAULT = 'bg-gray-400'
 
 // ── Button (solid bg) ───────────────────────────────────────────────
 const BUTTON: Record<Platform, string> = {
@@ -66,6 +109,11 @@ const BUTTON: Record<Platform, string> = {
   openai: 'bg-green-600 text-white hover:bg-green-700 active:bg-green-800 dark:bg-green-600/80 dark:hover:bg-green-600',
   antigravity: 'bg-purple-500 text-white hover:bg-purple-600 active:bg-purple-700 dark:bg-purple-500/80 dark:hover:bg-purple-500',
   gemini: 'bg-blue-500 text-white hover:bg-blue-600 active:bg-blue-700 dark:bg-blue-500/80 dark:hover:bg-blue-500',
+  zhipu: 'bg-emerald-500 text-white hover:bg-emerald-600 active:bg-emerald-700 dark:bg-emerald-500/80 dark:hover:bg-emerald-500',
+  deepseek: 'bg-cyan-500 text-white hover:bg-cyan-600 active:bg-cyan-700 dark:bg-cyan-500/80 dark:hover:bg-cyan-500',
+  volcengine: 'bg-rose-500 text-white hover:bg-rose-600 active:bg-rose-700 dark:bg-rose-500/80 dark:hover:bg-rose-500',
+  ali: 'bg-amber-500 text-white hover:bg-amber-600 active:bg-amber-700 dark:bg-amber-500/80 dark:hover:bg-amber-500',
+  moonshot: 'bg-fuchsia-500 text-white hover:bg-fuchsia-600 active:bg-fuchsia-700 dark:bg-fuchsia-500/80 dark:hover:bg-fuchsia-500',
 }
 const BUTTON_DEFAULT = 'bg-primary-500 text-white hover:bg-primary-600 dark:bg-primary-600 dark:hover:bg-primary-500'
 
@@ -75,6 +123,11 @@ const DISCOUNT: Record<Platform, string> = {
   openai: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
   antigravity: 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300',
   gemini: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
+  zhipu: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+  deepseek: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/40 dark:text-cyan-300',
+  volcengine: 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300',
+  ali: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+  moonshot: 'bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-900/40 dark:text-fuchsia-300',
 }
 const DISCOUNT_DEFAULT = 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
 
@@ -84,6 +137,11 @@ const GRADIENT: Record<Platform, string> = {
   openai: 'from-emerald-500 to-emerald-600',
   antigravity: 'from-purple-500 to-purple-600',
   gemini: 'from-blue-500 to-blue-600',
+  zhipu: 'from-emerald-500 to-emerald-600',
+  deepseek: 'from-cyan-500 to-cyan-600',
+  volcengine: 'from-rose-500 to-rose-600',
+  ali: 'from-amber-500 to-amber-600',
+  moonshot: 'from-fuchsia-500 to-fuchsia-600',
 }
 const GRADIENT_DEFAULT = 'from-primary-500 to-primary-600'
 
@@ -93,6 +151,11 @@ const GRADIENT_TEXT: Record<Platform, string> = {
   openai: 'text-emerald-100',
   antigravity: 'text-purple-100',
   gemini: 'text-blue-100',
+  zhipu: 'text-emerald-100',
+  deepseek: 'text-cyan-100',
+  volcengine: 'text-rose-100',
+  ali: 'text-amber-100',
+  moonshot: 'text-fuchsia-100',
 }
 const GRADIENT_TEXT_DEFAULT = 'text-primary-100'
 
@@ -101,13 +164,18 @@ const GRADIENT_SUBTEXT: Record<Platform, string> = {
   openai: 'text-emerald-200',
   antigravity: 'text-purple-200',
   gemini: 'text-blue-200',
+  zhipu: 'text-emerald-200',
+  deepseek: 'text-cyan-200',
+  volcengine: 'text-rose-200',
+  ali: 'text-amber-200',
+  moonshot: 'text-fuchsia-200',
 }
 const GRADIENT_SUBTEXT_DEFAULT = 'text-primary-200'
 
 // ── Public API ──────────────────────────────────────────────────────
 
 function isPlatform(p: string): p is Platform {
-  return p === 'anthropic' || p === 'openai' || p === 'antigravity' || p === 'gemini'
+  return ['anthropic', 'openai', 'antigravity', 'gemini', 'zhipu', 'deepseek', 'volcengine', 'ali', 'moonshot'].includes(p)
 }
 
 export function platformBadgeClass(p: string): string {
@@ -132,6 +200,10 @@ export function platformTextClass(p: string): string {
 
 export function platformIconClass(p: string): string {
   return isPlatform(p) ? ICON[p] : ICON_DEFAULT
+}
+
+export function platformDotClass(p: string): string {
+  return isPlatform(p) ? DOT[p] : DOT_DEFAULT
 }
 
 export function platformButtonClass(p: string): string {
@@ -160,6 +232,11 @@ export function platformLabel(p: string): string {
     case 'openai': return 'OpenAI'
     case 'antigravity': return 'Antigravity'
     case 'gemini': return 'Gemini'
+    case 'zhipu': return 'GLM/智谱'
+    case 'deepseek': return 'DeepSeek'
+    case 'volcengine': return '火山方舟/豆包'
+    case 'ali': return 'Qwen/阿里'
+    case 'moonshot': return 'Kimi/月之暗面'
     default: return p || 'API'
   }
 }

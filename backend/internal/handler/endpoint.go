@@ -88,6 +88,26 @@ func DeriveUpstreamEndpoint(inbound, rawRequestPath, platform string) string {
 			return EndpointGeminiModels
 		}
 		return EndpointMessages
+	case service.PlatformDeepSeek, service.PlatformMoonshot:
+		if inbound == EndpointMessages {
+			return EndpointMessages
+		}
+		return EndpointChatCompletions
+	case service.PlatformAli:
+		if inbound == EndpointResponses {
+			return EndpointResponses
+		}
+		if inbound == EndpointMessages {
+			return EndpointMessages
+		}
+		return EndpointChatCompletions
+	case service.PlatformVolcEngine:
+		if inbound == EndpointResponses {
+			return EndpointResponses
+		}
+		return EndpointChatCompletions
+	case service.PlatformZhipu:
+		return EndpointChatCompletions
 	}
 
 	// Unknown platform — fall back to inbound.

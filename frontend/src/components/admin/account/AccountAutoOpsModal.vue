@@ -456,7 +456,17 @@ const form = reactive<AccountAutoOpsConfig>({
 })
 const selectedModelToAdd = reactive<Record<string, string | null>>({})
 const customModelToAdd = reactive<Record<string, string>>({})
-const platforms = [{ value: 'anthropic', label: 'Anthropic' }, { value: 'openai', label: 'OpenAI' }, { value: 'gemini', label: 'Gemini' }, { value: 'antigravity', label: 'Antigravity' }]
+const platforms = [
+  { value: 'anthropic', label: 'Anthropic' },
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'gemini', label: 'Gemini' },
+  { value: 'antigravity', label: 'Antigravity' },
+  { value: 'zhipu', label: 'GLM/智谱' },
+  { value: 'deepseek', label: 'DeepSeek' },
+  { value: 'volcengine', label: '火山方舟/豆包' },
+  { value: 'ali', label: 'Qwen/阿里' },
+  { value: 'moonshot', label: 'Kimi/月之暗面' }
+]
 const subjectOptions = computed<Array<SelectOption & { value: AccountAutoOpsSubject }>>(() => [
   { value: 'account_name', label: t('admin.accounts.autoOpsDialog.subject.account_name') },
   { value: 'test_response', label: t('admin.accounts.autoOpsDialog.subject.test_response') },
@@ -495,7 +505,12 @@ const targetPlatformOptions = computed<SelectOption[]>(() => [
   { value: 'anthropic', label: t('admin.accounts.platforms.anthropic') },
   { value: 'openai', label: t('admin.accounts.platforms.openai') },
   { value: 'gemini', label: t('admin.accounts.platforms.gemini') },
-  { value: 'antigravity', label: t('admin.accounts.platforms.antigravity') }
+  { value: 'antigravity', label: t('admin.accounts.platforms.antigravity') },
+  { value: 'zhipu', label: t('admin.accounts.platforms.zhipu') },
+  { value: 'deepseek', label: t('admin.accounts.platforms.deepseek') },
+  { value: 'volcengine', label: t('admin.accounts.platforms.volcengine') },
+  { value: 'ali', label: t('admin.accounts.platforms.ali') },
+  { value: 'moonshot', label: t('admin.accounts.platforms.moonshot') }
 ])
 const targetAuthTypeOptions = computed<SelectOption[]>(() => [
   { value: 'oauth', label: t('admin.accounts.oauthType') },
@@ -559,7 +574,7 @@ const defaultTargetValueForField = (field: AccountAutoOpsTargetField): string =>
     case 'schedulable':
       return 'true'
     case 'platform':
-      return 'anthropic'
+      return String(targetPlatformOptions.value[0]?.value || 'anthropic')
     case 'auth_type':
       return 'oauth'
     case 'account_status':

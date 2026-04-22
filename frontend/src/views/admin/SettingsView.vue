@@ -2082,6 +2082,24 @@
                   />
                 </div>
 
+                <!-- Open in new tab -->
+                <div class="sm:col-span-2">
+                  <div class="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2.5 dark:border-dark-700">
+                    <div class="pr-4">
+                      <label class="block text-xs font-medium text-gray-600 dark:text-gray-400">
+                        {{ t('admin.settings.customMenu.openInNewTab') }}
+                      </label>
+                      <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        {{ t('admin.settings.customMenu.openInNewTabHint') }}
+                      </p>
+                    </div>
+                    <Toggle
+                      :model-value="item.open_in_new_tab === true"
+                      @update:model-value="(value: boolean) => item.open_in_new_tab = value"
+                    />
+                  </div>
+                </div>
+
                 <!-- SVG Icon (full width) -->
                 <div class="sm:col-span-2">
                   <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
@@ -2675,7 +2693,7 @@ const form = reactive<SettingsForm>({
   payment_enabled: false,  payment_min_amount: 1,  payment_max_amount: 10000,  payment_daily_limit: 50000,  payment_max_pending_orders: 3,  payment_order_timeout_minutes: 30,  payment_balance_disabled: false,  payment_enabled_types: [],  payment_help_image_url: '',  payment_help_text: '',  payment_product_name_prefix: '',  payment_product_name_suffix: '',  payment_load_balance_strategy: 'round-robin',  payment_cancel_rate_limit_enabled: false,  payment_cancel_rate_limit_max: 10,  payment_cancel_rate_limit_window: 1,  payment_cancel_rate_limit_unit: 'day',  payment_cancel_rate_limit_window_mode: 'rolling',
   table_default_page_size: tablePageSizeDefault,
   table_page_size_options: [10, 20, 50, 100],
-  custom_menu_items: [] as Array<{id: string; label: string; icon_svg: string; url: string; visibility: 'user' | 'admin'; sort_order: number}>,
+  custom_menu_items: [] as Array<{id: string; label: string; icon_svg: string; url: string; visibility: 'user' | 'admin'; sort_order: number; open_in_new_tab: boolean}>,
   custom_endpoints: [] as Array<{name: string; endpoint: string; description: string}>,
   frontend_url: '',
   smtp_host: '',
@@ -2865,6 +2883,7 @@ function addMenuItem() {
     url: '',
     visibility: 'user',
     sort_order: form.custom_menu_items.length,
+    open_in_new_tab: false,
   })
 }
 
@@ -2939,6 +2958,12 @@ async function loadSettings() {
         (form as Record<string, unknown>)[key] = value
       }
     }
+    form.custom_menu_items = Array.isArray(settings.custom_menu_items)
+      ? settings.custom_menu_items.map((item) => ({
+          ...item,
+          open_in_new_tab: item.open_in_new_tab === true,
+        }))
+      : []
     form.backend_mode_enabled = settings.backend_mode_enabled
     form.default_subscriptions = Array.isArray(settings.default_subscriptions)
       ? settings.default_subscriptions
@@ -3090,7 +3115,10 @@ async function saveSettings() {
       hide_ccs_import_button: form.hide_ccs_import_button,
       table_default_page_size: form.table_default_page_size,
       table_page_size_options: form.table_page_size_options,
-      custom_menu_items: form.custom_menu_items,
+      custom_menu_items: form.custom_menu_items.map((item) => ({
+        ...item,
+        open_in_new_tab: item.open_in_new_tab === true,
+      })),
       custom_endpoints: form.custom_endpoints,
       frontend_url: form.frontend_url,
       smtp_host: form.smtp_host,

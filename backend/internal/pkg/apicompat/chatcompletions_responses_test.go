@@ -254,6 +254,53 @@ func TestChatCompletionsToResponses_SystemArrayContent(t *testing.T) {
 	assert.Equal(t, "data:image/png;base64,abc123", userParts[1].ImageURL)
 }
 
+func TestChatCompletionsResponsesStream_PreservesZeroIndexesAndCompletedOutput(t *testing.T) {
+	state := NewChatCompletionsToResponsesState()
+	chunk := &ChatCompletionsChunk{
+		ID:      "resp_123",
+		Model:   "glm-4.6v",
+		Created: 123,
+		Choices: []ChatChunkChoice{
+			{
+				Delta: ChatDelta{
+					Content: ptrString("OK"),
+				},
+				FinishReason: ptrString("stop"),
+			},
+		},
+	}
+
+	events := ChatCompletionsChunkToResponsesEvents(chunk, state)
+	require.NotEmpty(t, events)
+
+	var deltaSSE string
+	var completed *ResponsesResponse
+	for _, event := range events {
+		switch event.Type {
+		case "response.output_text.delta":
+			sse, err := ChatResponsesEventToSSE(event)
+			require.NoError(t, err)
+			deltaSSE = sse
+		case "response.completed":
+			completed = event.Response
+		}
+	}
+
+	require.NotEmpty(t, deltaSSE)
+	assert.Contains(t, deltaSSE, `"output_index":0`)
+	assert.Contains(t, deltaSSE, `"content_index":0`)
+
+	require.NotNil(t, completed)
+	require.Len(t, completed.Output, 1)
+	assert.Equal(t, "message", completed.Output[0].Type)
+	require.Len(t, completed.Output[0].Content, 1)
+	assert.Equal(t, "OK", completed.Output[0].Content[0].Text)
+}
+
+func ptrString(v string) *string {
+	return &v
+}
+
 func TestChatCompletionsToResponses_LegacyFunctions(t *testing.T) {
 	req := &ChatCompletionsRequest{
 		Model: "gpt-4o",

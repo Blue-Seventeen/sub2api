@@ -42,15 +42,19 @@ func RegisterGatewayRoutes(
 	{
 		// /v1/messages: auto-route based on group platform
 		gateway.POST("/messages", func(c *gin.Context) {
-			if getGroupPlatform(c) == service.PlatformOpenAI {
+			switch getGroupPlatform(c) {
+			case service.PlatformOpenAI:
 				h.OpenAIGateway.Messages(c)
-				return
+			case service.PlatformZhipu, service.PlatformDeepSeek, service.PlatformVolcEngine, service.PlatformAli, service.PlatformMoonshot:
+				h.CompatibleGateway.Messages(c)
+			default:
+				h.Gateway.Messages(c)
 			}
-			h.Gateway.Messages(c)
 		})
 		// /v1/messages/count_tokens: OpenAI groups get 404
 		gateway.POST("/messages/count_tokens", func(c *gin.Context) {
-			if getGroupPlatform(c) == service.PlatformOpenAI {
+			switch getGroupPlatform(c) {
+			case service.PlatformOpenAI:
 				c.JSON(http.StatusNotFound, gin.H{
 					"type": "error",
 					"error": gin.H{
@@ -59,34 +63,52 @@ func RegisterGatewayRoutes(
 					},
 				})
 				return
+			case service.PlatformZhipu, service.PlatformDeepSeek, service.PlatformVolcEngine, service.PlatformAli, service.PlatformMoonshot:
+				h.CompatibleGateway.CountTokens(c)
+				return
 			}
 			h.Gateway.CountTokens(c)
 		})
-		gateway.GET("/models", h.Gateway.Models)
+		gateway.GET("/models", func(c *gin.Context) {
+			if service.IsCompatiblePlatform(getGroupPlatform(c)) {
+				h.CompatibleGateway.Models(c)
+				return
+			}
+			h.Gateway.Models(c)
+		})
 		gateway.GET("/usage", h.Gateway.Usage)
 		// OpenAI Responses API: auto-route based on group platform
 		gateway.POST("/responses", func(c *gin.Context) {
-			if getGroupPlatform(c) == service.PlatformOpenAI {
+			switch getGroupPlatform(c) {
+			case service.PlatformOpenAI:
 				h.OpenAIGateway.Responses(c)
-				return
+			case service.PlatformZhipu, service.PlatformDeepSeek, service.PlatformVolcEngine, service.PlatformAli, service.PlatformMoonshot:
+				h.CompatibleGateway.Responses(c)
+			default:
+				h.Gateway.Responses(c)
 			}
-			h.Gateway.Responses(c)
 		})
 		gateway.POST("/responses/*subpath", func(c *gin.Context) {
-			if getGroupPlatform(c) == service.PlatformOpenAI {
+			switch getGroupPlatform(c) {
+			case service.PlatformOpenAI:
 				h.OpenAIGateway.Responses(c)
-				return
+			case service.PlatformZhipu, service.PlatformDeepSeek, service.PlatformVolcEngine, service.PlatformAli, service.PlatformMoonshot:
+				h.CompatibleGateway.Responses(c)
+			default:
+				h.Gateway.Responses(c)
 			}
-			h.Gateway.Responses(c)
 		})
 		gateway.GET("/responses", h.OpenAIGateway.ResponsesWebSocket)
 		// OpenAI Chat Completions API: auto-route based on group platform
 		gateway.POST("/chat/completions", func(c *gin.Context) {
-			if getGroupPlatform(c) == service.PlatformOpenAI {
+			switch getGroupPlatform(c) {
+			case service.PlatformOpenAI:
 				h.OpenAIGateway.ChatCompletions(c)
-				return
+			case service.PlatformZhipu, service.PlatformDeepSeek, service.PlatformVolcEngine, service.PlatformAli, service.PlatformMoonshot:
+				h.CompatibleGateway.ChatCompletions(c)
+			default:
+				h.Gateway.ChatCompletions(c)
 			}
-			h.Gateway.ChatCompletions(c)
 		})
 	}
 
@@ -107,22 +129,28 @@ func RegisterGatewayRoutes(
 
 	// OpenAI Responses API（不带v1前缀的别名）— auto-route based on group platform
 	responsesHandler := func(c *gin.Context) {
-		if getGroupPlatform(c) == service.PlatformOpenAI {
+		switch getGroupPlatform(c) {
+		case service.PlatformOpenAI:
 			h.OpenAIGateway.Responses(c)
-			return
+		case service.PlatformZhipu, service.PlatformDeepSeek, service.PlatformVolcEngine, service.PlatformAli, service.PlatformMoonshot:
+			h.CompatibleGateway.Responses(c)
+		default:
+			h.Gateway.Responses(c)
 		}
-		h.Gateway.Responses(c)
 	}
 	r.POST("/responses", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, responsesHandler)
 	r.POST("/responses/*subpath", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, responsesHandler)
 	r.GET("/responses", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, h.OpenAIGateway.ResponsesWebSocket)
 	// OpenAI Chat Completions API（不带v1前缀的别名）— auto-route based on group platform
 	r.POST("/chat/completions", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, func(c *gin.Context) {
-		if getGroupPlatform(c) == service.PlatformOpenAI {
+		switch getGroupPlatform(c) {
+		case service.PlatformOpenAI:
 			h.OpenAIGateway.ChatCompletions(c)
-			return
+		case service.PlatformZhipu, service.PlatformDeepSeek, service.PlatformVolcEngine, service.PlatformAli, service.PlatformMoonshot:
+			h.CompatibleGateway.ChatCompletions(c)
+		default:
+			h.Gateway.ChatCompletions(c)
 		}
-		h.Gateway.ChatCompletions(c)
 	})
 
 	// Antigravity 模型列表

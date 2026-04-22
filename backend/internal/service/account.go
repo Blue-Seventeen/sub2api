@@ -554,6 +554,30 @@ func resolveRequestedModelInMapping(mapping map[string]string, requestedModel st
 	return matchWildcardMappingResult(mapping, requestedModel)
 }
 
+func compatibleFallbackMappedModel(platform string, mapping map[string]string) (string, bool) {
+	if !IsCompatiblePlatform(platform) || len(mapping) == 0 {
+		return "", false
+	}
+	var target string
+	for _, mapped := range mapping {
+		mapped = strings.TrimSpace(mapped)
+		if mapped == "" {
+			continue
+		}
+		if target == "" {
+			target = mapped
+			continue
+		}
+		if target != mapped {
+			return "", false
+		}
+	}
+	if target == "" {
+		return "", false
+	}
+	return target, true
+}
+
 // IsModelSupported 检查模型是否在 model_mapping 中（支持通配符）
 // 如果未配置 mapping，返回 true（允许所有模型）
 func (a *Account) IsModelSupported(requestedModel string) bool {
@@ -565,7 +589,11 @@ func (a *Account) IsModelSupported(requestedModel string) bool {
 		return true
 	}
 	normalized := normalizeRequestedModelForLookup(a.Platform, requestedModel)
-	return normalized != requestedModel && mappingSupportsRequestedModel(mapping, normalized)
+	if normalized != requestedModel && mappingSupportsRequestedModel(mapping, normalized) {
+		return true
+	}
+	_, ok := compatibleFallbackMappedModel(a.Platform, mapping)
+	return ok
 }
 
 // GetMappedModel 获取映射后的模型名（支持通配符，最长优先匹配）
@@ -590,6 +618,9 @@ func (a *Account) ResolveMappedModel(requestedModel string) (mappedModel string,
 		if mappedModel, matched := resolveRequestedModelInMapping(mapping, normalized); matched {
 			return mappedModel, true
 		}
+	}
+	if mappedModel, ok := compatibleFallbackMappedModel(a.Platform, mapping); ok {
+		return mappedModel, true
 	}
 	return requestedModel, false
 }

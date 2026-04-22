@@ -111,7 +111,12 @@ const platformOptions = computed(() => [
   { value: 'openai', label: 'OpenAI' },
   { value: 'anthropic', label: 'Anthropic' },
   { value: 'gemini', label: 'Gemini' },
-  { value: 'antigravity', label: 'Antigravity' }
+  { value: 'antigravity', label: 'Antigravity' },
+  { value: 'zhipu', label: 'GLM/智谱' },
+  { value: 'deepseek', label: 'DeepSeek' },
+  { value: 'volcengine', label: '火山方舟/豆包' },
+  { value: 'ali', label: 'Qwen/阿里' },
+  { value: 'moonshot', label: 'Kimi/月之暗面' }
 ])
 
 const timeRangeOptions = computed(() => [

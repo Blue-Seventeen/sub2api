@@ -24,6 +24,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/tidwall/gjson"
 )
 
 // sseDataPrefix matches SSE data lines with optional whitespace after colon.
@@ -179,6 +180,10 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 
 	if account.Platform == PlatformAntigravity {
 		return s.routeAntigravityTest(c, account, modelID, prompt)
+	}
+
+	if account.IsCompatiblePlatform() {
+		return s.testCompatibleAccountConnection(c, account, modelID)
 	}
 
 	return s.testClaudeAccountConnection(c, account, modelID)
@@ -1021,6 +1026,144 @@ func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader)
 				}
 			}
 			return s.sendErrorAndEnd(c, errorMsg)
+		}
+	}
+}
+
+func (s *AccountTestService) testCompatibleAccountConnection(c *gin.Context, account *Account, modelID string) error {
+	ctx := c.Request.Context()
+	if account.Type != AccountTypeAPIKey {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Unsupported account type: %s", account.Type))
+	}
+	preset, ok := CompatibleProviderPresetForPlatform(account.Platform)
+	if !ok {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Unsupported platform: %s", account.Platform))
+	}
+	testModelID := strings.TrimSpace(modelID)
+	if testModelID == "" {
+		testModelID = preset.DefaultTestModel
+	}
+	if mapped := account.GetMappedModel(testModelID); mapped != "" {
+		testModelID = mapped
+	}
+
+	baseURL := account.GetCompatibleBaseURL()
+	if baseURL == "" {
+		baseURL = preset.DefaultBaseURL
+	}
+	normalizedBaseURL, err := s.validateUpstreamBaseURL(baseURL)
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid base URL: %s", err.Error()))
+	}
+
+	var apiURL string
+	var payloadBytes []byte
+	if preset.SupportsResponses {
+		apiURL = preset.BuildResponsesURL(normalizedBaseURL, testModelID)
+		payload := createOpenAITestPayload(testModelID, false)
+		payloadBytes, _ = json.Marshal(payload)
+	} else {
+		apiURL = preset.BuildChatURL(normalizedBaseURL, testModelID)
+		payload := createCompatibleChatTestPayload(testModelID)
+		payloadBytes, _ = json.Marshal(payload)
+	}
+
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	c.Writer.Flush()
+
+	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
+	if err != nil {
+		return s.sendErrorAndEnd(c, "Failed to create request")
+	}
+	req.Header.Set("Content-Type", "application/json")
+	token := getCompatibleAuthToken(account, preset.AuthMode)
+	if token == "" {
+		return s.sendErrorAndEnd(c, "No API key available")
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	if preset.SupportsResponses {
+		if preset.PatchResponsesHeaders != nil {
+			preset.PatchResponsesHeaders(req, account, testModelID)
+		}
+		if preset.PatchResponsesBody != nil {
+			if payloadBytes, err = preset.PatchResponsesBody(payloadBytes, account, testModelID); err == nil {
+				req.Body = io.NopCloser(bytes.NewReader(payloadBytes))
+				req.ContentLength = int64(len(payloadBytes))
+			}
+		}
+	} else {
+		if preset.PatchChatHeaders != nil {
+			preset.PatchChatHeaders(req, account, testModelID)
+		}
+		if preset.PatchChatBody != nil {
+			if payloadBytes, err = preset.PatchChatBody(payloadBytes, account, testModelID); err == nil {
+				req.Body = io.NopCloser(bytes.NewReader(payloadBytes))
+				req.ContentLength = int64(len(payloadBytes))
+			}
+		}
+	}
+
+	proxyURL := resolveAccountProxyURL(ctx, account, nil)
+	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return s.sendErrorAndEnd(c, strings.TrimSpace(extractUpstreamErrorMessage(body)))
+	}
+	if preset.SupportsResponses {
+		return s.processOpenAIStream(c, resp.Body)
+	}
+	return s.processChatCompletionsStream(c, resp.Body)
+}
+
+func createCompatibleChatTestPayload(modelID string) map[string]any {
+	return map[string]any{
+		"model":  modelID,
+		"stream": true,
+		"messages": []map[string]any{
+			{
+				"role":    "user",
+				"content": "hi",
+			},
+		},
+		"max_tokens": 256,
+	}
+}
+
+func (s *AccountTestService) processChatCompletionsStream(c *gin.Context, body io.Reader) error {
+	reader := bufio.NewReader(body)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+				return nil
+			}
+			return s.sendErrorAndEnd(c, fmt.Sprintf("Stream read error: %s", err.Error()))
+		}
+		line = strings.TrimSpace(line)
+		if line == "" || !sseDataPrefix.MatchString(line) {
+			continue
+		}
+		jsonStr := sseDataPrefix.ReplaceAllString(line, "")
+		if jsonStr == "[DONE]" {
+			s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+			return nil
+		}
+		if delta := gjson.Get(jsonStr, "choices.0.delta.content").String(); delta != "" {
+			s.sendEvent(c, TestEvent{Type: "content", Text: delta})
+		}
+		if finish := gjson.Get(jsonStr, "choices.0.finish_reason").String(); finish != "" {
+			s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+			return nil
 		}
 	}
 }

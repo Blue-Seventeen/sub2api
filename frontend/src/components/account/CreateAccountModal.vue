@@ -67,89 +67,82 @@
         <p class="input-hint">{{ t('admin.accounts.notesHint') }}</p>
       </div>
 
-      <!-- Platform Selection - Segmented Control Style -->
+      <!-- Platform Selection - Search + Horizontal Scroll -->
       <div>
         <label class="input-label">{{ t('admin.accounts.platform') }}</label>
-        <div class="mt-2 flex rounded-lg bg-gray-100 p-1 dark:bg-dark-700" data-tour="account-form-platform">
-          <button
-            type="button"
-            @click="form.platform = 'anthropic'"
-            :class="[
-              'flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all',
-              form.platform === 'anthropic'
-                ? 'bg-white text-orange-600 shadow-sm dark:bg-dark-600 dark:text-orange-400'
-                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
-            ]"
-          >
-            <Icon name="sparkles" size="sm" />
-            Anthropic
-          </button>
-          <button
-            type="button"
-            @click="form.platform = 'openai'"
-            :class="[
-              'flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all',
-              form.platform === 'openai'
-                ? 'bg-white text-green-600 shadow-sm dark:bg-dark-600 dark:text-green-400'
-                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
-            ]"
-          >
-            <svg
-              class="h-4 w-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              stroke-width="1.5"
+        <div class="mt-2 space-y-3">
+          <div class="relative">
+            <Icon
+              name="search"
+              size="sm"
+              class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
+            />
+            <input
+              v-model="platformSearchQuery"
+              type="text"
+              class="input pl-10"
+              :placeholder="platformSearchPlaceholder"
+            />
+          </div>
+
+          <div class="rounded-xl bg-gray-100 p-2 dark:bg-dark-700" data-tour="account-form-platform">
+            <div
+              ref="platformScrollRef"
+              class="platform-scroll-strip flex gap-2 overflow-x-auto pb-1"
+              @wheel.prevent="handlePlatformWheel"
             >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"
-              />
-            </svg>
-            OpenAI
-          </button>
-          <button
-            type="button"
-            @click="form.platform = 'gemini'"
-            :class="[
-              'flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all',
-              form.platform === 'gemini'
-                ? 'bg-white text-blue-600 shadow-sm dark:bg-dark-600 dark:text-blue-400'
-                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
-            ]"
-          >
-            <svg
-              class="h-4 w-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              stroke-width="1.5"
+              <button
+                v-for="option in filteredPlatformOptions"
+                :key="option.value"
+                type="button"
+                @click="form.platform = option.value"
+                :ref="(el) => setPlatformOptionRef(option.value, el as HTMLElement | null)"
+                :class="[
+                  'group min-w-[156px] shrink-0 rounded-xl border px-3 py-3 text-left transition-all',
+                  form.platform === option.value
+                    ? option.activeClass
+                    : 'border-transparent bg-transparent hover:bg-white/80 hover:shadow-sm dark:hover:bg-dark-600/80'
+                ]"
+              >
+                <div class="flex items-center gap-3">
+                  <div
+                    :class="[
+                      'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors',
+                      form.platform === option.value
+                        ? option.iconActiveClass
+                        : 'bg-white/80 text-gray-500 dark:bg-dark-600 dark:text-gray-400'
+                    ]"
+                  >
+                    <PlatformIcon :platform="option.value" size="md" />
+                  </div>
+                  <div class="min-w-0">
+                    <div
+                      :class="[
+                        'truncate text-sm font-semibold',
+                        form.platform === option.value
+                          ? option.textActiveClass
+                          : 'text-gray-700 dark:text-gray-200'
+                      ]"
+                    >
+                      {{ option.label }}
+                    </div>
+                    <div class="truncate text-xs text-gray-500 dark:text-gray-400">
+                      {{ option.subtitle }}
+                    </div>
+                  </div>
+                </div>
+              </button>
+            </div>
+
+            <p
+              v-if="filteredPlatformOptions.length === 0"
+              class="px-2 py-3 text-sm text-gray-500 dark:text-gray-400"
             >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                d="M12 2l1.5 6.5L20 10l-6.5 1.5L12 18l-1.5-6.5L4 10l6.5-1.5L12 2z"
-              />
-            </svg>
-            Gemini
-          </button>
-          <button
-            type="button"
-            @click="form.platform = 'antigravity'"
-            :class="[
-              'flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all',
-              form.platform === 'antigravity'
-                ? 'bg-white text-purple-600 shadow-sm dark:bg-dark-600 dark:text-purple-400'
-                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
-            ]"
-          >
-            <Icon name="cloud" size="sm" />
-            Antigravity
-          </button>
+              {{ platformSearchEmptyText }}
+            </p>
+          </div>
         </div>
       </div>
-
       <!-- Account Type Selection (Anthropic) -->
       <div v-if="form.platform === 'anthropic'">
         <label class="input-label">{{ t('admin.accounts.accountType') }}</label>
@@ -703,6 +696,37 @@
         </div>
       </div>
 
+      <div v-if="isCompatibleProviderPlatform">
+        <label class="input-label">{{ t('admin.accounts.accountType') }}</label>
+        <div class="mt-2 grid grid-cols-1 gap-3">
+          <button
+            type="button"
+            @click="accountCategory = 'apikey'"
+            :class="[
+              'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
+              accountCategory === 'apikey'
+                ? 'border-purple-500 bg-purple-50 dark:bg-purple-900/20'
+                : 'border-gray-200 hover:border-purple-300 dark:border-dark-600 dark:hover:border-purple-700'
+            ]"
+          >
+            <div
+              :class="[
+                'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
+                accountCategory === 'apikey'
+                  ? 'bg-purple-500 text-white'
+                  : 'bg-gray-100 text-gray-500 dark:bg-dark-600 dark:text-gray-400'
+              ]"
+            >
+              <Icon name="key" size="sm" />
+            </div>
+            <div>
+              <span class="block text-sm font-medium text-gray-900 dark:text-white">API Key</span>
+              <span class="text-xs text-gray-500 dark:text-gray-400">OpenAI-compatible API Key</span>
+            </div>
+          </button>
+        </div>
+      </div>
+
       <!-- Upstream config (only for Antigravity upstream type) -->
       <div v-if="form.platform === 'antigravity' && antigravityAccountType === 'upstream'" class="space-y-4">
         <div>
@@ -855,13 +879,7 @@
             v-model="apiKeyBaseUrl"
             type="text"
             class="input"
-            :placeholder="
-              form.platform === 'openai'
-                ? 'https://api.openai.com'
-                : form.platform === 'gemini'
-                  ? 'https://generativelanguage.googleapis.com'
-                  : 'https://api.anthropic.com'
-            "
+            :placeholder="defaultApiKeyBaseUrl"
           />
           <p class="input-hint">{{ baseUrlHint }}</p>
         </div>
@@ -872,13 +890,7 @@
             type="password"
             required
             class="input font-mono"
-            :placeholder="
-              form.platform === 'openai'
-                ? 'sk-proj-...'
-                : form.platform === 'gemini'
-                  ? 'AIza...'
-                  : 'sk-ant-...'
-            "
+            :placeholder="apiKeyPlaceholder"
           />
           <p class="input-hint">{{ apiKeyHint }}</p>
         </div>
@@ -2800,7 +2812,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import {
@@ -2833,6 +2845,7 @@ import type {
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
+import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
@@ -2878,14 +2891,153 @@ const oauthStepTitle = computed(() => {
 const baseUrlHint = computed(() => {
   if (form.platform === 'openai') return t('admin.accounts.openai.baseUrlHint')
   if (form.platform === 'gemini') return t('admin.accounts.gemini.baseUrlHint')
+  if (isCompatibleProviderPlatform.value) return t('admin.accounts.baseUrlHint')
   return t('admin.accounts.baseUrlHint')
 })
 
 const apiKeyHint = computed(() => {
   if (form.platform === 'openai') return t('admin.accounts.openai.apiKeyHint')
   if (form.platform === 'gemini') return t('admin.accounts.gemini.apiKeyHint')
+  if (isCompatibleProviderPlatform.value) return t('admin.accounts.apiKeyHint')
   return t('admin.accounts.apiKeyHint')
 })
+
+const compatiblePlatforms: AccountPlatform[] = ['zhipu', 'deepseek', 'volcengine', 'ali', 'moonshot']
+
+const isCompatibleProviderPlatform = computed(() => compatiblePlatforms.includes(form.platform))
+
+const getPlatformDefaultBaseURL = (platform: AccountPlatform) => {
+  switch (platform) {
+    case 'openai':
+      return 'https://api.openai.com'
+    case 'gemini':
+      return 'https://generativelanguage.googleapis.com'
+    case 'zhipu':
+      return 'https://open.bigmodel.cn'
+    case 'deepseek':
+      return 'https://api.deepseek.com'
+    case 'volcengine':
+      return 'https://ark.cn-beijing.volces.com'
+    case 'ali':
+      return 'https://dashscope.aliyuncs.com'
+    case 'moonshot':
+      return 'https://api.moonshot.cn'
+    default:
+      return 'https://api.anthropic.com'
+  }
+}
+
+const defaultApiKeyBaseUrl = computed(() => getPlatformDefaultBaseURL(form.platform))
+
+const apiKeyPlaceholder = computed(() => {
+  switch (form.platform) {
+    case 'openai':
+      return 'sk-proj-...'
+    case 'gemini':
+      return 'AIza...'
+    case 'zhipu':
+      return 'xxxxxxxx.xxxxxxxx'
+    default:
+      return 'sk-...'
+  }
+})
+
+interface PlatformSearchOption {
+  value: AccountPlatform
+  label: string
+  subtitle: string
+  searchTerms: string[]
+  activeClass: string
+  iconActiveClass: string
+  textActiveClass: string
+}
+
+const platformSearchPlaceholder = computed(() => '搜索平台，如 Anthropic / GLM / DeepSeek / Qwen')
+const platformSearchEmptyText = computed(() => '没有匹配的平台，请换个关键词试试')
+
+const platformOptions = computed<PlatformSearchOption[]>(() => [
+  {
+    value: 'anthropic',
+    label: 'Anthropic',
+    subtitle: 'Claude / Messages',
+    searchTerms: ['anthropic', 'claude', 'messages'],
+    activeClass: 'border-orange-200 bg-white shadow-sm dark:border-orange-900/50 dark:bg-dark-600',
+    iconActiveClass: 'bg-orange-50 text-orange-600 dark:bg-orange-900/30 dark:text-orange-300',
+    textActiveClass: 'text-orange-600 dark:text-orange-300'
+  },
+  {
+    value: 'openai',
+    label: 'OpenAI',
+    subtitle: 'GPT / Responses',
+    searchTerms: ['openai', 'gpt', 'responses', 'chatgpt'],
+    activeClass: 'border-emerald-200 bg-white shadow-sm dark:border-emerald-900/50 dark:bg-dark-600',
+    iconActiveClass: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300',
+    textActiveClass: 'text-emerald-600 dark:text-emerald-300'
+  },
+  {
+    value: 'gemini',
+    label: 'Gemini',
+    subtitle: 'Google / v1beta',
+    searchTerms: ['gemini', 'google', 'v1beta'],
+    activeClass: 'border-blue-200 bg-white shadow-sm dark:border-blue-900/50 dark:bg-dark-600',
+    iconActiveClass: 'bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300',
+    textActiveClass: 'text-blue-600 dark:text-blue-300'
+  },
+  {
+    value: 'antigravity',
+    label: 'Antigravity',
+    subtitle: 'Mixed scheduling',
+    searchTerms: ['antigravity', 'mixed', 'cloud'],
+    activeClass: 'border-purple-200 bg-white shadow-sm dark:border-purple-900/50 dark:bg-dark-600',
+    iconActiveClass: 'bg-purple-50 text-purple-600 dark:bg-purple-900/30 dark:text-purple-300',
+    textActiveClass: 'text-purple-600 dark:text-purple-300'
+  },
+  {
+    value: 'zhipu',
+    label: 'GLM/智谱',
+    subtitle: 'Zhipu / GLM 系列',
+    searchTerms: ['zhipu', 'glm', '智谱', 'bigmodel'],
+    activeClass: 'border-emerald-200 bg-white shadow-sm dark:border-emerald-900/50 dark:bg-dark-600',
+    iconActiveClass: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300',
+    textActiveClass: 'text-emerald-600 dark:text-emerald-300'
+  },
+  {
+    value: 'deepseek',
+    label: 'DeepSeek',
+    subtitle: 'DeepSeek 系列',
+    searchTerms: ['deepseek', 'ds', '深度求索'],
+    activeClass: 'border-cyan-200 bg-white shadow-sm dark:border-cyan-900/50 dark:bg-dark-600',
+    iconActiveClass: 'bg-cyan-50 text-cyan-600 dark:bg-cyan-900/30 dark:text-cyan-300',
+    textActiveClass: 'text-cyan-600 dark:text-cyan-300'
+  },
+  {
+    value: 'volcengine',
+    label: '火山方舟/豆包',
+    subtitle: 'VolcEngine / Doubao',
+    searchTerms: ['volcengine', 'doubao', 'ark', '火山', '豆包'],
+    activeClass: 'border-rose-200 bg-white shadow-sm dark:border-rose-900/50 dark:bg-dark-600',
+    iconActiveClass: 'bg-rose-50 text-rose-600 dark:bg-rose-900/30 dark:text-rose-300',
+    textActiveClass: 'text-rose-600 dark:text-rose-300'
+  },
+  {
+    value: 'ali',
+    label: 'Qwen/阿里',
+    subtitle: 'DashScope / Qwen',
+    searchTerms: ['ali', 'alibaba', 'qwen', 'dashscope', '阿里', '通义'],
+    activeClass: 'border-amber-200 bg-white shadow-sm dark:border-amber-900/50 dark:bg-dark-600',
+    iconActiveClass: 'bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-300',
+    textActiveClass: 'text-amber-600 dark:text-amber-300'
+  },
+  {
+    value: 'moonshot',
+    label: 'Kimi/月之暗面',
+    subtitle: 'Moonshot / Kimi',
+    searchTerms: ['moonshot', 'kimi', '月之暗面'],
+    activeClass: 'border-fuchsia-200 bg-white shadow-sm dark:border-fuchsia-900/50 dark:bg-dark-600',
+    iconActiveClass: 'bg-fuchsia-50 text-fuchsia-600 dark:bg-fuchsia-900/30 dark:text-fuchsia-300',
+    textActiveClass: 'text-fuchsia-600 dark:text-fuchsia-300'
+  }
+])
 
 interface Props {
   show: boolean
@@ -2938,6 +3090,8 @@ const currentOAuthError = computed(() => {
 
 // Refs
 const oauthFlowRef = ref<OAuthFlowExposed | null>(null)
+const platformScrollRef = ref<HTMLElement | null>(null)
+const platformOptionRefs = ref<Partial<Record<AccountPlatform, HTMLElement | null>>>({})
 
 // Model mapping type
 interface ModelMapping {
@@ -2955,6 +3109,7 @@ interface TempUnschedRuleForm {
 // State
 const step = ref(1)
 const submitting = ref(false)
+const platformSearchQuery = ref('')
 const accountCategory = ref<'oauth-based' | 'apikey' | 'bedrock'>('oauth-based') // UI selection for account category
 const addMethod = ref<AddMethod>('oauth') // For oauth-based: 'oauth' or 'setup-token'
 const apiKeyBaseUrl = ref('https://api.anthropic.com')
@@ -2995,6 +3150,55 @@ const antigravityWhitelistModels = ref<string[]>([])
 const antigravityModelMappings = ref<ModelMapping[]>([])
 const antigravityPresetMappings = computed(() => getPresetMappingsByPlatform('antigravity'))
 const bedrockPresets = computed(() => getPresetMappingsByPlatform('bedrock'))
+
+const filteredPlatformOptions = computed(() => {
+  const query = platformSearchQuery.value.trim().toLowerCase()
+  return query ? platformOptions.value.filter((option) =>
+    option.label.toLowerCase().includes(query) ||
+    option.subtitle.toLowerCase().includes(query) ||
+    option.searchTerms.some((term) => term.toLowerCase().includes(query))
+  ) : platformOptions.value
+})
+
+const handlePlatformWheel = (event: WheelEvent) => {
+  const container = platformScrollRef.value
+  if (!container) {
+    return
+  }
+  const delta = Math.abs(event.deltaY) > Math.abs(event.deltaX) ? event.deltaY : event.deltaX
+  if (delta === 0) {
+    return
+  }
+  container.scrollBy({
+    left: delta,
+    behavior: 'auto'
+  })
+}
+
+const setPlatformOptionRef = (platform: AccountPlatform, el: HTMLElement | null) => {
+  platformOptionRefs.value[platform] = el
+}
+
+const ensureSelectedPlatformVisible = async () => {
+  await nextTick()
+  const selected = platformOptionRefs.value[form.platform]
+  if (!selected) {
+    return
+  }
+  selected.scrollIntoView({
+    behavior: 'smooth',
+    block: 'nearest',
+    inline: 'nearest'
+  })
+}
+
+watch(() => form.platform, () => {
+  void ensureSelectedPlatformVisible()
+})
+
+watch(filteredPlatformOptions, () => {
+  void ensureSelectedPlatformVisible()
+})
 
 // Bedrock credentials
 const bedrockAuthMode = ref<'sigv4' | 'apikey'>('sigv4')
@@ -3266,6 +3470,10 @@ watch(
 watch(
   [accountCategory, addMethod, antigravityAccountType],
   ([category, method, agType]) => {
+    if (isCompatibleProviderPlatform.value) {
+      form.type = 'apikey'
+      return
+    }
     // Antigravity upstream 类型（实际创建为 apikey）
     if (form.platform === 'antigravity' && agType === 'upstream') {
       form.type = 'apikey'
@@ -3290,12 +3498,7 @@ watch(
   () => form.platform,
   (newPlatform) => {
     // Reset base URL based on platform
-    apiKeyBaseUrl.value =
-      (newPlatform === 'openai')
-        ? 'https://api.openai.com'
-        : newPlatform === 'gemini'
-          ? 'https://generativelanguage.googleapis.com'
-          : 'https://api.anthropic.com'
+    apiKeyBaseUrl.value = getPlatformDefaultBaseURL(newPlatform)
     // Clear model-related settings
     allowedModels.value = []
     modelMappings.value = []
@@ -3313,6 +3516,9 @@ watch(
       antigravityWhitelistModels.value = []
       antigravityModelMappings.value = []
       antigravityModelRestrictionMode.value = 'mapping'
+    }
+    if (compatiblePlatforms.includes(newPlatform)) {
+      accountCategory.value = 'apikey'
     }
     // Reset Bedrock fields when switching platforms
     bedrockAccessKeyId.value = ''
@@ -3757,6 +3963,7 @@ const resetForm = () => {
 
 const handleClose = () => {
   antigravityMixedChannelConfirmed.value = false
+  platformSearchQuery.value = ''
   clearMixedChannelDialog()
   emit('close')
 }
@@ -3973,12 +4180,7 @@ const handleSubmit = async () => {
   }
 
   // Determine default base URL based on platform
-  const defaultBaseUrl =
-    form.platform === 'openai'
-      ? 'https://api.openai.com'
-      : form.platform === 'gemini'
-        ? 'https://generativelanguage.googleapis.com'
-        : 'https://api.anthropic.com'
+  const defaultBaseUrl = getPlatformDefaultBaseURL(form.platform)
 
   // Build credentials with optional model mapping
   const credentials: Record<string, unknown> = {
@@ -4747,3 +4949,14 @@ const handleCookieAuth = async (sessionKey: string) => {
   }
 }
 </script>
+
+<style scoped>
+.platform-scroll-strip {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.platform-scroll-strip::-webkit-scrollbar {
+  display: none;
+}
+</style>

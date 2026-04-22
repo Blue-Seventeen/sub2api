@@ -148,6 +148,11 @@ func (s *AccountAutoOpsService) GetModelOptions() map[string][]AccountAutoOpsMod
 		PlatformOpenAI:      make([]AccountAutoOpsModelOption, 0, len(openai.DefaultModels)),
 		PlatformGemini:      make([]AccountAutoOpsModelOption, 0, len(geminicli.DefaultModels)),
 		PlatformAntigravity: make([]AccountAutoOpsModelOption, 0, len(antigravity.DefaultModels())),
+		PlatformZhipu:       make([]AccountAutoOpsModelOption, 0, len(CompatibleDefaultModels(PlatformZhipu))),
+		PlatformDeepSeek:    make([]AccountAutoOpsModelOption, 0, len(CompatibleDefaultModels(PlatformDeepSeek))),
+		PlatformVolcEngine:  make([]AccountAutoOpsModelOption, 0, len(CompatibleDefaultModels(PlatformVolcEngine))),
+		PlatformAli:         make([]AccountAutoOpsModelOption, 0, len(CompatibleDefaultModels(PlatformAli))),
+		PlatformMoonshot:    make([]AccountAutoOpsModelOption, 0, len(CompatibleDefaultModels(PlatformMoonshot))),
 	}
 
 	for _, model := range claude.DefaultModels {
@@ -173,6 +178,15 @@ func (s *AccountAutoOpsService) GetModelOptions() map[string][]AccountAutoOpsMod
 			displayName = model.ID
 		}
 		options[PlatformAntigravity] = append(options[PlatformAntigravity], AccountAutoOpsModelOption{ID: model.ID, DisplayName: displayName})
+	}
+	for _, platform := range []string{PlatformZhipu, PlatformDeepSeek, PlatformVolcEngine, PlatformAli, PlatformMoonshot} {
+		for _, model := range CompatibleDefaultModels(platform) {
+			displayName := model.DisplayName
+			if strings.TrimSpace(displayName) == "" {
+				displayName = model.ID
+			}
+			options[platform] = append(options[platform], AccountAutoOpsModelOption{ID: model.ID, DisplayName: displayName})
+		}
 	}
 	return options
 }
@@ -611,6 +625,9 @@ func (s *AccountAutoOpsService) resolveTestModels(cfg *AccountAutoOpsConfig, pla
 	case PlatformAntigravity:
 		return []string{claude.DefaultTestModel}
 	default:
+		if model := strings.TrimSpace(CompatibleDefaultTestModel(platform)); model != "" {
+			return []string{model}
+		}
 		return []string{claude.DefaultTestModel}
 	}
 }

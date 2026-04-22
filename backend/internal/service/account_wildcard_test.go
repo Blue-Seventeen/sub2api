@@ -206,6 +206,17 @@ func TestAccountIsModelSupported(t *testing.T) {
 			requestedModel: "gemini-3-flash",
 			expected:       false,
 		},
+		{
+			name:     "compatible single target fallback allows any requested label",
+			platform: PlatformZhipu,
+			credentials: map[string]any{
+				"model_mapping": map[string]any{
+					"gpt-5.4": "glm-4.6v",
+				},
+			},
+			requestedModel: "claude-sonnet-4-20250514",
+			expected:       true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -304,6 +315,17 @@ func TestAccountGetMappedModel(t *testing.T) {
 			requestedModel: "claude-sonnet-4-5",
 			expected:       "claude-sonnet-4-5",
 		},
+		{
+			name:     "compatible single target fallback maps arbitrary label",
+			platform: PlatformZhipu,
+			credentials: map[string]any{
+				"model_mapping": map[string]any{
+					"gpt-5.4": "glm-4.6v",
+				},
+			},
+			requestedModel: "claude-sonnet-4-20250514",
+			expected:       "glm-4.6v",
+		},
 	}
 
 	for _, tt := range tests {
@@ -393,6 +415,18 @@ func TestAccountResolveMappedModel(t *testing.T) {
 			requestedModel: "gpt-5.4",
 			expectedModel:  "gpt-5.4",
 			expectedMatch:  false,
+		},
+		{
+			name:     "compatible single target fallback reports matched",
+			platform: PlatformZhipu,
+			credentials: map[string]any{
+				"model_mapping": map[string]any{
+					"gpt-5.4": "glm-4.6v",
+				},
+			},
+			requestedModel: "claude-sonnet-4-20250514",
+			expectedModel:  "glm-4.6v",
+			expectedMatch:  true,
 		},
 	}
 

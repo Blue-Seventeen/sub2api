@@ -43,8 +43,38 @@
           </div>
         </div>
 
+        <div
+          v-else-if="shouldAutoOpenInNewTab"
+          class="flex h-full items-center justify-center p-10 text-center"
+        >
+          <div class="max-w-md">
+            <div
+              class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-gray-100 dark:bg-dark-700"
+            >
+              <Icon name="externalLink" size="lg" class="text-gray-400" />
+            </div>
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-white">
+              {{ t('customPage.autoOpenTitle') }}
+            </h3>
+            <p class="mt-2 text-sm text-gray-500 dark:text-dark-400">
+              {{ t('customPage.autoOpenDesc') }}
+            </p>
+            <a
+              ref="openLinkRef"
+              :href="embeddedUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="btn btn-secondary mt-5"
+            >
+              <Icon name="externalLink" size="sm" class="mr-1.5" :stroke-width="2" />
+              {{ t('customPage.openInNewTab') }}
+            </a>
+          </div>
+        </div>
+
         <div v-else class="custom-embed-shell">
           <a
+            ref="openLinkRef"
             :href="embeddedUrl"
             target="_blank"
             rel="noopener noreferrer"
@@ -65,7 +95,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores'
@@ -83,6 +113,8 @@ const adminSettingsStore = useAdminSettingsStore()
 
 const loading = ref(false)
 const pageTheme = ref<'light' | 'dark'>('light')
+const openLinkRef = ref<HTMLAnchorElement | null>(null)
+const lastAutoOpenedId = ref<string | null>(null)
 let themeObserver: MutationObserver | null = null
 
 const menuItemId = computed(() => route.params.id as string)
@@ -115,6 +147,30 @@ const isValidUrl = computed(() => {
   const url = embeddedUrl.value
   return url.startsWith('http://') || url.startsWith('https://')
 })
+
+const shouldAutoOpenInNewTab = computed(() =>
+  menuItem.value?.open_in_new_tab === true && isValidUrl.value
+)
+
+async function triggerAutoOpen(menuId: string) {
+  if (!shouldAutoOpenInNewTab.value || lastAutoOpenedId.value === menuId) return
+  lastAutoOpenedId.value = menuId
+  await nextTick()
+  openLinkRef.value?.click()
+}
+
+watch(
+  () => ({
+    id: menuItemId.value,
+    enabled: shouldAutoOpenInNewTab.value,
+    url: embeddedUrl.value,
+  }),
+  ({ id, enabled, url }) => {
+    if (!enabled || !url) return
+    void triggerAutoOpen(id)
+  },
+  { immediate: true }
+)
 
 onMounted(async () => {
   pageTheme.value = detectTheme()
