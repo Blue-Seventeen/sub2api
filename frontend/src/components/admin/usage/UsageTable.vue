@@ -154,7 +154,7 @@
                 </div>
               </div>
             </div>
-            <div v-if="row.account_rate_multiplier != null" class="mt-0.5 text-[11px] text-orange-500 dark:text-orange-400">
+            <div v-if="row.account_rate_multiplier != null" class="mt-0.5 text-[11px] text-gray-400">
               A ${{ accountBilled(row).toFixed(6) }}
             </div>
           </div>
@@ -325,7 +325,6 @@
             <span class="text-gray-400">显示扣费</span>
             <span class="font-medium text-white">${{ tooltipData?.actual_cost?.toFixed(6) || '0.000000' }}</span>
           </div>
-          <!-- Account billing (separated from user billing) -->
           <div class="flex items-center justify-between gap-6 border-t border-gray-700 pt-1.5">
             <span class="text-gray-400">{{ t('usage.accountMultiplier') }}</span>
             <span class="font-semibold text-blue-400">{{ formatMultiplier(tooltipData?.account_rate_multiplier ?? 1) }}x</span>
@@ -333,11 +332,7 @@
           <div class="flex items-center justify-between gap-6">
             <span class="text-gray-400">{{ t('usage.accountBilled') }}</span>
             <span class="font-semibold text-green-400">
-              ${{ accountBilled({
-                total_cost: tooltipData?.total_cost,
-                account_stats_cost: tooltipData?.account_stats_cost,
-                account_rate_multiplier: tooltipData?.account_rate_multiplier,
-              }).toFixed(6) }}
+              ${{ accountBilled(tooltipData).toFixed(6) }}
             </span>
           </div>
         </div>
@@ -358,10 +353,8 @@ import { getUsageServiceTierLabel } from '@/utils/usageServiceTier'
 import { resolveUsageRequestType } from '@/utils/usageRequestType'
 import { getBillingModeLabel, getBillingModeBadgeClass, BILLING_MODE_TOKEN, BILLING_MODE_IMAGE } from '@/utils/billingMode'
 
-/** Compute the account-billed cost for display: (account_stats_cost ?? total_cost) * rate_multiplier */
-function accountBilled(row: { total_cost?: number | null; account_stats_cost?: number | null; account_rate_multiplier?: number | null }): number {
-  const base = row.account_stats_cost != null ? row.account_stats_cost : (row.total_cost ?? 0)
-  const result = base * (row.account_rate_multiplier ?? 1)
+function accountBilled(row: { total_cost?: number | null; account_rate_multiplier?: number | null } | null | undefined): number {
+  const result = (row?.total_cost ?? 0) * (row?.account_rate_multiplier ?? 1)
   return Number.isNaN(result) ? 0 : result
 }
 

@@ -3704,6 +3704,30 @@
                     />
                   </div>
 
+                  <!-- Open in new tab -->
+                  <div class="sm:col-span-2">
+                    <div
+                      class="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2.5 dark:border-dark-700"
+                    >
+                      <div class="pr-4">
+                        <label
+                          class="block text-xs font-medium text-gray-600 dark:text-gray-400"
+                        >
+                          {{ t("admin.settings.customMenu.openInNewTab") }}
+                        </label>
+                        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                          {{ t("admin.settings.customMenu.openInNewTabHint") }}
+                        </p>
+                      </div>
+                      <Toggle
+                        :model-value="item.open_in_new_tab === true"
+                        @update:model-value="
+                          (value: boolean) => (item.open_in_new_tab = value)
+                        "
+                      />
+                    </div>
+                  </div>
+
                   <!-- SVG Icon (full width) -->
                   <div class="sm:col-span-2">
                     <label

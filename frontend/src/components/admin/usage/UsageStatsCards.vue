@@ -28,19 +28,18 @@
       <div class="min-w-0 flex-1">
         <p class="text-xs font-medium text-gray-500">{{ t('usage.totalCost') }}</p>
         <p class="text-xl font-bold text-green-600">
-          ${{ getPrimaryCost().toFixed(4) }}
+          ${{ getTotalCost().toFixed(4) }}
         </p>
-        <p class="text-xs text-gray-400" v-if="stats?.total_account_cost != null">
-          {{ t('usage.userBilled') }}:
-          <span class="text-gray-300">${{ getRealUserCost().toFixed(4) }}</span>
-          ? {{ t('usage.standardCost') }}:
-          <span class="text-gray-300">${{ (stats?.total_cost || 0).toFixed(4) }}</span>
-        </p>
-        <p class="text-xs text-gray-400" v-else>
-          {{ t('usage.standardCost') }}:
-          <span class="line-through">${{ (stats?.total_cost || 0).toFixed(4) }}</span>
-
-        </p>
+        <div class="mt-1 space-y-0.5 text-xs text-gray-400">
+          <p>
+            {{ t('usage.accountBilled') }}（{{ t('usage.upstreamTotalCostHint') }}）:
+            <span class="text-gray-300">${{ getAccountCost().toFixed(4) }}</span>
+          </p>
+          <p>
+            {{ t('usage.standardTotalCost') }}:
+            <span class="text-gray-300">${{ (stats?.total_cost || 0).toFixed(4) }}</span>
+          </p>
+        </div>
       </div>
     </div>
     <div class="card p-4 flex items-center gap-3">
@@ -71,7 +70,7 @@ const formatTokens = (value: number) => {
   return value.toLocaleString()
 }
 
-const getRealUserCost = () => props.stats?.real_total_actual_cost ?? props.stats?.total_actual_cost ?? 0
+const getTotalCost = () => props.stats?.real_total_actual_cost ?? props.stats?.total_actual_cost ?? 0
 
-const getPrimaryCost = () => props.stats?.total_account_cost ?? getRealUserCost()
+const getAccountCost = () => props.stats?.total_account_cost ?? 0
 </script>

@@ -420,7 +420,7 @@ func TestUsageLogRepositoryGetStatsWithFiltersAlwaysReturnsAccountCost(t *testin
 	db, mock := newSQLMock(t)
 	repo := &usageLogRepository{sql: db}
 
-	// No AccountID filter set - TotalAccountCost should still be returned
+	// No AccountID filter set - TotalAccountCost should still be returned for UI summaries
 	filters := usagestats.UsageLogFilters{}
 
 	mock.ExpectQuery("FROM usage_logs").
