@@ -56,10 +56,10 @@ type DashboardStats struct {
 	TotalCacheCreationTokens int64   `json:"total_cache_creation_tokens"`
 	TotalCacheReadTokens     int64   `json:"total_cache_read_tokens"`
 	TotalTokens              int64   `json:"total_tokens"`
-	TotalCost                float64 `json:"total_cost"`        // 累计标准计费
-	TotalActualCost          float64 `json:"total_actual_cost"` // 累计实际扣除
-	// RealTotalActualCost is the admin-facing real cost metric.
+	TotalCost           float64 `json:"total_cost"`
+	TotalActualCost     float64 `json:"total_actual_cost"`
 	RealTotalActualCost float64 `json:"real_total_actual_cost"`
+	TotalAccountCost    float64 `json:"total_account_cost"`
 
 	// 今日 Token 使用统计
 	TodayRequests            int64   `json:"today_requests"`
@@ -68,10 +68,10 @@ type DashboardStats struct {
 	TodayCacheCreationTokens int64   `json:"today_cache_creation_tokens"`
 	TodayCacheReadTokens     int64   `json:"today_cache_read_tokens"`
 	TodayTokens              int64   `json:"today_tokens"`
-	TodayCost                float64 `json:"today_cost"`        // 今日标准计费
-	TodayActualCost          float64 `json:"today_actual_cost"` // 今日实际扣除
-	// RealTodayActualCost is the admin-facing real daily cost metric.
+	TodayCost           float64 `json:"today_cost"`
+	TodayActualCost     float64 `json:"today_actual_cost"`
 	RealTodayActualCost float64 `json:"real_today_actual_cost"`
+	TodayAccountCost    float64 `json:"today_account_cost"`
 
 	// 系统运行统计
 	AverageDurationMs float64 `json:"average_duration_ms"` // 平均响应时间
@@ -105,10 +105,10 @@ type ModelStat struct {
 	CacheCreationTokens int64   `json:"cache_creation_tokens"`
 	CacheReadTokens     int64   `json:"cache_read_tokens"`
 	TotalTokens         int64   `json:"total_tokens"`
-	Cost                float64 `json:"cost"`        // 标准计费
-	ActualCost          float64 `json:"actual_cost"` // 实际扣除
-	// RealActualCost is the admin-facing real cost metric.
+	Cost           float64 `json:"cost"`
+	ActualCost     float64 `json:"actual_cost"`
 	RealActualCost float64 `json:"real_actual_cost"`
+	AccountCost    float64 `json:"account_cost"`
 }
 
 // EndpointStat represents usage statistics for a single request endpoint.
@@ -139,10 +139,10 @@ type GroupStat struct {
 	GroupName   string  `json:"group_name"`
 	Requests    int64   `json:"requests"`
 	TotalTokens int64   `json:"total_tokens"`
-	Cost        float64 `json:"cost"`        // 标准计费
-	ActualCost  float64 `json:"actual_cost"` // 实际扣除
-	// RealActualCost is the admin-facing real cost metric.
+	Cost           float64 `json:"cost"`
+	ActualCost     float64 `json:"actual_cost"`
 	RealActualCost float64 `json:"real_actual_cost"`
+	AccountCost    float64 `json:"account_cost"`
 }
 
 // UserUsageTrendPoint represents user usage trend data point
@@ -186,10 +186,10 @@ type UserBreakdownItem struct {
 	Email       string  `json:"email"`
 	Requests    int64   `json:"requests"`
 	TotalTokens int64   `json:"total_tokens"`
-	Cost        float64 `json:"cost"`        // 标准计费
-	ActualCost  float64 `json:"actual_cost"` // 实际扣除
-	// RealActualCost is the admin-facing real cost metric.
+	Cost           float64 `json:"cost"`
+	ActualCost     float64 `json:"actual_cost"`
 	RealActualCost float64 `json:"real_actual_cost"`
+	AccountCost    float64 `json:"account_cost"`
 }
 
 // UserBreakdownDimension specifies the dimension to filter for user breakdown.

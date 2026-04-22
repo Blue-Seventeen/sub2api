@@ -3,7 +3,6 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -234,12 +233,13 @@ func TestLoadForcedCodexInstructionsTemplate(t *testing.T) {
 	configPath := filepath.Join(tempDir, "config.yaml")
 
 	require.NoError(t, os.WriteFile(templatePath, []byte("server-prefix\n\n{{ .ExistingInstructions }}"), 0o644))
-	require.NoError(t, os.WriteFile(configPath, []byte("gateway:\n  forced_codex_instructions_template_file: "+strconv.Quote(templatePath)+"\n"), 0o644))
+	yamlSafePath := filepath.ToSlash(templatePath)
+	require.NoError(t, os.WriteFile(configPath, []byte("gateway:\n  forced_codex_instructions_template_file: \""+yamlSafePath+"\"\n"), 0o644))
 	t.Setenv("DATA_DIR", tempDir)
 
 	cfg, err := Load()
 	require.NoError(t, err)
-	require.Equal(t, templatePath, cfg.Gateway.ForcedCodexInstructionsTemplateFile)
+	require.Equal(t, yamlSafePath, cfg.Gateway.ForcedCodexInstructionsTemplateFile)
 	require.Equal(t, "server-prefix\n\n{{ .ExistingInstructions }}", cfg.Gateway.ForcedCodexInstructionsTemplate)
 }
 
@@ -334,7 +334,7 @@ func TestValidateLinuxDoFrontendRedirectURL(t *testing.T) {
 	cfg.LinuxDo.ClientSecret = "test-secret"
 	cfg.LinuxDo.RedirectURL = "https://example.com/api/v1/auth/oauth/linuxdo/callback"
 	cfg.LinuxDo.TokenAuthMethod = "client_secret_post"
-	cfg.LinuxDo.UsePKCE = false
+	cfg.LinuxDo.UsePKCE = true
 
 	cfg.LinuxDo.FrontendRedirectURL = "javascript:alert(1)"
 	err = cfg.Validate()
@@ -389,6 +389,7 @@ func TestValidateOIDCScopesMustContainOpenID(t *testing.T) {
 	cfg.OIDC.RedirectURL = "https://example.com/api/v1/auth/oauth/oidc/callback"
 	cfg.OIDC.FrontendRedirectURL = "/auth/oidc/callback"
 	cfg.OIDC.Scopes = "profile email"
+	cfg.OIDC.UsePKCE = true
 
 	err = cfg.Validate()
 	if err == nil {
@@ -418,6 +419,7 @@ func TestValidateOIDCAllowsIssuerOnlyEndpointsWithDiscoveryFallback(t *testing.T
 	cfg.OIDC.FrontendRedirectURL = "/auth/oidc/callback"
 	cfg.OIDC.Scopes = "openid email profile"
 	cfg.OIDC.ValidateIDToken = true
+	cfg.OIDC.UsePKCE = true
 
 	err = cfg.Validate()
 	if err != nil {
@@ -840,6 +842,7 @@ func TestValidateConfigWithLinuxDoEnabled(t *testing.T) {
 	cfg.LinuxDo.RedirectURL = "https://example.com/api/v1/auth/oauth/linuxdo/callback"
 	cfg.LinuxDo.FrontendRedirectURL = "/auth/linuxdo/callback"
 	cfg.LinuxDo.TokenAuthMethod = "client_secret_post"
+	cfg.LinuxDo.UsePKCE = true
 
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate() unexpected error: %v", err)
@@ -990,6 +993,7 @@ func TestValidateConfigErrors(t *testing.T) {
 			name: "linuxdo client id required",
 			mutate: func(c *Config) {
 				c.LinuxDo.Enabled = true
+				c.LinuxDo.UsePKCE = true
 				c.LinuxDo.ClientID = ""
 			},
 			wantErr: "linuxdo_connect.client_id",
@@ -998,6 +1002,7 @@ func TestValidateConfigErrors(t *testing.T) {
 			name: "linuxdo token auth method",
 			mutate: func(c *Config) {
 				c.LinuxDo.Enabled = true
+				c.LinuxDo.UsePKCE = true
 				c.LinuxDo.ClientID = "client"
 				c.LinuxDo.ClientSecret = "secret"
 				c.LinuxDo.AuthorizeURL = "https://example.com/authorize"

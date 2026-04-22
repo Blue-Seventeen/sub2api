@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/rand/v2"
 	"time"
 
@@ -13,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 4
+const apiKeyAuthSnapshotVersion = 6 // v6: added unified rate fields and balance notification metadata
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -99,7 +100,7 @@ func (s *APIKeyService) StartAuthCacheInvalidationSubscriber(ctx context.Context
 		s.authCacheL1.Del(cacheKey)
 	}); err != nil {
 		// Log but don't fail - L1 cache will still work, just without cross-instance invalidation
-		println("[Service] Warning: failed to start auth cache invalidation subscriber:", err.Error())
+		slog.Warn("failed to start auth cache invalidation subscriber", "error", err)
 	}
 }
 
@@ -219,13 +220,20 @@ func (s *APIKeyService) snapshotFromAPIKey(apiKey *APIKey) *APIKeyAuthSnapshot {
 		RateLimit1d: apiKey.RateLimit1d,
 		RateLimit7d: apiKey.RateLimit7d,
 		User: APIKeyAuthUserSnapshot{
-			ID:                    apiKey.User.ID,
-			Status:                apiKey.User.Status,
-			Role:                  apiKey.User.Role,
-			Balance:               apiKey.User.Balance,
-			UnifiedRateEnabled:    apiKey.User.UnifiedRateEnabled,
-			UnifiedRateMultiplier: NormalizePersistedUnifiedRateMultiplier(apiKey.User.UnifiedRateEnabled, apiKey.User.UnifiedRateMultiplier),
-			Concurrency:           apiKey.User.Concurrency,
+			ID:                         apiKey.User.ID,
+			Status:                     apiKey.User.Status,
+			Role:                       apiKey.User.Role,
+			Balance:                    apiKey.User.Balance,
+			Concurrency:                apiKey.User.Concurrency,
+			UnifiedRateEnabled:         apiKey.User.UnifiedRateEnabled,
+			UnifiedRateMultiplier:      NormalizePersistedUnifiedRateMultiplier(apiKey.User.UnifiedRateEnabled, apiKey.User.UnifiedRateMultiplier),
+			Email:                      apiKey.User.Email,
+			Username:                   apiKey.User.Username,
+			BalanceNotifyEnabled:       apiKey.User.BalanceNotifyEnabled,
+			BalanceNotifyThresholdType: apiKey.User.BalanceNotifyThresholdType,
+			BalanceNotifyThreshold:     apiKey.User.BalanceNotifyThreshold,
+			BalanceNotifyExtraEmails:   apiKey.User.BalanceNotifyExtraEmails,
+			TotalRecharged:             apiKey.User.TotalRecharged,
 		},
 	}
 	if apiKey.Group != nil {
@@ -276,13 +284,20 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 		RateLimit1d: snapshot.RateLimit1d,
 		RateLimit7d: snapshot.RateLimit7d,
 		User: &User{
-			ID:                    snapshot.User.ID,
-			Status:                snapshot.User.Status,
-			Role:                  snapshot.User.Role,
-			Balance:               snapshot.User.Balance,
-			UnifiedRateEnabled:    snapshot.User.UnifiedRateEnabled,
-			UnifiedRateMultiplier: NormalizePersistedUnifiedRateMultiplier(snapshot.User.UnifiedRateEnabled, snapshot.User.UnifiedRateMultiplier),
-			Concurrency:           snapshot.User.Concurrency,
+			ID:                         snapshot.User.ID,
+			Status:                     snapshot.User.Status,
+			Role:                       snapshot.User.Role,
+			Balance:                    snapshot.User.Balance,
+			Concurrency:                snapshot.User.Concurrency,
+			UnifiedRateEnabled:         snapshot.User.UnifiedRateEnabled,
+			UnifiedRateMultiplier:      NormalizePersistedUnifiedRateMultiplier(snapshot.User.UnifiedRateEnabled, snapshot.User.UnifiedRateMultiplier),
+			Email:                      snapshot.User.Email,
+			Username:                   snapshot.User.Username,
+			BalanceNotifyEnabled:       snapshot.User.BalanceNotifyEnabled,
+			BalanceNotifyThresholdType: snapshot.User.BalanceNotifyThresholdType,
+			BalanceNotifyThreshold:     snapshot.User.BalanceNotifyThreshold,
+			BalanceNotifyExtraEmails:   snapshot.User.BalanceNotifyExtraEmails,
+			TotalRecharged:             snapshot.User.TotalRecharged,
 		},
 	}
 	if snapshot.Group != nil {

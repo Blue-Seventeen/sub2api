@@ -138,12 +138,22 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 		WithUser(func(q *dbent.UserQuery) {
 			q.Select(
 				user.FieldID,
+				user.FieldEmail,
+				user.FieldUsername,
 				user.FieldStatus,
 				user.FieldRole,
 				user.FieldBalance,
 				user.FieldUnifiedRateEnabled,
 				user.FieldUnifiedRateMultiplier,
 				user.FieldConcurrency,
+				user.FieldBalanceNotifyEnabled,
+				user.FieldBalanceNotifyThresholdType,
+				user.FieldBalanceNotifyThreshold,
+				user.FieldBalanceNotifyExtraEmails,
+				user.FieldTotalRecharged,
+				user.FieldSignupSource,
+				user.FieldLastLoginAt,
+				user.FieldLastActiveAt,
 			)
 		}).
 		WithGroup(func(q *dbent.GroupQuery) {
@@ -661,24 +671,35 @@ func userEntityToService(u *dbent.User) *service.User {
 		return nil
 	}
 	out := &service.User{
-		ID:                    u.ID,
-		Email:                 u.Email,
-		Username:              u.Username,
-		Notes:                 u.Notes,
-		PasswordHash:          u.PasswordHash,
-		Role:                  u.Role,
-		Balance:               u.Balance,
-		UnifiedRateEnabled:    u.UnifiedRateEnabled,
-		UnifiedRateMultiplier: service.NormalizePersistedUnifiedRateMultiplier(u.UnifiedRateEnabled, u.UnifiedRateMultiplier),
-		Concurrency:           u.Concurrency,
-		Status:                u.Status,
-		TotpSecretEncrypted:   u.TotpSecretEncrypted,
-		TotpEnabled:           u.TotpEnabled,
-		TotpEnabledAt:         u.TotpEnabledAt,
-		CreatedAt:             u.CreatedAt,
-		UpdatedAt:             u.UpdatedAt,
+		ID:                         u.ID,
+		Email:                      u.Email,
+		Username:                   u.Username,
+		Notes:                      u.Notes,
+		PasswordHash:               u.PasswordHash,
+		Role:                       u.Role,
+		Balance:                    u.Balance,
+		UnifiedRateEnabled:         u.UnifiedRateEnabled,
+		UnifiedRateMultiplier:      service.NormalizePersistedUnifiedRateMultiplier(u.UnifiedRateEnabled, u.UnifiedRateMultiplier),
+		Concurrency:                u.Concurrency,
+		Status:                     u.Status,
+		SignupSource:               u.SignupSource,
+		LastLoginAt:                u.LastLoginAt,
+		LastActiveAt:               u.LastActiveAt,
+		TotpSecretEncrypted:        u.TotpSecretEncrypted,
+		TotpEnabled:                u.TotpEnabled,
+		TotpEnabledAt:              u.TotpEnabledAt,
+		BalanceNotifyEnabled:       u.BalanceNotifyEnabled,
+		BalanceNotifyThresholdType: u.BalanceNotifyThresholdType,
+		BalanceNotifyThreshold:     u.BalanceNotifyThreshold,
+		TotalRecharged:             u.TotalRecharged,
+		CreatedAt:                  u.CreatedAt,
+		UpdatedAt:                  u.UpdatedAt,
 	}
 	out.RefreshBalanceViews()
+	// Parse extra emails JSON (supports both old []string and new []NotifyEmailEntry format)
+	if u.BalanceNotifyExtraEmails != "" && u.BalanceNotifyExtraEmails != "[]" {
+		out.BalanceNotifyExtraEmails = service.ParseNotifyEmails(u.BalanceNotifyExtraEmails)
+	}
 	return out
 }
 

@@ -13,18 +13,22 @@ func UserFromServiceShallow(u *service.User) *User {
 		return nil
 	}
 	return &User{
-		ID:       u.ID,
-		Email:    u.Email,
-		Username: u.Username,
-		Role:     u.Role,
-		// v0.1.114_Beta 增量兼容说明：
-		// 管理员前端默认继续把旧字段 balance 当作“显示余额”读取，以降低升级改动面。
-		Balance:       u.DisplayBalance,
-		Concurrency:   u.Concurrency,
-		Status:        u.Status,
-		AllowedGroups: u.AllowedGroups,
-		CreatedAt:     u.CreatedAt,
-		UpdatedAt:     u.UpdatedAt,
+		ID:                         u.ID,
+		Email:                      u.Email,
+		Username:                   u.Username,
+		Role:                       u.Role,
+		Balance:                    u.DisplayBalance,
+		Concurrency:                u.Concurrency,
+		Status:                     u.Status,
+		AllowedGroups:              u.AllowedGroups,
+		LastActiveAt:               u.LastActiveAt,
+		CreatedAt:                  u.CreatedAt,
+		UpdatedAt:                  u.UpdatedAt,
+		BalanceNotifyEnabled:       u.BalanceNotifyEnabled,
+		BalanceNotifyThresholdType: u.BalanceNotifyThresholdType,
+		BalanceNotifyThreshold:     u.BalanceNotifyThreshold,
+		BalanceNotifyExtraEmails:   NotifyEmailEntriesFromService(u.BalanceNotifyExtraEmails),
+		TotalRecharged:             u.TotalRecharged,
 	}
 }
 
@@ -61,12 +65,10 @@ func UserFromServiceAdmin(u *service.User) *AdminUser {
 		return nil
 	}
 	return &AdminUser{
-		User:  *base,
-		Notes: u.Notes,
-		// v0.1.114_Beta 增量兼容说明：
-		// RealBalance 明确暴露真实余额；其值等于内部 Balance。
-		RealBalance: u.RealBalance,
-		// DisplayBalance 作为增量兼容新增字段保留；管理员前端当前可以继续优先复用旧 balance。
+		User:                  *base,
+		Notes:                 u.Notes,
+		LastUsedAt:            u.LastUsedAt,
+		RealBalance:           u.RealBalance,
 		DisplayBalance:        u.DisplayBalance,
 		UnifiedRateEnabled:    u.UnifiedRateEnabled,
 		UnifiedRateMultiplier: u.EffectiveUnifiedRateMultiplier(),
@@ -331,6 +333,26 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 			if v, ok := a.Extra["quota_weekly_reset_at"].(string); ok && v != "" {
 				out.QuotaWeeklyResetAt = &v
 			}
+		}
+
+		// 配额通知配置
+		if enabled := a.GetQuotaNotifyDailyEnabled(); enabled {
+			out.QuotaNotifyDailyEnabled = &enabled
+		}
+		if threshold := a.GetQuotaNotifyDailyThreshold(); threshold > 0 {
+			out.QuotaNotifyDailyThreshold = &threshold
+		}
+		if enabled := a.GetQuotaNotifyWeeklyEnabled(); enabled {
+			out.QuotaNotifyWeeklyEnabled = &enabled
+		}
+		if threshold := a.GetQuotaNotifyWeeklyThreshold(); threshold > 0 {
+			out.QuotaNotifyWeeklyThreshold = &threshold
+		}
+		if enabled := a.GetQuotaNotifyTotalEnabled(); enabled {
+			out.QuotaNotifyTotalEnabled = &enabled
+		}
+		if threshold := a.GetQuotaNotifyTotalThreshold(); threshold > 0 {
+			out.QuotaNotifyTotalThreshold = &threshold
 		}
 	}
 
@@ -615,6 +637,7 @@ func UsageLogFromServiceAdmin(l *service.UsageLog) *AdminUsageLog {
 		AccountRateMultiplier: l.AccountRateMultiplier,
 		RealActualCost:        l.RealActualCost,
 		UnifiedRateMultiplier: l.UnifiedRateMultiplier,
+		AccountStatsCost:      l.AccountStatsCost,
 		IPAddress:             l.IPAddress,
 		Account:               AccountSummaryFromService(l.Account),
 	}

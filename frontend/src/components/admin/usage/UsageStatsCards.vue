@@ -33,12 +33,13 @@
         <p class="text-xs text-gray-400" v-if="stats?.total_account_cost != null">
           {{ t('usage.userBilled') }}:
           <span class="text-gray-300">${{ getRealUserCost().toFixed(4) }}</span>
-          · {{ t('usage.standardCost') }}:
+          ? {{ t('usage.standardCost') }}:
           <span class="text-gray-300">${{ (stats?.total_cost || 0).toFixed(4) }}</span>
         </p>
         <p class="text-xs text-gray-400" v-else>
           {{ t('usage.standardCost') }}:
           <span class="line-through">${{ (stats?.total_cost || 0).toFixed(4) }}</span>
+
         </p>
       </div>
     </div>

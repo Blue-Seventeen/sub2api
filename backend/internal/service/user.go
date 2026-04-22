@@ -7,22 +7,28 @@ import (
 )
 
 type User struct {
-	ID           int64
-	Email        string
-	Username     string
-	Notes        string
-	PasswordHash string
-	Role         string
-	// v0.1.114_Beta 增量兼容说明：
-	// Balance 继续复用旧字段/旧列名，但在当前版本中已被定义为“真实余额”的唯一落库结算口径。
-	// 管理员接口新增的 real_balance 本质上只是 Balance 的显式别名，方便前端展示与后续升级对照。
-	Balance       float64 // 真实余额（数据库持久化、内部唯一结算口径）
-	Concurrency   int
-	Status        string
-	AllowedGroups []int64
-	TokenVersion  int64 // Incremented on password change to invalidate existing tokens
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID             int64
+	Email          string
+	Username       string
+	Notes          string
+	AvatarURL      string
+	AvatarSource   string
+	AvatarMIME     string
+	AvatarByteSize int
+	AvatarSHA256   string
+	PasswordHash   string
+	Role           string
+	Balance        float64
+	Concurrency    int
+	Status         string
+	AllowedGroups  []int64
+	TokenVersion   int64
+	SignupSource   string
+	LastLoginAt    *time.Time
+	LastActiveAt   *time.Time
+	LastUsedAt     *time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 
 	// UnifiedRateEnabled indicates whether the user's unified multiplier is enabled.
 	// 关闭时统一倍率按 1.0 处理。
@@ -50,6 +56,13 @@ type User struct {
 	TotpSecretEncrypted *string    // AES-256-GCM 加密的 TOTP 密钥
 	TotpEnabled         bool       // 是否启用 TOTP
 	TotpEnabledAt       *time.Time // TOTP 启用时间
+
+	// 余额不足通知
+	BalanceNotifyEnabled       bool
+	BalanceNotifyThresholdType string // "fixed" (default) | "percentage"
+	BalanceNotifyThreshold     *float64
+	BalanceNotifyExtraEmails   []NotifyEmailEntry
+	TotalRecharged             float64
 
 	APIKeys       []APIKey
 	Subscriptions []UserSubscription

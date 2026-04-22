@@ -401,7 +401,7 @@ func detectOpsRetryType(path string, platform string) opsRetryRequestType {
 		}
 	}
 	switch {
-	case strings.Contains(p, "/responses"):
+	case strings.Contains(p, "/responses"), strings.Contains(p, "/images/"):
 		return opsRetryTypeOpenAI
 	case strings.Contains(p, "/v1beta/"):
 		return opsRetryTypeGeminiV1B

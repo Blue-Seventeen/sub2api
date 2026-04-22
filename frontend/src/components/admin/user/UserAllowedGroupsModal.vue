@@ -131,7 +131,7 @@
                   <input
                     type="number"
                     step="0.001"
-                    min="0"
+                    min="0.001"
                     :value="config.customRate ?? ''"
                     @input="updateCustomRate(config.groupId, ($event.target as HTMLInputElement).value)"
                     :placeholder="String(config.defaultRate)"
@@ -193,7 +193,7 @@
                   <input
                     type="number"
                     step="0.001"
-                    min="0"
+                    min="0.001"
                     :value="config.customRate ?? ''"
                     @input="updateCustomRate(config.groupId, ($event.target as HTMLInputElement).value)"
                     :placeholder="String(config.defaultRate)"

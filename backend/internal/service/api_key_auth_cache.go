@@ -33,9 +33,18 @@ type APIKeyAuthUserSnapshot struct {
 	Status                string  `json:"status"`
 	Role                  string  `json:"role"`
 	Balance               float64 `json:"balance"`
+	Concurrency           int     `json:"concurrency"`
 	UnifiedRateEnabled    bool    `json:"unified_rate_enabled"`
 	UnifiedRateMultiplier float64 `json:"unified_rate_multiplier"`
-	Concurrency           int     `json:"concurrency"`
+
+	// Balance notification fields (required for CheckBalanceAfterDeduction)
+	Email                      string             `json:"email"`
+	Username                   string             `json:"username"`
+	BalanceNotifyEnabled       bool               `json:"balance_notify_enabled"`
+	BalanceNotifyThresholdType string             `json:"balance_notify_threshold_type"`
+	BalanceNotifyThreshold     *float64           `json:"balance_notify_threshold,omitempty"`
+	BalanceNotifyExtraEmails   []NotifyEmailEntry `json:"balance_notify_extra_emails,omitempty"`
+	TotalRecharged             float64            `json:"total_recharged"`
 }
 
 // APIKeyAuthGroupSnapshot 分组快照
