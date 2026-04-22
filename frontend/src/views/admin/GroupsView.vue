@@ -638,11 +638,12 @@
           </div>
         </div>
 
-        <!-- 图片生成计费配置（antigravity 和 gemini 平台） -->
+        <!-- 图片生成计费配置 -->
         <div
           v-if="
             createForm.platform === 'antigravity' ||
-            createForm.platform === 'gemini'
+            createForm.platform === 'gemini' ||
+            createForm.platform === 'openai'
           "
           class="border-t pt-4"
         >
@@ -1760,11 +1761,12 @@
           </div>
         </div>
 
-        <!-- 图片生成计费配置（antigravity 和 gemini 平台） -->
+        <!-- 图片生成计费配置 -->
         <div
           v-if="
             editForm.platform === 'antigravity' ||
-            editForm.platform === 'gemini'
+            editForm.platform === 'gemini' ||
+            editForm.platform === 'openai'
           "
           class="border-t pt-4"
         >

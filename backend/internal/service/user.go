@@ -7,28 +7,29 @@ import (
 )
 
 type User struct {
-	ID             int64
-	Email          string
-	Username       string
-	Notes          string
-	AvatarURL      string
-	AvatarSource   string
-	AvatarMIME     string
-	AvatarByteSize int
-	AvatarSHA256   string
-	PasswordHash   string
-	Role           string
-	Balance        float64
-	Concurrency    int
-	Status         string
-	AllowedGroups  []int64
-	TokenVersion   int64
-	SignupSource   string
-	LastLoginAt    *time.Time
-	LastActiveAt   *time.Time
-	LastUsedAt     *time.Time
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID                   int64
+	Email                string
+	Username             string
+	Notes                string
+	AvatarURL            string
+	AvatarSource         string
+	AvatarMIME           string
+	AvatarByteSize       int
+	AvatarSHA256         string
+	PasswordHash         string
+	Role                 string
+	Balance              float64
+	Concurrency          int
+	Status               string
+	AllowedGroups        []int64
+	TokenVersion         int64 // Incremented on password change to invalidate existing tokens
+	TokenVersionResolved bool  // TokenVersion already contains the fingerprint-derived value expected in JWT claims and refresh-token state.
+	SignupSource         string
+	LastLoginAt          *time.Time
+	LastActiveAt         *time.Time
+	LastUsedAt           *time.Time
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 
 	// UnifiedRateEnabled indicates whether the user's unified multiplier is enabled.
 	// 关闭时统一倍率按 1.0 处理。
