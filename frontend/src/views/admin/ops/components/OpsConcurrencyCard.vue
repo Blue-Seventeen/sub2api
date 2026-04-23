@@ -16,6 +16,10 @@ const props = withDefaults(defineProps<Props>(), {
 
 const { t } = useI18n()
 
+// 平台/分组视图固定只展示约 3 行卡片，其余通过滚动查看，避免卡片区域被数据量撑高变形。
+const summaryListClass = 'custom-scrollbar h-[280px] space-y-2 overflow-y-auto overscroll-contain p-3'
+const detailListClass = 'custom-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain p-3'
+
 const loading = ref(false)
 const errorMessage = ref('')
 const concurrency = ref<OpsConcurrencyStatsResponse | null>(null)
@@ -409,7 +413,7 @@ watch(
       </div>
 
       <!-- 用户视图 -->
-      <div v-else-if="displayDimension === 'user'" class="custom-scrollbar max-h-[360px] flex-1 space-y-2 overflow-y-auto p-3">
+      <div v-else-if="displayDimension === 'user'" :class="detailListClass">
         <div v-for="row in (displayRows as UserRow[])" :key="row.key" class="rounded-lg bg-gray-50 p-2.5 dark:bg-dark-900">
           <!-- 用户信息和并发 -->
           <div class="mb-1.5 flex items-center justify-between gap-2">
@@ -442,7 +446,7 @@ watch(
       </div>
 
       <!-- 汇总视图（平台/分组） -->
-      <div v-else-if="displayDimension === 'platform' || displayDimension === 'group'" class="custom-scrollbar max-h-[360px] flex-1 space-y-2 overflow-y-auto p-3">
+      <div v-else-if="displayDimension === 'platform' || displayDimension === 'group'" :class="summaryListClass">
         <div v-for="row in (displayRows as SummaryRow[])" :key="row.key" class="rounded-lg bg-gray-50 p-3 dark:bg-dark-900">
           <!-- 标题行 -->
           <div class="mb-2 flex items-center justify-between gap-2">
@@ -516,7 +520,7 @@ watch(
       </div>
 
       <!-- 账号详细视图 -->
-      <div v-else class="custom-scrollbar max-h-[360px] flex-1 space-y-2 overflow-y-auto p-3">
+      <div v-else :class="detailListClass">
         <div v-for="row in (displayRows as AccountRow[])" :key="row.key" class="rounded-lg bg-gray-50 p-2.5 dark:bg-dark-900">
           <!-- 账号名称和并发 -->
           <div class="mb-1.5 flex items-center justify-between gap-2">
