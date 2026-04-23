@@ -3895,10 +3895,22 @@ func (s *OpenAIGatewayService) parseSSEUsageBytes(data []byte, usage *OpenAIUsag
 		return
 	}
 
-	usage.InputTokens = int(gjson.GetBytes(data, "response.usage.input_tokens").Int())
-	usage.OutputTokens = int(gjson.GetBytes(data, "response.usage.output_tokens").Int())
-	usage.CacheReadInputTokens = int(gjson.GetBytes(data, "response.usage.input_tokens_details.cached_tokens").Int())
-	usage.ImageOutputTokens = int(gjson.GetBytes(data, "response.usage.output_tokens_details.image_tokens").Int())
+	usage.InputTokens = firstExistingGJSONInt(
+		gjson.GetBytes(data, "response.usage.input_tokens"),
+		gjson.GetBytes(data, "response.usage.prompt_tokens"),
+	)
+	usage.OutputTokens = firstExistingGJSONInt(
+		gjson.GetBytes(data, "response.usage.output_tokens"),
+		gjson.GetBytes(data, "response.usage.completion_tokens"),
+	)
+	usage.CacheReadInputTokens = firstExistingGJSONInt(
+		gjson.GetBytes(data, "response.usage.input_tokens_details.cached_tokens"),
+		gjson.GetBytes(data, "response.usage.prompt_tokens_details.cached_tokens"),
+		gjson.GetBytes(data, "response.usage.cached_tokens"),
+	)
+	usage.ImageOutputTokens = firstExistingGJSONInt(
+		gjson.GetBytes(data, "response.usage.output_tokens_details.image_tokens"),
+	)
 }
 
 func extractOpenAIUsageFromJSONBytes(body []byte) (OpenAIUsage, bool) {
@@ -3908,16 +3920,29 @@ func extractOpenAIUsageFromJSONBytes(body []byte) (OpenAIUsage, bool) {
 	values := gjson.GetManyBytes(
 		body,
 		"usage.input_tokens",
+		"usage.prompt_tokens",
 		"usage.output_tokens",
+		"usage.completion_tokens",
 		"usage.input_tokens_details.cached_tokens",
+		"usage.prompt_tokens_details.cached_tokens",
+		"usage.cached_tokens",
 		"usage.output_tokens_details.image_tokens",
 	)
 	return OpenAIUsage{
-		InputTokens:          int(values[0].Int()),
-		OutputTokens:         int(values[1].Int()),
-		CacheReadInputTokens: int(values[2].Int()),
-		ImageOutputTokens:    int(values[3].Int()),
+		InputTokens:          firstExistingGJSONInt(values[0], values[1]),
+		OutputTokens:         firstExistingGJSONInt(values[2], values[3]),
+		CacheReadInputTokens: firstExistingGJSONInt(values[4], values[5], values[6]),
+		ImageOutputTokens:    firstExistingGJSONInt(values[7]),
 	}, true
+}
+
+func firstExistingGJSONInt(results ...gjson.Result) int {
+	for _, result := range results {
+		if result.Exists() {
+			return int(result.Int())
+		}
+	}
+	return 0
 }
 
 func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, originalModel, mappedModel string) (*OpenAIUsage, error) {

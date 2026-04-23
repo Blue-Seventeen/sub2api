@@ -42,6 +42,16 @@ func newCompatibleGatewayHTTPResponse(statusCode int, body string) *http.Respons
 	}
 }
 
+func newCompatibleGatewayEventStreamResponse(statusCode int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: statusCode,
+		Header: http.Header{
+			"Content-Type": []string{"text/event-stream"},
+		},
+		Body: io.NopCloser(strings.NewReader(body)),
+	}
+}
+
 func newCompatibleGatewayServiceForTest(upstream HTTPUpstream) *CompatibleGatewayService {
 	return &CompatibleGatewayService{
 		gatewayService: &GatewayService{
@@ -164,6 +174,104 @@ func TestCompatibleGatewayServiceForward_FallsBackToRelayChatEndpointForZhipu(t 
 	}
 	if upstream.urls[4] != "https://relay.example.com/v1/chat/completions" {
 		t.Fatalf("reprobe fallback URL = %q, want relay endpoint", upstream.urls[4])
+	}
+}
+
+func TestCompatibleGatewayServiceForward_ParsesChatUsagePromptCompletionForZhipu(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	upstream := &compatibleGatewayHTTPUpstreamRecorder{
+		responses: []*http.Response{
+			newCompatibleGatewayHTTPResponse(http.StatusOK, `{"id":"chatcmpl-usage","object":"chat.completion","model":"glm-4.6v","choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":12,"completion_tokens":4,"prompt_tokens_details":{"cached_tokens":2}}}`),
+		},
+	}
+	svc := newCompatibleGatewayServiceForTest(upstream)
+	account := &Account{
+		ID:          11,
+		Platform:    PlatformZhipu,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"base_url": "https://relay.example.com",
+			"api_key":  "test-key",
+		},
+	}
+
+	result, upstreamEndpoint, err := svc.Forward(
+		context.Background(),
+		c,
+		account,
+		CompatibleRouteChatCompletions,
+		[]byte(`{"model":"glm-4.6v","messages":[{"role":"user","content":"hi"}],"stream":false}`),
+	)
+	if err != nil {
+		t.Fatalf("Forward() error = %v", err)
+	}
+	if upstreamEndpoint != "/v1/chat/completions" {
+		t.Fatalf("upstreamEndpoint = %q, want %q", upstreamEndpoint, "/v1/chat/completions")
+	}
+	if result == nil {
+		t.Fatal("Forward() result is nil")
+	}
+	if result.Usage.InputTokens != 12 || result.Usage.OutputTokens != 4 || result.Usage.CacheReadInputTokens != 2 {
+		t.Fatalf("usage = %+v, want input=12 output=4 cached=2", result.Usage)
+	}
+}
+
+func TestCompatibleGatewayServiceForward_KeepsStreamingChatUsageAfterFinishChunkForZhipu(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	upstream := &compatibleGatewayHTTPUpstreamRecorder{
+		responses: []*http.Response{
+			newCompatibleGatewayEventStreamResponse(http.StatusOK, strings.Join([]string{
+				`data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","model":"glm-4.6v","choices":[{"index":0,"delta":{"content":"hel"},"finish_reason":null}]}`,
+				``,
+				`data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","model":"glm-4.6v","choices":[],"usage":{"prompt_tokens":12,"completion_tokens":4,"prompt_tokens_details":{"cached_tokens":2}}}`,
+				``,
+				`data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","model":"glm-4.6v","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+				``,
+				`data: [DONE]`,
+				``,
+			}, "\n")),
+		},
+	}
+	svc := newCompatibleGatewayServiceForTest(upstream)
+	account := &Account{
+		ID:          12,
+		Platform:    PlatformZhipu,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"base_url": "https://relay.example.com",
+			"api_key":  "test-key",
+		},
+	}
+
+	result, upstreamEndpoint, err := svc.Forward(
+		context.Background(),
+		c,
+		account,
+		CompatibleRouteChatCompletions,
+		[]byte(`{"model":"glm-4.6v","messages":[{"role":"user","content":"hi"}],"stream":true}`),
+	)
+	if err != nil {
+		t.Fatalf("Forward() error = %v", err)
+	}
+	if upstreamEndpoint != "/v1/chat/completions" {
+		t.Fatalf("upstreamEndpoint = %q, want %q", upstreamEndpoint, "/v1/chat/completions")
+	}
+	if result == nil {
+		t.Fatal("Forward() result is nil")
+	}
+	if result.Usage.InputTokens != 12 || result.Usage.OutputTokens != 4 || result.Usage.CacheReadInputTokens != 2 {
+		t.Fatalf("usage = %+v, want input=12 output=4 cached=2", result.Usage)
+	}
+	if !strings.Contains(rec.Body.String(), `"content":"hel"`) {
+		t.Fatalf("response body = %s, want contains streamed content", rec.Body.String())
 	}
 }
 

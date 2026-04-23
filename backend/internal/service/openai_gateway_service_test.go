@@ -1835,6 +1835,32 @@ func TestParseSSEUsage_SelectiveParsing(t *testing.T) {
 	require.Equal(t, 13, usage.InputTokens)
 	require.Equal(t, 15, usage.OutputTokens)
 	require.Equal(t, 4, usage.CacheReadInputTokens)
+
+	// 兼容部分 OpenAI-compatible chat / relay 事件沿用 prompt/completion 命名
+	svc.parseSSEUsage(`{"type":"response.completed","response":{"usage":{"prompt_tokens":21,"completion_tokens":34,"prompt_tokens_details":{"cached_tokens":5}}}}`, usage)
+	require.Equal(t, 21, usage.InputTokens)
+	require.Equal(t, 34, usage.OutputTokens)
+	require.Equal(t, 5, usage.CacheReadInputTokens)
+}
+
+func TestExtractOpenAIUsageFromJSONBytes_SupportsChatCompletionsSchema(t *testing.T) {
+	body := []byte(`{"id":"chatcmpl_1","usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18,"prompt_tokens_details":{"cached_tokens":3}}}`)
+
+	usage, ok := extractOpenAIUsageFromJSONBytes(body)
+	require.True(t, ok)
+	require.Equal(t, 11, usage.InputTokens)
+	require.Equal(t, 7, usage.OutputTokens)
+	require.Equal(t, 3, usage.CacheReadInputTokens)
+}
+
+func TestExtractOpenAIUsageFromJSONBytes_FallsBackToCachedTokens(t *testing.T) {
+	body := []byte(`{"id":"chatcmpl_2","usage":{"prompt_tokens":9,"completion_tokens":4,"cached_tokens":2}}`)
+
+	usage, ok := extractOpenAIUsageFromJSONBytes(body)
+	require.True(t, ok)
+	require.Equal(t, 9, usage.InputTokens)
+	require.Equal(t, 4, usage.OutputTokens)
+	require.Equal(t, 2, usage.CacheReadInputTokens)
 }
 
 func TestExtractCodexFinalResponse_SampleReplay(t *testing.T) {

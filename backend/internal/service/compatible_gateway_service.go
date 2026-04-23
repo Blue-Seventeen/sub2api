@@ -602,10 +602,20 @@ func (s *CompatibleGatewayService) handleResponsesResponse(resp *http.Response, 
 			line := scanner.Text()
 			if strings.HasPrefix(line, "data: ") {
 				payload := strings.TrimPrefix(line, "data: ")
-				if gjson.Get(payload, "response.usage.input_tokens").Exists() {
-					usage.InputTokens = int(gjson.Get(payload, "response.usage.input_tokens").Int())
-					usage.OutputTokens = int(gjson.Get(payload, "response.usage.output_tokens").Int())
-					usage.CacheReadInputTokens = int(gjson.Get(payload, "response.usage.input_tokens_details.cached_tokens").Int())
+				if gjson.Get(payload, "response.usage").Exists() {
+					usage.InputTokens = firstExistingGJSONInt(
+						gjson.Get(payload, "response.usage.input_tokens"),
+						gjson.Get(payload, "response.usage.prompt_tokens"),
+					)
+					usage.OutputTokens = firstExistingGJSONInt(
+						gjson.Get(payload, "response.usage.output_tokens"),
+						gjson.Get(payload, "response.usage.completion_tokens"),
+					)
+					usage.CacheReadInputTokens = firstExistingGJSONInt(
+						gjson.Get(payload, "response.usage.input_tokens_details.cached_tokens"),
+						gjson.Get(payload, "response.usage.prompt_tokens_details.cached_tokens"),
+						gjson.Get(payload, "response.usage.cached_tokens"),
+					)
 				}
 			}
 			_, _ = fmt.Fprintln(c.Writer, line)
@@ -639,8 +649,10 @@ func (s *CompatibleGatewayService) handleChatPassthrough(resp *http.Response, c 
 					c.Writer.Flush()
 					continue
 				}
-				if parsed, ok := extractOpenAIUsageFromJSONBytes([]byte(payload)); ok {
-					usage = openAIUsageToClaudeUsage(parsed)
+				if gjson.Get(payload, "usage").Exists() {
+					if parsed, ok := extractOpenAIUsageFromJSONBytes([]byte(payload)); ok {
+						usage = openAIUsageToClaudeUsage(parsed)
+					}
 				}
 			}
 			_, _ = fmt.Fprintln(c.Writer, line)
