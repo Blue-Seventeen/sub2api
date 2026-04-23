@@ -140,7 +140,7 @@ export async function renderElementToPngBlobById(options: RenderElementToPngOpti
     const canvas = await html2canvas(clonedRoot, {
       scale: pixelRatio * scaleMultiplier,
       useCORS: true,
-      allowTaint: true,
+      allowTaint: false,
       backgroundColor: options.backgroundColor ?? null,
       logging: false,
       imageTimeout: 0,

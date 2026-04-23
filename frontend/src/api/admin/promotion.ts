@@ -103,6 +103,7 @@ export interface PromotionConfigResponse {
   settings: PromotionSettingsConfig
   levels: PromotionLevelConfig[]
   effective_timezone: string
+  resolved_invite_base_url?: string
 }
 
 export const adminPromotionAPI = {

@@ -287,15 +287,16 @@ func (h *PromotionHandler) CancelCommission(c *gin.Context) {
 }
 
 func (h *PromotionHandler) GetConfig(c *gin.Context) {
-	payload, tz, err := h.promotionService.GetAdminConfig(c.Request.Context())
+	payload, tz, resolvedInviteBaseURL, err := h.promotionService.GetAdminConfig(c.Request.Context())
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 	response.Success(c, gin.H{
-		"settings":           payload.Settings,
-		"levels":             payload.Levels,
-		"effective_timezone": tz,
+		"settings":                 payload.Settings,
+		"levels":                   payload.Levels,
+		"effective_timezone":       tz,
+		"resolved_invite_base_url": resolvedInviteBaseURL,
 	})
 }
 
@@ -308,7 +309,7 @@ func (h *PromotionHandler) UpdateConfig(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
-	payload, tz, err := h.promotionService.UpdateAdminConfig(c.Request.Context(), service.PromotionConfigPayload{
+	payload, tz, resolvedInviteBaseURL, err := h.promotionService.UpdateAdminConfig(c.Request.Context(), service.PromotionConfigPayload{
 		Settings: req.Settings,
 		Levels:   req.Levels,
 	})
@@ -317,9 +318,10 @@ func (h *PromotionHandler) UpdateConfig(c *gin.Context) {
 		return
 	}
 	response.Success(c, gin.H{
-		"settings":           payload.Settings,
-		"levels":             payload.Levels,
-		"effective_timezone": tz,
+		"settings":                 payload.Settings,
+		"levels":                   payload.Levels,
+		"effective_timezone":       tz,
+		"resolved_invite_base_url": resolvedInviteBaseURL,
 	})
 }
 

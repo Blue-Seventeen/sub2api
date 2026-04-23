@@ -273,6 +273,26 @@ describe('useAppStore', () => {
       expect(store.publicSettingsLoaded).toBe(true)
     })
 
+    it('会清洗 site_logo，避免无效或危险 URL 影响展示', () => {
+      const windowAny = window as any
+      windowAny.__APP_CONFIG__ = {
+        site_name: 'TestSite',
+        site_logo: 'javascript:alert(1)',
+        version: '1.0.0',
+        contact_info: '',
+        api_base_url: '',
+        doc_url: '',
+      }
+
+      const store = useAppStore()
+      const result = store.initFromInjectedConfig()
+
+      expect(result).toBe(true)
+      expect(store.siteLogo).toBe('')
+      expect(store.cachedPublicSettings?.site_logo).toBe('')
+      expect(windowAny.__APP_CONFIG__.site_logo).toBe('')
+    })
+
     it('无注入配置时返回 false', () => {
       const store = useAppStore()
       const result = store.initFromInjectedConfig()

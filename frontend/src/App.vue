@@ -7,6 +7,7 @@ import { resolveDocumentTitle } from '@/router/title'
 import AnnouncementPopup from '@/components/common/AnnouncementPopup.vue'
 import { useAppStore, useAuthStore, useSubscriptionStore, useAnnouncementStore } from '@/stores'
 import { getSetupStatus } from '@/api/setup'
+import { sanitizeUrl } from '@/utils/url'
 
 const router = useRouter()
 const route = useRoute()
@@ -20,6 +21,13 @@ const announcementStore = useAnnouncementStore()
  * @param logoUrl - URL of the logo to use as favicon
  */
 function updateFavicon(logoUrl: string) {
+  const sanitizedLogoUrl = sanitizeUrl(logoUrl || '', {
+    allowRelative: true,
+    allowDataUrl: true
+  })
+  if (!sanitizedLogoUrl) {
+    return
+  }
   // Find existing favicon link or create new one
   let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
   if (!link) {
@@ -27,8 +35,21 @@ function updateFavicon(logoUrl: string) {
     link.rel = 'icon'
     document.head.appendChild(link)
   }
-  link.type = logoUrl.endsWith('.svg') ? 'image/svg+xml' : 'image/x-icon'
-  link.href = logoUrl
+  link.type = inferFaviconMimeType(sanitizedLogoUrl)
+  link.href = sanitizedLogoUrl
+}
+
+function inferFaviconMimeType(logoUrl: string) {
+  const normalized = logoUrl.toLowerCase()
+  if (normalized.startsWith('data:image/svg+xml')) return 'image/svg+xml'
+  if (normalized.startsWith('data:image/png')) return 'image/png'
+  if (normalized.startsWith('data:image/jpeg') || normalized.startsWith('data:image/jpg')) return 'image/jpeg'
+  if (normalized.startsWith('data:image/webp')) return 'image/webp'
+  if (normalized.endsWith('.svg')) return 'image/svg+xml'
+  if (normalized.endsWith('.png')) return 'image/png'
+  if (normalized.endsWith('.jpg') || normalized.endsWith('.jpeg')) return 'image/jpeg'
+  if (normalized.endsWith('.webp')) return 'image/webp'
+  return 'image/x-icon'
 }
 
 // Watch for site settings changes and update favicon/title

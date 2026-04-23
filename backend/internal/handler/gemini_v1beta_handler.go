@@ -73,7 +73,7 @@ func (h *GatewayHandler) GeminiV1BetaListModels(c *gin.Context) {
 		c.JSON(http.StatusOK, gemini.FallbackModelsList())
 		return
 	}
-	writeUpstreamResponse(c, res)
+	writeSanitizedGeminiModelsResponse(c, res)
 }
 
 // GeminiV1BetaGetModel proxies:
@@ -125,7 +125,7 @@ func (h *GatewayHandler) GeminiV1BetaGetModel(c *gin.Context) {
 		c.JSON(http.StatusOK, gemini.FallbackModel(modelName))
 		return
 	}
-	writeUpstreamResponse(c, res)
+	writeSanitizedGeminiModelsResponse(c, res)
 }
 
 // GeminiV1BetaModels proxies Gemini native REST endpoints like:
@@ -661,6 +661,60 @@ func writeUpstreamResponse(c *gin.Context, res *service.UpstreamHTTPResult) {
 		contentType = "application/json"
 	}
 	c.Data(res.StatusCode, contentType, res.Body)
+}
+
+func writeSanitizedGeminiModelsResponse(c *gin.Context, res *service.UpstreamHTTPResult) {
+	if res == nil {
+		googleError(c, http.StatusBadGateway, "Empty upstream response")
+		return
+	}
+	writeUpstreamResponse(c, &service.UpstreamHTTPResult{
+		StatusCode: res.StatusCode,
+		Headers:    res.Headers,
+		Body:       sanitizeJSONNullFields(res.Body),
+	})
+}
+
+func sanitizeJSONNullFields(body []byte) []byte {
+	if len(body) == 0 {
+		return body
+	}
+
+	var payload any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return body
+	}
+
+	sanitized, err := json.Marshal(pruneNullJSONValues(payload))
+	if err != nil {
+		return body
+	}
+	return sanitized
+}
+
+func pruneNullJSONValues(v any) any {
+	switch typed := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, value := range typed {
+			if value == nil {
+				continue
+			}
+			out[key] = pruneNullJSONValues(value)
+		}
+		return out
+	case []any:
+		out := make([]any, 0, len(typed))
+		for _, value := range typed {
+			if value == nil {
+				continue
+			}
+			out = append(out, pruneNullJSONValues(value))
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 func shouldFallbackGeminiModels(res *service.UpstreamHTTPResult) bool {

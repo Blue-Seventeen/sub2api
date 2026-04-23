@@ -441,37 +441,37 @@ func (s *PromotionService) CancelCommission(ctx context.Context, commissionID in
 	return record, nil
 }
 
-func (s *PromotionService) GetAdminConfig(ctx context.Context) (*PromotionConfigPayload, string, error) {
+func (s *PromotionService) GetAdminConfig(ctx context.Context) (*PromotionConfigPayload, string, string, error) {
 	settings, err := s.repo.GetPromotionSettings(ctx)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	levels, err := s.repo.ListPromotionLevels(ctx)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	payload := &PromotionConfigPayload{}
 	if settings != nil {
 		payload.Settings = *settings
 	}
 	payload.Levels = levels
-	return payload, s.appTimezoneName(), nil
+	return payload, s.appTimezoneName(), s.resolveInviteBaseURL(ctx, settings), nil
 }
 
-func (s *PromotionService) UpdateAdminConfig(ctx context.Context, payload PromotionConfigPayload) (*PromotionConfigPayload, string, error) {
+func (s *PromotionService) UpdateAdminConfig(ctx context.Context, payload PromotionConfigPayload) (*PromotionConfigPayload, string, string, error) {
 	if _, _, err := parseSettlementClock(payload.Settings.DailySettlementTime); err != nil {
-		return nil, "", ErrPromotionInvalidSettlementTime
+		return nil, "", "", ErrPromotionInvalidSettlementTime
 	}
 	payload.Settings.InviteBaseURL = strings.TrimSpace(payload.Settings.InviteBaseURL)
 	if payload.Settings.InviteBaseURL != "" {
 		if err := config.ValidateAbsoluteHTTPURL(payload.Settings.InviteBaseURL); err != nil {
-			return nil, "", infraerrors.BadRequest("PROMOTION_INVITE_BASE_URL_INVALID", "promotion invite base url must be an absolute http/https URL")
+			return nil, "", "", infraerrors.BadRequest("PROMOTION_INVITE_BASE_URL_INVALID", "promotion invite base url must be an absolute http/https URL")
 		}
 	}
 	payload.Settings.PosterLogoURL = strings.TrimSpace(payload.Settings.PosterLogoURL)
 	if payload.Settings.PosterLogoURL != "" {
 		if !isValidPromotionPosterLogoValue(payload.Settings.PosterLogoURL) {
-			return nil, "", infraerrors.BadRequest("PROMOTION_POSTER_LOGO_URL_INVALID", "promotion poster logo url must be an absolute http/https URL or a valid uploaded image payload")
+			return nil, "", "", infraerrors.BadRequest("PROMOTION_POSTER_LOGO_URL_INVALID", "promotion poster logo url must be an absolute http/https URL or a valid uploaded image payload")
 		}
 	}
 	payload.Settings.PosterTitle = strings.TrimSpace(payload.Settings.PosterTitle)
@@ -496,16 +496,16 @@ func (s *PromotionService) UpdateAdminConfig(ctx context.Context, payload Promot
 	}
 	updatedSettings, err := s.repo.UpdatePromotionSettings(ctx, payload.Settings)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	updatedLevels, err := s.repo.UpsertPromotionLevels(ctx, payload.Levels)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	return &PromotionConfigPayload{
 		Settings: *updatedSettings,
 		Levels:   updatedLevels,
-	}, s.appTimezoneName(), nil
+	}, s.appTimezoneName(), s.resolveInviteBaseURL(ctx, updatedSettings), nil
 }
 
 func (s *PromotionService) ListAdminScripts(ctx context.Context, filter PromotionScriptFilter) ([]PromotionScript, int64, error) {

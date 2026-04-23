@@ -389,7 +389,7 @@
       <template #footer>
         <div class="flex justify-end gap-3">
           <button type="button" class="promo-btn promo-btn-secondary" @click="showPosterPreview = false">关闭预览</button>
-          <button type="button" class="promo-btn promo-btn-primary" :disabled="posterPreviewDownloading" @click="downloadPreviewPoster">
+          <button type="button" class="promo-btn promo-btn-primary" :disabled="posterPreviewDownloading || previewQrCodeLoading || !previewInviteLink" @click="downloadPreviewPoster">
             <Icon :name="posterPreviewDownloading ? 'refresh' : 'download'" size="sm" :class="posterPreviewDownloading ? 'animate-spin' : ''" />
             {{ posterPreviewDownloading ? '生成中...' : '下载海报 PNG' }}
           </button>
@@ -419,10 +419,14 @@ const settlementDraftTime = ref('00:00')
 const settlementTimeInputRef = ref<HTMLInputElement | null>(null)
 const showPosterPreview = ref(false)
 const previewQrCodeDataUrl = ref('')
+const previewQrCodeLoading = ref(false)
 const posterPreviewRef = ref<HTMLElement | null>(null)
 const posterPreviewElementId = 'promotion-admin-poster-preview'
 const posterPreviewDownloading = ref(false)
+const resolvedInviteBaseUrl = ref('')
 const demoInviteCode = '174914E97ACEBFD1'
+let previewQrCodeRequestID = 0
+let previewQrCodePromise: Promise<boolean> | null = null
 
 const settings = reactive<PromotionSettingsConfig>({
   activation_threshold_amount: 5,
@@ -466,9 +470,23 @@ const settlementQuickOptions = ['00:00', '09:00', '12:00', '18:00', '23:55']
 
 const previewPosterTags = computed(() => parsePosterTagsInput(posterTagsInput.value).length ? parsePosterTagsInput(posterTagsInput.value) : ['真实消费返佣', '次日结算', '唯一推广码'])
 const posterLogoText = computed(() => ((settings.poster_title || 'SU').replace(/\s+/g, '').slice(0, 2) || 'SU').toUpperCase())
+const previewInviteBaseURL = computed(() => {
+  const explicitBase = String(settings.invite_base_url || '').trim()
+  if (explicitBase) {
+    return explicitBase.replace(/\/+$/, '')
+  }
+  const fallbackBase = String(resolvedInviteBaseUrl.value || '').trim()
+  if (fallbackBase) {
+    return fallbackBase.replace(/\/+$/, '')
+  }
+  if (typeof window !== 'undefined') {
+    return window.location.origin.replace(/\/+$/, '')
+  }
+  return ''
+})
 const previewInviteLink = computed(() => {
-  const base = (settings.invite_base_url || 'http://127.0.0.1:8080').replace(/\/$/, '')
-  return `${base}/register?ref=${demoInviteCode}`
+  const base = previewInviteBaseURL.value
+  return base ? `${base}/register?ref=${demoInviteCode}` : `/register?ref=${demoInviteCode}`
 })
 
 const previews = computed(() => {
@@ -493,12 +511,8 @@ const previews = computed(() => {
 
 watch(
   () => previewInviteLink.value,
-  async (link) => {
-    if (!link) {
-      previewQrCodeDataUrl.value = ''
-      return
-    }
-    previewQrCodeDataUrl.value = await QRCode.toDataURL(link, { width: 320, margin: 1 })
+  (link) => {
+    void refreshPreviewQrCode(link)
   },
   { immediate: true }
 )
@@ -511,6 +525,7 @@ async function loadConfig() {
   try {
     const response = await adminPromotionAPI.getConfig()
     Object.assign(settings, response.data.settings)
+    resolvedInviteBaseUrl.value = response.data.resolved_invite_base_url || ''
     posterTagsInput.value = (response.data.settings.poster_tags || []).join('，')
     levels.value = normalizeLevels((response.data.levels || []).map((item, index) => ({
       ...item,
@@ -637,6 +652,7 @@ async function saveConfig() {
     }
     const response = await adminPromotionAPI.updateConfig(payload)
     Object.assign(settings, response.data.settings)
+    resolvedInviteBaseUrl.value = response.data.resolved_invite_base_url || ''
     posterTagsInput.value = (response.data.settings.poster_tags || []).join('，')
     levels.value = normalizeLevels((response.data.levels || []).map((item, index) => ({
       ...item,
@@ -687,10 +703,62 @@ function handlePosterLogoUpload(event: Event) {
   input.value = ''
 }
 
+function refreshPreviewQrCode(link = previewInviteLink.value, notifyOnError = false) {
+  const nextLink = String(link || '').trim()
+  const requestID = ++previewQrCodeRequestID
+  const task = (async () => {
+    if (requestID === previewQrCodeRequestID) {
+      previewQrCodeDataUrl.value = ''
+      previewQrCodeLoading.value = !!nextLink
+    }
+    if (!nextLink) {
+      return false
+    }
+    try {
+      const dataUrl = await QRCode.toDataURL(nextLink, { width: 320, margin: 1 })
+      if (requestID !== previewQrCodeRequestID) {
+        return false
+      }
+      previewQrCodeDataUrl.value = dataUrl
+      return true
+    } catch (error) {
+      console.error('Failed to generate promotion preview QR code:', error)
+      if (requestID === previewQrCodeRequestID && notifyOnError) {
+        appStore.showError('生成推广二维码失败')
+      }
+      return false
+    } finally {
+      if (requestID === previewQrCodeRequestID) {
+        previewQrCodeLoading.value = false
+      }
+    }
+  })()
+  previewQrCodePromise = task
+  void task.finally(() => {
+    if (previewQrCodePromise === task) {
+      previewQrCodePromise = null
+    }
+  })
+  return task
+}
+
+async function ensurePreviewQrCodeReady() {
+  if (previewQrCodeDataUrl.value) {
+    return true
+  }
+  if (previewQrCodePromise) {
+    return previewQrCodePromise
+  }
+  return refreshPreviewQrCode(previewInviteLink.value, true)
+}
+
 async function downloadPreviewPoster() {
   if (!posterPreviewRef.value) return
   posterPreviewDownloading.value = true
   try {
+    if (!(await ensurePreviewQrCodeReady())) {
+      return
+    }
     const blob = await renderElementToPngBlobById({
       elementId: posterPreviewElementId,
       width: 420,
@@ -702,7 +770,7 @@ async function downloadPreviewPoster() {
     saveAs(blob, 'promotion-poster-preview.png')
   } catch (error) {
     console.error('Failed to export poster preview:', error)
-    appStore.showError('??????')
+    appStore.showError('下载海报失败')
   } finally {
     posterPreviewDownloading.value = false
   }

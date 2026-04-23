@@ -28,7 +28,7 @@
             <Icon name="link" size="sm" />
             复制邀请链接
           </button>
-          <button type="button" class="promo-btn promo-btn-primary" :disabled="downloading || !overview?.invite_code" @click="downloadPoster">
+          <button type="button" class="promo-btn promo-btn-primary" :disabled="downloading || qrCodeLoading || !overview?.invite_code || !resolvedInviteLink" @click="downloadPoster">
             <Icon :name="downloading ? 'refresh' : 'download'" size="sm" :class="downloading ? 'animate-spin' : ''" />
             {{ downloading ? '正在生成海报' : '下载海报 PNG' }}
           </button>
@@ -218,7 +218,10 @@ const siteName = computed(() => appStore.siteName || 'Sub2API')
 const scripts = ref<PromotionScript[]>([])
 const loadingScripts = ref(false)
 const qrCodeDataUrl = ref('')
+const qrCodeLoading = ref(false)
 const downloading = ref(false)
+let qrCodeRequestID = 0
+let qrCodePromise: Promise<boolean> | null = null
 const posterRef = ref<HTMLElement | null>(null)
 const posterElementId = 'promotion-user-poster'
 const posterPreviewScale = 0.715
@@ -283,12 +286,8 @@ const resolvedInviteLink = computed(() => {
 
 watch(
   () => resolvedInviteLink.value,
-  async (link) => {
-    if (!link) {
-      qrCodeDataUrl.value = ''
-      return
-    }
-    qrCodeDataUrl.value = await QRCode.toDataURL(link, { width: 320, margin: 1 })
+  (link) => {
+    void refreshPosterQrCode(link)
   },
   { immediate: true }
 )
@@ -332,10 +331,62 @@ async function copyScript(script: PromotionScript) {
   }
 }
 
+function refreshPosterQrCode(link = resolvedInviteLink.value, notifyOnError = false) {
+  const nextLink = String(link || '').trim()
+  const requestID = ++qrCodeRequestID
+  const task = (async () => {
+    if (requestID === qrCodeRequestID) {
+      qrCodeDataUrl.value = ''
+      qrCodeLoading.value = !!nextLink
+    }
+    if (!nextLink) {
+      return false
+    }
+    try {
+      const dataUrl = await QRCode.toDataURL(nextLink, { width: 320, margin: 1 })
+      if (requestID !== qrCodeRequestID) {
+        return false
+      }
+      qrCodeDataUrl.value = dataUrl
+      return true
+    } catch (error) {
+      console.error('Failed to generate promotion QR code:', error)
+      if (requestID === qrCodeRequestID && notifyOnError) {
+        appStore.showError('生成推广二维码失败')
+      }
+      return false
+    } finally {
+      if (requestID === qrCodeRequestID) {
+        qrCodeLoading.value = false
+      }
+    }
+  })()
+  qrCodePromise = task
+  void task.finally(() => {
+    if (qrCodePromise === task) {
+      qrCodePromise = null
+    }
+  })
+  return task
+}
+
+async function ensurePosterQrCodeReady() {
+  if (qrCodeDataUrl.value) {
+    return true
+  }
+  if (qrCodePromise) {
+    return qrCodePromise
+  }
+  return refreshPosterQrCode(resolvedInviteLink.value, true)
+}
+
 async function downloadPoster() {
   if (!posterRef.value || !props.overview?.invite_code) return
   downloading.value = true
   try {
+    if (!(await ensurePosterQrCodeReady())) {
+      return
+    }
     const blob = await renderElementToPngBlobById({
       elementId: posterElementId,
       width: posterWidth,

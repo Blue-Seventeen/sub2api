@@ -4,9 +4,11 @@ package handler
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -166,4 +168,59 @@ func TestShouldFallbackGeminiModel_DelegatesScopeFallback(t *testing.T) {
 		Body:       []byte("insufficient authentication scopes"),
 	}
 	require.True(t, shouldFallbackGeminiModel("gemini-future-model", res))
+}
+
+func TestSanitizeJSONNullFields_RemovesNullModelFields(t *testing.T) {
+	t.Parallel()
+
+	input := []byte(`{
+		"models": [
+			{
+				"name": "gemini-3.1-flash-image",
+				"baseModelId": null,
+				"version": null,
+				"displayName": "gemini-3.1-flash-image",
+				"description": null,
+				"inputTokenLimit": null,
+				"outputTokenLimit": null,
+				"supportedGenerationMethods": ["generateContent", "streamGenerateContent"]
+			}
+		],
+		"nextPageToken": null
+	}`)
+
+	sanitized := sanitizeJSONNullFields(input)
+
+	require.JSONEq(t, `{
+		"models": [
+			{
+				"name": "gemini-3.1-flash-image",
+				"displayName": "gemini-3.1-flash-image",
+				"supportedGenerationMethods": ["generateContent", "streamGenerateContent"]
+			}
+		]
+	}`, string(sanitized))
+}
+
+func TestWriteSanitizedGeminiModelsResponse_PreservesStatusAndHeaders(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	res := &service.UpstreamHTTPResult{
+		StatusCode: http.StatusOK,
+		Headers: http.Header{
+			"Content-Type": []string{"application/json"},
+			"X-Test":       []string{"keep-me"},
+		},
+		Body: []byte(`{"models":[{"name":"gemini-2.5-pro","description":null}]}`),
+	}
+
+	writeSanitizedGeminiModelsResponse(c, res)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, "keep-me", w.Header().Get("X-Test"))
+	require.JSONEq(t, `{"models":[{"name":"gemini-2.5-pro"}]}`, w.Body.String())
 }
