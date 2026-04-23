@@ -205,6 +205,17 @@ func (s *OpenAIOAuthServiceSuite) TestRequestError_ClosedServer() {
 	require.ErrorContains(s.T(), err, "request failed")
 }
 
+func (s *OpenAIOAuthServiceSuite) TestExchangeCode_RequestErrorWithoutProxyReturnsProxyHint() {
+	s.setupServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	s.srv.Close()
+
+	_, err := s.svc.ExchangeCode(s.ctx, "code", "ver", openai.DefaultRedirectURI, "", "")
+
+	require.Error(s.T(), err)
+	require.Equal(s.T(), "OPENAI_OAUTH_PROXY_REQUIRED", infraerrors.Reason(err))
+	require.Contains(s.T(), infraerrors.Message(err), "no proxy is configured")
+}
+
 func (s *OpenAIOAuthServiceSuite) TestContextCancel() {
 	started := make(chan struct{})
 	block := make(chan struct{})

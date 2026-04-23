@@ -13,6 +13,12 @@ func normalizeTopPForCompatibleBody(body []byte, _ *Account, _ string) ([]byte, 
 	return normalizeTopPForCompatibleBodyRaw(body), nil
 }
 
+func patchMoonshotCompatibleChatBody(body []byte, _ *Account, _ string) ([]byte, error) {
+	body = normalizeTopPForCompatibleBodyRaw(body)
+	body = ensureCompatibleStreamingUsageIncluded(body)
+	return body, nil
+}
+
 func normalizeTopPForCompatibleBodyRaw(body []byte) []byte {
 	topP := gjson.GetBytes(body, "top_p")
 	if !topP.Exists() || topP.Type != gjson.Number {
@@ -35,6 +41,18 @@ func normalizeTopPForCompatibleBodyRaw(body []byte) []byte {
 		}
 	}
 	return body
+}
+
+func ensureCompatibleStreamingUsageIncluded(body []byte) []byte {
+	stream := gjson.GetBytes(body, "stream")
+	if !stream.Exists() || !stream.Bool() {
+		return body
+	}
+	updated, err := sjson.SetBytes(body, "stream_options.include_usage", true)
+	if err != nil {
+		return body
+	}
+	return updated
 }
 
 func normalizeStopStringToArray(body []byte) []byte {

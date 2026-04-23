@@ -491,3 +491,45 @@ func TestGatewayServiceRecordUsage_ReasoningEffortNil(t *testing.T) {
 	require.NotNil(t, usageRepo.lastLog)
 	require.Nil(t, usageRepo.lastLog.ReasoningEffort)
 }
+
+func TestGatewayServiceRecordUsage_MoonshotCompatibleFallbackEstimatesInputTokens(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	svc := newGatewayRecordUsageServiceForTest(usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{})
+
+	parsed := &ParsedRequest{
+		Body:      []byte(`{"model":"Kimi-K2.5","messages":[{"role":"user","content":"请只回复 ok"}],"stream":true}`),
+		Model:     "Kimi-K2.5",
+		Messages:  []any{map[string]any{"role": "user", "content": "请只回复 ok"}},
+		HasSystem: false,
+	}
+
+	err := svc.RecordUsage(context.Background(), &RecordUsageInput{
+		Result: &ForwardResult{
+			RequestID: "moonshot_usage_fallback",
+			Usage: ClaudeUsage{
+				InputTokens:  0,
+				OutputTokens: 200,
+			},
+			Model:    "Kimi-K2.5",
+			Stream:   true,
+			Duration: time.Second,
+		},
+		ParsedRequest: parsed,
+		APIKey: &APIKey{
+			ID:      901,
+			Quota:   100,
+			GroupID: i64p(11),
+			Group: &Group{
+				ID:             11,
+				RateMultiplier: 1.0,
+			},
+		},
+		User:    &User{ID: 902},
+		Account: &Account{ID: 903, Platform: PlatformMoonshot},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.Equal(t, EstimateCompatibleInputTokens(parsed), usageRepo.lastLog.InputTokens)
+	require.Equal(t, 200, usageRepo.lastLog.OutputTokens)
+}

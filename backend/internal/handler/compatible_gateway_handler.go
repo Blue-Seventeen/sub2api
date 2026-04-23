@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
@@ -123,7 +122,7 @@ func (h *CompatibleGatewayHandler) CountTokens(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"input_tokens": estimateCompatibleInputTokens(parsed),
+		"input_tokens": service.EstimateCompatibleInputTokens(parsed),
 	})
 }
 
@@ -176,7 +175,10 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	if err := h.base.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription); err != nil {
-		status, code, message := billingErrorDetails(err)
+		status, code, message, retryAfter := billingErrorDetails(err)
+		if retryAfter > 0 {
+			c.Header("Retry-After", strconv.Itoa(retryAfter))
+		}
 		h.writeRouteError(c, route, status, code, message, false)
 		return
 	}
@@ -346,6 +348,7 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 		h.base.submitUsageRecordTask(func(ctx context.Context) {
 			if err := h.base.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 				Result:             result,
+				ParsedRequest:      parsed,
 				APIKey:             apiKey,
 				User:               apiKey.User,
 				Account:            account,
@@ -384,62 +387,6 @@ func parseCompatibleParsedRequest(body []byte, route service.CompatibleRequestRo
 		return service.ParseGatewayRequest(anthropicBody, domain.PlatformAnthropic)
 	default:
 		return service.ParseGatewayRequest(body, domain.PlatformOpenAI)
-	}
-}
-
-func estimateCompatibleInputTokens(parsed *service.ParsedRequest) int {
-	if parsed == nil {
-		return 1
-	}
-	totalChars := 0
-	totalImages := 0
-	if parsed.HasSystem {
-		totalChars += estimateCompatibleChars(parsed.System, &totalImages)
-		totalChars += 16
-	}
-	for _, msg := range parsed.Messages {
-		totalChars += estimateCompatibleChars(msg, &totalImages)
-		totalChars += 12
-	}
-	if totalChars == 0 {
-		totalChars = len(parsed.Body)
-	}
-	tokens := totalChars/4 + 1 + totalImages*256
-	if tokens < 1 {
-		return 1
-	}
-	return tokens
-}
-
-func estimateCompatibleChars(value any, imageCount *int) int {
-	switch v := value.(type) {
-	case nil:
-		return 0
-	case string:
-		return utf8.RuneCountInString(v)
-	case []any:
-		total := 0
-		for _, item := range v {
-			total += estimateCompatibleChars(item, imageCount)
-		}
-		return total
-	case map[string]any:
-		total := 0
-		if t, ok := v["type"].(string); ok && (strings.Contains(strings.ToLower(t), "image") || t == "input_image") {
-			if imageCount != nil {
-				*imageCount = *imageCount + 1
-			}
-		}
-		for _, item := range v {
-			total += estimateCompatibleChars(item, imageCount)
-		}
-		return total
-	default:
-		raw, err := json.Marshal(v)
-		if err != nil {
-			return 0
-		}
-		return len(raw)
 	}
 }
 

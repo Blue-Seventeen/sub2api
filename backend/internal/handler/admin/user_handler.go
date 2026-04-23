@@ -42,22 +42,24 @@ type CreateUserRequest struct {
 	UnifiedRateEnabled    bool     `json:"unified_rate_enabled"`
 	UnifiedRateMultiplier *float64 `json:"unified_rate_multiplier"`
 	Concurrency           int      `json:"concurrency"`
+	RPMLimit              int      `json:"rpm_limit"`
 	AllowedGroups         []int64  `json:"allowed_groups"`
 }
 
 // UpdateUserRequest represents admin update user request
 // 使用指针类型来区分"未提供"和"设置为0"
 type UpdateUserRequest struct {
-	Email         string   `json:"email" binding:"omitempty,email"`
-	Password      string   `json:"password" binding:"omitempty,min=6"`
-	Username      *string  `json:"username"`
-	Notes         *string  `json:"notes"`
-	Balance       *float64 `json:"balance"`
+	Email                 string   `json:"email" binding:"omitempty,email"`
+	Password              string   `json:"password" binding:"omitempty,min=6"`
+	Username              *string  `json:"username"`
+	Notes                 *string  `json:"notes"`
+	Balance               *float64 `json:"balance"`
 	UnifiedRateEnabled    *bool    `json:"unified_rate_enabled"`
 	UnifiedRateMultiplier *float64 `json:"unified_rate_multiplier"`
-	Concurrency   *int     `json:"concurrency"`
-	Status        string   `json:"status" binding:"omitempty,oneof=active disabled"`
-	AllowedGroups *[]int64 `json:"allowed_groups"`
+	Concurrency           *int     `json:"concurrency"`
+	RPMLimit              *int     `json:"rpm_limit"`
+	Status                string   `json:"status" binding:"omitempty,oneof=active disabled"`
+	AllowedGroups         *[]int64 `json:"allowed_groups"`
 	// GroupRates 用户专属分组倍率配置
 	// map[groupID]*rate，nil 表示删除该分组的专属倍率
 	GroupRates map[int64]*float64 `json:"group_rates"`
@@ -254,6 +256,7 @@ func (h *UserHandler) Create(c *gin.Context) {
 			return *req.UnifiedRateMultiplier
 		}(),
 		Concurrency:   req.Concurrency,
+		RPMLimit:      req.RPMLimit,
 		AllowedGroups: req.AllowedGroups,
 	})
 	if err != nil {
@@ -289,6 +292,7 @@ func (h *UserHandler) Update(c *gin.Context) {
 		UnifiedRateEnabled:    req.UnifiedRateEnabled,
 		UnifiedRateMultiplier: req.UnifiedRateMultiplier,
 		Concurrency:           req.Concurrency,
+		RPMLimit:              req.RPMLimit,
 		Status:                req.Status,
 		AllowedGroups:         req.AllowedGroups,
 		GroupRates:            req.GroupRates,
@@ -467,4 +471,22 @@ func (h *UserHandler) ReplaceGroup(c *gin.Context) {
 	response.Success(c, gin.H{
 		"migrated_keys": result.MigratedKeys,
 	})
+}
+
+// GetUserRPMStatus 返回指定用户当前分钟的 RPM 用量
+// GET /api/v1/admin/users/:id/rpm-status
+func (h *UserHandler) GetUserRPMStatus(c *gin.Context) {
+	userID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid user ID")
+		return
+	}
+
+	status, err := h.adminService.GetUserRPMStatus(c.Request.Context(), userID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, status)
 }

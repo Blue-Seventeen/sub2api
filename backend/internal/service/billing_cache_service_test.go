@@ -79,7 +79,7 @@ func (b *billingCacheWorkerStub) InvalidateAPIKeyRateLimit(ctx context.Context, 
 
 func TestBillingCacheServiceQueueHighLoad(t *testing.T) {
 	cache := &billingCacheWorkerStub{}
-	svc := NewBillingCacheService(cache, nil, nil, nil, &config.Config{})
+	svc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, &config.Config{})
 	t.Cleanup(svc.Stop)
 
 	start := time.Now()
@@ -101,7 +101,7 @@ func TestBillingCacheServiceQueueHighLoad(t *testing.T) {
 
 func TestBillingCacheServiceEnqueueAfterStopReturnsFalse(t *testing.T) {
 	cache := &billingCacheWorkerStub{}
-	svc := NewBillingCacheService(cache, nil, nil, nil, &config.Config{})
+	svc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, &config.Config{})
 	svc.Stop()
 
 	enqueued := svc.enqueueCacheWrite(cacheWriteTask{
@@ -113,7 +113,7 @@ func TestBillingCacheServiceEnqueueAfterStopReturnsFalse(t *testing.T) {
 }
 
 func TestBillingCacheServiceCheckBillingEligibility_FreeGroupSkipsBalanceCheck(t *testing.T) {
-	svc := NewBillingCacheService(nil, nil, nil, nil, &config.Config{})
+	svc := NewBillingCacheService(nil, nil, nil, nil, nil, nil, &config.Config{})
 	t.Cleanup(svc.Stop)
 
 	err := svc.CheckBillingEligibility(
@@ -127,7 +127,7 @@ func TestBillingCacheServiceCheckBillingEligibility_FreeGroupSkipsBalanceCheck(t
 }
 
 func TestBillingCacheServiceCheckBillingEligibility_FreeUserRateSkipsBalanceCheck(t *testing.T) {
-	svc := NewBillingCacheService(nil, nil, nil, nil, &config.Config{})
+	svc := NewBillingCacheService(nil, nil, nil, nil, nil, nil, &config.Config{})
 	svc.SetUserGroupRateRepository(&billingCacheUserGroupRateRepoStub{rate: func() *float64 {
 		v := 0.0
 		return &v

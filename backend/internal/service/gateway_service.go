@@ -7642,6 +7642,7 @@ type recordUsageOpts struct {
 func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInput) error {
 	return s.recordUsageCore(ctx, &recordUsageCoreInput{
 		Result:             input.Result,
+		ParsedRequest:      input.ParsedRequest,
 		APIKey:             input.APIKey,
 		User:               input.User,
 		Account:            input.Account,
@@ -7704,6 +7705,7 @@ func (s *GatewayService) RecordUsageWithLongContext(ctx context.Context, input *
 // recordUsageCoreInput 是 recordUsageCore 的公共输入字段，从两种输入结构体中提取。
 type recordUsageCoreInput struct {
 	Result             *ForwardResult
+	ParsedRequest      *ParsedRequest
 	APIKey             *APIKey
 	User               *User
 	Account            *Account
@@ -7718,6 +7720,40 @@ type recordUsageCoreInput struct {
 	ChannelUsageFields
 }
 
+func applyCompatibleUsageFallback(result *ForwardResult, account *Account, parsed *ParsedRequest) {
+	if result == nil || account == nil || parsed == nil {
+		return
+	}
+	if account.Platform != PlatformMoonshot {
+		return
+	}
+	if result.Usage.InputTokens > 0 {
+		return
+	}
+	if result.Usage.OutputTokens <= 0 && result.Usage.CacheReadInputTokens <= 0 && result.Usage.CacheCreationInputTokens <= 0 {
+		return
+	}
+
+	estimated := EstimateCompatibleInputTokens(parsed)
+	if estimated <= 0 {
+		return
+	}
+	if estimated < result.Usage.CacheReadInputTokens {
+		estimated = result.Usage.CacheReadInputTokens
+	}
+	result.Usage.InputTokens = estimated
+
+	logger.LegacyPrintf(
+		"service.gateway",
+		"compatible usage fallback applied: platform=%s model=%s estimated_input_tokens=%d output_tokens=%d stream=%t",
+		account.Platform,
+		result.Model,
+		estimated,
+		result.Usage.OutputTokens,
+		result.Stream,
+	)
+}
+
 // recordUsageCore 是 RecordUsage 和 RecordUsageWithLongContext 的统一实现。
 // opts 中的字段控制两者之间的差异行为：
 // - ParsedRequest != nil → 启用 Claude Max 缓存计费策略
@@ -7728,6 +7764,8 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	user := input.User
 	account := input.Account
 	subscription := input.Subscription
+
+	applyCompatibleUsageFallback(result, account, input.ParsedRequest)
 
 	// 强制缓存计费：将 input_tokens 转为 cache_read_input_tokens
 	// 用于粘性会话切换时的特殊计费处理

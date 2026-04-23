@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -315,7 +316,7 @@ func (s *CompatibleGatewayService) prepareRequest(account *Account, route Compat
 		}
 	case CompatibleRouteMessages:
 		prepared.UpstreamEndpoint = "/v1/messages"
-		if preset.SupportsMessages != nil && preset.SupportsMessages(upstreamModel) {
+		if shouldUseCompatibleNativeMessages(account, preset, upstreamModel) {
 			prepared.UpstreamKind = compatibleUpstreamMessages
 			prepared.RequestBody, err = rewriteCompatibleRequestModel(body, originalModel, upstreamModel)
 			if err != nil {
@@ -362,6 +363,35 @@ func (s *CompatibleGatewayService) prepareRequest(account *Account, route Compat
 	}
 
 	return prepared, nil
+}
+
+func shouldUseCompatibleNativeMessages(account *Account, preset CompatibleProviderPreset, upstreamModel string) bool {
+	if preset.SupportsMessages == nil || !preset.SupportsMessages(upstreamModel) {
+		return false
+	}
+	if account == nil {
+		return false
+	}
+	if account.Platform == PlatformMoonshot && !moonshotCompatibleSupportsNativeMessagesBase(account.GetCompatibleBaseURL()) {
+		return false
+	}
+	return true
+}
+
+func moonshotCompatibleSupportsNativeMessagesBase(baseURL string) bool {
+	baseURL = strings.TrimSpace(baseURL)
+	if baseURL == "" {
+		return true
+	}
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	if host == "" {
+		return false
+	}
+	return host == "api.moonshot.cn" || strings.HasSuffix(host, ".moonshot.cn")
 }
 
 func rewriteCompatibleRequestModel(body []byte, originalModel, upstreamModel string) ([]byte, error) {
@@ -671,7 +701,6 @@ func (s *CompatibleGatewayService) handleChatPassthrough(resp *http.Response, c 
 }
 
 func (s *CompatibleGatewayService) handleChatAsResponses(resp *http.Response, c *gin.Context, prepared *compatiblePreparedRequest) *ForwardResult {
-	c.Header("Content-Type", "text/event-stream")
 	if !prepared.ClientStream {
 		body, _ := readUpstreamResponseBodyLimited(resp.Body, resolveUpstreamResponseReadLimit(s.cfg))
 		var chatResp apicompat.ChatCompletionsResponse
@@ -689,12 +718,15 @@ func (s *CompatibleGatewayService) handleChatAsResponses(resp *http.Response, c 
 		return &ForwardResult{RequestID: resp.Header.Get("x-request-id"), Usage: usage, Model: prepared.OriginalModel, UpstreamModel: prepared.UpstreamModel}
 	}
 
+	c.Header("Content-Type", "text/event-stream")
 	c.Status(resp.StatusCode)
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), defaultMaxLineSize)
 	state := apicompat.NewChatCompletionsToResponsesState()
 	state.Model = prepared.UpstreamModel
 	usage := ClaudeUsage{}
+	finalFinishReason := "stop"
+	seenFinishReason := false
 	for scanner.Scan() {
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data: ") {
@@ -707,6 +739,16 @@ func (s *CompatibleGatewayService) handleChatAsResponses(resp *http.Response, c 
 		var chunk apicompat.ChatCompletionsChunk
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 			continue
+		}
+		if len(chunk.Choices) > 0 {
+			choice := &chunk.Choices[0]
+			if choice.FinishReason != nil && *choice.FinishReason != "" {
+				finalFinishReason = *choice.FinishReason
+				seenFinishReason = true
+				if chunk.Usage == nil {
+					choice.FinishReason = nil
+				}
+			}
 		}
 		events := apicompat.ChatCompletionsChunkToResponsesEvents(&chunk, state)
 		for _, event := range events {
@@ -721,7 +763,10 @@ func (s *CompatibleGatewayService) handleChatAsResponses(resp *http.Response, c 
 			}
 		}
 	}
-	for _, event := range apicompat.FinalizeChatCompletionsResponsesStream(state, "stop") {
+	if !seenFinishReason {
+		finalFinishReason = "stop"
+	}
+	for _, event := range apicompat.FinalizeChatCompletionsResponsesStream(state, finalFinishReason) {
 		sse, err := apicompat.ChatResponsesEventToSSE(event)
 		if err != nil {
 			continue
@@ -738,7 +783,6 @@ func (s *CompatibleGatewayService) handleChatAsResponses(resp *http.Response, c 
 }
 
 func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *gin.Context, prepared *compatiblePreparedRequest) *ForwardResult {
-	c.Header("Content-Type", "text/event-stream")
 	if !prepared.ClientStream {
 		body, _ := readUpstreamResponseBodyLimited(resp.Body, resolveUpstreamResponseReadLimit(s.cfg))
 		var chatResp apicompat.ChatCompletionsResponse
@@ -761,6 +805,7 @@ func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *
 		return &ForwardResult{RequestID: resp.Header.Get("x-request-id"), Usage: usage, Model: prepared.OriginalModel, UpstreamModel: prepared.UpstreamModel}
 	}
 
+	c.Header("Content-Type", "text/event-stream")
 	c.Status(resp.StatusCode)
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), defaultMaxLineSize)
@@ -769,6 +814,8 @@ func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *
 	anthropicState := apicompat.NewResponsesEventToAnthropicState()
 	anthropicState.Model = prepared.OriginalModel
 	usage := ClaudeUsage{}
+	finalFinishReason := "stop"
+	seenFinishReason := false
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -782,6 +829,16 @@ func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *
 		var chunk apicompat.ChatCompletionsChunk
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 			continue
+		}
+		if len(chunk.Choices) > 0 {
+			choice := &chunk.Choices[0]
+			if choice.FinishReason != nil && *choice.FinishReason != "" {
+				finalFinishReason = *choice.FinishReason
+				seenFinishReason = true
+				if chunk.Usage == nil {
+					choice.FinishReason = nil
+				}
+			}
 		}
 		responsesEvents := apicompat.ChatCompletionsChunkToResponsesEvents(&chunk, respState)
 		for _, event := range responsesEvents {
@@ -800,7 +857,10 @@ func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *
 			}
 		}
 	}
-	for _, event := range apicompat.FinalizeChatCompletionsResponsesStream(respState, "stop") {
+	if !seenFinishReason {
+		finalFinishReason = "stop"
+	}
+	for _, event := range apicompat.FinalizeChatCompletionsResponsesStream(respState, finalFinishReason) {
 		for _, anthropicEvent := range apicompat.ResponsesEventToAnthropicEvents(&event, anthropicState) {
 			sse, err := apicompat.ResponsesAnthropicEventToSSE(anthropicEvent)
 			if err != nil {

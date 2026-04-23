@@ -177,6 +177,122 @@ func TestCompatibleGatewayServiceForward_FallsBackToRelayChatEndpointForZhipu(t 
 	}
 }
 
+func TestCompatibleGatewayServiceForward_MoonshotCustomRelayMessagesUseChatEndpoint(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	upstream := &compatibleGatewayHTTPUpstreamRecorder{
+		responses: []*http.Response{
+			newCompatibleGatewayHTTPResponse(http.StatusOK, `{"id":"chatcmpl-kimi","object":"chat.completion","model":"Kimi-K2.5","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":7,"total_tokens":16}}`),
+		},
+	}
+	svc := newCompatibleGatewayServiceForTest(upstream)
+	account := &Account{
+		ID:          5,
+		Platform:    PlatformMoonshot,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"base_url": "https://api.hack3rx.cn/v1",
+			"api_key":  "test-key",
+		},
+	}
+
+	result, upstreamEndpoint, err := svc.Forward(
+		context.Background(),
+		c,
+		account,
+		CompatibleRouteMessages,
+		[]byte(`{"model":"Kimi-K2.5","messages":[{"role":"user","content":"hi"}],"max_tokens":64,"stream":false}`),
+	)
+	if err != nil {
+		t.Fatalf("Forward() error = %v", err)
+	}
+	if upstreamEndpoint != "/v1/chat/completions" {
+		t.Fatalf("upstreamEndpoint = %q, want %q", upstreamEndpoint, "/v1/chat/completions")
+	}
+	if len(upstream.urls) != 1 {
+		t.Fatalf("len(upstream.urls) = %d, want 1", len(upstream.urls))
+	}
+	if upstream.urls[0] != "https://api.hack3rx.cn/v1/chat/completions" {
+		t.Fatalf("upstream url = %q", upstream.urls[0])
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.Contains(got, "application/json") {
+		t.Fatalf("Content-Type = %q, want application/json", got)
+	}
+	if result == nil {
+		t.Fatal("Forward() result is nil")
+	}
+	if result.Usage.InputTokens != 9 || result.Usage.OutputTokens != 7 {
+		t.Fatalf("usage = %+v, want input=9 output=7", result.Usage)
+	}
+	if !strings.Contains(rec.Body.String(), `"type":"message"`) {
+		t.Fatalf("response body = %s, want anthropic message json", rec.Body.String())
+	}
+}
+
+func TestCompatibleGatewayServiceForward_MoonshotMessagesStreamKeepsLateUsageChunk(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	streamBody := strings.Join([]string{
+		`data: {"id":"chatcmpl-kimi-stream","object":"chat.completion.chunk","model":"Kimi-K2.5","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
+		``,
+		`data: {"id":"chatcmpl-kimi-stream","object":"chat.completion.chunk","model":"Kimi-K2.5","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]}`,
+		``,
+		`data: {"id":"chatcmpl-kimi-stream","object":"chat.completion.chunk","model":"Kimi-K2.5","choices":[],"usage":{"prompt_tokens":9,"completion_tokens":7,"total_tokens":16}}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+
+	upstream := &compatibleGatewayHTTPUpstreamRecorder{
+		responses: []*http.Response{
+			newCompatibleGatewayEventStreamResponse(http.StatusOK, streamBody),
+		},
+	}
+	svc := newCompatibleGatewayServiceForTest(upstream)
+	account := &Account{
+		ID:          5,
+		Platform:    PlatformMoonshot,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"base_url": "https://api.hack3rx.cn/v1",
+			"api_key":  "test-key",
+		},
+	}
+
+	result, upstreamEndpoint, err := svc.Forward(
+		context.Background(),
+		c,
+		account,
+		CompatibleRouteMessages,
+		[]byte(`{"model":"Kimi-K2.5","messages":[{"role":"user","content":"hi"}],"max_tokens":64,"stream":true}`),
+	)
+	if err != nil {
+		t.Fatalf("Forward() error = %v", err)
+	}
+	if upstreamEndpoint != "/v1/chat/completions" {
+		t.Fatalf("upstreamEndpoint = %q, want %q", upstreamEndpoint, "/v1/chat/completions")
+	}
+	if result == nil {
+		t.Fatal("Forward() result is nil")
+	}
+	if result.Usage.InputTokens != 9 || result.Usage.OutputTokens != 7 {
+		t.Fatalf("usage = %+v, want input=9 output=7", result.Usage)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"output_tokens":7`) {
+		t.Fatalf("stream body = %s, want final anthropic usage", body)
+	}
+	if !strings.Contains(body, `event: message_stop`) {
+		t.Fatalf("stream body = %s, want message_stop", body)
+	}
+}
+
 func TestCompatibleGatewayServiceForward_ParsesChatUsagePromptCompletionForZhipu(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
