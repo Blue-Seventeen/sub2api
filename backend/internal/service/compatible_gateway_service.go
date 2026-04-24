@@ -417,6 +417,35 @@ func shouldRetryViaRelayCompatibleEndpoint(prepared *compatiblePreparedRequest, 
 	return isCompatibleUnsupportedEndpointError(statusCode, respBody)
 }
 
+func shouldFallbackMoonshotMessagesToChat(account *Account, prepared *compatiblePreparedRequest, statusCode int, respBody []byte) bool {
+	if account == nil || account.Platform != PlatformMoonshot || prepared == nil {
+		return false
+	}
+	if statusCode != http.StatusBadRequest {
+		return false
+	}
+	if compatiblePreparedClientRoute(prepared) != CompatibleRouteMessages || prepared.UpstreamKind != compatibleUpstreamMessages {
+		return false
+	}
+
+	msg := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
+	if msg == "" {
+		msg = strings.ToLower(strings.TrimSpace(string(respBody)))
+	}
+	if msg == "" {
+		return false
+	}
+
+	hasToolCallContext := strings.Contains(msg, "assistant tool call message") ||
+		(strings.Contains(msg, "tool call") && strings.Contains(msg, "assistant"))
+	if !hasToolCallContext {
+		return false
+	}
+
+	return strings.Contains(msg, "reasoning_content") ||
+		(strings.Contains(msg, "thinking is enabled") && strings.Contains(msg, "missing"))
+}
+
 func isCompatibleUnsupportedEndpointError(statusCode int, respBody []byte) bool {
 	switch statusCode {
 	case http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusNotImplemented:
@@ -699,14 +728,15 @@ func (s *CompatibleGatewayService) executePreparedRequest(
 			statusCode := resp.StatusCode
 			respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 			_ = resp.Body.Close()
-			unsupported := isCompatibleUnsupportedEndpointError(statusCode, respBody)
+			moonshotChatFallback := shouldFallbackMoonshotMessagesToChat(account, prepared, statusCode, respBody)
+			unsupported := isCompatibleUnsupportedEndpointError(statusCode, respBody) || moonshotChatFallback
 			if !unsupported {
 				allUnsupported = false
 			}
 			if attempt == 0 && shouldRetryCompatibleTransientStatus(statusCode) {
 				continue
 			}
-			if idx == 0 && idx < len(urlCandidates)-1 && shouldRetryViaRelayCompatibleEndpoint(prepared, statusCode, respBody) {
+			if idx == 0 && idx < len(urlCandidates)-1 && (shouldRetryViaRelayCompatibleEndpoint(prepared, statusCode, respBody) || moonshotChatFallback) {
 				lastErr = &CompatibleUpstreamError{
 					StatusCode:   mapUpstreamStatusCode(statusCode),
 					Message:      sanitizeCompatibleUpstreamMessage(statusCode, respBody),
@@ -997,6 +1027,7 @@ func (s *CompatibleGatewayService) handleChatAsResponses(resp *http.Response, c 
 	var firstTokenMs *int
 	finalFinishReason := "stop"
 	seenFinishReason := false
+	pendingFinishReason := ""
 	for scanner.Scan() {
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data: ") {
@@ -1004,6 +1035,23 @@ func (s *CompatibleGatewayService) handleChatAsResponses(resp *http.Response, c 
 		}
 		payload := strings.TrimPrefix(line, "data: ")
 		if payload == "[DONE]" {
+			if pendingFinishReason != "" {
+				var finalBatch bytes.Buffer
+				for _, event := range apicompat.FinalizeChatCompletionsResponsesStream(state, pendingFinishReason) {
+					sse, err := apicompat.ChatResponsesEventToSSE(event)
+					if err != nil {
+						continue
+					}
+					finalBatch.WriteString(sse)
+					if event.Response != nil && event.Response.Usage != nil {
+						usage = responsesUsageToClaudeUsage(event.Response.Usage)
+					}
+				}
+				finalBatch.WriteString("data: [DONE]\n\n")
+				flushCompatibleSSEBuffer(c, &finalBatch)
+				_ = resp.Body.Close()
+				return buildCompatibleForwardResult(resp, prepared, usage, true, startTime, firstTokenMs)
+			}
 			break
 		}
 		markCompatibleFirstToken(startTime, &firstTokenMs, payload)
@@ -1011,13 +1059,21 @@ func (s *CompatibleGatewayService) handleChatAsResponses(resp *http.Response, c 
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 			continue
 		}
+		if chunk.Usage != nil {
+			usage = chatUsageToClaudeUsage(chunk.Usage)
+		}
+		finishReasonReady := false
 		if len(chunk.Choices) > 0 {
 			choice := &chunk.Choices[0]
 			if choice.FinishReason != nil && *choice.FinishReason != "" {
 				finalFinishReason = *choice.FinishReason
 				seenFinishReason = true
 				if chunk.Usage == nil {
+					pendingFinishReason = finalFinishReason
 					choice.FinishReason = nil
+				} else {
+					pendingFinishReason = ""
+					finishReasonReady = true
 				}
 			}
 		}
@@ -1034,6 +1090,30 @@ func (s *CompatibleGatewayService) handleChatAsResponses(resp *http.Response, c 
 			}
 		}
 		flushCompatibleSSEBuffer(c, &sseBatch)
+		if pendingFinishReason != "" && chunk.Usage != nil && len(chunk.Choices) == 0 {
+			var finalBatch bytes.Buffer
+			for _, event := range apicompat.FinalizeChatCompletionsResponsesStream(state, pendingFinishReason) {
+				sse, err := apicompat.ChatResponsesEventToSSE(event)
+				if err != nil {
+					continue
+				}
+				finalBatch.WriteString(sse)
+				if event.Response != nil && event.Response.Usage != nil {
+					usage = responsesUsageToClaudeUsage(event.Response.Usage)
+				}
+			}
+			finalBatch.WriteString("data: [DONE]\n\n")
+			flushCompatibleSSEBuffer(c, &finalBatch)
+			_ = resp.Body.Close()
+			return buildCompatibleForwardResult(resp, prepared, usage, true, startTime, firstTokenMs)
+		}
+		if finishReasonReady {
+			var finalBatch bytes.Buffer
+			finalBatch.WriteString("data: [DONE]\n\n")
+			flushCompatibleSSEBuffer(c, &finalBatch)
+			_ = resp.Body.Close()
+			return buildCompatibleForwardResult(resp, prepared, usage, true, startTime, firstTokenMs)
+		}
 	}
 	if !seenFinishReason {
 		finalFinishReason = "stop"
@@ -1089,6 +1169,7 @@ func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *
 	var firstTokenMs *int
 	finalFinishReason := "stop"
 	seenFinishReason := false
+	pendingFinishReason := ""
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -1097,6 +1178,38 @@ func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *
 		}
 		payload := strings.TrimPrefix(line, "data: ")
 		if payload == "[DONE]" {
+			if pendingFinishReason != "" {
+				var finalBatch bytes.Buffer
+				for _, event := range apicompat.FinalizeChatCompletionsResponsesStream(respState, pendingFinishReason) {
+					for _, anthropicEvent := range apicompat.ResponsesEventToAnthropicEvents(&event, anthropicState) {
+						sse, err := apicompat.ResponsesAnthropicEventToSSE(anthropicEvent)
+						if err != nil {
+							continue
+						}
+						finalBatch.WriteString(sse)
+						if anthropicEvent.Usage != nil {
+							usage.InputTokens = anthropicEvent.Usage.InputTokens
+							usage.OutputTokens = anthropicEvent.Usage.OutputTokens
+							usage.CacheReadInputTokens = anthropicEvent.Usage.CacheReadInputTokens
+						}
+					}
+				}
+				for _, anthropicEvent := range apicompat.FinalizeResponsesAnthropicStream(anthropicState) {
+					sse, err := apicompat.ResponsesAnthropicEventToSSE(anthropicEvent)
+					if err != nil {
+						continue
+					}
+					finalBatch.WriteString(sse)
+					if anthropicEvent.Usage != nil {
+						usage.InputTokens = anthropicEvent.Usage.InputTokens
+						usage.OutputTokens = anthropicEvent.Usage.OutputTokens
+						usage.CacheReadInputTokens = anthropicEvent.Usage.CacheReadInputTokens
+					}
+				}
+				flushCompatibleSSEBuffer(c, &finalBatch)
+				_ = resp.Body.Close()
+				return buildCompatibleForwardResult(resp, prepared, usage, true, startTime, firstTokenMs)
+			}
 			break
 		}
 		markCompatibleFirstToken(startTime, &firstTokenMs, payload)
@@ -1104,13 +1217,21 @@ func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 			continue
 		}
+		if chunk.Usage != nil {
+			usage = chatUsageToClaudeUsage(chunk.Usage)
+		}
+		finishReasonReady := false
 		if len(chunk.Choices) > 0 {
 			choice := &chunk.Choices[0]
 			if choice.FinishReason != nil && *choice.FinishReason != "" {
 				finalFinishReason = *choice.FinishReason
 				seenFinishReason = true
 				if chunk.Usage == nil {
+					pendingFinishReason = finalFinishReason
 					choice.FinishReason = nil
+				} else {
+					pendingFinishReason = ""
+					finishReasonReady = true
 				}
 			}
 		}
@@ -1131,6 +1252,42 @@ func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *
 			}
 		}
 		flushCompatibleSSEBuffer(c, &sseBatch)
+		if pendingFinishReason != "" && chunk.Usage != nil && len(chunk.Choices) == 0 {
+			var finalBatch bytes.Buffer
+			for _, event := range apicompat.FinalizeChatCompletionsResponsesStream(respState, pendingFinishReason) {
+				for _, anthropicEvent := range apicompat.ResponsesEventToAnthropicEvents(&event, anthropicState) {
+					sse, err := apicompat.ResponsesAnthropicEventToSSE(anthropicEvent)
+					if err != nil {
+						continue
+					}
+					finalBatch.WriteString(sse)
+					if anthropicEvent.Usage != nil {
+						usage.InputTokens = anthropicEvent.Usage.InputTokens
+						usage.OutputTokens = anthropicEvent.Usage.OutputTokens
+						usage.CacheReadInputTokens = anthropicEvent.Usage.CacheReadInputTokens
+					}
+				}
+			}
+			for _, anthropicEvent := range apicompat.FinalizeResponsesAnthropicStream(anthropicState) {
+				sse, err := apicompat.ResponsesAnthropicEventToSSE(anthropicEvent)
+				if err != nil {
+					continue
+				}
+				finalBatch.WriteString(sse)
+				if anthropicEvent.Usage != nil {
+					usage.InputTokens = anthropicEvent.Usage.InputTokens
+					usage.OutputTokens = anthropicEvent.Usage.OutputTokens
+					usage.CacheReadInputTokens = anthropicEvent.Usage.CacheReadInputTokens
+				}
+			}
+			flushCompatibleSSEBuffer(c, &finalBatch)
+			_ = resp.Body.Close()
+			return buildCompatibleForwardResult(resp, prepared, usage, true, startTime, firstTokenMs)
+		}
+		if finishReasonReady {
+			_ = resp.Body.Close()
+			return buildCompatibleForwardResult(resp, prepared, usage, true, startTime, firstTokenMs)
+		}
 	}
 	if !seenFinishReason {
 		finalFinishReason = "stop"
@@ -1237,6 +1394,20 @@ func responsesUsageToClaudeUsage(usage *apicompat.ResponsesUsage) ClaudeUsage {
 	}
 	if usage.InputTokensDetails != nil {
 		out.CacheReadInputTokens = usage.InputTokensDetails.CachedTokens
+	}
+	return out
+}
+
+func chatUsageToClaudeUsage(usage *apicompat.ChatUsage) ClaudeUsage {
+	if usage == nil {
+		return ClaudeUsage{}
+	}
+	out := ClaudeUsage{
+		InputTokens:  usage.PromptTokens,
+		OutputTokens: usage.CompletionTokens,
+	}
+	if usage.PromptTokensDetails != nil {
+		out.CacheReadInputTokens = usage.PromptTokensDetails.CachedTokens
 	}
 	return out
 }

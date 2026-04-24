@@ -25,6 +25,7 @@ func patchMoonshotCompatibleChatBody(body []byte, _ *Account, _ string) ([]byte,
 
 func patchMoonshotCompatibleChatBodyForAnthropicFallback(body []byte, _ *Account, _ string) ([]byte, error) {
 	body = normalizeTopPForCompatibleBodyRaw(body)
+	body = collapseMoonshotHistoricalToolCallsToText(body)
 	body = ensureMoonshotReasoningContentForToolCalls(body)
 	body = stripMoonshotReasoningEffortForToolCalls(body)
 	body = ensureCompatibleStreamingUsageIncluded(body)
@@ -152,16 +153,16 @@ func rewriteMoonshotAssistantToolCallMessage(msgMap map[string]any) (map[string]
 		if !ok {
 			continue
 		}
-		text := "(tool_use)"
+		text := "Previous assistant tool call"
 		if id, _ := toolCallMap["id"].(string); strings.TrimSpace(id) != "" {
-			text += " id=" + id
+			text += ": id=" + id
 		}
 		if functionMap, ok := toolCallMap["function"].(map[string]any); ok {
 			if name, _ := functionMap["name"].(string); strings.TrimSpace(name) != "" {
-				text += " name=" + name
+				text += "; name=" + name
 			}
 			if args, _ := functionMap["arguments"].(string); strings.TrimSpace(args) != "" {
-				text += " arguments=" + args
+				text += "; arguments=" + args
 			}
 		}
 		textParts = append(textParts, text)
@@ -169,7 +170,7 @@ func rewriteMoonshotAssistantToolCallMessage(msgMap map[string]any) (map[string]
 
 	text := strings.TrimSpace(strings.Join(textParts, "\n"))
 	if text == "" {
-		text = "(tool_use)"
+		text = "Previous assistant tool call"
 	}
 	return map[string]any{
 		"role":    "assistant",
@@ -178,9 +179,9 @@ func rewriteMoonshotAssistantToolCallMessage(msgMap map[string]any) (map[string]
 }
 
 func rewriteMoonshotToolResultMessage(msgMap map[string]any) (map[string]any, bool) {
-	text := "(tool_result)"
+	text := "Previous tool result"
 	if toolCallID, _ := msgMap["tool_call_id"].(string); strings.TrimSpace(toolCallID) != "" {
-		text += " tool_call_id=" + toolCallID
+		text += " for id=" + toolCallID
 	}
 	if content := extractMoonshotChatMessageContentText(msgMap["content"]); strings.TrimSpace(content) != "" {
 		text += "\n" + content
@@ -296,7 +297,7 @@ func relaxMoonshotThinkingForToolUse(body []byte) []byte {
 	if len(body) == 0 {
 		return body
 	}
-	if !gjson.GetBytes(body, "thinking").Exists() {
+	if !gjson.GetBytes(body, "thinking").Exists() && !gjson.GetBytes(body, "output_config.effort").Exists() {
 		return body
 	}
 	if !bytes.Contains(body, []byte(`"type":"tool_use"`)) &&
@@ -305,7 +306,13 @@ func relaxMoonshotThinkingForToolUse(body []byte) []byte {
 		!bytes.Contains(body, []byte(`"type": "tool_result"`)) {
 		return body
 	}
-	return FilterThinkingBlocksForRetry(body)
+	updated := FilterThinkingBlocksForRetry(body)
+	if gjson.GetBytes(updated, "output_config.effort").Exists() {
+		if next, err := sjson.DeleteBytes(updated, "output_config"); err == nil {
+			updated = next
+		}
+	}
+	return updated
 }
 
 func normalizeStopStringToArray(body []byte) []byte {

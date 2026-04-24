@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
@@ -59,6 +60,24 @@ func newCompatibleGatewayEventStreamResponse(statusCode int, body string) *http.
 			"Content-Type": []string{"text/event-stream"},
 		},
 		Body: io.NopCloser(strings.NewReader(body)),
+	}
+}
+
+func newCompatibleGatewayBlockingEventStreamResponse(statusCode int, chunks []string, release <-chan struct{}) *http.Response {
+	pr, pw := io.Pipe()
+	go func() {
+		for _, chunk := range chunks {
+			_, _ = io.WriteString(pw, chunk)
+		}
+		<-release
+		_ = pw.Close()
+	}()
+	return &http.Response{
+		StatusCode: statusCode,
+		Header: http.Header{
+			"Content-Type": []string{"text/event-stream"},
+		},
+		Body: pr,
 	}
 }
 
@@ -424,6 +443,67 @@ func TestCompatibleGatewayServiceForward_MoonshotMessagesFallbackToChatAfterHTML
 	}
 }
 
+func TestCompatibleGatewayServiceForward_MoonshotMessagesFallbackToChatAfterReasoningContentValidationError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	upstream := &compatibleGatewayHTTPUpstreamRecorder{
+		responses: []*http.Response{
+			newCompatibleGatewayHTTPResponse(http.StatusBadRequest, `{"error":{"message":"thinking is enabled but reasoning_content is missing in assistant tool call message at index 4"}}`),
+			newCompatibleGatewayHTTPResponse(http.StatusBadRequest, `{"error":{"message":"thinking is enabled but reasoning_content is missing in assistant tool call message at index 4"}}`),
+			newCompatibleGatewayHTTPResponse(http.StatusOK, `{"id":"chatcmpl-kimi-reasoning","object":"chat.completion","model":"Kimi-K2.5","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":7,"total_tokens":16}}`),
+		},
+	}
+	svc := newCompatibleGatewayServiceForTest(upstream)
+	account := &Account{
+		ID:          23,
+		Platform:    PlatformMoonshot,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"base_url": "https://api.hack3rx.cn/v1",
+			"api_key":  "test-key",
+		},
+	}
+
+	result, upstreamEndpoint, err := svc.Forward(
+		context.Background(),
+		c,
+		account,
+		CompatibleRouteMessages,
+		[]byte(`{"model":"Kimi-K2.5","thinking":{"type":"enabled","budget_tokens":12000},"messages":[{"role":"user","content":"hi"}],"max_tokens":64,"stream":false}`),
+	)
+	if err != nil {
+		t.Fatalf("Forward() error = %v", err)
+	}
+	if upstreamEndpoint != "/v1/chat/completions" {
+		t.Fatalf("upstreamEndpoint = %q, want %q", upstreamEndpoint, "/v1/chat/completions")
+	}
+	if result == nil {
+		t.Fatal("Forward() result is nil")
+	}
+	if len(upstream.urls) != 3 {
+		t.Fatalf("len(upstream.urls) = %d, want 3", len(upstream.urls))
+	}
+	if upstream.urls[0] != "https://api.hack3rx.cn/anthropic/v1/messages" {
+		t.Fatalf("first URL = %q", upstream.urls[0])
+	}
+	if upstream.urls[1] != "https://api.hack3rx.cn/v1/messages" {
+		t.Fatalf("second URL = %q", upstream.urls[1])
+	}
+	if upstream.urls[2] != "https://api.hack3rx.cn/v1/chat/completions" {
+		t.Fatalf("third URL = %q", upstream.urls[2])
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("HTTP status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"type":"message"`) || !strings.Contains(body, `"ok"`) {
+		t.Fatalf("response body = %s, want anthropic message with ok", body)
+	}
+}
+
 func TestCompatibleGatewayServiceForward_MoonshotMessagesCachesChatFallbackModeAndInvalidates(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
@@ -643,6 +723,93 @@ func TestCompatibleGatewayServiceForward_MoonshotMessagesStreamKeepsLateUsageChu
 	}
 	if strings.Contains(body, "(tool_use)") || strings.Contains(body, "(tool_result)") {
 		t.Fatalf("stream body should not contain collapsed tool markers: %s", body)
+	}
+}
+
+func TestCompatibleGatewayServiceForward_MoonshotMessagesStreamEmitsStopBeforeEOFWhenLateUsageArrives(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	release := make(chan struct{})
+	chunks := []string{
+		`data: {"id":"chatcmpl-kimi-stream-early","object":"chat.completion.chunk","model":"Kimi-K2.5","choices":[{"index":0,"delta":{"role":"assistant","content":"ok"},"finish_reason":null}]}` + "\n\n",
+		`data: {"id":"chatcmpl-kimi-stream-early","object":"chat.completion.chunk","model":"Kimi-K2.5","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}` + "\n\n",
+		`data: {"id":"chatcmpl-kimi-stream-early","object":"chat.completion.chunk","model":"Kimi-K2.5","choices":[],"usage":{"prompt_tokens":9,"completion_tokens":7,"total_tokens":16}}` + "\n\n",
+	}
+
+	upstream := &compatibleGatewayHTTPUpstreamRecorder{
+		responses: []*http.Response{
+			newCompatibleGatewayHTTPResponse(http.StatusNotFound, `{"error":{"message":"endpoint not found"}}`),
+			newCompatibleGatewayHTTPResponse(http.StatusBadRequest, `{"error":{"message":"unsupported route"}}`),
+			newCompatibleGatewayBlockingEventStreamResponse(http.StatusOK, chunks, release),
+		},
+	}
+	svc := newCompatibleGatewayServiceForTest(upstream)
+	account := &Account{
+		ID:          28,
+		Platform:    PlatformMoonshot,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"base_url": "https://api.hack3rx.cn/v1",
+			"api_key":  "test-key",
+		},
+	}
+
+	type forwardResult struct {
+		result           *ForwardResult
+		upstreamEndpoint string
+		err              error
+	}
+	done := make(chan forwardResult, 1)
+	go func() {
+		result, upstreamEndpoint, err := svc.Forward(
+			context.Background(),
+			c,
+			account,
+			CompatibleRouteMessages,
+			[]byte(`{"model":"Kimi-K2.5","messages":[{"role":"user","content":"hi"}],"max_tokens":64,"stream":true}`),
+		)
+		done <- forwardResult{result: result, upstreamEndpoint: upstreamEndpoint, err: err}
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		body := rec.Body.String()
+		if strings.Contains(body, `event: message_stop`) && strings.Contains(body, `"output_tokens":7`) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `event: message_stop`) {
+		close(release)
+		t.Fatalf("stream body = %s, want message_stop before EOF", body)
+	}
+	if !strings.Contains(body, `"output_tokens":7`) {
+		close(release)
+		t.Fatalf("stream body = %s, want final usage before EOF", body)
+	}
+
+	close(release)
+
+	select {
+	case out := <-done:
+		if out.err != nil {
+			t.Fatalf("Forward() error = %v", out.err)
+		}
+		if out.upstreamEndpoint != "/v1/chat/completions" {
+			t.Fatalf("upstreamEndpoint = %q, want %q", out.upstreamEndpoint, "/v1/chat/completions")
+		}
+		if out.result == nil {
+			t.Fatal("Forward() result is nil")
+		}
+		if out.result.Usage.InputTokens != 9 || out.result.Usage.OutputTokens != 7 {
+			t.Fatalf("usage = %+v, want input=9 output=7", out.result.Usage)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Forward() did not return after stream release")
 	}
 }
 

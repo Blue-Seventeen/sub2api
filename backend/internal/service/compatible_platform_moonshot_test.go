@@ -185,13 +185,13 @@ func TestPatchMoonshotCompatibleChatBody_StripsReasoningEffortForToolCalls(t *te
 	if gjson.GetBytes(patched, "messages.1.tool_calls").Exists() {
 		t.Fatal("messages.1.tool_calls should be collapsed to plain text")
 	}
-	if got := gjson.GetBytes(patched, "messages.1.content").String(); got != "(tool_use) id=call_123 name=pwd arguments={}" {
+	if got := gjson.GetBytes(patched, "messages.1.content").String(); got != "Previous assistant tool call: id=call_123; name=pwd; arguments={}" {
 		t.Fatalf("messages.1.content = %q, want collapsed tool_use text", got)
 	}
 	if got := gjson.GetBytes(patched, "messages.2.role").String(); got != "user" {
 		t.Fatalf("messages.2.role = %q, want %q", got, "user")
 	}
-	if got := gjson.GetBytes(patched, "messages.2.content").String(); got != "(tool_result) tool_call_id=call_123\nC:/Users/cy/Downloads" {
+	if got := gjson.GetBytes(patched, "messages.2.content").String(); got != "Previous tool result for id=call_123\nC:/Users/cy/Downloads" {
 		t.Fatalf("messages.2.content = %q, want collapsed tool_result text", got)
 	}
 	if gjson.GetBytes(patched, "reasoning_effort").Exists() {
@@ -202,7 +202,7 @@ func TestPatchMoonshotCompatibleChatBody_StripsReasoningEffortForToolCalls(t *te
 	}
 }
 
-func TestPatchMoonshotCompatibleChatBodyForAnthropicFallback_PreservesStructuredToolCalls(t *testing.T) {
+func TestPatchMoonshotCompatibleChatBodyForAnthropicFallback_CollapsesHistoricalToolCalls(t *testing.T) {
 	body := []byte(`{
 		"model":"kimi-k2.5",
 		"messages":[
@@ -232,17 +232,20 @@ func TestPatchMoonshotCompatibleChatBodyForAnthropicFallback_PreservesStructured
 	if err != nil {
 		t.Fatalf("patchMoonshotCompatibleChatBodyForAnthropicFallback() error = %v", err)
 	}
-	if !gjson.GetBytes(patched, "messages.1.tool_calls").Exists() {
-		t.Fatal("messages.1.tool_calls should remain structured")
+	if gjson.GetBytes(patched, "messages.1.tool_calls").Exists() {
+		t.Fatal("messages.1.tool_calls should be collapsed to plain text")
 	}
-	if got := gjson.GetBytes(patched, "messages.2.role").String(); got != "tool" {
-		t.Fatalf("messages.2.role = %q, want %q", got, "tool")
+	if got := gjson.GetBytes(patched, "messages.1.content").String(); got != "Previous assistant tool call: id=call_123; name=pwd; arguments={}" {
+		t.Fatalf("messages.1.content = %q, want collapsed tool_use text", got)
 	}
-	if strings.Contains(string(patched), "(tool_use)") || strings.Contains(string(patched), "(tool_result)") {
-		t.Fatalf("patched body should not contain collapsed tool markers: %s", string(patched))
+	if got := gjson.GetBytes(patched, "messages.2.role").String(); got != "user" {
+		t.Fatalf("messages.2.role = %q, want %q", got, "user")
 	}
-	if got := gjson.GetBytes(patched, "messages.1.reasoning_content").String(); got != "." {
-		t.Fatalf("messages.1.reasoning_content = %q, want %q", got, ".")
+	if got := gjson.GetBytes(patched, "messages.2.content").String(); got != "Previous tool result for id=call_123\nC:/Users/cy/Downloads" {
+		t.Fatalf("messages.2.content = %q, want collapsed tool_result text", got)
+	}
+	if got := gjson.GetBytes(patched, "messages.1.reasoning_content").String(); got != "" {
+		t.Fatalf("messages.1.reasoning_content = %q, want empty after collapsing tool calls", got)
 	}
 	if gjson.GetBytes(patched, "reasoning_effort").Exists() {
 		t.Fatal("reasoning_effort should be removed when tool_calls are present")
@@ -269,6 +272,32 @@ func TestPatchMoonshotCompatibleMessagesBody_RelaxesThinkingForToolUse(t *testin
 	}
 	if gjson.GetBytes(patched, "thinking").Exists() {
 		t.Fatal("thinking should be removed when tool_use/tool_result blocks are present")
+	}
+	if got := gjson.GetBytes(patched, "messages.1.content.0.type").String(); got != "tool_use" {
+		t.Fatalf("messages.1.content.0.type = %q, want %q", got, "tool_use")
+	}
+	if got := gjson.GetBytes(patched, "messages.2.content.0.type").String(); got != "tool_result" {
+		t.Fatalf("messages.2.content.0.type = %q, want %q", got, "tool_result")
+	}
+}
+
+func TestPatchMoonshotCompatibleMessagesBody_RemovesOutputConfigEffortForToolUse(t *testing.T) {
+	body := []byte(`{
+		"model":"kimi-k2.5",
+		"output_config":{"effort":"high"},
+		"messages":[
+			{"role":"user","content":[{"type":"text","text":"hi"}]},
+			{"role":"assistant","content":[{"type":"tool_use","id":"toolu_123","name":"pwd","input":{"path":"."}}]},
+			{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_123","content":"C:/Users/cy/Downloads"}]}
+		]
+	}`)
+
+	patched, err := patchMoonshotCompatibleMessagesBody(body, nil, "kimi-k2.5")
+	if err != nil {
+		t.Fatalf("patchMoonshotCompatibleMessagesBody() error = %v", err)
+	}
+	if gjson.GetBytes(patched, "output_config").Exists() {
+		t.Fatal("output_config should be removed when tool_use/tool_result blocks are present")
 	}
 	if got := gjson.GetBytes(patched, "messages.1.content.0.type").String(); got != "tool_use" {
 		t.Fatalf("messages.1.content.0.type = %q, want %q", got, "tool_use")
@@ -341,7 +370,7 @@ func TestMoonshotCompatibleProviderPreset_OfficialBaseKeepsNativeMessages(t *tes
 	}
 }
 
-func TestMoonshotCompatibleProviderPreset_MessagesPrepareRequestsIncludeStructuredChatFallback(t *testing.T) {
+func TestMoonshotCompatibleProviderPreset_MessagesPrepareRequestsCollapseChatFallbackToolHistory(t *testing.T) {
 	svc := &CompatibleGatewayService{}
 	account := &Account{
 		Platform: PlatformMoonshot,
@@ -375,17 +404,17 @@ func TestMoonshotCompatibleProviderPreset_MessagesPrepareRequestsIncludeStructur
 	if preparedRequests[1].UpstreamKind != compatibleUpstreamChat {
 		t.Fatalf("preparedRequests[1].UpstreamKind = %q, want %q", preparedRequests[1].UpstreamKind, compatibleUpstreamChat)
 	}
-	if got := gjson.GetBytes(preparedRequests[1].RequestBody, "messages.1.tool_calls.0.id").String(); got != "fc_toolu_123" {
-		t.Fatalf("fallback messages.1.tool_calls.0.id = %q, want %q", got, "fc_toolu_123")
+	if gjson.GetBytes(preparedRequests[1].RequestBody, "messages.1.tool_calls").Exists() {
+		t.Fatalf("fallback request body should collapse assistant tool_calls: %s", string(preparedRequests[1].RequestBody))
 	}
-	if got := gjson.GetBytes(preparedRequests[1].RequestBody, "messages.2.role").String(); got != "tool" {
-		t.Fatalf("fallback messages.2.role = %q, want %q", got, "tool")
+	if got := gjson.GetBytes(preparedRequests[1].RequestBody, "messages.1.content").String(); got != "Previous assistant tool call: id=fc_toolu_123; name=pwd; arguments={\"path\":\".\"}" {
+		t.Fatalf("fallback messages.1.content = %q, want collapsed tool_use text", got)
 	}
-	if got := gjson.GetBytes(preparedRequests[1].RequestBody, "messages.2.tool_call_id").String(); got != "fc_toolu_123" {
-		t.Fatalf("fallback messages.2.tool_call_id = %q, want %q", got, "fc_toolu_123")
+	if got := gjson.GetBytes(preparedRequests[1].RequestBody, "messages.2.role").String(); got != "user" {
+		t.Fatalf("fallback messages.2.role = %q, want %q", got, "user")
 	}
-	if strings.Contains(string(preparedRequests[1].RequestBody), "(tool_use)") || strings.Contains(string(preparedRequests[1].RequestBody), "(tool_result)") {
-		t.Fatalf("fallback request body should preserve structure: %s", string(preparedRequests[1].RequestBody))
+	if got := gjson.GetBytes(preparedRequests[1].RequestBody, "messages.2.content").String(); got != "Previous tool result for id=fc_toolu_123\nC:/Users/cy/Downloads" {
+		t.Fatalf("fallback messages.2.content = %q, want collapsed tool_result text", got)
 	}
 }
 
