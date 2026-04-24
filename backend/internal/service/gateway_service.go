@@ -174,6 +174,10 @@ func (s *GatewayService) debugClaudeMimicEnabled() bool {
 	return s.debugClaudeMimic.Load()
 }
 
+func slogDebugEnabled() bool {
+	return slog.Default().Enabled(context.Background(), slog.LevelDebug)
+}
+
 func parseDebugEnvBool(raw string) bool {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "1", "true", "yes", "on":
@@ -1210,8 +1214,10 @@ func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context
 func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, metadataUserID string, sub2apiUserID int64) (*AccountSelectionResult, error) {
 	// 调试日志：记录调度入口参数
 	excludedIDsList := make([]int64, 0, len(excludedIDs))
-	for id := range excludedIDs {
-		excludedIDsList = append(excludedIDsList, id)
+	if slogDebugEnabled() {
+		for id := range excludedIDs {
+			excludedIDsList = append(excludedIDsList, id)
+		}
 	}
 	slog.Debug("account_scheduling_starting",
 		"group_id", derefGroupID(groupID),
@@ -1929,9 +1935,10 @@ func (s *GatewayService) resolvePlatform(ctx context.Context, groupID *int64, gr
 }
 
 func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *int64, platform string, hasForcePlatform bool) ([]Account, bool, error) {
+	debugEnabled := slogDebugEnabled()
 	if s.schedulerSnapshot != nil {
 		accounts, useMixed, err := s.schedulerSnapshot.ListSchedulableAccounts(ctx, groupID, platform, hasForcePlatform)
-		if err == nil {
+		if err == nil && debugEnabled {
 			slog.Debug("account_scheduling_list_snapshot",
 				"group_id", derefGroupID(groupID),
 				"platform", platform,
@@ -1975,19 +1982,21 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 			}
 			filtered = append(filtered, acc)
 		}
-		slog.Debug("account_scheduling_list_mixed",
-			"group_id", derefGroupID(groupID),
-			"platform", platform,
-			"raw_count", len(accounts),
-			"filtered_count", len(filtered))
-		for _, acc := range filtered {
-			slog.Debug("account_scheduling_account_detail",
-				"account_id", acc.ID,
-				"name", acc.Name,
-				"platform", acc.Platform,
-				"type", acc.Type,
-				"status", acc.Status,
-				"tls_fingerprint", acc.IsTLSFingerprintEnabled())
+		if debugEnabled {
+			slog.Debug("account_scheduling_list_mixed",
+				"group_id", derefGroupID(groupID),
+				"platform", platform,
+				"raw_count", len(accounts),
+				"filtered_count", len(filtered))
+			for _, acc := range filtered {
+				slog.Debug("account_scheduling_account_detail",
+					"account_id", acc.ID,
+					"name", acc.Name,
+					"platform", acc.Platform,
+					"type", acc.Type,
+					"status", acc.Status,
+					"tls_fingerprint", acc.IsTLSFingerprintEnabled())
+			}
 		}
 		return filtered, useMixed, nil
 	}
@@ -2009,18 +2018,20 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 			"error", err)
 		return nil, useMixed, err
 	}
-	slog.Debug("account_scheduling_list_single",
-		"group_id", derefGroupID(groupID),
-		"platform", platform,
-		"count", len(accounts))
-	for _, acc := range accounts {
-		slog.Debug("account_scheduling_account_detail",
-			"account_id", acc.ID,
-			"name", acc.Name,
-			"platform", acc.Platform,
-			"type", acc.Type,
-			"status", acc.Status,
-			"tls_fingerprint", acc.IsTLSFingerprintEnabled())
+	if debugEnabled {
+		slog.Debug("account_scheduling_list_single",
+			"group_id", derefGroupID(groupID),
+			"platform", platform,
+			"count", len(accounts))
+		for _, acc := range accounts {
+			slog.Debug("account_scheduling_account_detail",
+				"account_id", acc.ID,
+				"name", acc.Name,
+				"platform", acc.Platform,
+				"type", acc.Type,
+				"status", acc.Status,
+				"tls_fingerprint", acc.IsTLSFingerprintEnabled())
+		}
 	}
 	return accounts, useMixed, nil
 }
@@ -7734,7 +7745,7 @@ func applyCompatibleUsageFallback(result *ForwardResult, account *Account, parse
 		return
 	}
 
-	estimated := EstimateCompatibleInputTokens(parsed)
+	estimated := EstimateCompatibleInputTokensForPlatform(account.Platform, parsed)
 	if estimated <= 0 {
 		return
 	}

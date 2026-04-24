@@ -338,7 +338,11 @@ func resToAnthHandleTextDelta(evt *ResponsesStreamEvent, state *ResponsesEventTo
 }
 
 func resToAnthHandleFuncArgsDelta(evt *ResponsesStreamEvent, state *ResponsesEventToAnthropicState) []AnthropicStreamEvent {
-	if evt.Delta == "" {
+	partialJSON := evt.Delta
+	if partialJSON == "" {
+		partialJSON = evt.Arguments
+	}
+	if partialJSON == "" {
 		return nil
 	}
 
@@ -352,7 +356,7 @@ func resToAnthHandleFuncArgsDelta(evt *ResponsesStreamEvent, state *ResponsesEve
 		Index: &blockIdx,
 		Delta: &AnthropicDelta{
 			Type:        "input_json_delta",
-			PartialJSON: evt.Delta,
+			PartialJSON: partialJSON,
 		},
 	}}
 }

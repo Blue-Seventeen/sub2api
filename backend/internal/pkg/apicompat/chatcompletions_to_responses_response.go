@@ -3,6 +3,7 @@ package apicompat
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -49,7 +50,7 @@ func ChatCompletionsToResponsesResponse(resp *ChatCompletionsResponse) *Response
 			Type:      "function_call",
 			CallID:    toolCall.ID,
 			Name:      toolCall.Function.Name,
-			Arguments: toolCall.Function.Arguments,
+			Arguments: sanitizeToolCallArgumentsJSON(toolCall.Function.Arguments),
 		})
 	}
 	out.Output = outputs
@@ -213,14 +214,22 @@ func ChatCompletionsChunkToResponsesEvents(chunk *ChatCompletionsChunk, state *C
 		}
 		if toolCall.Function.Arguments != "" {
 			current := state.ToolCalls[toolIdx]
-			current.Arguments += toolCall.Function.Arguments
+			prevArgs := current.Arguments
+			current.Arguments = sanitizeToolCallArgumentsJSON(prevArgs + toolCall.Function.Arguments)
 			state.ToolCalls[toolIdx] = current
+			deltaArgs := current.Arguments
+			if prevArgs != "" && strings.HasPrefix(current.Arguments, prevArgs) {
+				deltaArgs = current.Arguments[len(prevArgs):]
+			}
+			if deltaArgs == "" {
+				continue
+			}
 			events = append(events, ResponsesStreamEvent{
 				Type:        "response.function_call_arguments.delta",
 				OutputIndex: outputIndex,
 				CallID:      toolCall.ID,
 				Name:        toolCall.Function.Name,
-				Arguments:   toolCall.Function.Arguments,
+				Arguments:   deltaArgs,
 			})
 		}
 	}
@@ -323,6 +332,32 @@ func FinalizeChatCompletionsResponsesStream(state *ChatCompletionsToResponsesSta
 		Response: resp,
 	})
 	return events
+}
+
+func sanitizeToolCallArgumentsJSON(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return raw
+	}
+	if json.Valid([]byte(raw)) {
+		return raw
+	}
+	for i := 0; i < len(raw); i++ {
+		switch raw[i] {
+		case '{', '[':
+			candidate := strings.TrimSpace(raw[i:])
+			if json.Valid([]byte(candidate)) {
+				return candidate
+			}
+		}
+	}
+	for end := len(raw); end > 0; end-- {
+		candidate := strings.TrimSpace(raw[:end])
+		if json.Valid([]byte(candidate)) {
+			return candidate
+		}
+	}
+	return raw
 }
 
 func ChatResponsesEventToSSE(event ResponsesStreamEvent) (string, error) {

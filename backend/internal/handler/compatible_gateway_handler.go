@@ -122,7 +122,7 @@ func (h *CompatibleGatewayHandler) CountTokens(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"input_tokens": service.EstimateCompatibleInputTokens(parsed),
+		"input_tokens": service.EstimateCompatibleInputTokensForPlatform(apiKey.Group.Platform, parsed),
 	})
 }
 

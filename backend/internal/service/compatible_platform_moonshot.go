@@ -24,6 +24,7 @@ func moonshotCompatibleProviderPreset() CompatibleProviderPreset {
 		BuildChatURL:      moonshotBuildCompatibleChatURL,
 		BuildResponsesURL: moonshotBuildCompatibleChatURL,
 		BuildMessagesURL:  moonshotBuildCompatibleMessagesURL,
+		PatchMessagesBody: patchMoonshotCompatibleMessagesBody,
 		PatchChatBody:     patchMoonshotCompatibleChatBody,
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -371,6 +372,8 @@ func TestAPIKeyAuthTouchesLastUsedOnSuccess(t *testing.T) {
 
 	var touchedID int64
 	var touchedAt time.Time
+	var touchOnce sync.Once
+	touchDone := make(chan struct{})
 	apiKeyRepo := &stubApiKeyRepo{
 		getByKey: func(ctx context.Context, key string) (*service.APIKey, error) {
 			if key != apiKey.Key {
@@ -382,6 +385,7 @@ func TestAPIKeyAuthTouchesLastUsedOnSuccess(t *testing.T) {
 		updateLastUsed: func(ctx context.Context, id int64, usedAt time.Time) error {
 			touchedID = id
 			touchedAt = usedAt
+			touchOnce.Do(func() { close(touchDone) })
 			return nil
 		},
 	}
@@ -396,6 +400,14 @@ func TestAPIKeyAuthTouchesLastUsedOnSuccess(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
+	require.Eventually(t, func() bool {
+		select {
+		case <-touchDone:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
 	require.Equal(t, apiKey.ID, touchedID)
 	require.False(t, touchedAt.IsZero(), "expected touch timestamp")
 }
@@ -419,6 +431,8 @@ func TestAPIKeyAuthTouchLastUsedFailureDoesNotBlock(t *testing.T) {
 	}
 
 	touchCalls := 0
+	var touchOnce sync.Once
+	touchDone := make(chan struct{})
 	apiKeyRepo := &stubApiKeyRepo{
 		getByKey: func(ctx context.Context, key string) (*service.APIKey, error) {
 			if key != apiKey.Key {
@@ -429,6 +443,7 @@ func TestAPIKeyAuthTouchLastUsedFailureDoesNotBlock(t *testing.T) {
 		},
 		updateLastUsed: func(ctx context.Context, id int64, usedAt time.Time) error {
 			touchCalls++
+			touchOnce.Do(func() { close(touchDone) })
 			return errors.New("db unavailable")
 		},
 	}
@@ -443,6 +458,14 @@ func TestAPIKeyAuthTouchLastUsedFailureDoesNotBlock(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code, "touch failure should not block request")
+	require.Eventually(t, func() bool {
+		select {
+		case <-touchDone:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
 	require.Equal(t, 1, touchCalls)
 }
 
@@ -465,6 +488,8 @@ func TestAPIKeyAuthTouchesLastUsedInStandardMode(t *testing.T) {
 	}
 
 	touchCalls := 0
+	var touchOnce sync.Once
+	touchDone := make(chan struct{})
 	apiKeyRepo := &stubApiKeyRepo{
 		getByKey: func(ctx context.Context, key string) (*service.APIKey, error) {
 			if key != apiKey.Key {
@@ -475,6 +500,7 @@ func TestAPIKeyAuthTouchesLastUsedInStandardMode(t *testing.T) {
 		},
 		updateLastUsed: func(ctx context.Context, id int64, usedAt time.Time) error {
 			touchCalls++
+			touchOnce.Do(func() { close(touchDone) })
 			return nil
 		},
 	}
@@ -489,6 +515,14 @@ func TestAPIKeyAuthTouchesLastUsedInStandardMode(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
+	require.Eventually(t, func() bool {
+		select {
+		case <-touchDone:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
 	require.Equal(t, 1, touchCalls)
 }
 

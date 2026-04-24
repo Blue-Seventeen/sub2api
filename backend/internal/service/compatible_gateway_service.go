@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -54,8 +53,9 @@ const (
 type compatibleEndpointMode string
 
 const (
-	compatibleEndpointModeNative compatibleEndpointMode = "native"
-	compatibleEndpointModeRelay  compatibleEndpointMode = "relay"
+	compatibleEndpointModeNative       compatibleEndpointMode = "native"
+	compatibleEndpointModeRelay        compatibleEndpointMode = "relay"
+	compatibleEndpointModeChatFallback compatibleEndpointMode = "chat_fallback"
 )
 
 type compatibleEndpointModeCacheEntry struct {
@@ -72,6 +72,7 @@ type compatiblePreparedRequest struct {
 	OriginalModel    string
 	UpstreamModel    string
 	ClientStream     bool
+	ClientRoute      CompatibleRequestRoute
 	UpstreamKind     compatibleUpstreamKind
 	UpstreamEndpoint string
 	RequestBody      []byte
@@ -140,98 +141,43 @@ func (s *CompatibleGatewayService) Forward(
 	route CompatibleRequestRoute,
 	body []byte,
 ) (*ForwardResult, string, error) {
-	prepared, err := s.prepareRequest(account, route, body)
+	startTime := time.Now()
+	preparedRequests, err := s.prepareRequests(account, route, body)
 	if err != nil {
 		return nil, "", err
+	}
+	upstreamEndpoint := ""
+	if len(preparedRequests) > 0 {
+		upstreamEndpoint = preparedRequests[0].UpstreamEndpoint
 	}
 
 	baseURL, err := s.gatewayService.validateUpstreamBaseURL(account.GetCompatibleBaseURL())
 	if err != nil {
-		return nil, prepared.UpstreamEndpoint, err
+		return nil, upstreamEndpoint, err
 	}
 	proxyURL := resolveAccountProxyURL(ctx, account, nil)
-	urlCandidates := s.buildURLCandidatesForPreparedRequest(account, prepared, baseURL)
-
-	var resp *http.Response
-	for idx, candidate := range urlCandidates {
-		prepared.URL = candidate.URL
-
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, prepared.URL, bytes.NewReader(prepared.RequestBody))
-		if err != nil {
-			return nil, prepared.UpstreamEndpoint, err
+	var lastErr error
+	for _, prepared := range s.orderPreparedRequests(account, route, preparedRequests, baseURL) {
+		result, endpoint, unsupported, err := s.forwardPreparedRequestAttempt(ctx, c, account, prepared, baseURL, proxyURL, startTime)
+		if err == nil {
+			return result, endpoint, nil
 		}
-		req.Header.Set("Content-Type", "application/json")
-		if prepared.ClientStream {
-			req.Header.Set("Accept", "text/event-stream")
+		lastErr = err
+		if !unsupported {
+			return nil, endpoint, err
 		}
-		if err := s.applyAuth(req, account); err != nil {
-			return nil, prepared.UpstreamEndpoint, err
-		}
-		s.applyHeaderPatches(req, account, prepared)
-
-		resp, err = s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
-		if err != nil {
-			return nil, prepared.UpstreamEndpoint, &CompatibleUpstreamError{
-				StatusCode: http.StatusBadGateway,
-				Message:    sanitizeUpstreamErrorMessage(err.Error()),
-			}
-		}
-
-		if resp.StatusCode < 400 {
-			s.recordEndpointMode(account, prepared, baseURL, candidate.Mode)
-			break
-		}
-
-		statusCode := resp.StatusCode
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
-		_ = resp.Body.Close()
-		resp = nil
-
-		if idx == 0 && shouldRetryViaRelayCompatibleEndpoint(prepared, statusCode, respBody) {
-			continue
-		}
-
-		upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
-		if upstreamMsg == "" {
-			upstreamMsg = http.StatusText(statusCode)
-		}
-		if s.gatewayService.shouldFailoverUpstreamError(statusCode) {
-			return nil, prepared.UpstreamEndpoint, &UpstreamFailoverError{
-				StatusCode:   statusCode,
-				ResponseBody: respBody,
-			}
-		}
-		return nil, prepared.UpstreamEndpoint, &CompatibleUpstreamError{
-			StatusCode:   mapUpstreamStatusCode(statusCode),
-			Message:      upstreamMsg,
-			ResponseBody: respBody,
-		}
+		upstreamEndpoint = endpoint
 	}
-
-	if resp == nil {
-		return nil, prepared.UpstreamEndpoint, &CompatibleUpstreamError{
-			StatusCode: http.StatusBadGateway,
-			Message:    "compatible upstream error",
-		}
+	if upstreamEndpoint == "" && len(preparedRequests) > 0 {
+		upstreamEndpoint = preparedRequests[len(preparedRequests)-1].UpstreamEndpoint
 	}
-	defer func() { _ = resp.Body.Close() }()
-
-	switch prepared.UpstreamKind {
-	case compatibleUpstreamMessages:
-		return s.handleMessagesResponse(resp, c, prepared), prepared.UpstreamEndpoint, nil
-	case compatibleUpstreamResponses:
-		return s.handleResponsesResponse(resp, c, prepared), prepared.UpstreamEndpoint, nil
-	case compatibleUpstreamChat:
-		switch route {
-		case CompatibleRouteChatCompletions:
-			return s.handleChatPassthrough(resp, c, prepared), prepared.UpstreamEndpoint, nil
-		case CompatibleRouteResponses:
-			return s.handleChatAsResponses(resp, c, prepared), prepared.UpstreamEndpoint, nil
-		case CompatibleRouteMessages:
-			return s.handleChatAsMessages(resp, c, prepared), prepared.UpstreamEndpoint, nil
-		}
+	if lastErr != nil {
+		return nil, upstreamEndpoint, lastErr
 	}
-	return nil, prepared.UpstreamEndpoint, fmt.Errorf("unsupported compatible route")
+	return nil, upstreamEndpoint, &CompatibleUpstreamError{
+		StatusCode: http.StatusBadGateway,
+		Message:    "compatible upstream error",
+	}
 }
 
 func (s *CompatibleGatewayService) prepareRequest(account *Account, route CompatibleRequestRoute, body []byte) (*compatiblePreparedRequest, error) {
@@ -257,6 +203,7 @@ func (s *CompatibleGatewayService) prepareRequest(account *Account, route Compat
 		OriginalModel: originalModel,
 		UpstreamModel: upstreamModel,
 		ClientStream:  clientStream,
+		ClientRoute:   route,
 	}
 
 	switch route {
@@ -365,33 +312,27 @@ func (s *CompatibleGatewayService) prepareRequest(account *Account, route Compat
 	return prepared, nil
 }
 
+func (s *CompatibleGatewayService) prepareRequests(account *Account, route CompatibleRequestRoute, body []byte) ([]*compatiblePreparedRequest, error) {
+	prepared, err := s.prepareRequest(account, route, body)
+	if err != nil {
+		return nil, err
+	}
+	preparedRequests := []*compatiblePreparedRequest{prepared}
+	if !shouldAddMoonshotMessagesChatFallback(account, route, prepared) {
+		return preparedRequests, nil
+	}
+	fallbackPrepared, err := s.prepareMoonshotAnthropicMessagesChatFallbackRequest(account, body, prepared.OriginalModel, prepared.UpstreamModel, prepared.ClientStream)
+	if err != nil {
+		return nil, err
+	}
+	return append(preparedRequests, fallbackPrepared), nil
+}
+
 func shouldUseCompatibleNativeMessages(account *Account, preset CompatibleProviderPreset, upstreamModel string) bool {
 	if preset.SupportsMessages == nil || !preset.SupportsMessages(upstreamModel) {
 		return false
 	}
-	if account == nil {
-		return false
-	}
-	if account.Platform == PlatformMoonshot && !moonshotCompatibleSupportsNativeMessagesBase(account.GetCompatibleBaseURL()) {
-		return false
-	}
-	return true
-}
-
-func moonshotCompatibleSupportsNativeMessagesBase(baseURL string) bool {
-	baseURL = strings.TrimSpace(baseURL)
-	if baseURL == "" {
-		return true
-	}
-	parsed, err := url.Parse(baseURL)
-	if err != nil {
-		return false
-	}
-	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
-	if host == "" {
-		return false
-	}
-	return host == "api.moonshot.cn" || strings.HasSuffix(host, ".moonshot.cn")
+	return account != nil
 }
 
 func rewriteCompatibleRequestModel(body []byte, originalModel, upstreamModel string) ([]byte, error) {
@@ -418,6 +359,13 @@ func (s *CompatibleGatewayService) buildURLForPreparedRequest(account *Account, 
 
 func (s *CompatibleGatewayService) buildURLCandidatesForPreparedRequest(account *Account, prepared *compatiblePreparedRequest, baseURL string) []compatibleURLCandidate {
 	primary := s.buildURLForPreparedRequest(account, prepared, baseURL)
+	if prepared != nil &&
+		account != nil &&
+		account.Platform == PlatformMoonshot &&
+		compatiblePreparedClientRoute(prepared) == CompatibleRouteMessages &&
+		prepared.UpstreamKind == compatibleUpstreamChat {
+		return []compatibleURLCandidate{{URL: primary, Mode: compatibleEndpointModeChatFallback}}
+	}
 	fallback := buildRelayCompatibleFallbackURL(baseURL, prepared.UpstreamKind)
 	if fallback == "" || fallback == primary {
 		return []compatibleURLCandidate{{URL: primary, Mode: compatibleEndpointModeNative}}
@@ -466,6 +414,10 @@ func shouldRetryViaRelayCompatibleEndpoint(prepared *compatiblePreparedRequest, 
 	if prepared == nil {
 		return false
 	}
+	return isCompatibleUnsupportedEndpointError(statusCode, respBody)
+}
+
+func isCompatibleUnsupportedEndpointError(statusCode int, respBody []byte) bool {
 	switch statusCode {
 	case http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusNotImplemented:
 		return true
@@ -484,16 +436,24 @@ func shouldRetryViaRelayCompatibleEndpoint(prepared *compatiblePreparedRequest, 
 		strings.Contains(msg, "unsupported")
 }
 
+func shouldRetryCompatibleTransientStatus(statusCode int) bool {
+	switch statusCode {
+	case http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout,
+		520, 521, 522, 523, 524, 525:
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *CompatibleGatewayService) endpointModeCacheKey(account *Account, prepared *compatiblePreparedRequest, baseURL string) string {
 	accountID := int64(0)
 	if account != nil {
 		accountID = account.ID
 	}
-	upstreamKind := compatibleUpstreamChat
-	if prepared != nil {
-		upstreamKind = prepared.UpstreamKind
-	}
-	return fmt.Sprintf("%d|%s|%s", accountID, strings.TrimSpace(baseURL), upstreamKind)
+	return fmt.Sprintf("%d|%s|%s", accountID, strings.TrimSpace(baseURL), compatiblePreparedClientRoute(prepared))
 }
 
 func (s *CompatibleGatewayService) preferredEndpointMode(account *Account, prepared *compatiblePreparedRequest, baseURL string) compatibleEndpointMode {
@@ -510,10 +470,30 @@ func (s *CompatibleGatewayService) preferredEndpointMode(account *Account, prepa
 		s.endpointModeCache.Delete(key)
 		return compatibleEndpointModeNative
 	}
-	if entry.Mode == compatibleEndpointModeRelay {
+	switch entry.Mode {
+	case compatibleEndpointModeRelay:
 		return compatibleEndpointModeRelay
+	case compatibleEndpointModeChatFallback:
+		return compatibleEndpointModeChatFallback
 	}
 	return compatibleEndpointModeNative
+}
+
+func compatiblePreparedClientRoute(prepared *compatiblePreparedRequest) CompatibleRequestRoute {
+	if prepared != nil && prepared.ClientRoute != "" {
+		return prepared.ClientRoute
+	}
+	if prepared == nil {
+		return CompatibleRouteChatCompletions
+	}
+	switch prepared.UpstreamKind {
+	case compatibleUpstreamMessages:
+		return CompatibleRouteMessages
+	case compatibleUpstreamResponses:
+		return CompatibleRouteResponses
+	default:
+		return CompatibleRouteChatCompletions
+	}
 }
 
 func (s *CompatibleGatewayService) recordEndpointMode(account *Account, prepared *compatiblePreparedRequest, baseURL string, mode compatibleEndpointMode) {
@@ -583,28 +563,314 @@ func (s *CompatibleGatewayService) applyHeaderPatches(req *http.Request, account
 	}
 }
 
-func (s *CompatibleGatewayService) handleMessagesResponse(resp *http.Response, c *gin.Context, prepared *compatiblePreparedRequest) *ForwardResult {
+func shouldAddMoonshotMessagesChatFallback(account *Account, route CompatibleRequestRoute, prepared *compatiblePreparedRequest) bool {
+	return account != nil &&
+		account.Platform == PlatformMoonshot &&
+		route == CompatibleRouteMessages &&
+		prepared != nil &&
+		prepared.UpstreamKind == compatibleUpstreamMessages
+}
+
+func (s *CompatibleGatewayService) prepareMoonshotAnthropicMessagesChatFallbackRequest(
+	account *Account,
+	body []byte,
+	originalModel string,
+	upstreamModel string,
+	clientStream bool,
+) (*compatiblePreparedRequest, error) {
+	var anthropicReq apicompat.AnthropicRequest
+	if err := json.Unmarshal(body, &anthropicReq); err != nil {
+		return nil, fmt.Errorf("parse anthropic request: %w", err)
+	}
+	responsesReq, err := apicompat.AnthropicToResponses(&anthropicReq)
+	if err != nil {
+		return nil, err
+	}
+	chatReq, err := apicompat.ResponsesToChatCompletionsRequest(responsesReq)
+	if err != nil {
+		return nil, err
+	}
+	chatReq.Model = upstreamModel
+	chatBody, err := json.Marshal(chatReq)
+	if err != nil {
+		return nil, err
+	}
+	chatBody, err = patchMoonshotCompatibleChatBodyForAnthropicFallback(chatBody, account, upstreamModel)
+	if err != nil {
+		return nil, err
+	}
+	return &compatiblePreparedRequest{
+		OriginalModel:    originalModel,
+		UpstreamModel:    upstreamModel,
+		ClientStream:     clientStream,
+		ClientRoute:      CompatibleRouteMessages,
+		UpstreamKind:     compatibleUpstreamChat,
+		UpstreamEndpoint: "/v1/chat/completions",
+		RequestBody:      chatBody,
+	}, nil
+}
+
+func (s *CompatibleGatewayService) orderPreparedRequests(
+	account *Account,
+	route CompatibleRequestRoute,
+	preparedRequests []*compatiblePreparedRequest,
+	baseURL string,
+) []*compatiblePreparedRequest {
+	if len(preparedRequests) < 2 || account == nil || account.Platform != PlatformMoonshot || route != CompatibleRouteMessages {
+		return preparedRequests
+	}
+	if s.preferredEndpointMode(account, preparedRequests[0], baseURL) != compatibleEndpointModeChatFallback {
+		return preparedRequests
+	}
+	ordered := make([]*compatiblePreparedRequest, 0, len(preparedRequests))
+	for _, prepared := range preparedRequests {
+		if prepared != nil && prepared.UpstreamKind == compatibleUpstreamChat {
+			ordered = append(ordered, prepared)
+		}
+	}
+	for _, prepared := range preparedRequests {
+		if prepared == nil || prepared.UpstreamKind == compatibleUpstreamChat {
+			continue
+		}
+		ordered = append(ordered, prepared)
+	}
+	if len(ordered) == len(preparedRequests) {
+		return ordered
+	}
+	return preparedRequests
+}
+
+func (s *CompatibleGatewayService) executePreparedRequest(
+	ctx context.Context,
+	account *Account,
+	prepared *compatiblePreparedRequest,
+	baseURL string,
+	proxyURL string,
+) (*http.Response, bool, error) {
+	urlCandidates := s.buildURLCandidatesForPreparedRequest(account, prepared, baseURL)
+	if len(urlCandidates) == 0 {
+		return nil, false, &CompatibleUpstreamError{
+			StatusCode: http.StatusBadGateway,
+			Message:    "compatible upstream error",
+		}
+	}
+	allUnsupported := true
+	var lastErr error
+
+	for idx, candidate := range urlCandidates {
+		for attempt := 0; ; attempt++ {
+			prepared.URL = candidate.URL
+
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, prepared.URL, bytes.NewReader(prepared.RequestBody))
+			if err != nil {
+				return nil, false, err
+			}
+			req.Header.Set("Content-Type", "application/json")
+			if prepared.ClientStream {
+				req.Header.Set("Accept", "text/event-stream")
+			}
+			if err := s.applyAuth(req, account); err != nil {
+				return nil, false, err
+			}
+			s.applyHeaderPatches(req, account, prepared)
+
+			resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+			if err != nil {
+				return nil, false, &CompatibleUpstreamError{
+					StatusCode: http.StatusBadGateway,
+					Message:    sanitizeUpstreamErrorMessage(err.Error()),
+				}
+			}
+
+			if resp.StatusCode < 400 {
+				unsupported, validationErr := validateCompatibleSuccessResponse(resp)
+				if validationErr != nil {
+					_ = resp.Body.Close()
+					lastErr = validationErr
+					if !unsupported {
+						return nil, false, lastErr
+					}
+					break
+				}
+				s.recordEndpointMode(account, prepared, baseURL, candidate.Mode)
+				return resp, false, nil
+			}
+
+			statusCode := resp.StatusCode
+			respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+			_ = resp.Body.Close()
+			unsupported := isCompatibleUnsupportedEndpointError(statusCode, respBody)
+			if !unsupported {
+				allUnsupported = false
+			}
+			if attempt == 0 && shouldRetryCompatibleTransientStatus(statusCode) {
+				continue
+			}
+			if idx == 0 && idx < len(urlCandidates)-1 && shouldRetryViaRelayCompatibleEndpoint(prepared, statusCode, respBody) {
+				lastErr = &CompatibleUpstreamError{
+					StatusCode:   mapUpstreamStatusCode(statusCode),
+					Message:      sanitizeCompatibleUpstreamMessage(statusCode, respBody),
+					ResponseBody: respBody,
+				}
+				break
+			}
+			if s.gatewayService.shouldFailoverUpstreamError(statusCode) {
+				return nil, false, &UpstreamFailoverError{
+					StatusCode:   statusCode,
+					ResponseBody: respBody,
+				}
+			}
+			lastErr = &CompatibleUpstreamError{
+				StatusCode:   mapUpstreamStatusCode(statusCode),
+				Message:      sanitizeCompatibleUpstreamMessage(statusCode, respBody),
+				ResponseBody: respBody,
+			}
+			if !unsupported {
+				return nil, false, lastErr
+			}
+			break
+		}
+	}
+
+	if lastErr != nil {
+		return nil, allUnsupported, lastErr
+	}
+	return nil, false, &CompatibleUpstreamError{
+		StatusCode: http.StatusBadGateway,
+		Message:    "compatible upstream error",
+	}
+}
+
+func validateCompatibleSuccessResponse(resp *http.Response) (bool, error) {
+	if resp == nil {
+		return false, &CompatibleUpstreamError{
+			StatusCode: http.StatusBadGateway,
+			Message:    "empty upstream response",
+		}
+	}
+	sample, err := peekCompatibleResponseSample(resp, 512)
+	if err != nil {
+		return false, &CompatibleUpstreamError{
+			StatusCode: http.StatusBadGateway,
+			Message:    "failed to inspect upstream response",
+		}
+	}
+	if isLikelyCompatibleHTMLResponse(resp.Header.Get("Content-Type"), sample) {
+		return true, &CompatibleUpstreamError{
+			StatusCode:   http.StatusBadGateway,
+			Message:      "upstream returned an HTML page instead of API response",
+			ResponseBody: sample,
+		}
+	}
+	return false, nil
+}
+
+func peekCompatibleResponseSample(resp *http.Response, maxBytes int) ([]byte, error) {
+	if resp == nil || resp.Body == nil || maxBytes <= 0 {
+		return nil, nil
+	}
+	originalBody := resp.Body
+	reader := bufio.NewReader(originalBody)
+	sample, err := reader.Peek(maxBytes)
+	if err != nil && err != io.EOF && err != bufio.ErrBufferFull {
+		return nil, err
+	}
+	resp.Body = struct {
+		io.Reader
+		io.Closer
+	}{
+		Reader: reader,
+		Closer: originalBody,
+	}
+	return append([]byte(nil), sample...), nil
+}
+
+func isLikelyCompatibleHTMLResponse(contentType string, sample []byte) bool {
+	trimmedContentType := strings.ToLower(strings.TrimSpace(contentType))
+	if strings.Contains(trimmedContentType, "text/html") || strings.Contains(trimmedContentType, "application/xhtml+xml") {
+		return true
+	}
+	trimmedSample := bytes.TrimSpace(sample)
+	if len(trimmedSample) == 0 {
+		return false
+	}
+	lowerSample := bytes.ToLower(trimmedSample)
+	return bytes.HasPrefix(lowerSample, []byte("<!doctype html")) ||
+		bytes.HasPrefix(lowerSample, []byte("<html")) ||
+		bytes.HasPrefix(lowerSample, []byte("<head")) ||
+		bytes.HasPrefix(lowerSample, []byte("<body"))
+}
+
+func sanitizeCompatibleUpstreamMessage(statusCode int, respBody []byte) string {
+	upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
+	if upstreamMsg == "" {
+		upstreamMsg = http.StatusText(statusCode)
+	}
+	return upstreamMsg
+}
+
+func (s *CompatibleGatewayService) forwardPreparedRequestAttempt(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	prepared *compatiblePreparedRequest,
+	baseURL string,
+	proxyURL string,
+	startTime time.Time,
+) (*ForwardResult, string, bool, error) {
+	resp, unsupported, err := s.executePreparedRequest(ctx, account, prepared, baseURL, proxyURL)
+	if err != nil {
+		return nil, prepared.UpstreamEndpoint, unsupported, err
+	}
+	if resp == nil {
+		return nil, prepared.UpstreamEndpoint, unsupported, &CompatibleUpstreamError{
+			StatusCode: http.StatusBadGateway,
+			Message:    "compatible upstream error",
+		}
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	switch prepared.UpstreamKind {
+	case compatibleUpstreamMessages:
+		return s.handleMessagesResponse(resp, c, prepared, startTime), prepared.UpstreamEndpoint, false, nil
+	case compatibleUpstreamResponses:
+		return s.handleResponsesResponse(resp, c, prepared, startTime), prepared.UpstreamEndpoint, false, nil
+	case compatibleUpstreamChat:
+		switch compatiblePreparedClientRoute(prepared) {
+		case CompatibleRouteChatCompletions:
+			return s.handleChatPassthrough(resp, c, prepared, startTime), prepared.UpstreamEndpoint, false, nil
+		case CompatibleRouteResponses:
+			return s.handleChatAsResponses(resp, c, prepared, startTime), prepared.UpstreamEndpoint, false, nil
+		case CompatibleRouteMessages:
+			return s.handleChatAsMessages(resp, c, prepared, startTime), prepared.UpstreamEndpoint, false, nil
+		}
+	}
+	return nil, prepared.UpstreamEndpoint, false, fmt.Errorf("unsupported compatible route")
+}
+
+func (s *CompatibleGatewayService) handleMessagesResponse(resp *http.Response, c *gin.Context, prepared *compatiblePreparedRequest, startTime time.Time) *ForwardResult {
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, nil)
 	usage := ClaudeUsage{}
 	if prepared.ClientStream {
 		c.Status(resp.StatusCode)
 		scanner := bufio.NewScanner(resp.Body)
 		scanner.Buffer(make([]byte, 0, 64*1024), defaultMaxLineSize)
+		var firstTokenMs *int
+		var eventBuf bytes.Buffer
 		for scanner.Scan() {
 			line := scanner.Text()
 			if strings.HasPrefix(line, "data: ") {
-				s.gatewayService.parseSSEUsage(strings.TrimPrefix(line, "data: "), &usage)
+				payload := strings.TrimPrefix(line, "data: ")
+				markCompatibleFirstToken(startTime, &firstTokenMs, payload)
+				s.gatewayService.parseSSEUsage(payload, &usage)
 			}
-			_, _ = fmt.Fprintln(c.Writer, line)
-			c.Writer.Flush()
+			appendCompatibleSSELine(&eventBuf, line)
+			if line == "" {
+				flushCompatibleSSEBuffer(c, &eventBuf)
+			}
 		}
-		return &ForwardResult{
-			RequestID:     resp.Header.Get("x-request-id"),
-			Usage:         usage,
-			Model:         prepared.OriginalModel,
-			UpstreamModel: prepared.UpstreamModel,
-			Stream:        true,
-		}
+		flushCompatibleSSEBuffer(c, &eventBuf)
+		return buildCompatibleForwardResult(resp, prepared, usage, true, startTime, firstTokenMs)
 	}
 
 	body, _ := readUpstreamResponseBodyLimited(resp.Body, resolveUpstreamResponseReadLimit(s.cfg))
@@ -612,26 +878,23 @@ func (s *CompatibleGatewayService) handleMessagesResponse(resp *http.Response, c
 	if parsed := parseClaudeUsageFromResponseBody(body); parsed != nil {
 		usage = *parsed
 	}
-	return &ForwardResult{
-		RequestID:     resp.Header.Get("x-request-id"),
-		Usage:         usage,
-		Model:         prepared.OriginalModel,
-		UpstreamModel: prepared.UpstreamModel,
-		Stream:        false,
-	}
+	return buildCompatibleForwardResult(resp, prepared, usage, false, startTime, nil)
 }
 
-func (s *CompatibleGatewayService) handleResponsesResponse(resp *http.Response, c *gin.Context, prepared *compatiblePreparedRequest) *ForwardResult {
+func (s *CompatibleGatewayService) handleResponsesResponse(resp *http.Response, c *gin.Context, prepared *compatiblePreparedRequest, startTime time.Time) *ForwardResult {
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, nil)
 	if prepared.ClientStream {
 		c.Status(resp.StatusCode)
 		scanner := bufio.NewScanner(resp.Body)
 		scanner.Buffer(make([]byte, 0, 64*1024), defaultMaxLineSize)
 		usage := ClaudeUsage{}
+		var firstTokenMs *int
+		var eventBuf bytes.Buffer
 		for scanner.Scan() {
 			line := scanner.Text()
 			if strings.HasPrefix(line, "data: ") {
 				payload := strings.TrimPrefix(line, "data: ")
+				markCompatibleFirstToken(startTime, &firstTokenMs, payload)
 				if gjson.Get(payload, "response.usage").Exists() {
 					usage.InputTokens = firstExistingGJSONInt(
 						gjson.Get(payload, "response.usage.input_tokens"),
@@ -648,10 +911,13 @@ func (s *CompatibleGatewayService) handleResponsesResponse(resp *http.Response, 
 					)
 				}
 			}
-			_, _ = fmt.Fprintln(c.Writer, line)
-			c.Writer.Flush()
+			appendCompatibleSSELine(&eventBuf, line)
+			if line == "" {
+				flushCompatibleSSEBuffer(c, &eventBuf)
+			}
 		}
-		return &ForwardResult{RequestID: resp.Header.Get("x-request-id"), Usage: usage, Model: prepared.OriginalModel, UpstreamModel: prepared.UpstreamModel, Stream: true}
+		flushCompatibleSSEBuffer(c, &eventBuf)
+		return buildCompatibleForwardResult(resp, prepared, usage, true, startTime, firstTokenMs)
 	}
 
 	body, _ := readUpstreamResponseBodyLimited(resp.Body, resolveUpstreamResponseReadLimit(s.cfg))
@@ -660,35 +926,38 @@ func (s *CompatibleGatewayService) handleResponsesResponse(resp *http.Response, 
 	if parsed, ok := extractOpenAIUsageFromJSONBytes(body); ok {
 		usage = openAIUsageToClaudeUsage(parsed)
 	}
-	return &ForwardResult{RequestID: resp.Header.Get("x-request-id"), Usage: usage, Model: prepared.OriginalModel, UpstreamModel: prepared.UpstreamModel, Stream: false}
+	return buildCompatibleForwardResult(resp, prepared, usage, false, startTime, nil)
 }
 
-func (s *CompatibleGatewayService) handleChatPassthrough(resp *http.Response, c *gin.Context, prepared *compatiblePreparedRequest) *ForwardResult {
+func (s *CompatibleGatewayService) handleChatPassthrough(resp *http.Response, c *gin.Context, prepared *compatiblePreparedRequest, startTime time.Time) *ForwardResult {
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, nil)
 	if prepared.ClientStream {
 		c.Status(resp.StatusCode)
 		scanner := bufio.NewScanner(resp.Body)
 		scanner.Buffer(make([]byte, 0, 64*1024), defaultMaxLineSize)
 		usage := ClaudeUsage{}
+		var firstTokenMs *int
+		var eventBuf bytes.Buffer
 		for scanner.Scan() {
 			line := scanner.Text()
 			if strings.HasPrefix(line, "data: ") {
 				payload := strings.TrimPrefix(line, "data: ")
-				if payload == "[DONE]" {
-					_, _ = fmt.Fprintln(c.Writer, line)
-					c.Writer.Flush()
-					continue
+				if payload != "[DONE]" {
+					markCompatibleFirstToken(startTime, &firstTokenMs, payload)
 				}
-				if gjson.Get(payload, "usage").Exists() {
+				if payload != "[DONE]" && gjson.Get(payload, "usage").Exists() {
 					if parsed, ok := extractOpenAIUsageFromJSONBytes([]byte(payload)); ok {
 						usage = openAIUsageToClaudeUsage(parsed)
 					}
 				}
 			}
-			_, _ = fmt.Fprintln(c.Writer, line)
-			c.Writer.Flush()
+			appendCompatibleSSELine(&eventBuf, line)
+			if line == "" {
+				flushCompatibleSSEBuffer(c, &eventBuf)
+			}
 		}
-		return &ForwardResult{RequestID: resp.Header.Get("x-request-id"), Usage: usage, Model: prepared.OriginalModel, UpstreamModel: prepared.UpstreamModel, Stream: true}
+		flushCompatibleSSEBuffer(c, &eventBuf)
+		return buildCompatibleForwardResult(resp, prepared, usage, true, startTime, firstTokenMs)
 	}
 
 	body, _ := readUpstreamResponseBodyLimited(resp.Body, resolveUpstreamResponseReadLimit(s.cfg))
@@ -697,16 +966,16 @@ func (s *CompatibleGatewayService) handleChatPassthrough(resp *http.Response, c 
 	if parsed, ok := extractOpenAIUsageFromJSONBytes(body); ok {
 		usage = openAIUsageToClaudeUsage(parsed)
 	}
-	return &ForwardResult{RequestID: resp.Header.Get("x-request-id"), Usage: usage, Model: prepared.OriginalModel, UpstreamModel: prepared.UpstreamModel, Stream: false}
+	return buildCompatibleForwardResult(resp, prepared, usage, false, startTime, nil)
 }
 
-func (s *CompatibleGatewayService) handleChatAsResponses(resp *http.Response, c *gin.Context, prepared *compatiblePreparedRequest) *ForwardResult {
+func (s *CompatibleGatewayService) handleChatAsResponses(resp *http.Response, c *gin.Context, prepared *compatiblePreparedRequest, startTime time.Time) *ForwardResult {
 	if !prepared.ClientStream {
 		body, _ := readUpstreamResponseBodyLimited(resp.Body, resolveUpstreamResponseReadLimit(s.cfg))
 		var chatResp apicompat.ChatCompletionsResponse
 		if err := json.Unmarshal(body, &chatResp); err != nil {
 			c.Data(http.StatusBadGateway, gin.MIMEJSON, []byte(`{"error":{"message":"invalid upstream response"}}`))
-			return &ForwardResult{Model: prepared.OriginalModel, UpstreamModel: prepared.UpstreamModel}
+			return &ForwardResult{Model: prepared.OriginalModel, UpstreamModel: prepared.UpstreamModel, Duration: time.Since(startTime)}
 		}
 		responsesResp := apicompat.ChatCompletionsToResponsesResponse(&chatResp)
 		responseBody, _ := json.Marshal(responsesResp)
@@ -715,7 +984,7 @@ func (s *CompatibleGatewayService) handleChatAsResponses(resp *http.Response, c 
 		if responsesResp != nil && responsesResp.Usage != nil {
 			usage = responsesUsageToClaudeUsage(responsesResp.Usage)
 		}
-		return &ForwardResult{RequestID: resp.Header.Get("x-request-id"), Usage: usage, Model: prepared.OriginalModel, UpstreamModel: prepared.UpstreamModel}
+		return buildCompatibleForwardResult(resp, prepared, usage, false, startTime, nil)
 	}
 
 	c.Header("Content-Type", "text/event-stream")
@@ -725,6 +994,7 @@ func (s *CompatibleGatewayService) handleChatAsResponses(resp *http.Response, c 
 	state := apicompat.NewChatCompletionsToResponsesState()
 	state.Model = prepared.UpstreamModel
 	usage := ClaudeUsage{}
+	var firstTokenMs *int
 	finalFinishReason := "stop"
 	seenFinishReason := false
 	for scanner.Scan() {
@@ -736,6 +1006,7 @@ func (s *CompatibleGatewayService) handleChatAsResponses(resp *http.Response, c 
 		if payload == "[DONE]" {
 			break
 		}
+		markCompatibleFirstToken(startTime, &firstTokenMs, payload)
 		var chunk apicompat.ChatCompletionsChunk
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 			continue
@@ -751,44 +1022,45 @@ func (s *CompatibleGatewayService) handleChatAsResponses(resp *http.Response, c 
 			}
 		}
 		events := apicompat.ChatCompletionsChunkToResponsesEvents(&chunk, state)
+		var sseBatch bytes.Buffer
 		for _, event := range events {
 			sse, err := apicompat.ChatResponsesEventToSSE(event)
 			if err != nil {
 				continue
 			}
-			_, _ = fmt.Fprint(c.Writer, sse)
-			c.Writer.Flush()
+			sseBatch.WriteString(sse)
 			if event.Response != nil && event.Response.Usage != nil {
 				usage = responsesUsageToClaudeUsage(event.Response.Usage)
 			}
 		}
+		flushCompatibleSSEBuffer(c, &sseBatch)
 	}
 	if !seenFinishReason {
 		finalFinishReason = "stop"
 	}
+	var finalBatch bytes.Buffer
 	for _, event := range apicompat.FinalizeChatCompletionsResponsesStream(state, finalFinishReason) {
 		sse, err := apicompat.ChatResponsesEventToSSE(event)
 		if err != nil {
 			continue
 		}
-		_, _ = fmt.Fprint(c.Writer, sse)
-		c.Writer.Flush()
+		finalBatch.WriteString(sse)
 		if event.Response != nil && event.Response.Usage != nil {
 			usage = responsesUsageToClaudeUsage(event.Response.Usage)
 		}
 	}
-	_, _ = fmt.Fprint(c.Writer, "data: [DONE]\n\n")
-	c.Writer.Flush()
-	return &ForwardResult{RequestID: resp.Header.Get("x-request-id"), Usage: usage, Model: prepared.OriginalModel, UpstreamModel: prepared.UpstreamModel, Stream: true}
+	finalBatch.WriteString("data: [DONE]\n\n")
+	flushCompatibleSSEBuffer(c, &finalBatch)
+	return buildCompatibleForwardResult(resp, prepared, usage, true, startTime, firstTokenMs)
 }
 
-func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *gin.Context, prepared *compatiblePreparedRequest) *ForwardResult {
+func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *gin.Context, prepared *compatiblePreparedRequest, startTime time.Time) *ForwardResult {
 	if !prepared.ClientStream {
 		body, _ := readUpstreamResponseBodyLimited(resp.Body, resolveUpstreamResponseReadLimit(s.cfg))
 		var chatResp apicompat.ChatCompletionsResponse
 		if err := json.Unmarshal(body, &chatResp); err != nil {
 			c.Data(http.StatusBadGateway, gin.MIMEJSON, []byte(`{"type":"error","error":{"type":"api_error","message":"invalid upstream response"}}`))
-			return &ForwardResult{Model: prepared.OriginalModel, UpstreamModel: prepared.UpstreamModel}
+			return &ForwardResult{Model: prepared.OriginalModel, UpstreamModel: prepared.UpstreamModel, Duration: time.Since(startTime)}
 		}
 		responsesResp := apicompat.ChatCompletionsToResponsesResponse(&chatResp)
 		anthropicResp := apicompat.ResponsesToAnthropic(responsesResp, prepared.OriginalModel)
@@ -802,7 +1074,7 @@ func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *
 				CacheReadInputTokens: anthropicResp.Usage.CacheReadInputTokens,
 			}
 		}
-		return &ForwardResult{RequestID: resp.Header.Get("x-request-id"), Usage: usage, Model: prepared.OriginalModel, UpstreamModel: prepared.UpstreamModel}
+		return buildCompatibleForwardResult(resp, prepared, usage, false, startTime, nil)
 	}
 
 	c.Header("Content-Type", "text/event-stream")
@@ -814,6 +1086,7 @@ func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *
 	anthropicState := apicompat.NewResponsesEventToAnthropicState()
 	anthropicState.Model = prepared.OriginalModel
 	usage := ClaudeUsage{}
+	var firstTokenMs *int
 	finalFinishReason := "stop"
 	seenFinishReason := false
 
@@ -826,6 +1099,7 @@ func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *
 		if payload == "[DONE]" {
 			break
 		}
+		markCompatibleFirstToken(startTime, &firstTokenMs, payload)
 		var chunk apicompat.ChatCompletionsChunk
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 			continue
@@ -841,14 +1115,14 @@ func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *
 			}
 		}
 		responsesEvents := apicompat.ChatCompletionsChunkToResponsesEvents(&chunk, respState)
+		var sseBatch bytes.Buffer
 		for _, event := range responsesEvents {
 			for _, anthropicEvent := range apicompat.ResponsesEventToAnthropicEvents(&event, anthropicState) {
 				sse, err := apicompat.ResponsesAnthropicEventToSSE(anthropicEvent)
 				if err != nil {
 					continue
 				}
-				_, _ = fmt.Fprint(c.Writer, sse)
-				c.Writer.Flush()
+				sseBatch.WriteString(sse)
 				if anthropicEvent.Usage != nil {
 					usage.InputTokens = anthropicEvent.Usage.InputTokens
 					usage.OutputTokens = anthropicEvent.Usage.OutputTokens
@@ -856,18 +1130,19 @@ func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *
 				}
 			}
 		}
+		flushCompatibleSSEBuffer(c, &sseBatch)
 	}
 	if !seenFinishReason {
 		finalFinishReason = "stop"
 	}
+	var finalBatch bytes.Buffer
 	for _, event := range apicompat.FinalizeChatCompletionsResponsesStream(respState, finalFinishReason) {
 		for _, anthropicEvent := range apicompat.ResponsesEventToAnthropicEvents(&event, anthropicState) {
 			sse, err := apicompat.ResponsesAnthropicEventToSSE(anthropicEvent)
 			if err != nil {
 				continue
 			}
-			_, _ = fmt.Fprint(c.Writer, sse)
-			c.Writer.Flush()
+			finalBatch.WriteString(sse)
 			if anthropicEvent.Usage != nil {
 				usage.InputTokens = anthropicEvent.Usage.InputTokens
 				usage.OutputTokens = anthropicEvent.Usage.OutputTokens
@@ -880,15 +1155,67 @@ func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *
 		if err != nil {
 			continue
 		}
-		_, _ = fmt.Fprint(c.Writer, sse)
-		c.Writer.Flush()
+		finalBatch.WriteString(sse)
 		if anthropicEvent.Usage != nil {
 			usage.InputTokens = anthropicEvent.Usage.InputTokens
 			usage.OutputTokens = anthropicEvent.Usage.OutputTokens
 			usage.CacheReadInputTokens = anthropicEvent.Usage.CacheReadInputTokens
 		}
 	}
-	return &ForwardResult{RequestID: resp.Header.Get("x-request-id"), Usage: usage, Model: prepared.OriginalModel, UpstreamModel: prepared.UpstreamModel, Stream: true}
+	flushCompatibleSSEBuffer(c, &finalBatch)
+	return buildCompatibleForwardResult(resp, prepared, usage, true, startTime, firstTokenMs)
+}
+
+func buildCompatibleForwardResult(
+	resp *http.Response,
+	prepared *compatiblePreparedRequest,
+	usage ClaudeUsage,
+	stream bool,
+	startTime time.Time,
+	firstTokenMs *int,
+) *ForwardResult {
+	requestID := ""
+	if resp != nil {
+		requestID = resp.Header.Get("x-request-id")
+	}
+	return &ForwardResult{
+		RequestID:     requestID,
+		Usage:         usage,
+		Model:         prepared.OriginalModel,
+		UpstreamModel: prepared.UpstreamModel,
+		Stream:        stream,
+		Duration:      time.Since(startTime),
+		FirstTokenMs:  firstTokenMs,
+	}
+}
+
+func markCompatibleFirstToken(startTime time.Time, firstTokenMs **int, payload string) {
+	if firstTokenMs == nil || *firstTokenMs != nil {
+		return
+	}
+	trimmed := strings.TrimSpace(payload)
+	if trimmed == "" || trimmed == "[DONE]" {
+		return
+	}
+	ms := int(time.Since(startTime).Milliseconds())
+	*firstTokenMs = &ms
+}
+
+func appendCompatibleSSELine(buf *bytes.Buffer, line string) {
+	if buf == nil {
+		return
+	}
+	buf.WriteString(line)
+	buf.WriteByte('\n')
+}
+
+func flushCompatibleSSEBuffer(c *gin.Context, buf *bytes.Buffer) {
+	if c == nil || buf == nil || buf.Len() == 0 {
+		return
+	}
+	_, _ = c.Writer.Write(buf.Bytes())
+	c.Writer.Flush()
+	buf.Reset()
 }
 
 func openAIUsageToClaudeUsage(usage OpenAIUsage) ClaudeUsage {

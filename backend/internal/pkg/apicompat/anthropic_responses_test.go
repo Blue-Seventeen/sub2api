@@ -343,6 +343,23 @@ func TestStreamingTextOnly(t *testing.T) {
 	assert.Equal(t, "message_stop", events[1].Type)
 }
 
+func TestStreamingFunctionCallArgumentsDelta_UsesArgumentsField(t *testing.T) {
+	state := NewResponsesEventToAnthropicState()
+	state.OutputIndexToBlockIdx[3] = 1
+
+	events := ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{
+		Type:        "response.function_call_arguments.delta",
+		OutputIndex: 3,
+		Arguments:   `{"command":"pwd"}`,
+	}, state)
+
+	require.Len(t, events, 1)
+	assert.Equal(t, "content_block_delta", events[0].Type)
+	require.NotNil(t, events[0].Delta)
+	assert.Equal(t, "input_json_delta", events[0].Delta.Type)
+	assert.Equal(t, `{"command":"pwd"}`, events[0].Delta.PartialJSON)
+}
+
 func TestStreamingToolCall(t *testing.T) {
 	state := NewResponsesEventToAnthropicState()
 

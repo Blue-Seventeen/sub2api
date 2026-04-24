@@ -4,6 +4,7 @@ package service
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/tidwall/gjson"
@@ -151,7 +152,133 @@ func TestMoonshotCompatibleProviderPreset_ChatStreamingAddsUsageRequest(t *testi
 	}
 }
 
-func TestMoonshotCompatibleProviderPreset_CustomRelayMessagesFallbackToChat(t *testing.T) {
+func TestPatchMoonshotCompatibleChatBody_StripsReasoningEffortForToolCalls(t *testing.T) {
+	body := []byte(`{
+		"model":"kimi-k2.5",
+		"messages":[
+			{"role":"user","content":"hi"},
+			{
+				"role":"assistant",
+				"content":"",
+				"tool_calls":[
+					{
+						"id":"call_123",
+						"type":"function",
+						"function":{"name":"pwd","arguments":"{}"}
+					}
+				]
+			},
+			{
+				"role":"tool",
+				"tool_call_id":"call_123",
+				"content":"C:/Users/cy/Downloads"
+			}
+		],
+		"reasoning_effort":"high",
+		"stream":true
+	}`)
+
+	patched, err := patchMoonshotCompatibleChatBody(body, nil, "kimi-k2.5")
+	if err != nil {
+		t.Fatalf("patchMoonshotCompatibleChatBody() error = %v", err)
+	}
+	if gjson.GetBytes(patched, "messages.1.tool_calls").Exists() {
+		t.Fatal("messages.1.tool_calls should be collapsed to plain text")
+	}
+	if got := gjson.GetBytes(patched, "messages.1.content").String(); got != "(tool_use) id=call_123 name=pwd arguments={}" {
+		t.Fatalf("messages.1.content = %q, want collapsed tool_use text", got)
+	}
+	if got := gjson.GetBytes(patched, "messages.2.role").String(); got != "user" {
+		t.Fatalf("messages.2.role = %q, want %q", got, "user")
+	}
+	if got := gjson.GetBytes(patched, "messages.2.content").String(); got != "(tool_result) tool_call_id=call_123\nC:/Users/cy/Downloads" {
+		t.Fatalf("messages.2.content = %q, want collapsed tool_result text", got)
+	}
+	if gjson.GetBytes(patched, "reasoning_effort").Exists() {
+		t.Fatal("reasoning_effort should be removed when tool_calls are present")
+	}
+	if !gjson.GetBytes(patched, "stream_options.include_usage").Bool() {
+		t.Fatal("stream_options.include_usage = false, want true")
+	}
+}
+
+func TestPatchMoonshotCompatibleChatBodyForAnthropicFallback_PreservesStructuredToolCalls(t *testing.T) {
+	body := []byte(`{
+		"model":"kimi-k2.5",
+		"messages":[
+			{"role":"user","content":"hi"},
+			{
+				"role":"assistant",
+				"content":"",
+				"tool_calls":[
+					{
+						"id":"call_123",
+						"type":"function",
+						"function":{"name":"pwd","arguments":"{}"}
+					}
+				]
+			},
+			{
+				"role":"tool",
+				"tool_call_id":"call_123",
+				"content":"C:/Users/cy/Downloads"
+			}
+		],
+		"reasoning_effort":"high",
+		"stream":true
+	}`)
+
+	patched, err := patchMoonshotCompatibleChatBodyForAnthropicFallback(body, nil, "kimi-k2.5")
+	if err != nil {
+		t.Fatalf("patchMoonshotCompatibleChatBodyForAnthropicFallback() error = %v", err)
+	}
+	if !gjson.GetBytes(patched, "messages.1.tool_calls").Exists() {
+		t.Fatal("messages.1.tool_calls should remain structured")
+	}
+	if got := gjson.GetBytes(patched, "messages.2.role").String(); got != "tool" {
+		t.Fatalf("messages.2.role = %q, want %q", got, "tool")
+	}
+	if strings.Contains(string(patched), "(tool_use)") || strings.Contains(string(patched), "(tool_result)") {
+		t.Fatalf("patched body should not contain collapsed tool markers: %s", string(patched))
+	}
+	if got := gjson.GetBytes(patched, "messages.1.reasoning_content").String(); got != "." {
+		t.Fatalf("messages.1.reasoning_content = %q, want %q", got, ".")
+	}
+	if gjson.GetBytes(patched, "reasoning_effort").Exists() {
+		t.Fatal("reasoning_effort should be removed when tool_calls are present")
+	}
+	if !gjson.GetBytes(patched, "stream_options.include_usage").Bool() {
+		t.Fatal("stream_options.include_usage = false, want true")
+	}
+}
+
+func TestPatchMoonshotCompatibleMessagesBody_RelaxesThinkingForToolUse(t *testing.T) {
+	body := []byte(`{
+		"model":"kimi-k2.5",
+		"thinking":{"type":"enabled"},
+		"messages":[
+			{"role":"user","content":[{"type":"text","text":"hi"}]},
+			{"role":"assistant","content":[{"type":"tool_use","id":"toolu_123","name":"pwd","input":{"path":"."}}]},
+			{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_123","content":"C:/Users/cy/Downloads"}]}
+		]
+	}`)
+
+	patched, err := patchMoonshotCompatibleMessagesBody(body, nil, "kimi-k2.5")
+	if err != nil {
+		t.Fatalf("patchMoonshotCompatibleMessagesBody() error = %v", err)
+	}
+	if gjson.GetBytes(patched, "thinking").Exists() {
+		t.Fatal("thinking should be removed when tool_use/tool_result blocks are present")
+	}
+	if got := gjson.GetBytes(patched, "messages.1.content.0.type").String(); got != "tool_use" {
+		t.Fatalf("messages.1.content.0.type = %q, want %q", got, "tool_use")
+	}
+	if got := gjson.GetBytes(patched, "messages.2.content.0.type").String(); got != "tool_result" {
+		t.Fatalf("messages.2.content.0.type = %q, want %q", got, "tool_result")
+	}
+}
+
+func TestMoonshotCompatibleProviderPreset_CustomRelayKeepsNativeMessagesInPrepareRequest(t *testing.T) {
 	svc := &CompatibleGatewayService{}
 	account := &Account{
 		Platform: PlatformMoonshot,
@@ -172,17 +299,17 @@ func TestMoonshotCompatibleProviderPreset_CustomRelayMessagesFallbackToChat(t *t
 	if err != nil {
 		t.Fatalf("prepareRequest() error = %v", err)
 	}
-	if prepared.UpstreamKind != compatibleUpstreamChat {
-		t.Fatalf("UpstreamKind = %q, want %q", prepared.UpstreamKind, compatibleUpstreamChat)
+	if prepared.UpstreamKind != compatibleUpstreamMessages {
+		t.Fatalf("UpstreamKind = %q, want %q", prepared.UpstreamKind, compatibleUpstreamMessages)
 	}
-	if prepared.UpstreamEndpoint != "/v1/chat/completions" {
-		t.Fatalf("UpstreamEndpoint = %q, want %q", prepared.UpstreamEndpoint, "/v1/chat/completions")
+	if prepared.UpstreamEndpoint != "/v1/messages" {
+		t.Fatalf("UpstreamEndpoint = %q, want %q", prepared.UpstreamEndpoint, "/v1/messages")
 	}
 	if got := gjson.GetBytes(prepared.RequestBody, "model").String(); got != "kimi-k2.5" {
 		t.Fatalf("patched model = %q, want %q", got, "kimi-k2.5")
 	}
-	if !gjson.GetBytes(prepared.RequestBody, "stream_options.include_usage").Bool() {
-		t.Fatal("messages fallback streaming should force stream_options.include_usage = true")
+	if got := gjson.GetBytes(prepared.RequestBody, "messages.0.role").String(); got != "user" {
+		t.Fatalf("messages.0.role = %q, want %q", got, "user")
 	}
 }
 
@@ -211,6 +338,54 @@ func TestMoonshotCompatibleProviderPreset_OfficialBaseKeepsNativeMessages(t *tes
 	}
 	if prepared.UpstreamEndpoint != "/v1/messages" {
 		t.Fatalf("UpstreamEndpoint = %q, want %q", prepared.UpstreamEndpoint, "/v1/messages")
+	}
+}
+
+func TestMoonshotCompatibleProviderPreset_MessagesPrepareRequestsIncludeStructuredChatFallback(t *testing.T) {
+	svc := &CompatibleGatewayService{}
+	account := &Account{
+		Platform: PlatformMoonshot,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"base_url": "https://api.hack3rx.cn/v1",
+		},
+	}
+
+	body := []byte(`{
+		"model":"kimi-k2.5",
+		"messages":[
+			{"role":"user","content":[{"type":"text","text":"hi"}]},
+			{"role":"assistant","content":[{"type":"tool_use","id":"toolu_123","name":"pwd","input":{"path":"."}}]},
+			{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_123","content":"C:/Users/cy/Downloads"}]}
+		],
+		"max_tokens":32,
+		"stream":true
+	}`)
+
+	preparedRequests, err := svc.prepareRequests(account, CompatibleRouteMessages, body)
+	if err != nil {
+		t.Fatalf("prepareRequests() error = %v", err)
+	}
+	if len(preparedRequests) != 2 {
+		t.Fatalf("len(preparedRequests) = %d, want 2", len(preparedRequests))
+	}
+	if preparedRequests[0].UpstreamKind != compatibleUpstreamMessages {
+		t.Fatalf("preparedRequests[0].UpstreamKind = %q, want %q", preparedRequests[0].UpstreamKind, compatibleUpstreamMessages)
+	}
+	if preparedRequests[1].UpstreamKind != compatibleUpstreamChat {
+		t.Fatalf("preparedRequests[1].UpstreamKind = %q, want %q", preparedRequests[1].UpstreamKind, compatibleUpstreamChat)
+	}
+	if got := gjson.GetBytes(preparedRequests[1].RequestBody, "messages.1.tool_calls.0.id").String(); got != "fc_toolu_123" {
+		t.Fatalf("fallback messages.1.tool_calls.0.id = %q, want %q", got, "fc_toolu_123")
+	}
+	if got := gjson.GetBytes(preparedRequests[1].RequestBody, "messages.2.role").String(); got != "tool" {
+		t.Fatalf("fallback messages.2.role = %q, want %q", got, "tool")
+	}
+	if got := gjson.GetBytes(preparedRequests[1].RequestBody, "messages.2.tool_call_id").String(); got != "fc_toolu_123" {
+		t.Fatalf("fallback messages.2.tool_call_id = %q, want %q", got, "fc_toolu_123")
+	}
+	if strings.Contains(string(preparedRequests[1].RequestBody), "(tool_use)") || strings.Contains(string(preparedRequests[1].RequestBody), "(tool_result)") {
+		t.Fatalf("fallback request body should preserve structure: %s", string(preparedRequests[1].RequestBody))
 	}
 }
 

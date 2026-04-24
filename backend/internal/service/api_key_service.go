@@ -39,8 +39,9 @@ var (
 )
 
 const (
-	apiKeyMaxErrorsPerHour = 20
-	apiKeyLastUsedMinTouch = 30 * time.Second
+	apiKeyMaxErrorsPerHour     = 20
+	apiKeyLastUsedMinTouch     = 30 * time.Second
+	apiKeyLastUsedAsyncTimeout = 3 * time.Second
 	// DB 写失败后的短退避，避免请求路径持续同步重试造成写风暴与高延迟。
 	apiKeyLastUsedFailBackoff = 5 * time.Second
 )
@@ -206,6 +207,7 @@ type APIKeyService struct {
 	authCfg               apiKeyAuthCacheConfig
 	authGroup             singleflight.Group
 	lastUsedTouchL1       sync.Map // keyID -> nextAllowedAt(time.Time)
+	lastUsedTouchPending  sync.Map // keyID -> struct{}{}
 	lastUsedTouchSF       singleflight.Group
 }
 
@@ -693,23 +695,44 @@ func (s *APIKeyService) ValidateKey(ctx context.Context, key string) (*APIKey, *
 // TouchLastUsed 通过防抖更新 api_keys.last_used_at，减少高频写放大。
 // 该操作为尽力而为，不应阻塞主请求链路。
 func (s *APIKeyService) TouchLastUsed(ctx context.Context, keyID int64) error {
+	return s.touchLastUsed(ctx, keyID, false)
+}
+
+// QueueTouchLastUsed 异步刷新 api_keys.last_used_at，避免在请求热路径里同步写库。
+func (s *APIKeyService) QueueTouchLastUsed(keyID int64) {
+	if keyID <= 0 {
+		return
+	}
+	now := time.Now()
+	if s.shouldSkipLastUsedTouch(keyID, now) {
+		return
+	}
+	if _, loaded := s.lastUsedTouchPending.LoadOrStore(keyID, struct{}{}); loaded {
+		return
+	}
+
+	go func() {
+		defer s.lastUsedTouchPending.Delete(keyID)
+		ctx, cancel := context.WithTimeout(context.Background(), apiKeyLastUsedAsyncTimeout)
+		defer cancel()
+		_ = s.touchLastUsed(ctx, keyID, true)
+	}()
+}
+
+func (s *APIKeyService) touchLastUsed(ctx context.Context, keyID int64, force bool) error {
 	if keyID <= 0 {
 		return nil
 	}
 
 	now := time.Now()
-	if v, ok := s.lastUsedTouchL1.Load(keyID); ok {
-		if nextAllowedAt, ok := v.(time.Time); ok && now.Before(nextAllowedAt) {
-			return nil
-		}
+	if !force && s.shouldSkipLastUsedTouch(keyID, now) {
+		return nil
 	}
 
 	_, err, _ := s.lastUsedTouchSF.Do(strconv.FormatInt(keyID, 10), func() (any, error) {
 		latest := time.Now()
-		if v, ok := s.lastUsedTouchL1.Load(keyID); ok {
-			if nextAllowedAt, ok := v.(time.Time); ok && latest.Before(nextAllowedAt) {
-				return nil, nil
-			}
+		if !force && s.shouldSkipLastUsedTouch(keyID, latest) {
+			return nil, nil
 		}
 
 		if err := s.apiKeyRepo.UpdateLastUsed(ctx, keyID, latest); err != nil {
@@ -720,6 +743,18 @@ func (s *APIKeyService) TouchLastUsed(ctx context.Context, keyID int64) error {
 		return nil, nil
 	})
 	return err
+}
+
+func (s *APIKeyService) shouldSkipLastUsedTouch(keyID int64, now time.Time) bool {
+	if keyID <= 0 {
+		return true
+	}
+	if v, ok := s.lastUsedTouchL1.Load(keyID); ok {
+		if nextAllowedAt, ok := v.(time.Time); ok && now.Before(nextAllowedAt) {
+			return true
+		}
+	}
+	return false
 }
 
 // IncrementUsage 增加API Key使用次数（可选：用于统计）

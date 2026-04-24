@@ -297,6 +297,77 @@ func TestChatCompletionsResponsesStream_PreservesZeroIndexesAndCompletedOutput(t
 	assert.Equal(t, "OK", completed.Output[0].Content[0].Text)
 }
 
+func TestChatCompletionsToResponsesResponse_SanitizesMalformedToolArguments(t *testing.T) {
+	resp := &ChatCompletionsResponse{
+		ID:    "chatcmpl_test",
+		Model: "Kimi-K2.5",
+		Choices: []ChatChoice{
+			{
+				Message: ChatMessage{
+					Role: "assistant",
+					ToolCalls: []ChatToolCall{
+						{
+							ID:   "call_1",
+							Type: "function",
+							Function: ChatFunctionCall{
+								Name:      "Bash",
+								Arguments: `{}{"command":"pwd"}`,
+							},
+						},
+					},
+				},
+				FinishReason: "tool_calls",
+			},
+		},
+	}
+
+	out := ChatCompletionsToResponsesResponse(resp)
+	require.NotNil(t, out)
+	require.Len(t, out.Output, 1)
+	assert.Equal(t, "function_call", out.Output[0].Type)
+	assert.Equal(t, `{"command":"pwd"}`, out.Output[0].Arguments)
+}
+
+func TestChatCompletionsChunkToResponsesEvents_SanitizesMalformedToolArguments(t *testing.T) {
+	state := NewChatCompletionsToResponsesState()
+	idx := 0
+	chunk := &ChatCompletionsChunk{
+		ID:    "chatcmpl_test",
+		Model: "Kimi-K2.5",
+		Choices: []ChatChunkChoice{
+			{
+				Delta: ChatDelta{
+					ToolCalls: []ChatToolCall{
+						{
+							Index: &idx,
+							ID:    "call_1",
+							Type:  "function",
+							Function: ChatFunctionCall{
+								Name:      "Bash",
+								Arguments: `{}{"command":"pwd"}`,
+							},
+						},
+					},
+				},
+				FinishReason: ptrString("tool_calls"),
+			},
+		},
+	}
+
+	events := ChatCompletionsChunkToResponsesEvents(chunk, state)
+	require.NotEmpty(t, events)
+
+	var seenDelta bool
+	for _, event := range events {
+		if event.Type != "response.function_call_arguments.delta" {
+			continue
+		}
+		seenDelta = true
+		assert.Equal(t, `{"command":"pwd"}`, event.Arguments)
+	}
+	assert.True(t, seenDelta, "expected sanitized function_call_arguments delta event")
+}
+
 func ptrString(v string) *string {
 	return &v
 }
