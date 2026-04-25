@@ -1203,11 +1203,16 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 
 	// Add config paths in priority order
 	// 1. DATA_DIR environment variable (highest priority)
+	// If DATA_DIR is explicitly set, treat it as the authoritative config root
+	// and do not fall back to the default Docker data directory. This keeps
+	// bootstrap / tests deterministic and avoids accidentally reading another
+	// runtime's persisted config from /app/data.
 	if dataDir := os.Getenv("DATA_DIR"); dataDir != "" {
 		viper.AddConfigPath(dataDir)
+	} else {
+		// 2. Docker data directory
+		viper.AddConfigPath("/app/data")
 	}
-	// 2. Docker data directory
-	viper.AddConfigPath("/app/data")
 	// 3. Current directory
 	viper.AddConfigPath(".")
 	// 4. Config subdirectory

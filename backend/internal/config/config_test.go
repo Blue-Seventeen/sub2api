@@ -14,11 +14,17 @@ import (
 func resetViperWithJWTSecret(t *testing.T) {
 	t.Helper()
 	viper.Reset()
+	t.Setenv("DATA_DIR", t.TempDir())
+	t.Setenv("SERVER_MODE", "")
+	t.Setenv("DATABASE_SSLMODE", "")
 	t.Setenv("JWT_SECRET", strings.Repeat("x", 32))
 }
 
 func TestLoadForBootstrapAllowsMissingJWTSecret(t *testing.T) {
 	viper.Reset()
+	t.Setenv("DATA_DIR", t.TempDir())
+	t.Setenv("SERVER_MODE", "")
+	t.Setenv("DATABASE_SSLMODE", "")
 	t.Setenv("JWT_SECRET", "")
 
 	cfg, err := LoadForBootstrap()
