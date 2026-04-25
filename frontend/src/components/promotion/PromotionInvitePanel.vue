@@ -13,7 +13,7 @@
           <span class="promo-chip">唯一码</span>
         </div>
 
-        <div class="mt-5 rounded-[24px] border border-cyan-400/20 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 px-6 py-8 text-center shadow-[0_0_32px_-22px_rgba(34,211,238,0.55)]">
+        <div class="promo-spotlight-card mt-5">
           <div class="text-xs uppercase tracking-[0.34em] text-slate-500">Invite Code</div>
           <div class="mt-3 text-3xl font-semibold tracking-[0.3em] text-cyan-300">{{ overview?.invite_code || '--' }}</div>
           <div class="mt-3 text-sm text-slate-400">好友注册后自动绑定，后续按真实消费金额计算返佣。</div>

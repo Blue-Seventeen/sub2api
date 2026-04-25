@@ -304,11 +304,11 @@ export interface SystemSettings {
   password_reset_enabled: boolean;
   frontend_url: string;
   invitation_code_enabled: boolean;
+  invitation_code_missing_prompt_html: string;
   totp_enabled: boolean; // TOTP 双因素认证
   totp_encryption_key_configured: boolean; // TOTP 加密密钥是否已配置
   // Default settings
   default_balance: number;
-  affiliate_rebate_rate: number;
   default_concurrency: number;
   default_user_rpm_limit: number;
   default_subscriptions: DefaultSubscriptionSetting[];
@@ -488,9 +488,9 @@ export interface UpdateSettingsRequest {
   password_reset_enabled?: boolean;
   frontend_url?: string;
   invitation_code_enabled?: boolean;
+  invitation_code_missing_prompt_html?: string;
   totp_enabled?: boolean; // TOTP 双因素认证
   default_balance?: number;
-  affiliate_rebate_rate?: number;
   default_concurrency?: number;
   default_user_rpm_limit?: number;
   default_subscriptions?: DefaultSubscriptionSetting[];

@@ -3,10 +3,10 @@
     :show="show"
     :title="mode === 'edit' ? '编辑佣金记录' : '查看佣金记录'"
     width="wide"
-    content-class="border-white/10 bg-slate-900 text-slate-100"
-    header-class="border-white/10 bg-slate-900"
-    body-class="bg-slate-900"
-    footer-class="border-white/10 bg-slate-900"
+    content-class="promo-modal"
+    header-class="promo-modal-header"
+    body-class="promo-modal-body"
+    footer-class="promo-modal-footer"
     @close="$emit('close')"
   >
     <div v-if="record" class="space-y-5">

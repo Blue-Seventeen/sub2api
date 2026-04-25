@@ -3,10 +3,10 @@
     :show="show"
     title="差额调整"
     width="wide"
-    content-class="border-white/10 bg-slate-900 text-slate-100"
-    header-class="border-white/10 bg-slate-900"
-    body-class="bg-slate-900"
-    footer-class="border-white/10 bg-slate-900"
+    content-class="promo-modal"
+    header-class="promo-modal-header"
+    body-class="promo-modal-body"
+    footer-class="promo-modal-footer"
     @close="$emit('close')"
   >
     <form id="promotion-manual-grant-form" class="space-y-5" @submit.prevent="handleSubmit">

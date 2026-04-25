@@ -208,7 +208,16 @@
       @confirm="handleBindParent"
     />
 
-    <BaseDialog :show="showDownlineDialog" title="下级管理" width="extra-wide" @close="closeDownlineDialog">
+    <BaseDialog
+      :show="showDownlineDialog"
+      title="下级管理"
+      width="extra-wide"
+      content-class="promo-modal"
+      header-class="promo-modal-header"
+      body-class="promo-modal-body"
+      footer-class="promo-modal-footer"
+      @close="closeDownlineDialog"
+    >
       <div class="space-y-5">
         <section class="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
           <div class="text-xs uppercase tracking-[0.24em] text-slate-500">当前用户</div>

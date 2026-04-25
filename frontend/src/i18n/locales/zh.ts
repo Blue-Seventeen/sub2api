@@ -346,7 +346,6 @@ export default {
     apiKeys: 'API 密钥',
     usage: '使用记录',
     redeem: '兑换',
-    affiliate: '邀请返利',
     profile: '个人资料',
     users: '用户管理',
     groups: '分组管理',
@@ -450,6 +449,7 @@ export default {
     invitationCodeLabel: '邀请码',
     invitationCodePlaceholder: '请输入邀请码',
     invitationCodeRequired: '请输入邀请码',
+    invitationCodePromptTitle: '请输入邀请码后再注册',
     invitationCodeValid: '邀请码有效',
     invitationCodeInvalid: '邀请码无效或已被使用',
     invitationCodeValidating: '正在验证邀请码...',
@@ -980,48 +980,6 @@ export default {
       unitPerRequest: '/ 次'
     }
   },
-
-  affiliate: {
-    title: '邀请返利',
-    description: '邀请新用户注册，并将返利额度转入账户余额',
-    yourCode: '我的邀请码',
-    inviteLink: '邀请链接',
-    copyCode: '复制邀请码',
-    copyLink: '复制链接',
-    codeCopied: '邀请码已复制',
-    linkCopied: '邀请链接已复制',
-    loadFailed: '加载邀请返利数据失败',
-    transferFailed: '转入余额失败',
-    stats: {
-      invitedUsers: '邀请人数',
-      availableQuota: '可转返利额度',
-      totalQuota: '历史返利额度'
-    },
-    transfer: {
-      title: '返利额度转余额',
-      description: '将当前可用返利额度一键转入账户余额',
-      button: '转入余额',
-      transferring: '转入中...',
-      empty: '当前没有可转入额度',
-      success: '已转入余额：{amount}'
-    },
-    invitees: {
-      title: '已邀请用户',
-      empty: '暂无邀请记录',
-      columns: {
-        email: '邮箱',
-        username: '用户名',
-        joinedAt: '注册时间'
-      }
-    },
-    tips: {
-      title: '使用说明',
-      line1: '将邀请码或邀请链接分享给新用户。',
-      line2: '被邀请用户充值后，你可获得对应比例的返利额度。',
-      line3: '返利额度可随时转入账户余额。'
-    }
-  },
-
   // Redeem
   redeem: {
     title: '兑换码',
@@ -5174,6 +5132,14 @@ export default {
         promoCodeHint: '允许用户在注册时使用优惠码',
         invitationCode: '邀请码注册',
         invitationCodeHint: '开启后，用户注册时需要填写有效的邀请码',
+        invitationCodeMissingPrompt: '未填写邀请码时的提示内容',
+        invitationCodeMissingPromptHint:
+          '当用户未填写邀请码就提交注册时，会弹出此提示框。支持嵌入 HTML（例如链接）。',
+        invitationCodeMissingPromptPlaceholder:
+          '<p>请先前往 <a href=\"https://example.com\" target=\"_blank\">这里</a> 获取邀请码。</p>',
+        invitationCodeMissingPromptWarning:
+          '此内容会以 HTML 原样渲染给访客，请仅填写你信任的内容。',
+        invitationCodeMissingPromptPreview: '前台弹窗预览',
         passwordReset: '忘记密码',
         passwordResetHint: '允许用户通过邮箱重置密码',
         frontendUrl: '前端地址',
@@ -5271,8 +5237,6 @@ export default {
         description: '新用户的默认值',
         defaultBalance: '默认余额',
         defaultBalanceHint: '新用户的初始余额',
-        affiliateRebateRate: '邀请返利比例',
-        affiliateRebateRateHint: '充值后返给邀请人的比例（0-100%，例如填写 10 表示返利 10%）',
         defaultConcurrency: '默认并发数',
         defaultConcurrencyHint: '新用户的最大并发请求数',
         defaultUserRpmLimit: '默认用户 RPM 限制',

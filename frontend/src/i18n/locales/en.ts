@@ -346,7 +346,6 @@ export default {
     apiKeys: 'API Keys',
     usage: 'Usage',
     redeem: 'Redeem',
-    affiliate: 'Affiliate Rebates',
     profile: 'Profile',
     users: 'Users',
     groups: 'Groups',
@@ -451,6 +450,7 @@ export default {
     invitationCodeLabel: 'Invitation Code',
     invitationCodePlaceholder: 'Enter invitation code',
     invitationCodeRequired: 'Invitation code is required',
+    invitationCodePromptTitle: 'Enter an invitation code before registering',
     invitationCodeValid: 'Invitation code is valid',
     invitationCodeInvalid: 'Invalid or used invitation code',
     invitationCodeValidating: 'Validating invitation code...',
@@ -976,48 +976,6 @@ export default {
       unitPerRequest: '/ request'
     }
   },
-
-  affiliate: {
-    title: 'Affiliate Rebates',
-    description: 'Invite new users and convert your rebate quota into account balance',
-    yourCode: 'Your Affiliate Code',
-    inviteLink: 'Invite Link',
-    copyCode: 'Copy Code',
-    copyLink: 'Copy Link',
-    codeCopied: 'Affiliate code copied',
-    linkCopied: 'Invite link copied',
-    loadFailed: 'Failed to load affiliate data',
-    transferFailed: 'Failed to transfer affiliate quota',
-    stats: {
-      invitedUsers: 'Invited Users',
-      availableQuota: 'Available Rebate Quota',
-      totalQuota: 'Historical Rebate Quota'
-    },
-    transfer: {
-      title: 'Transfer Rebate Quota',
-      description: 'Move available rebate quota into your account balance',
-      button: 'Transfer to Balance',
-      transferring: 'Transferring...',
-      empty: 'No available rebate quota',
-      success: '{amount} has been transferred to your balance'
-    },
-    invitees: {
-      title: 'Invited Users',
-      empty: 'No invited users yet',
-      columns: {
-        email: 'Email',
-        username: 'Username',
-        joinedAt: 'Joined At'
-      }
-    },
-    tips: {
-      title: 'How It Works',
-      line1: 'Share your affiliate code or invite link with new users.',
-      line2: 'When invitees recharge, you receive rebate quota based on the configured rate.',
-      line3: 'Transfer rebate quota to balance at any time.'
-    }
-  },
-
   // Redeem
   redeem: {
     title: 'Redeem Code',
@@ -5011,6 +4969,14 @@ export default {
         promoCodeHint: 'Allow users to use promo codes during registration',
         invitationCode: 'Invitation Code Registration',
         invitationCodeHint: 'When enabled, users must enter a valid invitation code to register',
+        invitationCodeMissingPrompt: 'Prompt shown when invitation code is missing',
+        invitationCodeMissingPromptHint:
+          'When users submit registration without an invitation code, this dialog will be shown. HTML is allowed (for example, links).',
+        invitationCodeMissingPromptPlaceholder:
+          '<p>Please visit <a href=\"https://example.com\" target=\"_blank\">this page</a> to get an invitation code.</p>',
+        invitationCodeMissingPromptWarning:
+          'This content is rendered as raw HTML for visitors. Only use trusted content.',
+        invitationCodeMissingPromptPreview: 'Preview shown to users',
         passwordReset: 'Password Reset',
         passwordResetHint: 'Allow users to reset their password via email',
         frontendUrl: 'Frontend URL',
@@ -5108,9 +5074,6 @@ export default {
         description: 'Default values for new users',
         defaultBalance: 'Default Balance',
         defaultBalanceHint: 'Initial balance for new users',
-        affiliateRebateRate: 'Affiliate Rebate Rate',
-        affiliateRebateRateHint:
-          'Rebate percentage credited to inviter after recharge (0-100%, e.g. 10 means 10%)',
         defaultConcurrency: 'Default Concurrency',
         defaultConcurrencyHint: 'Maximum concurrent requests for new users',
         defaultUserRpmLimit: 'Default User RPM Limit',

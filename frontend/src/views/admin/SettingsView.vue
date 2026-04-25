@@ -1100,6 +1100,38 @@
                 </div>
                 <Toggle v-model="form.invitation_code_enabled" />
               </div>
+              <div
+                v-if="form.invitation_code_enabled"
+                class="rounded-xl border border-dashed border-primary-200 bg-primary-50/40 p-4 dark:border-primary-700/50 dark:bg-primary-900/10"
+              >
+                <label class="mb-2 block font-medium text-gray-900 dark:text-white">{{
+                  t("admin.settings.registration.invitationCodeMissingPrompt")
+                }}</label>
+                <p class="mb-3 text-sm text-gray-500 dark:text-gray-400">
+                  {{ t("admin.settings.registration.invitationCodeMissingPromptHint") }}
+                </p>
+                <textarea
+                  v-model="form.invitation_code_missing_prompt_html"
+                  rows="5"
+                  class="input min-h-[140px] resize-y font-mono text-sm"
+                  :placeholder="t('admin.settings.registration.invitationCodeMissingPromptPlaceholder')"
+                />
+                <p class="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                  {{ t("admin.settings.registration.invitationCodeMissingPromptWarning") }}
+                </p>
+                <div
+                  v-if="form.invitation_code_missing_prompt_html.trim()"
+                  class="mt-4 rounded-lg border border-gray-200 bg-white p-3 dark:border-dark-700 dark:bg-dark-900"
+                >
+                  <div class="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.registration.invitationCodeMissingPromptPreview") }}
+                  </div>
+                  <div
+                    class="max-w-none break-words text-sm text-gray-700 dark:text-gray-300 [&_a]:text-primary-600 [&_a]:underline dark:[&_a]:text-primary-400"
+                    v-html="form.invitation_code_missing_prompt_html"
+                  />
+                </div>
+              </div>
               <!-- Password Reset - Only show when email verification is enabled -->
               <div
                 v-if="form.email_verify_enabled"
@@ -2151,31 +2183,6 @@
                   />
                   <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
                     {{ t("admin.settings.defaults.defaultBalanceHint") }}
-                  </p>
-                </div>
-                <div>
-                  <label
-                    class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
-                  >
-                    {{ t("admin.settings.defaults.affiliateRebateRate") }}
-                  </label>
-                  <div class="relative">
-                    <input
-                      v-model.number="form.affiliate_rebate_rate"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max="100"
-                      class="input pr-8"
-                      placeholder="20"
-                    />
-                    <span
-                      class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
-                      >%</span
-                    >
-                  </div>
-                  <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-                    {{ t("admin.settings.defaults.affiliateRebateRateHint") }}
                   </p>
                 </div>
                 <div>
@@ -5018,11 +5025,11 @@ const form = reactive<SettingsForm>({
   registration_email_suffix_whitelist: [],
   promo_code_enabled: true,
   invitation_code_enabled: false,
+  invitation_code_missing_prompt_html: "",
   password_reset_enabled: false,
   totp_enabled: false,
   totp_encryption_key_configured: false,
   default_balance: 0,
-  affiliate_rebate_rate: 20,
   default_concurrency: 1,
   default_subscriptions: [],
   force_email_on_third_party_signup: false,
@@ -5953,13 +5960,11 @@ async function saveSettings() {
         ),
       promo_code_enabled: form.promo_code_enabled,
       invitation_code_enabled: form.invitation_code_enabled,
+      invitation_code_missing_prompt_html:
+        form.invitation_code_missing_prompt_html,
       password_reset_enabled: form.password_reset_enabled,
       totp_enabled: form.totp_enabled,
       default_balance: form.default_balance,
-      affiliate_rebate_rate: Math.min(
-        100,
-        Math.max(0, Number(form.affiliate_rebate_rate) || 0),
-      ),
       default_concurrency: form.default_concurrency,
       default_subscriptions: normalizedDefaultSubscriptions,
       force_email_on_third_party_signup: form.force_email_on_third_party_signup,

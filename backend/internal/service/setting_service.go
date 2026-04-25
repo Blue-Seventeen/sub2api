@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math"
 	"net/url"
 	"sort"
 	"strconv"
@@ -409,6 +408,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SettingKeyPromoCodeEnabled,
 		SettingKeyPasswordResetEnabled,
 		SettingKeyInvitationCodeEnabled,
+		SettingKeyInvitationCodeMissingPromptHTML,
 		SettingKeyTotpEnabled,
 		SettingKeyTurnstileEnabled,
 		SettingKeyTurnstileSiteKey,
@@ -506,6 +506,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		PromoCodeEnabled:                 settings[SettingKeyPromoCodeEnabled] != "false", // 默认启用
 		PasswordResetEnabled:             passwordResetEnabled,
 		InvitationCodeEnabled:            settings[SettingKeyInvitationCodeEnabled] == "true",
+		InvitationCodeMissingPromptHTML:  settings[SettingKeyInvitationCodeMissingPromptHTML],
 		TotpEnabled:                      settings[SettingKeyTotpEnabled] == "true",
 		TurnstileEnabled:                 settings[SettingKeyTurnstileEnabled] == "true",
 		TurnstileSiteKey:                 settings[SettingKeyTurnstileSiteKey],
@@ -649,6 +650,7 @@ type PublicSettingsInjectionPayload struct {
 	PromoCodeEnabled                 bool            `json:"promo_code_enabled"`
 	PasswordResetEnabled             bool            `json:"password_reset_enabled"`
 	InvitationCodeEnabled            bool            `json:"invitation_code_enabled"`
+	InvitationCodeMissingPromptHTML  string          `json:"invitation_code_missing_prompt_html"`
 	TotpEnabled                      bool            `json:"totp_enabled"`
 	TurnstileEnabled                 bool            `json:"turnstile_enabled"`
 	TurnstileSiteKey                 string          `json:"turnstile_site_key"`
@@ -704,6 +706,7 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		PromoCodeEnabled:                 settings.PromoCodeEnabled,
 		PasswordResetEnabled:             settings.PasswordResetEnabled,
 		InvitationCodeEnabled:            settings.InvitationCodeEnabled,
+		InvitationCodeMissingPromptHTML:  settings.InvitationCodeMissingPromptHTML,
 		TotpEnabled:                      settings.TotpEnabled,
 		TurnstileEnabled:                 settings.TurnstileEnabled,
 		TurnstileSiteKey:                 settings.TurnstileSiteKey,
@@ -1061,6 +1064,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyPasswordResetEnabled] = strconv.FormatBool(settings.PasswordResetEnabled)
 	updates[SettingKeyFrontendURL] = settings.FrontendURL
 	updates[SettingKeyInvitationCodeEnabled] = strconv.FormatBool(settings.InvitationCodeEnabled)
+	updates[SettingKeyInvitationCodeMissingPromptHTML] = strings.TrimSpace(settings.InvitationCodeMissingPromptHTML)
 	updates[SettingKeyTotpEnabled] = strconv.FormatBool(settings.TotpEnabled)
 
 	// 邮件服务设置（只有非空才更新密码）
@@ -1168,8 +1172,6 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	// 默认配置
 	updates[SettingKeyDefaultConcurrency] = strconv.Itoa(settings.DefaultConcurrency)
 	updates[SettingKeyDefaultBalance] = strconv.FormatFloat(settings.DefaultBalance, 'f', 8, 64)
-	settings.AffiliateRebateRate = clampAffiliateRebateRate(settings.AffiliateRebateRate)
-	updates[SettingKeyAffiliateRebateRate] = strconv.FormatFloat(settings.AffiliateRebateRate, 'f', 8, 64)
 	updates[SettingKeyDefaultUserRPMLimit] = strconv.Itoa(settings.DefaultUserRPMLimit)
 	defaultSubsJSON, err := json.Marshal(settings.DefaultSubscriptions)
 	if err != nil {
@@ -1674,6 +1676,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyEmailVerifyEnabled:                       "false",
 		SettingKeyRegistrationEmailSuffixWhitelist:         "[]",
 		SettingKeyPromoCodeEnabled:                         "true", // 默认启用优惠码功能
+		SettingKeyInvitationCodeMissingPromptHTML:          "",
 		SettingKeySiteName:                                 "Sub2API",
 		SettingKeySiteLogo:                                 "",
 		SettingKeyPurchaseSubscriptionEnabled:              "false",
@@ -1722,7 +1725,6 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyOIDCConnectUserInfoUsernamePath:          "",
 		SettingKeyDefaultConcurrency:                       strconv.Itoa(s.cfg.Default.UserConcurrency),
 		SettingKeyDefaultBalance:                           strconv.FormatFloat(s.cfg.Default.UserBalance, 'f', 8, 64),
-		SettingKeyAffiliateRebateRate:                      strconv.FormatFloat(AffiliateRebateRateDefault, 'f', 8, 64),
 		SettingKeyDefaultUserRPMLimit:                      "0",
 		SettingKeyDefaultSubscriptions:                     "[]",
 		SettingKeyAuthSourceDefaultEmailBalance:            "0",
@@ -1798,6 +1800,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		PasswordResetEnabled:             emailVerifyEnabled && settings[SettingKeyPasswordResetEnabled] == "true",
 		FrontendURL:                      settings[SettingKeyFrontendURL],
 		InvitationCodeEnabled:            settings[SettingKeyInvitationCodeEnabled] == "true",
+		InvitationCodeMissingPromptHTML:  settings[SettingKeyInvitationCodeMissingPromptHTML],
 		TotpEnabled:                      settings[SettingKeyTotpEnabled] == "true",
 		SMTPHost:                         settings[SettingKeySMTPHost],
 		SMTPUsername:                     settings[SettingKeySMTPUsername],
@@ -1849,11 +1852,6 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		result.DefaultBalance = balance
 	} else {
 		result.DefaultBalance = s.cfg.Default.UserBalance
-	}
-	if rebateRate, err := strconv.ParseFloat(settings[SettingKeyAffiliateRebateRate], 64); err == nil {
-		result.AffiliateRebateRate = clampAffiliateRebateRate(rebateRate)
-	} else {
-		result.AffiliateRebateRate = AffiliateRebateRateDefault
 	}
 	result.DefaultSubscriptions = parseDefaultSubscriptions(settings[SettingKeyDefaultSubscriptions])
 
@@ -2137,19 +2135,6 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	}
 
 	return result
-}
-
-func clampAffiliateRebateRate(value float64) float64 {
-	if math.IsNaN(value) || math.IsInf(value, 0) {
-		return AffiliateRebateRateDefault
-	}
-	if value < AffiliateRebateRateMin {
-		return AffiliateRebateRateMin
-	}
-	if value > AffiliateRebateRateMax {
-		return AffiliateRebateRateMax
-	}
-	return value
 }
 
 func isFalseSettingValue(value string) bool {

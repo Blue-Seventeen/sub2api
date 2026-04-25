@@ -130,29 +130,6 @@ export interface RegisterRequest {
   turnstile_token?: string
   promo_code?: string
   invitation_code?: string
-  aff_code?: string
-}
-
-export interface AffiliateInvitee {
-  user_id: number
-  email: string
-  username: string
-  created_at?: string
-}
-
-export interface UserAffiliateDetail {
-  user_id: number
-  aff_code: string
-  inviter_id?: number | null
-  aff_count: number
-  aff_quota: number
-  aff_history_quota: number
-  invitees: AffiliateInvitee[]
-}
-
-export interface AffiliateTransferResponse {
-  transferred_quota: number
-  balance: number
 }
 
 export interface SendVerifyCodeRequest {
@@ -191,6 +168,7 @@ export interface PublicSettings {
   promo_code_enabled: boolean
   password_reset_enabled: boolean
   invitation_code_enabled: boolean
+  invitation_code_missing_prompt_html: string
   turnstile_enabled: boolean
   turnstile_site_key: string
   site_name: string

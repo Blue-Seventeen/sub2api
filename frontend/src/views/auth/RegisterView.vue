@@ -269,6 +269,35 @@
       </p>
     </template>
   </AuthLayout>
+
+  <BaseDialog
+    :show="showInvitationCodePromptDialog"
+    :title="t('auth.invitationCodePromptTitle')"
+    width="narrow"
+    @close="closeInvitationCodePromptDialog"
+  >
+    <div class="space-y-4">
+      <p class="text-sm text-gray-600 dark:text-gray-400">
+        {{ t("auth.invitationCodeRequired") }}
+      </p>
+      <div
+        class="max-w-none break-words text-sm text-gray-700 dark:text-gray-300 [&_a]:text-primary-600 [&_a]:underline dark:[&_a]:text-primary-400"
+        v-html="invitationCodeMissingPromptHtml"
+      />
+    </div>
+
+    <template #footer>
+      <div class="flex justify-end">
+        <button
+          type="button"
+          class="rounded-md bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 dark:focus:ring-offset-dark-800"
+          @click="closeInvitationCodePromptDialog"
+        >
+          {{ t("common.close") }}
+        </button>
+      </div>
+    </template>
+  </BaseDialog>
 </template>
 
 <script setup lang="ts">
@@ -276,6 +305,7 @@ import { computed, ref, reactive, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { AuthLayout } from '@/components/layout'
+import BaseDialog from '@/components/common/BaseDialog.vue'
 import LinuxDoOAuthSection from '@/components/auth/LinuxDoOAuthSection.vue'
 import OidcOAuthSection from '@/components/auth/OidcOAuthSection.vue'
 import WechatOAuthSection from '@/components/auth/WechatOAuthSection.vue'
@@ -315,6 +345,7 @@ const registrationEnabled = ref<boolean>(true)
 const emailVerifyEnabled = ref<boolean>(false)
 const promoCodeEnabled = ref<boolean>(true)
 const invitationCodeEnabled = ref<boolean>(false)
+const invitationCodeMissingPromptHtml = ref<string>('')
 const turnstileEnabled = ref<boolean>(false)
 const turnstileSiteKey = ref<string>('')
 const siteName = ref<string>('Sub2API')
@@ -346,13 +377,13 @@ const invitationValidation = reactive({
   message: ''
 })
 let invitationValidateTimeout: ReturnType<typeof setTimeout> | null = null
+const showInvitationCodePromptDialog = ref<boolean>(false)
 
 const formData = reactive({
   email: '',
   password: '',
   promo_code: '',
-  invitation_code: '',
-  aff_code: ''
+  invitation_code: ''
 })
 
 const errors = reactive({
@@ -371,6 +402,9 @@ const validationToastMessage = computed(() =>
   errors.turnstile ||
   ''
 )
+const hasInvitationCodeMissingPrompt = computed(
+  () => invitationCodeMissingPromptHtml.value.trim().length > 0
+)
 
 watch(validationToastMessage, (value, previousValue) => {
   if (value && value !== previousValue) {
@@ -387,6 +421,8 @@ onMounted(async () => {
     emailVerifyEnabled.value = settings.email_verify_enabled
     promoCodeEnabled.value = settings.promo_code_enabled
     invitationCodeEnabled.value = settings.invitation_code_enabled
+    invitationCodeMissingPromptHtml.value =
+      settings.invitation_code_missing_prompt_html || ''
     turnstileEnabled.value = settings.turnstile_enabled
     turnstileSiteKey.value = settings.turnstile_site_key || ''
     siteName.value = settings.site_name || 'Sub2API'
@@ -406,10 +442,6 @@ onMounted(async () => {
         // Validate the promo code from URL
         await validatePromoCodeDebounced(promoParam)
       }
-    }
-    const affParam = (route.query.aff as string) || (route.query.aff_code as string)
-    if (affParam) {
-      formData.aff_code = affParam.trim()
     }
   } catch (error) {
     console.error('Failed to load public settings:', error)
@@ -637,6 +669,9 @@ function validateForm(): boolean {
   if (invitationCodeEnabled.value) {
     if (!formData.invitation_code.trim()) {
       errors.invitation_code = t('auth.invitationCodeRequired')
+      if (hasInvitationCodeMissingPrompt.value) {
+        openInvitationCodePromptDialog()
+      }
       isValid = false
     }
   }
@@ -648,6 +683,14 @@ function validateForm(): boolean {
   }
 
   return isValid
+}
+
+function openInvitationCodePromptDialog(): void {
+  showInvitationCodePromptDialog.value = true
+}
+
+function closeInvitationCodePromptDialog(): void {
+  showInvitationCodePromptDialog.value = false
 }
 
 // ==================== Form Handlers ====================
@@ -712,8 +755,7 @@ async function handleRegister(): Promise<void> {
           password: formData.password,
           turnstile_token: turnstileToken.value,
           promo_code: formData.promo_code || undefined,
-          invitation_code: formData.invitation_code || undefined,
-          ...(formData.aff_code ? { aff_code: formData.aff_code } : {})
+          invitation_code: formData.invitation_code || undefined
         })
       )
 
@@ -728,8 +770,7 @@ async function handleRegister(): Promise<void> {
       password: formData.password,
       turnstile_token: turnstileEnabled.value ? turnstileToken.value : undefined,
       promo_code: formData.promo_code || undefined,
-      invitation_code: formData.invitation_code || undefined,
-      ...(formData.aff_code ? { aff_code: formData.aff_code } : {})
+      invitation_code: formData.invitation_code || undefined
     })
 
     // Show success toast

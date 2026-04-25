@@ -19,6 +19,7 @@ type SystemSettings struct {
 	PasswordResetEnabled             bool
 	FrontendURL                      string
 	InvitationCodeEnabled            bool
+	InvitationCodeMissingPromptHTML  string
 	TotpEnabled                      bool // TOTP 双因素认证
 
 	SMTPHost               string
@@ -106,7 +107,6 @@ type SystemSettings struct {
 
 	DefaultConcurrency   int
 	DefaultBalance       float64
-	AffiliateRebateRate  float64
 	DefaultUserRPMLimit  int
 	DefaultSubscriptions []DefaultSubscriptionSetting
 
@@ -184,6 +184,7 @@ type PublicSettings struct {
 	PromoCodeEnabled                 bool
 	PasswordResetEnabled             bool
 	InvitationCodeEnabled            bool
+	InvitationCodeMissingPromptHTML  string
 	TotpEnabled                      bool // TOTP 双因素认证
 	TurnstileEnabled                 bool
 	TurnstileSiteKey                 string

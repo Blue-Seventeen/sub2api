@@ -5,7 +5,7 @@
     </div>
 
     <template v-else-if="overview">
-      <section class="promo-panel border border-cyan-400/20 bg-gradient-to-br from-slate-900 via-slate-900 to-slate-950 shadow-[0_0_40px_-24px_rgba(34,211,238,0.45)]">
+      <section class="promo-panel promo-hero-card">
         <div class="mb-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div class="min-w-0">
             <div class="mb-2 flex flex-wrap items-center gap-3">
@@ -86,8 +86,8 @@
           暂未配置等级规则
         </div>
         <div v-else class="relative">
-          <div class="pointer-events-none absolute inset-y-0 left-0 z-[1] w-10 bg-gradient-to-r from-slate-900 via-slate-900/70 to-transparent"></div>
-          <div class="pointer-events-none absolute inset-y-0 right-0 z-[1] w-10 bg-gradient-to-l from-slate-900 via-slate-900/70 to-transparent"></div>
+          <div class="promo-scroll-fade-left"></div>
+          <div class="promo-scroll-fade-right"></div>
           <div
             ref="levelScrollerRef"
             class="flex gap-4 overflow-x-auto scroll-smooth px-1 pb-2 pt-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
