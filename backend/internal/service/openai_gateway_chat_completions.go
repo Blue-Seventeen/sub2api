@@ -220,7 +220,8 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
-		if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody) {
+		logOpenAIInstructionsRequiredDebug(ctx, c, account, resp.StatusCode, upstreamMsg, responsesBody, respBody)
+		if s.shouldFailoverOpenAIChatCompletionsUpstreamResponse(resp.StatusCode, upstreamMsg, respBody) {
 			upstreamDetail := ""
 			if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
 				maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
@@ -634,6 +635,13 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			c.Writer.Flush()
 		}
 	}
+}
+
+func (s *OpenAIGatewayService) shouldFailoverOpenAIChatCompletionsUpstreamResponse(statusCode int, upstreamMsg string, upstreamBody []byte) bool {
+	if isOpenAIInstructionsRequiredError(statusCode, upstreamMsg, upstreamBody) {
+		return true
+	}
+	return s.shouldFailoverOpenAIUpstreamResponse(statusCode, upstreamMsg, upstreamBody)
 }
 
 // writeChatCompletionsError writes an error response in OpenAI Chat Completions format.

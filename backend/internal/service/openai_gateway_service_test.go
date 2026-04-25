@@ -1981,3 +1981,54 @@ func TestHandleSSEToJSON_ResponseFailedReturnsProtocolError(t *testing.T) {
 	require.Contains(t, rec.Body.String(), "upstream rejected request")
 	require.Contains(t, rec.Header().Get("Content-Type"), "application/json")
 }
+
+func TestOpenAIGatewayService_ShouldFailoverOpenAIChatCompletionsUpstreamResponse_InstructionsRequired(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	tests := []struct {
+		name string
+		body []byte
+		want bool
+	}{
+		{
+			name: "detail style",
+			body: []byte(`{"detail":"Instructions are required"}`),
+			want: true,
+		},
+		{
+			name: "openai error style",
+			body: []byte(`{"error":{"message":"Instructions are required","type":"invalid_request_error"}}`),
+			want: true,
+		},
+		{
+			name: "ordinary 400",
+			body: []byte(`{"error":{"message":"Unsupported parameter: foo","type":"invalid_request_error"}}`),
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := strings.TrimSpace(extractUpstreamErrorMessage(tt.body))
+			require.Equal(t, tt.want, svc.shouldFailoverOpenAIChatCompletionsUpstreamResponse(http.StatusBadRequest, msg, tt.body))
+		})
+	}
+}
+
+func TestEnsureOpenAIPassthroughOAuthShellInstructions(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.4","stream":true,"max_output_tokens":4096}`)
+	got, changed, err := ensureOpenAIPassthroughOAuthShellInstructions(body)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, "You are a helpful coding assistant.", gjson.GetBytes(got, "instructions").String())
+	require.Equal(t, "gpt-5.4", gjson.GetBytes(got, "model").String())
+	require.True(t, gjson.GetBytes(got, "stream").Bool())
+	require.Equal(t, int64(4096), gjson.GetBytes(got, "max_output_tokens").Int())
+}
+
+func TestEnsureOpenAIPassthroughOAuthShellInstructions_PreservesPromptPayload(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.4","stream":true,"input":[{"type":"text","text":"hi"}]}`)
+	got, changed, err := ensureOpenAIPassthroughOAuthShellInstructions(body)
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.False(t, gjson.GetBytes(got, "instructions").Exists())
+}

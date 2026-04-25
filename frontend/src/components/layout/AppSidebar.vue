@@ -870,9 +870,7 @@ function handleExternalMenuItemClick(item: NavItem) {
     } catch {
       // ignore focus errors
     }
-    return
   }
-  window.location.assign(targetUrl)
 }
 
 function isActive(path: string): boolean {

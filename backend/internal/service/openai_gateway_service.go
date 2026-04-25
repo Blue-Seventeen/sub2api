@@ -2552,6 +2552,26 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		if normalized {
 			body = normalizedBody
 		}
+		withInstructionsBody, injectedInstructions, err := ensureOpenAIPassthroughOAuthShellInstructions(body)
+		if err != nil {
+			return nil, err
+		}
+		if injectedInstructions {
+			body = withInstructionsBody
+			logger.FromContext(ctx).With(
+				zap.String("component", "service.openai_gateway"),
+				zap.Int64("account_id", account.ID),
+				zap.String("account_name", account.Name),
+				zap.String("request_path", requestPathForLog(c)),
+				zap.Int("request_body_size", len(body)),
+				zap.Bool("passthrough", true),
+				zap.Bool("default_instructions_injected", true),
+				zap.Bool("has_input", gjson.GetBytes(body, "input").Exists()),
+				zap.Bool("has_messages", gjson.GetBytes(body, "messages").Exists()),
+				zap.Bool("has_prompt", gjson.GetBytes(body, "prompt").Exists()),
+				zap.Bool("has_tools", gjson.GetBytes(body, "tools").Exists()),
+			).Warn("OpenAI OAuth passthrough injected default instructions for shell-style request")
+		}
 		reqStream = gjson.GetBytes(body, "stream").Bool()
 	}
 	normalizedServiceTierBody, _, normalizeServiceTierErr := normalizeOpenAIServiceTierInBody(body)
@@ -5117,9 +5137,76 @@ func normalizeOpenAIPassthroughOAuthBody(body []byte, compact bool) ([]byte, boo
 	return normalized, changed, nil
 }
 
+func ensureOpenAIPassthroughOAuthShellInstructions(body []byte) ([]byte, bool, error) {
+	if len(body) == 0 || !gjson.ValidBytes(body) {
+		return body, false, nil
+	}
+	if !gjson.GetBytes(body, "model").Exists() {
+		return body, false, nil
+	}
+	if !isInstructionsEmptyInJSONBody(body) {
+		return body, false, nil
+	}
+	if hasEffectiveOpenAIPromptPayload(body) {
+		return body, false, nil
+	}
+	next, err := sjson.SetBytes(body, "instructions", "You are a helpful coding assistant.")
+	if err != nil {
+		return body, false, fmt.Errorf("inject passthrough default instructions: %w", err)
+	}
+	return next, true, nil
+}
+
+func isInstructionsEmptyInJSONBody(body []byte) bool {
+	instructions := gjson.GetBytes(body, "instructions")
+	if !instructions.Exists() {
+		return true
+	}
+	if instructions.Type != gjson.String {
+		return true
+	}
+	return strings.TrimSpace(instructions.String()) == ""
+}
+
+func hasEffectiveOpenAIPromptPayload(body []byte) bool {
+	for _, path := range []string{"input", "messages", "prompt"} {
+		value := gjson.GetBytes(body, path)
+		if !value.Exists() || value.Type == gjson.Null {
+			continue
+		}
+		switch value.Type {
+		case gjson.String:
+			if strings.TrimSpace(value.String()) != "" {
+				return true
+			}
+		case gjson.JSON:
+			if value.IsArray() || value.IsObject() {
+				if len(value.Array()) > 0 || len(value.Map()) > 0 {
+					return true
+				}
+			} else if strings.TrimSpace(value.Raw) != "" {
+				return true
+			}
+		default:
+			return true
+		}
+	}
+	return false
+}
+
+func requestPathForLog(c *gin.Context) string {
+	if c == nil || c.Request == nil || c.Request.URL == nil {
+		return ""
+	}
+	return c.Request.URL.Path
+}
+
 func detectOpenAIPassthroughInstructionsRejectReason(reqModel string, body []byte) string {
 	model := strings.ToLower(strings.TrimSpace(reqModel))
 	if !strings.Contains(model, "codex") {
+		return ""
+	}
+	if !hasEffectiveOpenAIPromptPayload(body) && gjson.GetBytes(body, "model").Exists() {
 		return ""
 	}
 

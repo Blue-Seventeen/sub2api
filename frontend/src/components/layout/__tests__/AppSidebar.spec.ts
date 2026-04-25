@@ -30,3 +30,10 @@ describe('AppSidebar header styles', () => {
     expect(sidebarBrandBlockMatch?.[0]).not.toContain('overflow: hidden;')
   })
 })
+
+describe('AppSidebar external custom menu navigation', () => {
+  it('does not fall back to same-tab navigation after opening a new tab', () => {
+    expect(componentSource).toContain("window.open(targetUrl, '_blank', 'noopener,noreferrer')")
+    expect(componentSource).not.toContain('window.location.assign(targetUrl)')
+  })
+})
