@@ -122,6 +122,14 @@ type UsageLog struct {
 	InboundEndpoint *string
 	// UpstreamEndpoint is the normalized upstream endpoint path, e.g. /v1/responses.
 	UpstreamEndpoint *string
+	// ClientProfile records the detected downstream client family, e.g. codex / claude_code / cherry_studio.
+	ClientProfile *string
+	// CompatibilityRoute records the canonical compatibility lane selected for the request.
+	CompatibilityRoute *string
+	// FallbackChain records the observed fallback chain, e.g. native -> relay -> chat_fallback.
+	FallbackChain *string
+	// UpstreamTransport records the actual upstream transport lane, e.g. http_json / sse / ws_v2.
+	UpstreamTransport *string
 
 	GroupID        *int64
 	SubscriptionID *int64
@@ -147,7 +155,7 @@ type UsageLog struct {
 	RealActualCost float64
 	// UnifiedRateMultiplier is the user unified multiplier snapshot written with the log.
 	UnifiedRateMultiplier float64
-	RateMultiplier    float64
+	RateMultiplier        float64
 	// AccountRateMultiplier 账号计费倍率快照（nil 表示历史数据，按 1.0 处理）
 	AccountRateMultiplier *float64
 	// AccountStatsCost 账号统计定价预计算费用（nil = 使用默认公式 total_cost × account_rate_multiplier）

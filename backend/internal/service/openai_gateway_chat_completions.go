@@ -51,6 +51,9 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
 	startTime := time.Now()
+	SetCompatibilityRoute(c, CompatibilityRouteOpenAIChatCompletionsNative)
+	SetCompatibilityUpstreamTransport(c, UpstreamTransportSSE)
+	AppendCompatibilityFallbackStage(c, "native")
 
 	// 1. Parse Chat Completions request
 	var chatReq apicompat.ChatCompletionsRequest

@@ -23,6 +23,7 @@ import (
 func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	streamStarted := false
 	defer h.recoverResponsesPanic(c, &streamStarted)
+	setCompatibilityForImages(c)
 
 	requestStart := time.Now()
 
@@ -264,6 +265,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		if parsed.Multipart {
 			requestPayloadHash = service.HashUsageRequestPayload([]byte(parsed.StickySessionSeed()))
 		}
+		compat := compatibilityLogFields(c)
 
 		h.submitUsageRecordTask(func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
@@ -277,6 +279,10 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 				UserAgent:          userAgent,
 				IPAddress:          clientIP,
 				RequestPayloadHash: requestPayloadHash,
+				ClientProfile:      compat.ClientProfile,
+				CompatibilityRoute: compat.CompatibilityRoute,
+				FallbackChain:      compat.FallbackChain,
+				UpstreamTransport:  compat.UpstreamTransport,
 				APIKeyService:      h.apiKeyService,
 				ChannelUsageFields: channelMapping.ToUsageFields(parsed.Model, result.UpstreamModel),
 			}); err != nil {

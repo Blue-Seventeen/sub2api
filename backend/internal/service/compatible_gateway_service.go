@@ -525,6 +525,38 @@ func compatiblePreparedClientRoute(prepared *compatiblePreparedRequest) Compatib
 	}
 }
 
+func compatiblePreparedUpstreamTransport(prepared *compatiblePreparedRequest) UpstreamTransport {
+	if prepared == nil {
+		return UpstreamTransportUnknown
+	}
+	if prepared.ClientStream {
+		return UpstreamTransportSSE
+	}
+	return UpstreamTransportHTTPJSON
+}
+
+func compatiblePreparedCompatibilityRoute(prepared *compatiblePreparedRequest, mode compatibleEndpointMode) CompatibilityRoute {
+	switch mode {
+	case compatibleEndpointModeRelay:
+		return CompatibilityRouteCompatibleEndpointRelay
+	case compatibleEndpointModeChatFallback:
+		return CompatibilityRouteCompatibleChatFallback
+	}
+	if prepared == nil {
+		return CompatibilityRouteUnknown
+	}
+	switch prepared.UpstreamKind {
+	case compatibleUpstreamMessages:
+		return CompatibilityRouteCompatibleMessagesNative
+	case compatibleUpstreamResponses:
+		return CompatibilityRouteCompatibleResponsesNative
+	case compatibleUpstreamChat:
+		return CompatibilityRouteCompatibleChatNative
+	default:
+		return CompatibilityRouteUnknown
+	}
+}
+
 func (s *CompatibleGatewayService) recordEndpointMode(account *Account, prepared *compatiblePreparedRequest, baseURL string, mode compatibleEndpointMode) {
 	if s == nil {
 		return
@@ -671,6 +703,7 @@ func (s *CompatibleGatewayService) orderPreparedRequests(
 
 func (s *CompatibleGatewayService) executePreparedRequest(
 	ctx context.Context,
+	c *gin.Context,
 	account *Account,
 	prepared *compatiblePreparedRequest,
 	baseURL string,
@@ -687,6 +720,9 @@ func (s *CompatibleGatewayService) executePreparedRequest(
 	var lastErr error
 
 	for idx, candidate := range urlCandidates {
+		SetCompatibilityRoute(c, compatiblePreparedCompatibilityRoute(prepared, candidate.Mode))
+		SetCompatibilityUpstreamTransport(c, compatiblePreparedUpstreamTransport(prepared))
+		AppendCompatibilityFallbackStage(c, string(candidate.Mode))
 		for attempt := 0; ; attempt++ {
 			prepared.URL = candidate.URL
 
@@ -848,7 +884,7 @@ func (s *CompatibleGatewayService) forwardPreparedRequestAttempt(
 	proxyURL string,
 	startTime time.Time,
 ) (*ForwardResult, string, bool, error) {
-	resp, unsupported, err := s.executePreparedRequest(ctx, account, prepared, baseURL, proxyURL)
+	resp, unsupported, err := s.executePreparedRequest(ctx, c, account, prepared, baseURL, proxyURL)
 	if err != nil {
 		return nil, prepared.UpstreamEndpoint, unsupported, err
 	}
@@ -880,6 +916,9 @@ func (s *CompatibleGatewayService) forwardPreparedRequestAttempt(
 
 func (s *CompatibleGatewayService) handleMessagesResponse(resp *http.Response, c *gin.Context, prepared *compatiblePreparedRequest, startTime time.Time) *ForwardResult {
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, nil)
+	if handled, repaired := s.maybeRepairClaudeKimiMessagesResponse(resp, c, prepared, startTime); handled {
+		return repaired
+	}
 	usage := ClaudeUsage{}
 	if prepared.ClientStream {
 		c.Status(resp.StatusCode)

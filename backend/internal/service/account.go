@@ -668,6 +668,35 @@ func (a *Account) GetExtraString(key string) string {
 	return ""
 }
 
+func (a *Account) GetExtraBool(key string) bool {
+	if a.Extra == nil {
+		return false
+	}
+	v, ok := a.Extra[key]
+	if !ok {
+		return false
+	}
+	switch typed := v.(type) {
+	case bool:
+		return typed
+	case string:
+		switch strings.ToLower(strings.TrimSpace(typed)) {
+		case "1", "true", "yes", "on", "enabled":
+			return true
+		default:
+			return false
+		}
+	case float64:
+		return typed != 0
+	case int:
+		return typed != 0
+	case int64:
+		return typed != 0
+	default:
+		return false
+	}
+}
+
 func (a *Account) GetClaudeUserID() string {
 	if v := strings.TrimSpace(a.GetExtraString("claude_user_id")); v != "" {
 		return v

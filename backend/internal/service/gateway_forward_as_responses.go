@@ -36,6 +36,11 @@ func (s *GatewayService) ForwardAsResponses(
 	parsed *ParsedRequest,
 ) (*ForwardResult, error) {
 	startTime := time.Now()
+	if c != nil {
+		SetCompatibilityRoute(c, CompatibilityRouteAnthropicResponsesBridge)
+		SetCompatibilityUpstreamTransport(c, UpstreamTransportSSE)
+		AppendCompatibilityFallbackStage(c, "bridge")
+	}
 
 	// 1. Parse Responses request
 	var responsesReq apicompat.ResponsesRequest

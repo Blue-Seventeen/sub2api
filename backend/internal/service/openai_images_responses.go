@@ -724,6 +724,9 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 	channelMappedModel string,
 ) (*OpenAIForwardResult, error) {
 	startTime := time.Now()
+	SetCompatibilityRoute(c, CompatibilityRouteOpenAIImagesResponsesBridge)
+	SetCompatibilityUpstreamTransport(c, UpstreamTransportSSE)
+	AppendCompatibilityFallbackStage(c, "bridge")
 	requestModel := strings.TrimSpace(parsed.Model)
 	if mapped := strings.TrimSpace(channelMappedModel); mapped != "" {
 		requestModel = mapped

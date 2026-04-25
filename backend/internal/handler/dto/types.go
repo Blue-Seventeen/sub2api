@@ -373,7 +373,11 @@ type UsageLog struct {
 	// InboundEndpoint is the client-facing API endpoint path, e.g. /v1/chat/completions.
 	InboundEndpoint *string `json:"inbound_endpoint,omitempty"`
 	// UpstreamEndpoint is the normalized upstream endpoint path, e.g. /v1/responses.
-	UpstreamEndpoint *string `json:"upstream_endpoint,omitempty"`
+	UpstreamEndpoint   *string `json:"upstream_endpoint,omitempty"`
+	ClientProfile      *string `json:"client_profile,omitempty"`
+	CompatibilityRoute *string `json:"compatibility_route,omitempty"`
+	FallbackChain      *string `json:"fallback_chain,omitempty"`
+	UpstreamTransport  *string `json:"upstream_transport,omitempty"`
 
 	GroupID        *int64 `json:"group_id"`
 	SubscriptionID *int64 `json:"subscription_id"`

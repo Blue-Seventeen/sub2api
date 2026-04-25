@@ -169,6 +169,7 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 		h.writeRouteError(c, route, http.StatusBadRequest, "invalid_request_error", "model is required", false)
 		return
 	}
+	setCompatibilityForCompatibleRoute(c, route, body, parsed)
 
 	setOpsRequestContext(c, parsed.Model, parsed.Stream, body)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(parsed.Stream, false)))
@@ -189,6 +190,7 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 		APIKeyID:  apiKey.ID,
 	}
 	sessionHash := h.base.gatewayService.GenerateSessionHash(parsed)
+	repairToolNames := extractCompatibleAnthropicToolNames(body, route)
 
 	maxWait := service.CalculateMaxWait(subject.Concurrency)
 	waitCounted := false
@@ -251,6 +253,18 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 
 		account := selection.Account
 		setOpsSelectedAccount(c, account.ID, account.Platform)
+		if route == service.CompatibleRouteMessages {
+			service.SetClaudeKimiToolRestoreContext(c, service.ClaudeKimiToolRestoreContext{
+				Enabled:         service.GetCompatibilityClientProfile(c) == service.ClientProfileClaudeCode && service.GetCompatibilityInboundProtocol(c) == service.InboundProtocolAnthropicMessages && account != nil && account.Platform == service.PlatformMoonshot && account.GetExtraBool("compat_claude_kimi_tool_restore"),
+				GroupID:         compatibleGroupIDValue(apiKey.GroupID),
+				SessionHash:     sessionHash,
+				AccountID:       account.ID,
+				Platform:        account.Platform,
+				ClientProfile:   service.GetCompatibilityClientProfile(c),
+				InboundProtocol: service.GetCompatibilityInboundProtocol(c),
+				ToolNames:       repairToolNames,
+			})
+		}
 
 		accountReleaseFunc := selection.ReleaseFunc
 		if !selection.Acquired {
@@ -345,6 +359,7 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 		clientIP := ip.GetClientIP(c)
 		requestPayloadHash := service.HashUsageRequestPayload(body)
 		inboundEndpoint := GetInboundEndpoint(c)
+		compat := compatibilityLogFields(c)
 		h.base.submitUsageRecordTask(func(ctx context.Context) {
 			if err := h.base.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 				Result:             result,
@@ -357,6 +372,10 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 				UpstreamEndpoint:   upstreamEndpoint,
 				UserAgent:          userAgent,
 				IPAddress:          clientIP,
+				ClientProfile:      compat.ClientProfile,
+				CompatibilityRoute: compat.CompatibilityRoute,
+				FallbackChain:      compat.FallbackChain,
+				UpstreamTransport:  compat.UpstreamTransport,
 				RequestPayloadHash: requestPayloadHash,
 				APIKeyService:      h.base.apiKeyService,
 			}); err != nil {
@@ -388,6 +407,38 @@ func parseCompatibleParsedRequest(body []byte, route service.CompatibleRequestRo
 	default:
 		return service.ParseGatewayRequest(body, domain.PlatformOpenAI)
 	}
+}
+
+func extractCompatibleAnthropicToolNames(body []byte, route service.CompatibleRequestRoute) []string {
+	if route != service.CompatibleRouteMessages || len(body) == 0 {
+		return nil
+	}
+	var req apicompat.AnthropicRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(req.Tools))
+	seen := make(map[string]struct{}, len(req.Tools))
+	for _, tool := range req.Tools {
+		name := strings.TrimSpace(tool.Name)
+		if name == "" {
+			continue
+		}
+		key := strings.ToLower(name)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, name)
+	}
+	return out
+}
+
+func compatibleGroupIDValue(groupID *int64) int64 {
+	if groupID == nil {
+		return 0
+	}
+	return *groupID
 }
 
 func (h *CompatibleGatewayHandler) writeFailoverError(c *gin.Context, route service.CompatibleRequestRoute, failoverErr *service.UpstreamFailoverError, fallbackStatus int, streamStarted bool, platform string) {

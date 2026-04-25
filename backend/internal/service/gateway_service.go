@@ -3938,6 +3938,15 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	if parsed == nil {
 		return nil, fmt.Errorf("parse request: empty request")
 	}
+	if c != nil {
+		SetCompatibilityRoute(c, CompatibilityRouteAnthropicNativeMessages)
+		if parsed.Stream {
+			SetCompatibilityUpstreamTransport(c, UpstreamTransportSSE)
+		} else {
+			SetCompatibilityUpstreamTransport(c, UpstreamTransportHTTPJSON)
+		}
+		AppendCompatibilityFallbackStage(c, "native")
+	}
 
 	// Web Search 模拟：纯 web_search 请求时，直接调用搜索 API 构造响应
 	if account != nil && s.shouldEmulateWebSearch(ctx, account, parsed.GroupID, parsed.Body) {
@@ -7260,6 +7269,10 @@ type RecordUsageInput struct {
 	RequestPayloadHash string             // 请求体语义哈希，用于降低 request_id 误复用时的静默误去重风险
 	ForceCacheBilling  bool               // 强制缓存计费：将 input_tokens 转为 cache_read 计费（用于粘性会话切换）
 	APIKeyService      APIKeyQuotaUpdater // 可选：用于更新API Key配额
+	ClientProfile      string
+	CompatibilityRoute string
+	FallbackChain      string
+	UpstreamTransport  string
 
 	ChannelUsageFields // 渠道映射信息（由 handler 在 Forward 前解析）
 }
@@ -7662,6 +7675,10 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 		UpstreamEndpoint:   input.UpstreamEndpoint,
 		UserAgent:          input.UserAgent,
 		IPAddress:          input.IPAddress,
+		ClientProfile:      input.ClientProfile,
+		CompatibilityRoute: input.CompatibilityRoute,
+		FallbackChain:      input.FallbackChain,
+		UpstreamTransport:  input.UpstreamTransport,
 		RequestPayloadHash: input.RequestPayloadHash,
 		ForceCacheBilling:  input.ForceCacheBilling,
 		APIKeyService:      input.APIKeyService,
@@ -7687,6 +7704,10 @@ type RecordUsageLongContextInput struct {
 	LongContextMultiplier float64            // 超出阈值部分的倍率（如 2.0）
 	ForceCacheBilling     bool               // 强制缓存计费：将 input_tokens 转为 cache_read 计费（用于粘性会话切换）
 	APIKeyService         APIKeyQuotaUpdater // API Key 配额服务（可选）
+	ClientProfile         string
+	CompatibilityRoute    string
+	FallbackChain         string
+	UpstreamTransport     string
 
 	ChannelUsageFields // 渠道映射信息（由 handler 在 Forward 前解析）
 }
@@ -7703,6 +7724,10 @@ func (s *GatewayService) RecordUsageWithLongContext(ctx context.Context, input *
 		UpstreamEndpoint:   input.UpstreamEndpoint,
 		UserAgent:          input.UserAgent,
 		IPAddress:          input.IPAddress,
+		ClientProfile:      input.ClientProfile,
+		CompatibilityRoute: input.CompatibilityRoute,
+		FallbackChain:      input.FallbackChain,
+		UpstreamTransport:  input.UpstreamTransport,
 		RequestPayloadHash: input.RequestPayloadHash,
 		ForceCacheBilling:  input.ForceCacheBilling,
 		APIKeyService:      input.APIKeyService,
@@ -7728,6 +7753,10 @@ type recordUsageCoreInput struct {
 	RequestPayloadHash string
 	ForceCacheBilling  bool
 	APIKeyService      APIKeyQuotaUpdater
+	ClientProfile      string
+	CompatibilityRoute string
+	FallbackChain      string
+	UpstreamTransport  string
 	ChannelUsageFields
 }
 
@@ -8041,6 +8070,10 @@ func (s *GatewayService) buildRecordUsageLog(
 		ReasoningEffort:       result.ReasoningEffort,
 		InboundEndpoint:       optionalTrimmedStringPtr(input.InboundEndpoint),
 		UpstreamEndpoint:      optionalTrimmedStringPtr(input.UpstreamEndpoint),
+		ClientProfile:         optionalTrimmedStringPtr(input.ClientProfile),
+		CompatibilityRoute:    optionalTrimmedStringPtr(input.CompatibilityRoute),
+		FallbackChain:         optionalTrimmedStringPtr(input.FallbackChain),
+		UpstreamTransport:     optionalTrimmedStringPtr(input.UpstreamTransport),
 		InputTokens:           result.Usage.InputTokens,
 		OutputTokens:          result.Usage.OutputTokens,
 		CacheCreationTokens:   result.Usage.CacheCreationInputTokens,

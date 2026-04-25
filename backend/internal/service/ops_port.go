@@ -87,6 +87,13 @@ type OpsInsertErrorLogInput struct {
 	RequestedModel string
 	// UpstreamModel is the actual model sent to upstream after mapping. Empty means no mapping.
 	UpstreamModel string
+	ClientProfile string
+	// CompatibilityRoute is the canonical compatibility lane selected for the request.
+	CompatibilityRoute string
+	// FallbackChain records observed fallback stages, e.g. native -> relay -> chat_fallback.
+	FallbackChain string
+	// UpstreamTransport records the actual upstream transport lane, e.g. http_json / sse / ws_v2.
+	UpstreamTransport string
 	// RequestType is the granular request type: 0=unknown, 1=sync, 2=stream, 3=ws_v2.
 	// Matches service.RequestType enum semantics from usage_log.go.
 	RequestType *int16

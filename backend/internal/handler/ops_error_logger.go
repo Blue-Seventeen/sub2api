@@ -629,6 +629,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 				recoveredMsg += ": " + strings.TrimSpace(*upstreamErrorMessage)
 			}
 			recoveredMsg = truncateString(recoveredMsg, 2048)
+			compat := service.CompatibilityLogFieldsFromContext(c)
 
 			entry := &service.OpsInsertErrorLogInput{
 				RequestID:       requestID,
@@ -655,6 +656,10 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 					}
 					return ""
 				}(),
+				ClientProfile:      compat.ClientProfile,
+				CompatibilityRoute: compat.CompatibilityRoute,
+				FallbackChain:      compat.FallbackChain,
+				UpstreamTransport:  compat.UpstreamTransport,
 				RequestType: func() *int16 {
 					if v, ok := c.Get(opsRequestTypeKey); ok {
 						switch t := v.(type) {
@@ -780,6 +785,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 
 		errorOwner := classifyOpsErrorOwner(phase, parsed.Message)
 		errorSource := classifyOpsErrorSource(phase, parsed.Message)
+		compat := service.CompatibilityLogFieldsFromContext(c)
 
 		entry := &service.OpsInsertErrorLogInput{
 			RequestID:       requestID,
@@ -806,6 +812,10 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 				}
 				return ""
 			}(),
+			ClientProfile:      compat.ClientProfile,
+			CompatibilityRoute: compat.CompatibilityRoute,
+			FallbackChain:      compat.FallbackChain,
+			UpstreamTransport:  compat.UpstreamTransport,
 			RequestType: func() *int16 {
 				if v, ok := c.Get(opsRequestTypeKey); ok {
 					switch t := v.(type) {

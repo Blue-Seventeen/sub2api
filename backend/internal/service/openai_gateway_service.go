@@ -1830,6 +1830,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		c.Set("openai_ws_transport_reason", wsDecision.Reason)
 	}
 	if wsDecision.Transport == OpenAIUpstreamTransportResponsesWebsocketV2 {
+		SetCompatibilityRoute(c, CompatibilityRouteOpenAIResponsesWSV2)
+		SetCompatibilityUpstreamTransport(c, UpstreamTransportWSV2)
+		AppendCompatibilityFallbackStage(c, "ws_v2")
 		logOpenAIWSModeDebug(
 			"selected account_id=%d account_type=%s transport=%s reason=%s model=%s stream=%v",
 			account.ID,
@@ -1853,6 +1856,15 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return nil, errors.New("openai ws v1 is temporarily unsupported; use ws v2")
 	}
 	passthroughEnabled := account.IsOpenAIPassthroughEnabled()
+	if wsDecision.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {
+		SetCompatibilityRoute(c, CompatibilityRouteOpenAIResponsesNative)
+		if reqStream {
+			SetCompatibilityUpstreamTransport(c, UpstreamTransportSSE)
+		} else {
+			SetCompatibilityUpstreamTransport(c, UpstreamTransportHTTPJSON)
+		}
+		AppendCompatibilityFallbackStage(c, "native")
+	}
 	if passthroughEnabled {
 		// 透传分支只需要轻量提取字段，避免热路径全量 Unmarshal。
 		reasoningEffort := extractOpenAIReasoningEffortFromBody(body, reqModel)
@@ -4520,6 +4532,10 @@ type OpenAIRecordUsageInput struct {
 	IPAddress          string // 请求的客户端 IP 地址
 	RequestPayloadHash string
 	APIKeyService      APIKeyQuotaUpdater
+	ClientProfile      string
+	CompatibilityRoute string
+	FallbackChain      string
+	UpstreamTransport  string
 	ChannelUsageFields
 }
 
@@ -4627,6 +4643,10 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		ReasoningEffort:     result.ReasoningEffort,
 		InboundEndpoint:     optionalTrimmedStringPtr(input.InboundEndpoint),
 		UpstreamEndpoint:    optionalTrimmedStringPtr(input.UpstreamEndpoint),
+		ClientProfile:       optionalTrimmedStringPtr(input.ClientProfile),
+		CompatibilityRoute:  optionalTrimmedStringPtr(input.CompatibilityRoute),
+		FallbackChain:       optionalTrimmedStringPtr(input.FallbackChain),
+		UpstreamTransport:   optionalTrimmedStringPtr(input.UpstreamTransport),
 		InputTokens:         actualInputTokens,
 		OutputTokens:        result.Usage.OutputTokens,
 		CacheCreationTokens: result.Usage.CacheCreationInputTokens,

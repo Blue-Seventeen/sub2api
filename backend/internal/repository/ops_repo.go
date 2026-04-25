@@ -33,6 +33,10 @@ INSERT INTO ops_error_logs (
   upstream_endpoint,
   requested_model,
   upstream_model,
+  client_profile,
+  compatibility_route,
+  fallback_chain,
+  upstream_transport,
   request_type,
   user_agent,
   error_phase,
@@ -62,7 +66,7 @@ INSERT INTO ops_error_logs (
   retry_count,
   created_at
 ) VALUES (
-  $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43
+  $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47
 )`
 
 func NewOpsRepository(db *sql.DB) service.OpsRepository {
@@ -149,6 +153,10 @@ func opsInsertErrorLogArgs(input *service.OpsInsertErrorLogInput) []any {
 		opsNullString(input.UpstreamEndpoint),
 		opsNullString(input.RequestedModel),
 		opsNullString(input.UpstreamModel),
+		opsNullString(input.ClientProfile),
+		opsNullString(input.CompatibilityRoute),
+		opsNullString(input.FallbackChain),
+		opsNullString(input.UpstreamTransport),
 		opsNullInt16(input.RequestType),
 		opsNullString(input.UserAgent),
 		input.ErrorPhase,
@@ -246,6 +254,10 @@ SELECT
   COALESCE(e.upstream_endpoint, ''),
   COALESCE(e.requested_model, ''),
   COALESCE(e.upstream_model, ''),
+  COALESCE(e.client_profile, ''),
+  COALESCE(e.compatibility_route, ''),
+  COALESCE(e.fallback_chain, ''),
+  COALESCE(e.upstream_transport, ''),
   e.request_type
 FROM ops_error_logs e
 LEFT JOIN accounts a ON e.account_id = a.id
@@ -314,6 +326,10 @@ LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
 			&item.UpstreamEndpoint,
 			&item.RequestedModel,
 			&item.UpstreamModel,
+			&item.ClientProfile,
+			&item.CompatibilityRoute,
+			&item.FallbackChain,
+			&item.UpstreamTransport,
 			&requestType,
 		); err != nil {
 			return nil, err
@@ -422,6 +438,10 @@ SELECT
   COALESCE(e.upstream_endpoint, ''),
   COALESCE(e.requested_model, ''),
   COALESCE(e.upstream_model, ''),
+  COALESCE(e.client_profile, ''),
+  COALESCE(e.compatibility_route, ''),
+  COALESCE(e.fallback_chain, ''),
+  COALESCE(e.upstream_transport, ''),
   e.request_type,
   COALESCE(e.user_agent, ''),
   e.auth_latency_ms,
@@ -499,6 +519,10 @@ LIMIT 1`
 		&out.UpstreamEndpoint,
 		&out.RequestedModel,
 		&out.UpstreamModel,
+		&out.ClientProfile,
+		&out.CompatibilityRoute,
+		&out.FallbackChain,
+		&out.UpstreamTransport,
 		&requestType,
 		&out.UserAgent,
 		&authLatency,

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"sync/atomic"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
@@ -18,6 +19,8 @@ type RequestMetadata struct {
 	PrefetchedStickyGroupID    *int64
 	SingleAccountRetry         *bool
 	AccountSwitchCount         *int
+	ClientProfile              *string
+	InboundProtocol            *string
 }
 
 var (
@@ -114,6 +117,26 @@ func WithAccountSwitchCount(ctx context.Context, value int, bridgeOldKeys bool) 
 	}, func(base context.Context) context.Context {
 		return context.WithValue(base, ctxkey.AccountSwitchCount, value)
 	})
+}
+
+func WithClientProfile(ctx context.Context, value ClientProfile) context.Context {
+	return updateRequestMetadata(ctx, false, func(md *RequestMetadata) {
+		v := strings.TrimSpace(string(value.Normalize()))
+		if v == "" {
+			return
+		}
+		md.ClientProfile = &v
+	}, nil)
+}
+
+func WithInboundProtocol(ctx context.Context, value InboundProtocol) context.Context {
+	return updateRequestMetadata(ctx, false, func(md *RequestMetadata) {
+		v := strings.TrimSpace(string(value.Normalize()))
+		if v == "" {
+			return
+		}
+		md.InboundProtocol = &v
+	}, nil)
 }
 
 func IsMaxTokensOneHaikuRequestFromContext(ctx context.Context) (bool, bool) {
@@ -213,4 +236,22 @@ func AccountSwitchCountFromContext(ctx context.Context) (int, bool) {
 		return int(t), true
 	}
 	return 0, false
+}
+
+func ClientProfileFromContext(ctx context.Context) (ClientProfile, bool) {
+	if md := metadataFromContext(ctx); md != nil && md.ClientProfile != nil {
+		if value := ClientProfile(*md.ClientProfile).Normalize(); value != ClientProfileUnknown {
+			return value, true
+		}
+	}
+	return ClientProfileUnknown, false
+}
+
+func InboundProtocolFromContext(ctx context.Context) (InboundProtocol, bool) {
+	if md := metadataFromContext(ctx); md != nil && md.InboundProtocol != nil {
+		if value := InboundProtocol(*md.InboundProtocol).Normalize(); value != InboundProtocolUnknown {
+			return value, true
+		}
+	}
+	return InboundProtocolUnknown, false
 }

@@ -93,6 +93,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	compactStartedAt := time.Now()
 	defer h.logOpenAIRemoteCompactOutcome(c, compactStartedAt)
 	setOpenAIClientTransportHTTP(c)
+	setCompatibilityForResponsesHTTP(c, h.cfg != nil && h.cfg.Gateway.ForceCodexCLI)
 
 	requestStart := time.Now()
 
@@ -387,6 +388,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
 		requestPayloadHash := service.HashUsageRequestPayload(body)
+		compat := compatibilityLogFields(c)
 
 		// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 		h.submitUsageRecordTask(func(ctx context.Context) {
@@ -401,6 +403,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				UserAgent:          userAgent,
 				IPAddress:          clientIP,
 				RequestPayloadHash: requestPayloadHash,
+				ClientProfile:      compat.ClientProfile,
+				CompatibilityRoute: compat.CompatibilityRoute,
+				FallbackChain:      compat.FallbackChain,
+				UpstreamTransport:  compat.UpstreamTransport,
 				APIKeyService:      h.apiKeyService,
 				ChannelUsageFields: channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
 			}); err != nil {
@@ -558,6 +564,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return
 	}
+	setCompatibilityForAnthropicMessages(c, body, nil)
 
 	modelResult := gjson.GetBytes(body, "model")
 	if !modelResult.Exists() || modelResult.Type != gjson.String || modelResult.String() == "" {
@@ -760,6 +767,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
 		requestPayloadHash := service.HashUsageRequestPayload(body)
+		compat := compatibilityLogFields(c)
 
 		h.submitUsageRecordTask(func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
@@ -773,6 +781,10 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 				UserAgent:          userAgent,
 				IPAddress:          clientIP,
 				RequestPayloadHash: requestPayloadHash,
+				ClientProfile:      compat.ClientProfile,
+				CompatibilityRoute: compat.CompatibilityRoute,
+				FallbackChain:      compat.FallbackChain,
+				UpstreamTransport:  compat.UpstreamTransport,
 				APIKeyService:      h.apiKeyService,
 				ChannelUsageFields: channelMappingMsg.ToUsageFields(reqModel, result.UpstreamModel),
 			}); err != nil {
@@ -1025,6 +1037,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		return
 	}
 	setOpenAIClientTransportWS(c)
+	setCompatibilityForResponsesWS(c, h.cfg != nil && h.cfg.Gateway.ForceCodexCLI)
 
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
 	if !ok {
@@ -1277,6 +1290,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					UserAgent:          userAgent,
 					IPAddress:          clientIP,
 					RequestPayloadHash: service.HashUsageRequestPayload(firstMessage),
+					ClientProfile:      compatibilityLogFields(c).ClientProfile,
+					CompatibilityRoute: compatibilityLogFields(c).CompatibilityRoute,
+					FallbackChain:      compatibilityLogFields(c).FallbackChain,
+					UpstreamTransport:  compatibilityLogFields(c).UpstreamTransport,
 					APIKeyService:      h.apiKeyService,
 					ChannelUsageFields: channelMappingWS.ToUsageFields(reqModel, result.UpstreamModel),
 				}); err != nil {

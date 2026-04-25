@@ -508,6 +508,16 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 	channelMappedModel string,
 ) (*OpenAIForwardResult, error) {
 	startTime := time.Now()
+	SetCompatibilityRoute(c, CompatibilityRouteOpenAIImagesNative)
+	switch {
+	case parsed.Stream:
+		SetCompatibilityUpstreamTransport(c, UpstreamTransportSSE)
+	case parsed.Multipart:
+		SetCompatibilityUpstreamTransport(c, UpstreamTransportHTTPMultipart)
+	default:
+		SetCompatibilityUpstreamTransport(c, UpstreamTransportHTTPJSON)
+	}
+	AppendCompatibilityFallbackStage(c, "native")
 	requestModel := strings.TrimSpace(parsed.Model)
 	if mapped := strings.TrimSpace(channelMappedModel); mapped != "" {
 		requestModel = mapped
@@ -783,10 +793,18 @@ func (s *OpenAIGatewayService) handleOpenAIImagesNonStreamingResponse(resp *http
 			contentType = upstreamType
 		}
 	}
-	c.Data(resp.StatusCode, contentType, body)
+	normalizedBody := body
+	imageCount := extractOpenAIImageCountFromJSONBytes(body)
+	if candidate, normalizedCount, ok := normalizeOpenAIImagesResponseBody(body); ok {
+		normalizedBody = candidate
+		if normalizedCount > 0 {
+			imageCount = normalizedCount
+		}
+	}
+	c.Data(resp.StatusCode, contentType, normalizedBody)
 
 	usage, _ := extractOpenAIUsageFromJSONBytes(body)
-	return usage, extractOpenAIImageCountFromJSONBytes(body), nil
+	return usage, imageCount, nil
 }
 
 func (s *OpenAIGatewayService) handleOpenAIImagesStreamingResponse(
@@ -871,6 +889,142 @@ func extractOpenAIImageCountFromJSONBytes(body []byte) int {
 		return len(data.Array())
 	}
 	return 0
+}
+
+type normalizedOpenAIImageResponseItem struct {
+	URL           string `json:"url,omitempty"`
+	B64JSON       string `json:"b64_json,omitempty"`
+	RevisedPrompt string `json:"revised_prompt,omitempty"`
+}
+
+func normalizeOpenAIImagesResponseBody(body []byte) ([]byte, int, bool) {
+	items := buildNormalizedOpenAIImageResponseItems(body)
+	if len(items) == 0 {
+		return body, 0, false
+	}
+	dataRaw, err := json.Marshal(items)
+	if err != nil {
+		return body, 0, false
+	}
+	base := ensureJSONObjectBytes(body)
+	base, err = sjson.SetRawBytes(base, "data", dataRaw)
+	if err != nil {
+		base = []byte(`{"data":[]}`)
+		base, _ = sjson.SetRawBytes(base, "data", dataRaw)
+	}
+	if !gjson.GetBytes(base, "created").Exists() {
+		base, _ = sjson.SetBytes(base, "created", time.Now().Unix())
+	}
+	return base, len(items), true
+}
+
+func ensureJSONObjectBytes(body []byte) []byte {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return []byte(`{}`)
+	}
+	return append([]byte(nil), body...)
+}
+
+func buildNormalizedOpenAIImageResponseItems(body []byte) []normalizedOpenAIImageResponseItem {
+	if len(body) == 0 || !gjson.ValidBytes(body) {
+		return nil
+	}
+	fallbackPrompt := strings.TrimSpace(firstNonEmptyString(
+		gjson.GetBytes(body, "revised_prompt").String(),
+		gjson.GetBytes(body, "message.metadata.dalle.prompt").String(),
+		gjson.GetBytes(body, "metadata.dalle.prompt").String(),
+	))
+	items := make([]normalizedOpenAIImageResponseItem, 0, 4)
+	seen := make(map[string]struct{}, 4)
+	appendArray := func(path string) {
+		result := gjson.GetBytes(body, path)
+		if !result.Exists() || !result.IsArray() {
+			return
+		}
+		for _, item := range result.Array() {
+			appendNormalizedOpenAIImageResponseItem(&items, seen, item, fallbackPrompt)
+		}
+	}
+
+	appendArray("data")
+	appendArray("images")
+	appendArray("output.images")
+	appendArray("output.b64_json")
+
+	for _, pointer := range collectOpenAIImagePointers(body) {
+		item := normalizedOpenAIImageResponseItem{
+			URL:           strings.TrimSpace(pointer.DownloadURL),
+			B64JSON:       normalizeOpenAIImageBase64(pointer.B64JSON),
+			RevisedPrompt: strings.TrimSpace(pointer.Prompt),
+		}
+		appendNormalizedOpenAIImageResponseItemValue(&items, seen, item, fallbackPrompt)
+	}
+	return items
+}
+
+func appendNormalizedOpenAIImageResponseItem(items *[]normalizedOpenAIImageResponseItem, seen map[string]struct{}, item gjson.Result, fallbackPrompt string) {
+	if items == nil {
+		return
+	}
+	normalized := normalizedOpenAIImageResponseItem{
+		URL: strings.TrimSpace(firstNonEmptyString(
+			item.Get("url").String(),
+			item.Get("image_url").String(),
+			item.Get("download_url").String(),
+		)),
+		B64JSON: normalizeOpenAIImageBase64(firstNonEmptyString(
+			resolveOpenAIImageB64JSON(item),
+			item.Get("bytesBase64").String(),
+			item.Get("bytes_base64").String(),
+		)),
+		RevisedPrompt: strings.TrimSpace(firstNonEmptyString(
+			item.Get("revised_prompt").String(),
+			item.Get("prompt").String(),
+		)),
+	}
+	appendNormalizedOpenAIImageResponseItemValue(items, seen, normalized, fallbackPrompt)
+}
+
+func resolveOpenAIImageB64JSON(item gjson.Result) string {
+	b64JSON := item.Get("b64_json")
+	if !b64JSON.Exists() {
+		return firstNonEmptyString(
+			item.Get("base64").String(),
+			item.Get("image_base64").String(),
+		)
+	}
+	if b64JSON.Type == gjson.String {
+		return b64JSON.String()
+	}
+	return firstNonEmptyString(
+		b64JSON.Get("bytesBase64").String(),
+		b64JSON.Get("bytes_base64").String(),
+		b64JSON.Get("b64_json").String(),
+	)
+}
+
+func appendNormalizedOpenAIImageResponseItemValue(items *[]normalizedOpenAIImageResponseItem, seen map[string]struct{}, item normalizedOpenAIImageResponseItem, fallbackPrompt string) {
+	if items == nil {
+		return
+	}
+	item.URL = strings.TrimSpace(item.URL)
+	item.B64JSON = normalizeOpenAIImageBase64(item.B64JSON)
+	if item.URL == "" && item.B64JSON == "" {
+		return
+	}
+	if strings.TrimSpace(item.RevisedPrompt) == "" {
+		item.RevisedPrompt = fallbackPrompt
+	}
+	key := item.URL + "|" + item.B64JSON
+	if key == "|" {
+		return
+	}
+	if _, exists := seen[key]; exists {
+		return
+	}
+	seen[key] = struct{}{}
+	*items = append(*items, item)
 }
 
 type openAIImagePointerInfo struct {

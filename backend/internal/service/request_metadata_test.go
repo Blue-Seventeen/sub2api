@@ -117,3 +117,17 @@ func TestRequestMetadataRead_PreferMetadataOverLegacy(t *testing.T) {
 	require.True(t, thinking)
 	require.Equal(t, false, ctx.Value(ctxkey.ThinkingEnabled))
 }
+
+func TestRequestMetadataWriteAndRead_ClientProfileAndInboundProtocol(t *testing.T) {
+	ctx := context.Background()
+	ctx = WithClientProfile(ctx, ClientProfileCodex)
+	ctx = WithInboundProtocol(ctx, InboundProtocolOpenAIResponsesWS)
+
+	clientProfile, ok := ClientProfileFromContext(ctx)
+	require.True(t, ok)
+	require.Equal(t, ClientProfileCodex, clientProfile)
+
+	inboundProtocol, ok := InboundProtocolFromContext(ctx)
+	require.True(t, ok)
+	require.Equal(t, InboundProtocolOpenAIResponsesWS, inboundProtocol)
+}

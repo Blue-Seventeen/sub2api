@@ -42,56 +42,7 @@ func TestUsageLogRepositoryCreateSyncRequestTypeAndLegacyFields(t *testing.T) {
 	}
 
 	mock.ExpectQuery("INSERT INTO usage_logs").
-		WithArgs(
-			log.UserID,
-			log.APIKeyID,
-			log.AccountID,
-			log.RequestID,
-			log.Model,
-			log.RequestedModel,
-			sqlmock.AnyArg(), // upstream_model
-			sqlmock.AnyArg(), // group_id
-			sqlmock.AnyArg(), // subscription_id
-			log.InputTokens,
-			log.OutputTokens,
-			log.CacheCreationTokens,
-			log.CacheReadTokens,
-			log.CacheCreation5mTokens,
-			log.CacheCreation1hTokens,
-			log.ImageOutputTokens,
-			log.ImageOutputCost,
-			log.InputCost,
-			log.OutputCost,
-			log.CacheCreationCost,
-			log.CacheReadCost,
-			log.TotalCost,
-			log.ActualCost,
-			log.RealActualCost,
-			log.UnifiedRateMultiplier,
-			log.RateMultiplier,
-			log.AccountRateMultiplier,
-			log.BillingType,
-			int16(service.RequestTypeWSV2),
-			true,
-			true,
-			sqlmock.AnyArg(), // duration_ms
-			sqlmock.AnyArg(), // first_token_ms
-			sqlmock.AnyArg(), // user_agent
-			sqlmock.AnyArg(), // ip_address
-			log.ImageCount,
-			sqlmock.AnyArg(), // image_size
-			sqlmock.AnyArg(), // service_tier
-			sqlmock.AnyArg(), // reasoning_effort
-			sqlmock.AnyArg(), // inbound_endpoint
-			sqlmock.AnyArg(), // upstream_endpoint
-			log.CacheTTLOverridden,
-			sqlmock.AnyArg(), // channel_id
-			sqlmock.AnyArg(), // model_mapping_chain
-			sqlmock.AnyArg(), // billing_tier
-			sqlmock.AnyArg(), // billing_mode
-			sqlmock.AnyArg(), // account_stats_cost
-			createdAt,
-		).
+		WithArgs(usageLogInsertExpectationArgs(log)...).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(99), createdAt))
 
 	inserted, err := repo.Create(context.Background(), log)
@@ -123,56 +74,7 @@ func TestUsageLogRepositoryCreate_PersistsServiceTier(t *testing.T) {
 	}
 
 	mock.ExpectQuery("INSERT INTO usage_logs").
-		WithArgs(
-			log.UserID,
-			log.APIKeyID,
-			log.AccountID,
-			log.RequestID,
-			log.Model,
-			log.RequestedModel,
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			log.InputTokens,
-			log.OutputTokens,
-			log.CacheCreationTokens,
-			log.CacheReadTokens,
-			log.CacheCreation5mTokens,
-			log.CacheCreation1hTokens,
-			log.ImageOutputTokens,
-			log.ImageOutputCost,
-			log.InputCost,
-			log.OutputCost,
-			log.CacheCreationCost,
-			log.CacheReadCost,
-			log.TotalCost,
-			log.ActualCost,
-			log.RealActualCost,
-			log.UnifiedRateMultiplier,
-			log.RateMultiplier,
-			log.AccountRateMultiplier,
-			log.BillingType,
-			int16(service.RequestTypeSync),
-			false,
-			false,
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			log.ImageCount,
-			sqlmock.AnyArg(),
-			serviceTier,
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			log.CacheTTLOverridden,
-			sqlmock.AnyArg(), // channel_id
-			sqlmock.AnyArg(), // model_mapping_chain
-			sqlmock.AnyArg(), // billing_tier
-			sqlmock.AnyArg(), // billing_mode
-			sqlmock.AnyArg(), // account_stats_cost
-			createdAt,
-		).
+		WithArgs(usageLogInsertExpectationArgs(log)...).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(100), createdAt))
 
 	inserted, err := repo.Create(context.Background(), log)
@@ -535,60 +437,109 @@ func (s usageLogScannerStub) Scan(dest ...any) error {
 	return nil
 }
 
+type usageLogScanRowOptions struct {
+	ID           int64
+	UserID       int64
+	APIKeyID     int64
+	AccountID    int64
+	RequestID    string
+	Model        string
+	RequestedModel string
+	BillingType  int16
+	RequestType  int16
+	LegacyStream bool
+	LegacyWS     bool
+	ServiceTier  *string
+	CreatedAt    time.Time
+}
+
+func usageLogInsertExpectationArgs(log *service.UsageLog) []driver.Value {
+	cloned := *log
+	prepared := prepareUsageLogInsert(&cloned)
+	return anySliceToDriverValues(prepared.args)
+}
+
+func buildUsageLogScanValues(opts usageLogScanRowOptions) []any {
+	requestedModel := opts.RequestedModel
+	if requestedModel == "" {
+		requestedModel = opts.Model
+	}
+
+	return []any{
+		opts.ID,
+		opts.UserID,
+		opts.APIKeyID,
+		opts.AccountID,
+		nullString(&opts.RequestID),
+		opts.Model,
+		nullString(&requestedModel),
+		sql.NullString{}, // upstream_model
+		sql.NullInt64{},  // group_id
+		sql.NullInt64{},  // subscription_id
+		1,                // input_tokens
+		2,                // output_tokens
+		3,                // cache_creation_tokens
+		4,                // cache_read_tokens
+		5,                // cache_creation_5m_tokens
+		6,                // cache_creation_1h_tokens
+		0,                // image_output_tokens
+		0.0,              // image_output_cost
+		0.1,              // input_cost
+		0.2,              // output_cost
+		0.3,              // cache_creation_cost
+		0.4,              // cache_read_cost
+		1.0,              // total_cost
+		0.9,              // actual_cost
+		0.9,              // real_actual_cost
+		1.0,              // unified_rate_multiplier
+		1.0,              // rate_multiplier
+		sql.NullFloat64{}, // account_rate_multiplier
+		opts.BillingType,
+		opts.RequestType,
+		opts.LegacyStream,
+		opts.LegacyWS,
+		sql.NullInt64{},   // duration_ms
+		sql.NullInt64{},   // first_token_ms
+		sql.NullString{},  // user_agent
+		sql.NullString{},  // ip_address
+		0,                 // image_count
+		sql.NullString{},  // image_size
+		nullString(opts.ServiceTier),
+		sql.NullString{},  // reasoning_effort
+		sql.NullString{},  // inbound_endpoint
+		sql.NullString{},  // upstream_endpoint
+		sql.NullString{},  // client_profile
+		sql.NullString{},  // compatibility_route
+		sql.NullString{},  // fallback_chain
+		sql.NullString{},  // upstream_transport
+		false,             // cache_ttl_overridden
+		sql.NullInt64{},   // channel_id
+		sql.NullString{},  // model_mapping_chain
+		sql.NullString{},  // billing_tier
+		sql.NullString{},  // billing_mode
+		sql.NullFloat64{}, // account_stats_cost
+		opts.CreatedAt,
+	}
+}
+
 func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 	t.Run("request_type_ws_v2_overrides_legacy", func(t *testing.T) {
 		now := time.Now().UTC()
-		log, err := scanUsageLog(usageLogScannerStub{values: []any{
-			int64(1),  // id
-			int64(10), // user_id
-			int64(20), // api_key_id
-			int64(30), // account_id
-			sql.NullString{Valid: true, String: "req-1"},
-			"gpt-5", // model
-			sql.NullString{Valid: true, String: "gpt-5"}, // requested_model
-			sql.NullString{},  // upstream_model
-			sql.NullInt64{},   // group_id
-			sql.NullInt64{},   // subscription_id
-			1,                 // input_tokens
-			2,                 // output_tokens
-			3,                 // cache_creation_tokens
-			4,                 // cache_read_tokens
-			5,                 // cache_creation_5m_tokens
-			6,                 // cache_creation_1h_tokens
-			0,                 // image_output_tokens
-			0.0,               // image_output_cost
-			0.1,               // input_cost
-			0.2,               // output_cost
-			0.3,               // cache_creation_cost
-			0.4,               // cache_read_cost
-			1.0,               // total_cost
-			0.9,               // actual_cost
-			0.9,               // real_actual_cost
-			1.0,               // unified_rate_multiplier
-			1.0,               // rate_multiplier
-			sql.NullFloat64{}, // account_rate_multiplier
-			int16(service.BillingTypeBalance),
-			int16(service.RequestTypeWSV2),
-			false, // legacy stream
-			false, // legacy openai ws
-			sql.NullInt64{},
-			sql.NullInt64{},
-			sql.NullString{},
-			sql.NullString{},
-			0,
-			sql.NullString{},
-			sql.NullString{Valid: true, String: "priority"},
-			sql.NullString{},
-			sql.NullString{},
-			sql.NullString{},
-			false,
-			sql.NullInt64{},   // channel_id
-			sql.NullString{},  // model_mapping_chain
-			sql.NullString{},  // billing_tier
-			sql.NullString{},  // billing_mode
-			sql.NullFloat64{}, // account_stats_cost
-			now,
-		}})
+		serviceTier := "priority"
+		log, err := scanUsageLog(usageLogScannerStub{values: buildUsageLogScanValues(usageLogScanRowOptions{
+			ID:             1,
+			UserID:         10,
+			APIKeyID:       20,
+			AccountID:      30,
+			RequestID:      "req-1",
+			Model:          "gpt-5",
+			BillingType:    int16(service.BillingTypeBalance),
+			RequestType:    int16(service.RequestTypeWSV2),
+			LegacyStream:   false,
+			LegacyWS:       false,
+			ServiceTier:    &serviceTier,
+			CreatedAt:      now,
+		})})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
 		require.Equal(t, "priority", *log.ServiceTier)
@@ -599,46 +550,21 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 
 	t.Run("request_type_unknown_falls_back_to_legacy", func(t *testing.T) {
 		now := time.Now().UTC()
-		log, err := scanUsageLog(usageLogScannerStub{values: []any{
-			int64(2),
-			int64(11),
-			int64(21),
-			int64(31),
-			sql.NullString{Valid: true, String: "req-2"},
-			"gpt-5",
-			sql.NullString{Valid: true, String: "gpt-5"},
-			sql.NullString{},
-			sql.NullInt64{},
-			sql.NullInt64{},
-			1, 2, 3, 4, 5, 6,
-			0, 0.0, // image_output_tokens, image_output_cost
-			0.1, 0.2, 0.3, 0.4, 1.0, 0.9,
-			0.9, // real_actual_cost
-			1.0, // unified_rate_multiplier
-			1.0,
-			sql.NullFloat64{},
-			int16(service.BillingTypeBalance),
-			int16(service.RequestTypeUnknown),
-			true,
-			false,
-			sql.NullInt64{},
-			sql.NullInt64{},
-			sql.NullString{},
-			sql.NullString{},
-			0,
-			sql.NullString{},
-			sql.NullString{Valid: true, String: "flex"},
-			sql.NullString{},
-			sql.NullString{},
-			sql.NullString{},
-			false,
-			sql.NullInt64{},   // channel_id
-			sql.NullString{},  // model_mapping_chain
-			sql.NullString{},  // billing_tier
-			sql.NullString{},  // billing_mode
-			sql.NullFloat64{}, // account_stats_cost
-			now,
-		}})
+		serviceTier := "flex"
+		log, err := scanUsageLog(usageLogScannerStub{values: buildUsageLogScanValues(usageLogScanRowOptions{
+			ID:             2,
+			UserID:         11,
+			APIKeyID:       21,
+			AccountID:      31,
+			RequestID:      "req-2",
+			Model:          "gpt-5",
+			BillingType:    int16(service.BillingTypeBalance),
+			RequestType:    int16(service.RequestTypeUnknown),
+			LegacyStream:   true,
+			LegacyWS:       false,
+			ServiceTier:    &serviceTier,
+			CreatedAt:      now,
+		})})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
 		require.Equal(t, "flex", *log.ServiceTier)
@@ -649,46 +575,21 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 
 	t.Run("service_tier_is_scanned", func(t *testing.T) {
 		now := time.Now().UTC()
-		log, err := scanUsageLog(usageLogScannerStub{values: []any{
-			int64(3),
-			int64(12),
-			int64(22),
-			int64(32),
-			sql.NullString{Valid: true, String: "req-3"},
-			"gpt-5.4",
-			sql.NullString{Valid: true, String: "gpt-5.4"},
-			sql.NullString{},
-			sql.NullInt64{},
-			sql.NullInt64{},
-			1, 2, 3, 4, 5, 6,
-			0, 0.0, // image_output_tokens, image_output_cost
-			0.1, 0.2, 0.3, 0.4, 1.0, 0.9,
-			0.9, // real_actual_cost
-			1.0, // unified_rate_multiplier
-			1.0,
-			sql.NullFloat64{},
-			int16(service.BillingTypeBalance),
-			int16(service.RequestTypeSync),
-			false,
-			false,
-			sql.NullInt64{},
-			sql.NullInt64{},
-			sql.NullString{},
-			sql.NullString{},
-			0,
-			sql.NullString{},
-			sql.NullString{Valid: true, String: "priority"},
-			sql.NullString{},
-			sql.NullString{},
-			sql.NullString{},
-			false,
-			sql.NullInt64{},   // channel_id
-			sql.NullString{},  // model_mapping_chain
-			sql.NullString{},  // billing_tier
-			sql.NullString{},  // billing_mode
-			sql.NullFloat64{}, // account_stats_cost
-			now,
-		}})
+		serviceTier := "priority"
+		log, err := scanUsageLog(usageLogScannerStub{values: buildUsageLogScanValues(usageLogScanRowOptions{
+			ID:             3,
+			UserID:         12,
+			APIKeyID:       22,
+			AccountID:      32,
+			RequestID:      "req-3",
+			Model:          "gpt-5.4",
+			BillingType:    int16(service.BillingTypeBalance),
+			RequestType:    int16(service.RequestTypeSync),
+			LegacyStream:   false,
+			LegacyWS:       false,
+			ServiceTier:    &serviceTier,
+			CreatedAt:      now,
+		})})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
 		require.Equal(t, "priority", *log.ServiceTier)

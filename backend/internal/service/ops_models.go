@@ -63,11 +63,15 @@ type OpsErrorLog struct {
 	RequestPath string  `json:"request_path"`
 	Stream      bool    `json:"stream"`
 
-	InboundEndpoint  string `json:"inbound_endpoint"`
-	UpstreamEndpoint string `json:"upstream_endpoint"`
-	RequestedModel   string `json:"requested_model"`
-	UpstreamModel    string `json:"upstream_model"`
-	RequestType      *int16 `json:"request_type"`
+	InboundEndpoint    string `json:"inbound_endpoint"`
+	UpstreamEndpoint   string `json:"upstream_endpoint"`
+	RequestedModel     string `json:"requested_model"`
+	UpstreamModel      string `json:"upstream_model"`
+	ClientProfile      string `json:"client_profile"`
+	CompatibilityRoute string `json:"compatibility_route"`
+	FallbackChain      string `json:"fallback_chain"`
+	UpstreamTransport  string `json:"upstream_transport"`
+	RequestType        *int16 `json:"request_type"`
 }
 
 type OpsErrorLogDetail struct {
