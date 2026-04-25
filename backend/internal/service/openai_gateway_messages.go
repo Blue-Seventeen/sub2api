@@ -33,6 +33,15 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
 	startTime := time.Now()
+	reqLog := logger.L()
+	if c != nil && c.Request != nil {
+		reqLog = logger.FromContext(c.Request.Context())
+	}
+	if c != nil {
+		SetCompatibilityRoute(c, CompatibilityRouteAnthropicResponsesBridge)
+		SetCompatibilityUpstreamTransport(c, UpstreamTransportSSE)
+		AppendCompatibilityFallbackStage(c, "bridge")
+	}
 
 	// 1. Parse Anthropic request
 	var anthropicReq apicompat.AnthropicRequest
@@ -65,13 +74,13 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
 	responsesReq.Model = upstreamModel
 
-	logger.L().Debug("openai messages: model mapping applied",
-		zap.Int64("account_id", account.ID),
-		zap.String("original_model", originalModel),
-		zap.String("normalized_model", normalizedModel),
-		zap.String("billing_model", billingModel),
-		zap.String("upstream_model", upstreamModel),
-		zap.Bool("stream", isStream),
+	reqLog.Debug("openai messages: model mapping applied",
+		openAIMessagesServiceLogFields(c, account, originalModel, upstreamModel,
+			zap.String("normalized_model", normalizedModel),
+			zap.String("billing_model", billingModel),
+			zap.Bool("client_stream", clientStream),
+			zap.Bool("upstream_stream", isStream),
+		)...,
 	)
 
 	// 4. Marshal Responses request body, then apply OAuth codex transform
@@ -142,6 +151,15 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 			}
 		}
 	}
+	setOpsUpstreamRequestBody(c, responsesBody)
+	reqLog.Debug("openai messages: bridge request prepared",
+		openAIMessagesServiceLogFields(c, account, originalModel, upstreamModel,
+			zap.String("billing_model", billingModel),
+			zap.Bool("client_stream", clientStream),
+			zap.Bool("upstream_stream", isStream),
+			zap.Bool("has_prompt_cache_key", strings.TrimSpace(promptCacheKey) != ""),
+		)...,
+	)
 
 	// 5. Get access token
 	token, _, err := s.GetAccessToken(ctx, account)
@@ -179,6 +197,12 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 			Kind:               "request_error",
 			Message:            safeErr,
 		})
+		reqLog.Warn("openai messages: upstream request failed",
+			openAIMessagesServiceLogFields(c, account, originalModel, upstreamModel,
+				zap.String("failover_reason", safeErr),
+				zap.Int64("response_latency_ms", time.Since(startTime).Milliseconds()),
+			)...,
+		)
 		writeAnthropicError(c, http.StatusBadGateway, "api_error", "Upstream request failed")
 		return nil, fmt.Errorf("upstream request failed: %s", safeErr)
 	}
@@ -192,6 +216,14 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+		reqLog.Debug("openai messages: upstream non-2xx response",
+			openAIMessagesServiceLogFields(c, account, originalModel, upstreamModel,
+				zap.Int("upstream_status", resp.StatusCode),
+				zap.String("failover_reason", upstreamMsg),
+				zap.String("upstream_request_id", strings.TrimSpace(resp.Header.Get("x-request-id"))),
+				zap.Int64("response_latency_ms", time.Since(startTime).Milliseconds()),
+			)...,
+		)
 		if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody) {
 			upstreamDetail := ""
 			if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
@@ -211,6 +243,14 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 				Message:            upstreamMsg,
 				Detail:             upstreamDetail,
 			})
+			reqLog.Warn("openai messages: upstream failover eligible",
+				openAIMessagesServiceLogFields(c, account, originalModel, upstreamModel,
+					zap.Int("upstream_status", resp.StatusCode),
+					zap.String("failover_reason", upstreamMsg),
+					zap.String("upstream_request_id", strings.TrimSpace(resp.Header.Get("x-request-id"))),
+					zap.Int64("response_latency_ms", time.Since(startTime).Milliseconds()),
+				)...,
+			)
 			if s.rateLimitService != nil {
 				s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
 			}
@@ -253,6 +293,18 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 			s.updateCodexUsageSnapshot(ctx, account.ID, snapshot)
 		}
 	}
+	if handleErr != nil {
+		reqLog.Warn("openai messages: bridge response handling failed",
+			openAIMessagesServiceLogFields(c, account, originalModel, upstreamModel,
+				zap.Error(handleErr),
+				zap.Int64("response_latency_ms", time.Since(startTime).Milliseconds()),
+			)...,
+		)
+		return result, handleErr
+	}
+	reqLog.Debug("openai messages: bridge completed",
+		openAIMessagesServiceResultLogFields(c, account, originalModel, result)...,
+	)
 
 	return result, handleErr
 }
@@ -585,6 +637,60 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			c.Writer.Flush()
 		}
 	}
+}
+
+func openAIMessagesServiceLogFields(
+	c *gin.Context,
+	account *Account,
+	requestedModel string,
+	upstreamModel string,
+	extra ...zap.Field,
+) []zap.Field {
+	fields := make([]zap.Field, 0, 12+len(extra))
+	if account != nil && account.ID > 0 {
+		fields = append(fields,
+			zap.Int64("selected_account_id", account.ID),
+			zap.Int("pool_mode_retry_limit", account.GetPoolModeRetryCount()),
+		)
+	}
+	if requestedModel = strings.TrimSpace(requestedModel); requestedModel != "" {
+		fields = append(fields, zap.String("requested_model", requestedModel))
+	}
+	if upstreamModel = strings.TrimSpace(upstreamModel); upstreamModel != "" {
+		fields = append(fields, zap.String("upstream_model", upstreamModel))
+	}
+	compat := CompatibilityLogFieldsFromContext(c)
+	if compat.ClientProfile != "" {
+		fields = append(fields, zap.String("client_profile", compat.ClientProfile))
+	}
+	if compat.CompatibilityRoute != "" {
+		fields = append(fields, zap.String("compatibility_route", compat.CompatibilityRoute))
+	}
+	if compat.UpstreamTransport != "" {
+		fields = append(fields, zap.String("upstream_transport", compat.UpstreamTransport))
+	}
+	if compat.FallbackChain != "" {
+		fields = append(fields, zap.String("fallback_chain", compat.FallbackChain))
+	}
+	return append(fields, extra...)
+}
+
+func openAIMessagesServiceResultLogFields(
+	c *gin.Context,
+	account *Account,
+	requestedModel string,
+	result *OpenAIForwardResult,
+) []zap.Field {
+	if result == nil {
+		return openAIMessagesServiceLogFields(c, account, requestedModel, "")
+	}
+	fields := openAIMessagesServiceLogFields(c, account, requestedModel, result.UpstreamModel,
+		zap.Int64("response_latency_ms", result.Duration.Milliseconds()),
+	)
+	if result.FirstTokenMs != nil {
+		fields = append(fields, zap.Int("first_token_ms", *result.FirstTokenMs))
+	}
+	return fields
 }
 
 // writeAnthropicError writes an error response in Anthropic Messages API format.

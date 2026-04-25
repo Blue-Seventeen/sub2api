@@ -565,6 +565,9 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		return
 	}
 	setCompatibilityForAnthropicMessages(c, body, nil)
+	service.SetCompatibilityRoute(c, service.CompatibilityRouteAnthropicResponsesBridge)
+	service.SetCompatibilityUpstreamTransport(c, service.UpstreamTransportSSE)
+	service.AppendCompatibilityFallbackStage(c, "bridge")
 
 	modelResult := gjson.GetBytes(body, "model")
 	if !modelResult.Exists() || modelResult.Type != gjson.String || modelResult.String() == "" {
@@ -575,11 +578,17 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	routingModel := service.NormalizeOpenAICompatRequestedModel(reqModel)
 	preferredMappedModel := resolveOpenAIMessagesDispatchMappedModel(apiKey, reqModel)
 	reqStream := gjson.GetBytes(body, "stream").Bool()
+	requestType := int16(service.RequestTypeFromLegacy(reqStream, false))
 
-	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
+	reqLog = reqLog.With(
+		append([]zap.Field{
+			zap.String("requested_model", reqModel),
+			zap.Bool("stream", reqStream),
+		}, openAIMessagesEntryLogFields(compatibilityLogFields(c))...)...,
+	)
 
 	setOpsRequestContext(c, reqModel, reqStream, body)
-	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(reqStream, false)))
+	setOpsEndpointContext(c, "", requestType)
 
 	// 解析渠道级模型映射
 	channelMappingMsg, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, reqModel)
@@ -653,10 +662,20 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			service.OpenAIUpstreamTransportAny,
 		)
 		if err != nil {
-			reqLog.Warn("openai_messages.account_select_failed",
+			fields := []zap.Field{
 				zap.Error(err),
 				zap.Int("excluded_account_count", len(failedAccountIDs)),
-			)
+			}
+			fields = append(fields, openAIMessagesHandlerLogFields(c, currentRoutingModel, currentRoutingModel, nil, -1, nil)...)
+			if lastFailoverErr != nil {
+				fields = append(fields,
+					zap.Int("upstream_status", lastFailoverErr.StatusCode),
+				)
+				if reason := strings.TrimSpace(service.ExtractUpstreamErrorMessage(lastFailoverErr.ResponseBody)); reason != "" {
+					fields = append(fields, zap.String("failover_reason", reason))
+				}
+			}
+			reqLog.Warn("openai_messages.account_select_failed", fields...)
 			if len(failedAccountIDs) == 0 {
 				if err != nil {
 					h.anthropicStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable", streamStarted)
@@ -677,9 +696,15 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		}
 		account := selection.Account
 		sessionHash = ensureOpenAIPoolModeSessionHash(sessionHash, account)
-		reqLog.Debug("openai_messages.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
+		reqLog.Debug("openai_messages.account_selected",
+			append([]zap.Field{
+				zap.Int64("account_id", account.ID),
+				zap.String("account_name", account.Name),
+			}, openAIMessagesHandlerLogFields(c, currentRoutingModel, currentRoutingModel, account, sameAccountRetryCount[account.ID], nil)...)...,
+		)
 		_ = scheduleDecision
 		setOpsSelectedAccount(c, account.ID, account.Platform)
+		setOpsEndpointContext(c, currentRoutingModel, requestType)
 
 		accountReleaseFunc, acquired := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, reqStream, &streamStarted, reqLog)
 		if !acquired {
@@ -719,12 +744,17 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 					retryLimit := account.GetPoolModeRetryCount()
 					if sameAccountRetryCount[account.ID] < retryLimit {
 						sameAccountRetryCount[account.ID]++
-						reqLog.Warn("openai_messages.pool_mode_same_account_retry",
+						fields := []zap.Field{
 							zap.Int64("account_id", account.ID),
 							zap.Int("upstream_status", failoverErr.StatusCode),
 							zap.Int("retry_limit", retryLimit),
 							zap.Int("retry_count", sameAccountRetryCount[account.ID]),
-						)
+						}
+						if reason := strings.TrimSpace(service.ExtractUpstreamErrorMessage(failoverErr.ResponseBody)); reason != "" {
+							fields = append(fields, zap.String("failover_reason", reason))
+						}
+						fields = append(fields, openAIMessagesHandlerLogFields(c, currentRoutingModel, currentRoutingModel, account, sameAccountRetryCount[account.ID], nil)...)
+						reqLog.Warn("openai_messages.pool_mode_same_account_retry", fields...)
 						select {
 						case <-c.Request.Context().Done():
 							return
@@ -741,24 +771,34 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 					return
 				}
 				switchCount++
-				reqLog.Warn("openai_messages.upstream_failover_switching",
+				fields := []zap.Field{
 					zap.Int64("account_id", account.ID),
 					zap.Int("upstream_status", failoverErr.StatusCode),
 					zap.Int("switch_count", switchCount),
 					zap.Int("max_switches", maxAccountSwitches),
-				)
+				}
+				if reason := strings.TrimSpace(service.ExtractUpstreamErrorMessage(failoverErr.ResponseBody)); reason != "" {
+					fields = append(fields, zap.String("failover_reason", reason))
+				}
+				fields = append(fields, openAIMessagesHandlerLogFields(c, currentRoutingModel, currentRoutingModel, account, sameAccountRetryCount[account.ID], nil)...)
+				reqLog.Warn("openai_messages.upstream_failover_switching", fields...)
 				continue
 			}
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
 			wroteFallback := h.ensureAnthropicErrorResponse(c, streamStarted)
 			reqLog.Warn("openai_messages.forward_failed",
-				zap.Int64("account_id", account.ID),
-				zap.Bool("fallback_error_response_written", wroteFallback),
-				zap.Error(err),
+				append([]zap.Field{
+					zap.Int64("account_id", account.ID),
+					zap.Bool("fallback_error_response_written", wroteFallback),
+					zap.Error(err),
+				}, openAIMessagesHandlerLogFields(c, currentRoutingModel, currentRoutingModel, account, sameAccountRetryCount[account.ID], nil)...)...,
 			)
 			return
 		}
 		if result != nil {
+			if result.UpstreamModel != "" {
+				setOpsEndpointContext(c, result.UpstreamModel, requestType)
+			}
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, true, result.FirstTokenMs)
 		} else {
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, true, nil)
@@ -799,8 +839,10 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			}
 		})
 		reqLog.Debug("openai_messages.request_completed",
-			zap.Int64("account_id", account.ID),
-			zap.Int("switch_count", switchCount),
+			append([]zap.Field{
+				zap.Int64("account_id", account.ID),
+				zap.Int("switch_count", switchCount),
+			}, openAIMessagesHandlerLogFields(c, currentRoutingModel, currentRoutingModel, account, sameAccountRetryCount[account.ID], result)...)...,
 		)
 		return
 	}
@@ -1434,6 +1476,64 @@ func getContextInt64(c *gin.Context, key string) (int64, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func openAIMessagesEntryLogFields(compat service.CompatibilityLogFields) []zap.Field {
+	fields := make([]zap.Field, 0, 4)
+	if compat.ClientProfile != "" {
+		fields = append(fields, zap.String("client_profile", compat.ClientProfile))
+	}
+	if compat.CompatibilityRoute != "" {
+		fields = append(fields, zap.String("compatibility_route", compat.CompatibilityRoute))
+	}
+	if compat.UpstreamTransport != "" {
+		fields = append(fields, zap.String("upstream_transport", compat.UpstreamTransport))
+	}
+	if compat.FallbackChain != "" {
+		fields = append(fields, zap.String("fallback_chain", compat.FallbackChain))
+	}
+	return fields
+}
+
+func openAIMessagesHandlerLogFields(
+	c *gin.Context,
+	effectiveMappedModel string,
+	upstreamModel string,
+	account *service.Account,
+	retryCount int,
+	result *service.OpenAIForwardResult,
+) []zap.Field {
+	fields := openAIMessagesEntryLogFields(compatibilityLogFields(c))
+	if effectiveMappedModel = strings.TrimSpace(effectiveMappedModel); effectiveMappedModel != "" {
+		fields = append(fields, zap.String("effective_mapped_model", effectiveMappedModel))
+	}
+	if result != nil && strings.TrimSpace(result.UpstreamModel) != "" {
+		upstreamModel = result.UpstreamModel
+	}
+	if upstreamModel = strings.TrimSpace(upstreamModel); upstreamModel != "" {
+		fields = append(fields, zap.String("upstream_model", upstreamModel))
+	}
+	if account != nil && account.ID > 0 {
+		fields = append(fields,
+			zap.Int64("selected_account_id", account.ID),
+			zap.Int("pool_mode_retry_limit", account.GetPoolModeRetryCount()),
+		)
+	}
+	if retryCount >= 0 {
+		fields = append(fields, zap.Int("pool_mode_retry_count", retryCount))
+	}
+	if upstreamStatus, ok := getContextInt64(c, service.OpsUpstreamStatusCodeKey); ok && upstreamStatus > 0 {
+		fields = append(fields, zap.Int64("upstream_status", upstreamStatus))
+	}
+	if result != nil && result.FirstTokenMs != nil {
+		fields = append(fields, zap.Int("first_token_ms", *result.FirstTokenMs))
+	} else if firstTokenMs, ok := getContextInt64(c, service.OpsTimeToFirstTokenMsKey); ok && firstTokenMs >= 0 {
+		fields = append(fields, zap.Int64("first_token_ms", firstTokenMs))
+	}
+	if responseLatencyMs, ok := getContextInt64(c, service.OpsResponseLatencyMsKey); ok && responseLatencyMs >= 0 {
+		fields = append(fields, zap.Int64("response_latency_ms", responseLatencyMs))
+	}
+	return fields
 }
 
 func (h *OpenAIGatewayHandler) submitUsageRecordTask(task service.UsageRecordTask) {
