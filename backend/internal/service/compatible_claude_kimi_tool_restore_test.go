@@ -102,7 +102,7 @@ func mustAnthropicSSE(t *testing.T, events ...apicompat.AnthropicStreamEvent) st
 	for _, evt := range events {
 		sse, err := apicompat.ResponsesAnthropicEventToSSE(evt)
 		require.NoError(t, err)
-		b.WriteString(sse)
+		_, _ = b.WriteString(sse)
 	}
 	return b.String()
 }

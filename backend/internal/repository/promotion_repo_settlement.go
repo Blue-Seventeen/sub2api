@@ -209,7 +209,7 @@ func (r *promotionRepository) ListPendingActivationCandidates(ctx context.Contex
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]service.PromotionActivationCandidate, 0)
 	for rows.Next() {
 		var item service.PromotionActivationCandidate
@@ -285,7 +285,7 @@ func (r *promotionRepository) UpsertDailyPromotionCommissions(ctx context.Contex
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	type aggregate struct {
 		sourceUserID   int64
@@ -378,7 +378,7 @@ func (r *promotionRepository) ListSettlablePromotionBusinessDates(ctx context.Co
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var dates []time.Time
 	for rows.Next() {
 		var businessDate time.Time
@@ -411,7 +411,7 @@ func (r *promotionRepository) SettlePromotionBusinessDate(ctx context.Context, b
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	type beneficiarySettlement struct {
 		userID int64
 		amount float64

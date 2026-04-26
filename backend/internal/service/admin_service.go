@@ -740,7 +740,7 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	oldStatus := user.Status
 	oldRole := user.Role
 	oldUnifiedRateEnabled := user.UnifiedRateEnabled
-	oldUnifiedRateMultiplier := user.UnifiedRateMultiplier
+	oldUnifiedRateMultiplier := NormalizePersistedUnifiedRateMultiplier(user.UnifiedRateEnabled, user.UnifiedRateMultiplier)
 	oldRPMLimit := user.RPMLimit
 
 	if input.Email != "" {

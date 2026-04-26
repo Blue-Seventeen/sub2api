@@ -190,24 +190,24 @@ func buildMoonshotPromptFromParsedRequest(parsed *ParsedRequest) (string, int) {
 	}
 
 	var sb strings.Builder
-	sb.WriteString("[BOS]")
+	_, _ = sb.WriteString("[BOS]")
 
 	offset := 0
 	if messages[0].Role == "system" {
-		sb.WriteString("<|im_system|>")
-		sb.WriteString(messages[0].Content)
-		sb.WriteString("<|im_end|>")
+		_, _ = sb.WriteString("<|im_system|>")
+		_, _ = sb.WriteString(messages[0].Content)
+		_, _ = sb.WriteString("<|im_end|>")
 		offset = 1
 	}
 
 	for i := offset; i < len(messages); i++ {
 		roleToken := moonshotRoleToken(messages[i].Role)
-		sb.WriteString(roleToken)
-		sb.WriteString(messages[i].Content)
-		sb.WriteString("<|im_end|>")
+		_, _ = sb.WriteString(roleToken)
+		_, _ = sb.WriteString(messages[i].Content)
+		_, _ = sb.WriteString("<|im_end|>")
 	}
 
-	sb.WriteString("<|im_assistant|>")
+	_, _ = sb.WriteString("<|im_assistant|>")
 	return sb.String(), imageCount
 }
 
@@ -261,7 +261,7 @@ func flattenMoonshotContent(raw any) (string, int) {
 		imageCount := 0
 		for _, item := range v {
 			text, images := flattenMoonshotContent(item)
-			sb.WriteString(text)
+			_, _ = sb.WriteString(text)
 			imageCount += images
 		}
 		return sb.String(), imageCount

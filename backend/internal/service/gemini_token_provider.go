@@ -113,8 +113,7 @@ func (p *GeminiTokenProvider) GetAccessToken(ctx context.Context, account *Accou
 			return accessToken, nil
 		}
 
-		var proxyURL string
-		proxyURL = resolveAccountProxyURL(ctx, account, p.geminiOAuthService.proxyRepo)
+		proxyURL := resolveAccountProxyURL(ctx, account, p.geminiOAuthService.proxyRepo)
 
 		detected, tierID, err := p.geminiOAuthService.fetchProjectID(ctx, accessToken, proxyURL)
 		if err != nil {

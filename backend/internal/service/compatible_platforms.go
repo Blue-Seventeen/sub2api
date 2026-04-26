@@ -84,16 +84,6 @@ func compatiblePlatformDisplayName(platform string) string {
 	}
 }
 
-func compatiblePlatformLabels() map[string]string {
-	return map[string]string{
-		PlatformZhipu:      compatiblePlatformDisplayName(PlatformZhipu),
-		PlatformDeepSeek:   compatiblePlatformDisplayName(PlatformDeepSeek),
-		PlatformVolcEngine: compatiblePlatformDisplayName(PlatformVolcEngine),
-		PlatformAli:        compatiblePlatformDisplayName(PlatformAli),
-		PlatformMoonshot:   compatiblePlatformDisplayName(PlatformMoonshot),
-	}
-}
-
 func CompatibleProviderPresetForPlatform(platform string) (CompatibleProviderPreset, bool) {
 	switch strings.TrimSpace(platform) {
 	case PlatformZhipu:

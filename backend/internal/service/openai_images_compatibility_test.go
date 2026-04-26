@@ -3,8 +3,8 @@ package service
 import (
 	"testing"
 
-	"github.com/tidwall/gjson"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestNormalizeOpenAIImagesResponseBody(t *testing.T) {

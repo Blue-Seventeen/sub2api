@@ -4,7 +4,6 @@ package service
 
 import (
 	"net/http"
-	"strings"
 	"testing"
 
 	"github.com/tidwall/gjson"

@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
 
@@ -220,5 +219,5 @@ func scanAccountAutoOpsStep(row accountAutoOpsScannable) (*service.AccountAutoOp
 }
 
 func (r *accountAutoOpsRepository) String() string {
-	return fmt.Sprintf("accountAutoOpsRepository")
+	return "accountAutoOpsRepository"
 }

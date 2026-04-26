@@ -152,7 +152,7 @@ func TestZhipuCompatibleProviderPreset_PatchBody(t *testing.T) {
 		if gjson.GetBytes(patched, "max_completion_tokens").Exists() {
 			t.Fatalf("%s should delete max_completion_tokens", name)
 		}
-		if got := gjson.GetBytes(patched, "messages.0.content.0.image_url.url").String(); got != "Zm9vYmFy" {
+		if got := gjson.GetBytes(patched, "messages.1.content.0.image_url.url").String(); got != "Zm9vYmFy" {
 			t.Fatalf("%s patched image url = %q, want %q", name, got, "Zm9vYmFy")
 		}
 	}

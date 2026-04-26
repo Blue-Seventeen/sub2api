@@ -94,7 +94,7 @@ func parseClaudeKimiCollapsedToolUse(text string) (claudeKimiCollapsedToolUse, b
 	}
 
 	callID := strings.TrimSpace(rest[len("id="):nameSep])
-	toolName := strings.TrimSpace(rest[nameSep+len("; name="):argsSep])
+	toolName := strings.TrimSpace(rest[nameSep+len("; name=") : argsSep])
 	argumentsJSON := strings.TrimSpace(rest[argsSep+len("; arguments="):])
 	if callID == "" {
 		return claudeKimiCollapsedToolUse{}, false, "empty_call_id"
@@ -323,7 +323,7 @@ func (s *CompatibleGatewayService) repairClaudeKimiStreamingMessagesResponse(
 			if err != nil {
 				continue
 			}
-			outBuf.WriteString(sse)
+			_, _ = outBuf.WriteString(sse)
 		}
 		flushCompatibleSSEBuffer(c, &outBuf)
 		rawEventLines = rawEventLines[:0]

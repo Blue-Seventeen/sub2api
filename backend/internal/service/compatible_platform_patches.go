@@ -127,9 +127,7 @@ func collapseMoonshotHistoricalToolCallsToText(body []byte) []byte {
 	}
 
 	payload["messages"] = newMessages
-	if _, exists := payload["reasoning_effort"]; exists {
-		delete(payload, "reasoning_effort")
-	}
+	delete(payload, "reasoning_effort")
 	updated, err := json.Marshal(payload)
 	if err != nil {
 		return body

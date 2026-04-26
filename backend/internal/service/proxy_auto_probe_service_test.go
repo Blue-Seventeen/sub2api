@@ -219,7 +219,7 @@ func TestProxyAutoProbeServiceFinishProbeTransitionsQueue(t *testing.T) {
 	svc := NewProxyAutoProbeService(nil, &proxyAutoProbeRepoStub{}, &proxyAutoProbeSettingRepoStub{}, nil)
 	svc.config = ProxyAutoProbeConfig{Enabled: true, DefaultIntervalSec: 60, RetryIntervalSec: 5}
 	svc.entries[7] = &proxyAutoProbeEntry{ProxyID: 7, Queue: ProxyAutoProbeQueueSuccess}
-	svc.currentProxyID = ptrInt64(7)
+	svc.currentProxyID = ptrProxyInt64(7)
 
 	finishedAt := time.Now()
 	svc.finishProbe(7, proxyAutoProbeOutcome{Success: false, QualityStatus: "failed"}, finishedAt)
@@ -228,7 +228,7 @@ func TestProxyAutoProbeServiceFinishProbeTransitionsQueue(t *testing.T) {
 	require.Equal(t, finishedAt.Add(5*time.Second), svc.entries[7].NextDueAt)
 
 	latency := int64(18)
-	svc.currentProxyID = ptrInt64(7)
+	svc.currentProxyID = ptrProxyInt64(7)
 	svc.finishProbe(7, proxyAutoProbeOutcome{Success: true, QualityStatus: "healthy", LatencyMs: &latency}, finishedAt)
 	require.Equal(t, ProxyAutoProbeQueueSuccess, svc.entries[7].Queue)
 	require.Equal(t, finishedAt.Add(60*time.Second), svc.entries[7].NextDueAt)
@@ -305,7 +305,7 @@ func TestClassifyAutoProbeQueueFromQuality_OpenAIStatusRules(t *testing.T) {
 	}
 }
 
-func ptrInt64(v int64) *int64 {
+func ptrProxyInt64(v int64) *int64 {
 	return &v
 }
 

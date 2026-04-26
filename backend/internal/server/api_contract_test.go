@@ -1052,17 +1052,18 @@ func newContractDeps(t *testing.T) *contractDeps {
 	userRepo := &stubUserRepo{
 		users: map[int64]*service.User{
 			1: {
-				ID:            1,
-				Email:         "alice@example.com",
-				Username:      "alice",
-				Notes:         "hello",
-				Role:          service.RoleUser,
-				Balance:       12.5,
-				Concurrency:   5,
-				Status:        service.StatusActive,
-				AllowedGroups: nil,
-				CreatedAt:     now,
-				UpdatedAt:     now,
+				ID:             1,
+				Email:          "alice@example.com",
+				Username:       "alice",
+				Notes:          "hello",
+				Role:           service.RoleUser,
+				Balance:        12.5,
+				DisplayBalance: 12.5,
+				Concurrency:    5,
+				Status:         service.StatusActive,
+				AllowedGroups:  nil,
+				CreatedAt:      now,
+				UpdatedAt:      now,
 			},
 		},
 	}
@@ -1102,7 +1103,7 @@ func newContractDeps(t *testing.T) *contractDeps {
 	apiKeyHandler := handler.NewAPIKeyHandler(apiKeyService)
 	usageHandler := handler.NewUsageHandler(usageService, apiKeyService)
 	adminSettingHandler := adminhandler.NewSettingHandler(settingService, nil, nil, nil, nil, nil)
-	adminAccountHandler := adminhandler.NewAccountHandler(adminService, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	adminAccountHandler := adminhandler.NewAccountHandler(adminService, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	jwtAuth := func(c *gin.Context) {
 		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{

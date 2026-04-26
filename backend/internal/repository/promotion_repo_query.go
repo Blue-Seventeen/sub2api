@@ -91,7 +91,7 @@ func (r *promotionRepository) GetCurrentPromotionLevels(ctx context.Context, use
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	out := make(map[int64]*service.PromotionLevelConfig, len(userIDs))
 	for rows.Next() {
@@ -196,7 +196,7 @@ func (r *promotionRepository) ListPromotionLeaderboard(ctx context.Context, limi
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]service.PromotionLeaderboardItem, 0, limit)
 	userIDs := make([]int64, 0, limit)
 	for rows.Next() {
@@ -268,7 +268,7 @@ func (r *promotionRepository) ListPromotionEarnings(ctx context.Context, userID 
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items, err := scanPromotionCommissionItems(rows)
 	return items, total, err
 }
@@ -328,7 +328,7 @@ func (r *promotionRepository) SearchPromotionRelationUserIDs(ctx context.Context
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var ids []int64
 	for rows.Next() {
 		var id int64
@@ -355,7 +355,7 @@ func (r *promotionRepository) ListPromotionRelationsByUserIDs(ctx context.Contex
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	byID := make(map[int64]service.PromotionRelationRow, len(userIDs))
 	for rows.Next() {
 		var item service.PromotionRelationRow
@@ -471,7 +471,7 @@ func (r *promotionRepository) ListPromotionCommissions(ctx context.Context, filt
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items, err := scanPromotionCommissionItems(rows)
 	return items, total, err
 }
@@ -576,7 +576,7 @@ func (r *promotionRepository) listPromotionTeamByCommission(ctx context.Context,
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]service.PromotionTeamItem, 0)
 	for rows.Next() {
 		var item service.PromotionTeamItem
@@ -686,7 +686,7 @@ func (r *promotionRepository) listPromotionTreeByUsage(ctx context.Context, root
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]service.PromotionTeamItem, 0)
 	for rows.Next() {
 		var item service.PromotionTeamItem
@@ -752,7 +752,7 @@ func (r *promotionRepository) countPromotionDescendantsByUserIDs(ctx context.Con
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	out := make(map[int64]int, len(userIDs))
 	for rows.Next() {

@@ -831,15 +831,6 @@ func validatePromotionScript(script *PromotionScript) error {
 	return nil
 }
 
-func validManualCommissionType(commissionType string) (string, bool) {
-	switch commissionType {
-	case PromotionCommissionTypeManual, PromotionCommissionTypeAdjustment, PromotionCommissionTypePromotion:
-		return commissionType, true
-	default:
-		return "", false
-	}
-}
-
 func renderPromotionScriptPreview(content string, variables map[string]string) string {
 	rendered := content
 	for key, value := range variables {

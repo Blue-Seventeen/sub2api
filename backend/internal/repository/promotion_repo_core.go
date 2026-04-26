@@ -4,8 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
-	"encoding/json"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -212,7 +212,7 @@ func (r *promotionRepository) ListPromotionLevels(ctx context.Context) ([]servic
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]service.PromotionLevelConfig, 0)
 	for rows.Next() {
 		item, err := scanPromotionLevelRow(rows)
@@ -262,18 +262,20 @@ func (r *promotionRepository) UpsertPromotionLevels(ctx context.Context, levels 
 	if err != nil {
 		return nil, err
 	}
+	defer func() { _ = rows.Close() }()
 	var missing []int
 	for rows.Next() {
 		var levelNo int
 		if err := rows.Scan(&levelNo); err != nil {
-			rows.Close()
 			return nil, err
 		}
 		if _, ok := seen[levelNo]; !ok {
 			missing = append(missing, levelNo)
 		}
 	}
-	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	if len(missing) > 0 {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM promotion_level_configs WHERE level_no = ANY($1)`, pq.Array(missing)); err != nil {
 			return nil, err
@@ -312,7 +314,7 @@ func (r *promotionRepository) ListPromotionScripts(ctx context.Context, filter s
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]service.PromotionScript, 0)
 	for rows.Next() {
 		item, err := scanPromotionScript(rows)

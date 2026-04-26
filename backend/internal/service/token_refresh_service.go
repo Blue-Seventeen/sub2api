@@ -450,8 +450,7 @@ func (s *TokenRefreshService) ensureOpenAIPrivacy(ctx context.Context, account *
 		return
 	}
 
-	var proxyURL string
-	proxyURL = resolveAccountProxyURL(ctx, account, s.proxyRepo)
+	proxyURL := resolveAccountProxyURL(ctx, account, s.proxyRepo)
 
 	mode := disableOpenAITraining(ctx, s.privacyClientFactory, token, proxyURL)
 	if mode == "" {
@@ -491,8 +490,7 @@ func (s *TokenRefreshService) ensureAntigravityPrivacy(ctx context.Context, acco
 
 	projectID, _ := account.Credentials["project_id"].(string)
 
-	var proxyURL string
-	proxyURL = resolveAccountProxyURL(ctx, account, s.proxyRepo)
+	proxyURL := resolveAccountProxyURL(ctx, account, s.proxyRepo)
 
 	mode := setAntigravityPrivacy(ctx, token, projectID, proxyURL)
 	if mode == "" {

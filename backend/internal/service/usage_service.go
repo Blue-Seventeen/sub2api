@@ -36,7 +36,7 @@ type CreateUsageLogRequest struct {
 	TotalCost             float64 `json:"total_cost"`
 	ActualCost            float64 `json:"actual_cost"`
 	// RealActualCost 是管理员真实消费口径。
-	RealActualCost        float64 `json:"real_actual_cost"`
+	RealActualCost float64 `json:"real_actual_cost"`
 	// UnifiedRateMultiplier 是写入日志时的统一倍率快照。
 	UnifiedRateMultiplier float64 `json:"unified_rate_multiplier"`
 	RateMultiplier        float64 `json:"rate_multiplier"`

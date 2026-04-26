@@ -22,23 +22,23 @@ func TestUsageLogRepositoryCreateSyncRequestTypeAndLegacyFields(t *testing.T) {
 
 	createdAt := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
 	log := &service.UsageLog{
-		UserID:         1,
-		APIKeyID:       2,
-		AccountID:      3,
-		RequestID:      "req-1",
-		Model:          "gpt-5",
-		RequestedModel: "gpt-5",
-		InputTokens:    10,
-		OutputTokens:   20,
-		TotalCost:      1,
-		ActualCost:     1,
-		RealActualCost: 1,
+		UserID:                1,
+		APIKeyID:              2,
+		AccountID:             3,
+		RequestID:             "req-1",
+		Model:                 "gpt-5",
+		RequestedModel:        "gpt-5",
+		InputTokens:           10,
+		OutputTokens:          20,
+		TotalCost:             1,
+		ActualCost:            1,
+		RealActualCost:        1,
 		UnifiedRateMultiplier: 1,
-		BillingType:    service.BillingTypeBalance,
-		RequestType:    service.RequestTypeWSV2,
-		Stream:         false,
-		OpenAIWSMode:   false,
-		CreatedAt:      createdAt,
+		BillingType:           service.BillingTypeBalance,
+		RequestType:           service.RequestTypeWSV2,
+		Stream:                false,
+		OpenAIWSMode:          false,
+		CreatedAt:             createdAt,
 	}
 
 	mock.ExpectQuery("INSERT INTO usage_logs").
@@ -369,10 +369,10 @@ func TestUsageLogRepositoryGetUserSpendingRanking(t *testing.T) {
 			{UserID: 1, Email: "alpha@example.com", ActualCost: 12.5, RealActualCost: 8.5, Requests: 8, Tokens: 800},
 			{UserID: 3, Email: "gamma@example.com", ActualCost: 4.25, RealActualCost: 11.0, Requests: 5, Tokens: 300},
 		},
-		TotalActualCost: 40.0,
+		TotalActualCost:     40.0,
 		RealTotalActualCost: 28.0,
-		TotalRequests:   30,
-		TotalTokens:     2600,
+		TotalRequests:       30,
+		TotalTokens:         2600,
 	}, got)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
@@ -438,19 +438,19 @@ func (s usageLogScannerStub) Scan(dest ...any) error {
 }
 
 type usageLogScanRowOptions struct {
-	ID           int64
-	UserID       int64
-	APIKeyID     int64
-	AccountID    int64
-	RequestID    string
-	Model        string
+	ID             int64
+	UserID         int64
+	APIKeyID       int64
+	AccountID      int64
+	RequestID      string
+	Model          string
 	RequestedModel string
-	BillingType  int16
-	RequestType  int16
-	LegacyStream bool
-	LegacyWS     bool
-	ServiceTier  *string
-	CreatedAt    time.Time
+	BillingType    int16
+	RequestType    int16
+	LegacyStream   bool
+	LegacyWS       bool
+	ServiceTier    *string
+	CreatedAt      time.Time
 }
 
 func usageLogInsertExpectationArgs(log *service.UsageLog) []driver.Value {
@@ -473,37 +473,37 @@ func buildUsageLogScanValues(opts usageLogScanRowOptions) []any {
 		nullString(&opts.RequestID),
 		opts.Model,
 		nullString(&requestedModel),
-		sql.NullString{}, // upstream_model
-		sql.NullInt64{},  // group_id
-		sql.NullInt64{},  // subscription_id
-		1,                // input_tokens
-		2,                // output_tokens
-		3,                // cache_creation_tokens
-		4,                // cache_read_tokens
-		5,                // cache_creation_5m_tokens
-		6,                // cache_creation_1h_tokens
-		0,                // image_output_tokens
-		0.0,              // image_output_cost
-		0.1,              // input_cost
-		0.2,              // output_cost
-		0.3,              // cache_creation_cost
-		0.4,              // cache_read_cost
-		1.0,              // total_cost
-		0.9,              // actual_cost
-		0.9,              // real_actual_cost
-		1.0,              // unified_rate_multiplier
-		1.0,              // rate_multiplier
+		sql.NullString{},  // upstream_model
+		sql.NullInt64{},   // group_id
+		sql.NullInt64{},   // subscription_id
+		1,                 // input_tokens
+		2,                 // output_tokens
+		3,                 // cache_creation_tokens
+		4,                 // cache_read_tokens
+		5,                 // cache_creation_5m_tokens
+		6,                 // cache_creation_1h_tokens
+		0,                 // image_output_tokens
+		0.0,               // image_output_cost
+		0.1,               // input_cost
+		0.2,               // output_cost
+		0.3,               // cache_creation_cost
+		0.4,               // cache_read_cost
+		1.0,               // total_cost
+		0.9,               // actual_cost
+		0.9,               // real_actual_cost
+		1.0,               // unified_rate_multiplier
+		1.0,               // rate_multiplier
 		sql.NullFloat64{}, // account_rate_multiplier
 		opts.BillingType,
 		opts.RequestType,
 		opts.LegacyStream,
 		opts.LegacyWS,
-		sql.NullInt64{},   // duration_ms
-		sql.NullInt64{},   // first_token_ms
-		sql.NullString{},  // user_agent
-		sql.NullString{},  // ip_address
-		0,                 // image_count
-		sql.NullString{},  // image_size
+		sql.NullInt64{},  // duration_ms
+		sql.NullInt64{},  // first_token_ms
+		sql.NullString{}, // user_agent
+		sql.NullString{}, // ip_address
+		0,                // image_count
+		sql.NullString{}, // image_size
 		nullString(opts.ServiceTier),
 		sql.NullString{},  // reasoning_effort
 		sql.NullString{},  // inbound_endpoint
@@ -527,18 +527,18 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 		now := time.Now().UTC()
 		serviceTier := "priority"
 		log, err := scanUsageLog(usageLogScannerStub{values: buildUsageLogScanValues(usageLogScanRowOptions{
-			ID:             1,
-			UserID:         10,
-			APIKeyID:       20,
-			AccountID:      30,
-			RequestID:      "req-1",
-			Model:          "gpt-5",
-			BillingType:    int16(service.BillingTypeBalance),
-			RequestType:    int16(service.RequestTypeWSV2),
-			LegacyStream:   false,
-			LegacyWS:       false,
-			ServiceTier:    &serviceTier,
-			CreatedAt:      now,
+			ID:           1,
+			UserID:       10,
+			APIKeyID:     20,
+			AccountID:    30,
+			RequestID:    "req-1",
+			Model:        "gpt-5",
+			BillingType:  int16(service.BillingTypeBalance),
+			RequestType:  int16(service.RequestTypeWSV2),
+			LegacyStream: false,
+			LegacyWS:     false,
+			ServiceTier:  &serviceTier,
+			CreatedAt:    now,
 		})})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
@@ -552,18 +552,18 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 		now := time.Now().UTC()
 		serviceTier := "flex"
 		log, err := scanUsageLog(usageLogScannerStub{values: buildUsageLogScanValues(usageLogScanRowOptions{
-			ID:             2,
-			UserID:         11,
-			APIKeyID:       21,
-			AccountID:      31,
-			RequestID:      "req-2",
-			Model:          "gpt-5",
-			BillingType:    int16(service.BillingTypeBalance),
-			RequestType:    int16(service.RequestTypeUnknown),
-			LegacyStream:   true,
-			LegacyWS:       false,
-			ServiceTier:    &serviceTier,
-			CreatedAt:      now,
+			ID:           2,
+			UserID:       11,
+			APIKeyID:     21,
+			AccountID:    31,
+			RequestID:    "req-2",
+			Model:        "gpt-5",
+			BillingType:  int16(service.BillingTypeBalance),
+			RequestType:  int16(service.RequestTypeUnknown),
+			LegacyStream: true,
+			LegacyWS:     false,
+			ServiceTier:  &serviceTier,
+			CreatedAt:    now,
 		})})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
@@ -577,18 +577,18 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 		now := time.Now().UTC()
 		serviceTier := "priority"
 		log, err := scanUsageLog(usageLogScannerStub{values: buildUsageLogScanValues(usageLogScanRowOptions{
-			ID:             3,
-			UserID:         12,
-			APIKeyID:       22,
-			AccountID:      32,
-			RequestID:      "req-3",
-			Model:          "gpt-5.4",
-			BillingType:    int16(service.BillingTypeBalance),
-			RequestType:    int16(service.RequestTypeSync),
-			LegacyStream:   false,
-			LegacyWS:       false,
-			ServiceTier:    &serviceTier,
-			CreatedAt:      now,
+			ID:           3,
+			UserID:       12,
+			APIKeyID:     22,
+			AccountID:    32,
+			RequestID:    "req-3",
+			Model:        "gpt-5.4",
+			BillingType:  int16(service.BillingTypeBalance),
+			RequestType:  int16(service.RequestTypeSync),
+			LegacyStream: false,
+			LegacyWS:     false,
+			ServiceTier:  &serviceTier,
+			CreatedAt:    now,
 		})})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)

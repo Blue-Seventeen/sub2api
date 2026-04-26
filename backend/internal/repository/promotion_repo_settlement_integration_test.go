@@ -98,7 +98,7 @@ func TestPromotionRepositoryUpsertDailyPromotionCommissions_OnlyCountsActivatedU
 		ORDER BY source_user_id, relation_depth
 	`, parent.ID, businessDate.Format("2006-01-02"))
 	require.NoError(t, err)
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	type commissionRow struct {
 		sourceUserID  int64

@@ -430,13 +430,9 @@ func (s *AccountAutoOpsService) processAccount(ctx context.Context, run *Account
 		}
 
 		actionOutput, terminal, actionErr := s.executeRuleAction(ctx, account, cfg, rule)
-		stepStatus := AccountAutoOpsStepStatusMatched
+		stepStatus := AccountAutoOpsStepStatusActionExecuted
 		if actionErr != nil {
 			stepStatus = AccountAutoOpsStepStatusActionFailed
-		} else if terminal {
-			stepStatus = AccountAutoOpsStepStatusActionExecuted
-		} else {
-			stepStatus = AccountAutoOpsStepStatusActionExecuted
 		}
 		if err := s.appendStep(ctx, &AccountAutoOpsStep{
 			RunID:            run.ID,

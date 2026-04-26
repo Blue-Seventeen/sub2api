@@ -646,13 +646,13 @@ func TestNewOAuthRefreshAPI_ZeroTTLUsesDefault(t *testing.T) {
 	require.Equal(t, defaultRefreshLockTTL, api.lockTTL)
 }
 
-// ========== isInvalidGrantError tests ==========
+// ========== isRefreshRaceRecoverableError tests ==========
 
 func TestIsInvalidGrantError(t *testing.T) {
-	require.True(t, isInvalidGrantError(errors.New("invalid_grant: token revoked")))
-	require.True(t, isInvalidGrantError(errors.New("INVALID_GRANT")))
-	require.False(t, isInvalidGrantError(errors.New("invalid_client")))
-	require.False(t, isInvalidGrantError(nil))
+	require.True(t, isRefreshRaceRecoverableError(errors.New("invalid_grant: token revoked")))
+	require.True(t, isRefreshRaceRecoverableError(errors.New("INVALID_GRANT")))
+	require.False(t, isRefreshRaceRecoverableError(errors.New("invalid_client")))
+	require.False(t, isRefreshRaceRecoverableError(nil))
 }
 
 // ========== BackgroundRefreshPolicy tests ==========

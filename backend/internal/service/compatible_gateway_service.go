@@ -585,12 +585,11 @@ func (s *CompatibleGatewayService) applyAuth(req *http.Request, account *Account
 	if req == nil || account == nil {
 		return fmt.Errorf("nil request/account")
 	}
-	apiKey := strings.TrimSpace(account.GetCredential("api_key"))
 	preset, err := getCompatiblePreset(account)
 	if err != nil {
 		return err
 	}
-	apiKey = getCompatibleAuthToken(account, preset.AuthMode)
+	apiKey := getCompatibleAuthToken(account, preset.AuthMode)
 	if apiKey == "" {
 		return fmt.Errorf("api_key not found in credentials")
 	}
@@ -1081,12 +1080,12 @@ func (s *CompatibleGatewayService) handleChatAsResponses(resp *http.Response, c 
 					if err != nil {
 						continue
 					}
-					finalBatch.WriteString(sse)
+					_, _ = finalBatch.WriteString(sse)
 					if event.Response != nil && event.Response.Usage != nil {
 						usage = responsesUsageToClaudeUsage(event.Response.Usage)
 					}
 				}
-				finalBatch.WriteString("data: [DONE]\n\n")
+				_, _ = finalBatch.WriteString("data: [DONE]\n\n")
 				flushCompatibleSSEBuffer(c, &finalBatch)
 				_ = resp.Body.Close()
 				return buildCompatibleForwardResult(resp, prepared, usage, true, startTime, firstTokenMs)
@@ -1123,7 +1122,7 @@ func (s *CompatibleGatewayService) handleChatAsResponses(resp *http.Response, c 
 			if err != nil {
 				continue
 			}
-			sseBatch.WriteString(sse)
+			_, _ = sseBatch.WriteString(sse)
 			if event.Response != nil && event.Response.Usage != nil {
 				usage = responsesUsageToClaudeUsage(event.Response.Usage)
 			}
@@ -1136,19 +1135,19 @@ func (s *CompatibleGatewayService) handleChatAsResponses(resp *http.Response, c 
 				if err != nil {
 					continue
 				}
-				finalBatch.WriteString(sse)
+				_, _ = finalBatch.WriteString(sse)
 				if event.Response != nil && event.Response.Usage != nil {
 					usage = responsesUsageToClaudeUsage(event.Response.Usage)
 				}
 			}
-			finalBatch.WriteString("data: [DONE]\n\n")
+			_, _ = finalBatch.WriteString("data: [DONE]\n\n")
 			flushCompatibleSSEBuffer(c, &finalBatch)
 			_ = resp.Body.Close()
 			return buildCompatibleForwardResult(resp, prepared, usage, true, startTime, firstTokenMs)
 		}
 		if finishReasonReady {
 			var finalBatch bytes.Buffer
-			finalBatch.WriteString("data: [DONE]\n\n")
+			_, _ = finalBatch.WriteString("data: [DONE]\n\n")
 			flushCompatibleSSEBuffer(c, &finalBatch)
 			_ = resp.Body.Close()
 			return buildCompatibleForwardResult(resp, prepared, usage, true, startTime, firstTokenMs)
@@ -1163,12 +1162,12 @@ func (s *CompatibleGatewayService) handleChatAsResponses(resp *http.Response, c 
 		if err != nil {
 			continue
 		}
-		finalBatch.WriteString(sse)
+		_, _ = finalBatch.WriteString(sse)
 		if event.Response != nil && event.Response.Usage != nil {
 			usage = responsesUsageToClaudeUsage(event.Response.Usage)
 		}
 	}
-	finalBatch.WriteString("data: [DONE]\n\n")
+	_, _ = finalBatch.WriteString("data: [DONE]\n\n")
 	flushCompatibleSSEBuffer(c, &finalBatch)
 	return buildCompatibleForwardResult(resp, prepared, usage, true, startTime, firstTokenMs)
 }
@@ -1225,7 +1224,7 @@ func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *
 						if err != nil {
 							continue
 						}
-						finalBatch.WriteString(sse)
+						_, _ = finalBatch.WriteString(sse)
 						if anthropicEvent.Usage != nil {
 							usage.InputTokens = anthropicEvent.Usage.InputTokens
 							usage.OutputTokens = anthropicEvent.Usage.OutputTokens
@@ -1238,7 +1237,7 @@ func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *
 					if err != nil {
 						continue
 					}
-					finalBatch.WriteString(sse)
+					_, _ = finalBatch.WriteString(sse)
 					if anthropicEvent.Usage != nil {
 						usage.InputTokens = anthropicEvent.Usage.InputTokens
 						usage.OutputTokens = anthropicEvent.Usage.OutputTokens
@@ -1282,7 +1281,7 @@ func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *
 				if err != nil {
 					continue
 				}
-				sseBatch.WriteString(sse)
+				_, _ = sseBatch.WriteString(sse)
 				if anthropicEvent.Usage != nil {
 					usage.InputTokens = anthropicEvent.Usage.InputTokens
 					usage.OutputTokens = anthropicEvent.Usage.OutputTokens
@@ -1299,7 +1298,7 @@ func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *
 					if err != nil {
 						continue
 					}
-					finalBatch.WriteString(sse)
+					_, _ = finalBatch.WriteString(sse)
 					if anthropicEvent.Usage != nil {
 						usage.InputTokens = anthropicEvent.Usage.InputTokens
 						usage.OutputTokens = anthropicEvent.Usage.OutputTokens
@@ -1312,7 +1311,7 @@ func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *
 				if err != nil {
 					continue
 				}
-				finalBatch.WriteString(sse)
+				_, _ = finalBatch.WriteString(sse)
 				if anthropicEvent.Usage != nil {
 					usage.InputTokens = anthropicEvent.Usage.InputTokens
 					usage.OutputTokens = anthropicEvent.Usage.OutputTokens
@@ -1338,7 +1337,7 @@ func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *
 			if err != nil {
 				continue
 			}
-			finalBatch.WriteString(sse)
+			_, _ = finalBatch.WriteString(sse)
 			if anthropicEvent.Usage != nil {
 				usage.InputTokens = anthropicEvent.Usage.InputTokens
 				usage.OutputTokens = anthropicEvent.Usage.OutputTokens
@@ -1351,7 +1350,7 @@ func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *
 		if err != nil {
 			continue
 		}
-		finalBatch.WriteString(sse)
+		_, _ = finalBatch.WriteString(sse)
 		if anthropicEvent.Usage != nil {
 			usage.InputTokens = anthropicEvent.Usage.InputTokens
 			usage.OutputTokens = anthropicEvent.Usage.OutputTokens
@@ -1401,8 +1400,8 @@ func appendCompatibleSSELine(buf *bytes.Buffer, line string) {
 	if buf == nil {
 		return
 	}
-	buf.WriteString(line)
-	buf.WriteByte('\n')
+	_, _ = buf.WriteString(line)
+	_ = buf.WriteByte('\n')
 }
 
 func flushCompatibleSSEBuffer(c *gin.Context, buf *bytes.Buffer) {
