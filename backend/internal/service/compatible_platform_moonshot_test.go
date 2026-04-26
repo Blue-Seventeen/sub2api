@@ -313,7 +313,7 @@ func TestMoonshotCompatibleProviderPreset_CustomRelayKeepsNativeMessagesInPrepar
 		Platform: PlatformMoonshot,
 		Type:     AccountTypeAPIKey,
 		Credentials: map[string]any{
-			"base_url": "http://api.hack3rx.cn/v1",
+			"base_url": "http://api.example.test/v1",
 		},
 	}
 
@@ -376,7 +376,7 @@ func TestMoonshotCompatibleProviderPreset_MessagesPrepareRequestsCollapseChatFal
 		Platform: PlatformMoonshot,
 		Type:     AccountTypeAPIKey,
 		Credentials: map[string]any{
-			"base_url": "https://api.hack3rx.cn/v1",
+			"base_url": "https://api.example.test/v1",
 		},
 	}
 

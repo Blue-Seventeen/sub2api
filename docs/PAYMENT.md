@@ -1,6 +1,6 @@
 # Payment System Configuration Guide
 
-Sub2API has a built-in payment system that enables user self-service top-up without deploying a separate payment service.
+Hack3rX Sub2API Custom has a built-in payment system that enables user self-service top-up without deploying a separate payment service.
 
 ---
 

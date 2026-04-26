@@ -82,6 +82,7 @@ temp/
 *.temp
 *.log
 *.bak
+*.bak.*
 .cache/
 .dev/
 .serena/
@@ -135,3 +136,19 @@ docs/*
 frontend/coverage/
 aicodex
 output/
+
+# ===================
+# Custom fork cleanup
+# ===================
+# Local release / migration bundles
+.tmp-migration/
+sub2api-custom-*.tar.gz
+
+# Scraped / bundled external website artifacts accidentally produced during research
+hvoy_*.js
+hvoy_*.html
+ProviderPriceApi*.js
+
+# Keep selected custom docs under docs/ even though docs/* is ignored above
+!docs/ARCHITECTURE_COMPATIBILITY_KERNEL_CN.md
+!docs/promotion_e2e_checklist.md

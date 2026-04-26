@@ -245,7 +245,7 @@ function formatDate(value?: string) {
 function renderPreview(content?: string) {
   return String(content || '')
     .replace(/\{\{INVITE_CODE\}\}/g, 'DA044C326EC7BF13')
-    .replace(/\{\{REF_LINK\}\}/g, 'https://api.hack3rx.cn/?ref=DA044C326EC7BF13')
+    .replace(/\{\{REF_LINK\}\}/g, 'https://api.example.test/?ref=DA044C326EC7BF13')
     .replace(/\{\{USER_NAME\}\}/g, '推广达人')
     .replace(/\{\{SITE_NAME\}\}/g, 'Sub2API')
     .replace(/\{\{LEVEL\}\}/g, 'Lv3 推广大使')
