@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"github.com/robfig/cron/v3"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -27,6 +28,9 @@ const (
 	settingKeyBackupRecords  = "backup_records"
 
 	maxBackupRecords = 100
+
+	backupScheduleLockKey = "sub2api:backup:scheduler:lock"
+	backupScheduleLockTTL = 35 * time.Minute
 )
 
 var (
@@ -57,6 +61,37 @@ type BackupObjectStore interface {
 
 // BackupObjectStoreFactory creates an object store from S3 config
 type BackupObjectStoreFactory func(ctx context.Context, cfg *BackupS3Config) (BackupObjectStore, error)
+
+// BackupScheduleLockStore coordinates scheduled backup execution across nodes.
+type BackupScheduleLockStore interface {
+	Acquire(ctx context.Context, key string, value string, ttl time.Duration) (bool, error)
+	Release(ctx context.Context, key string, value string) error
+}
+
+type redisBackupScheduleLockStore struct {
+	rdb *redis.Client
+}
+
+func newRedisBackupScheduleLockStore(rdb *redis.Client) BackupScheduleLockStore {
+	if rdb == nil {
+		return nil
+	}
+	return &redisBackupScheduleLockStore{rdb: rdb}
+}
+
+func (s *redisBackupScheduleLockStore) Acquire(ctx context.Context, key string, value string, ttl time.Duration) (bool, error) {
+	return s.rdb.SetNX(ctx, key, value, ttl).Result()
+}
+
+func (s *redisBackupScheduleLockStore) Release(ctx context.Context, key string, value string) error {
+	const releaseScript = `
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+	return redis.call("DEL", KEYS[1])
+end
+return 0
+`
+	return s.rdb.Eval(ctx, releaseScript, []string{key}, value).Err()
+}
 
 // ─── 数据模型 ───
 
@@ -119,6 +154,8 @@ type BackupService struct {
 	store   BackupObjectStore
 	s3Cfg   *BackupS3Config
 
+	scheduleLock BackupScheduleLockStore
+
 	recordsMu sync.Mutex // 保护 records 的 load/save 操作
 
 	cronMu      sync.Mutex
@@ -137,14 +174,20 @@ func NewBackupService(
 	encryptor SecretEncryptor,
 	storeFactory BackupObjectStoreFactory,
 	dumper DBDumper,
+	lockStores ...BackupScheduleLockStore,
 ) *BackupService {
 	bgCtx, bgCancel := context.WithCancel(context.Background())
+	var scheduleLock BackupScheduleLockStore
+	if len(lockStores) > 0 {
+		scheduleLock = lockStores[0]
+	}
 	return &BackupService{
 		settingRepo:  settingRepo,
 		dbCfg:        &cfg.Database,
 		encryptor:    encryptor,
 		storeFactory: storeFactory,
 		dumper:       dumper,
+		scheduleLock: scheduleLock,
 		bgCtx:        bgCtx,
 		bgCancel:     bgCancel,
 	}
@@ -391,6 +434,14 @@ func (s *BackupService) runScheduledBackup() {
 	ctx, cancel := context.WithTimeout(s.bgCtx, 30*time.Minute)
 	defer cancel()
 
+	lockValue, locked := s.acquireScheduledBackupLock(ctx)
+	if !locked {
+		return
+	}
+	if lockValue != "" {
+		defer s.releaseScheduledBackupLock(lockValue)
+	}
+
 	// 读取定时备份配置中的过期天数
 	schedule, _ := s.GetSchedule(ctx)
 	expireDays := 14 // 默认14天过期
@@ -420,6 +471,35 @@ func (s *BackupService) runScheduledBackup() {
 }
 
 // ─── 备份/恢复核心 ───
+
+func (s *BackupService) acquireScheduledBackupLock(ctx context.Context) (string, bool) {
+	if s.scheduleLock == nil {
+		return "", true
+	}
+
+	lockValue := uuid.NewString()
+	locked, err := s.scheduleLock.Acquire(ctx, backupScheduleLockKey, lockValue, backupScheduleLockTTL)
+	if err != nil {
+		logger.LegacyPrintf("service.backup", "[Backup] scheduled backup skipped: failed to acquire Redis lock: %v", err)
+		return "", false
+	}
+	if !locked {
+		logger.LegacyPrintf("service.backup", "[Backup] scheduled backup skipped: another node is running backup")
+		return "", false
+	}
+	return lockValue, true
+}
+
+func (s *BackupService) releaseScheduledBackupLock(lockValue string) {
+	if s.scheduleLock == nil || lockValue == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := s.scheduleLock.Release(ctx, backupScheduleLockKey, lockValue); err != nil {
+		logger.LegacyPrintf("service.backup", "[Backup] failed to release scheduled backup Redis lock: %v", err)
+	}
+}
 
 // CreateBackup 创建全量数据库备份并上传到 S3（流式处理）
 // expireDays: 备份过期天数，0=永不过期，默认14天

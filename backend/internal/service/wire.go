@@ -440,8 +440,9 @@ func ProvideBackupService(
 	encryptor SecretEncryptor,
 	storeFactory BackupObjectStoreFactory,
 	dumper DBDumper,
+	redisClient *redis.Client,
 ) *BackupService {
-	svc := NewBackupService(settingRepo, cfg, encryptor, storeFactory, dumper)
+	svc := NewBackupService(settingRepo, cfg, encryptor, storeFactory, dumper, newRedisBackupScheduleLockStore(redisClient))
 	svc.Start()
 	return svc
 }
