@@ -18,7 +18,7 @@
 | 项目 | 当前约定 |
 |---|---|
 | 当前主线 | `dev` |
-| 当前 upstream 基线 | 已同步到 `v0.1.118` |
+| 当前 upstream 基线 | 已同步到 `v0.1.119` |
 | 早期 fork 保护基线 | `2b72deb8fd45dc3a526bda2299b16df8d471107c` |
 | 部署策略 | `dev` 是真实可部署主线；`sub2api-custom-localtest` 仅用于本地测试 |
 | 架构原则 | 保留 Sub2API 的 Account / Group / Channel / 调度 / sticky / failover / billing，渐进吸收协议优先兼容内核 |
