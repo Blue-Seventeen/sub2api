@@ -329,3 +329,20 @@ pnpm run build
 - 是否允许 upstream 覆盖
 
 如果只改代码不改本文件，下一次 upstream 同步时很容易被误删。
+
+
+## 11. 远端推送约定
+
+本项目当前维护两个自有远端，后续执行“推送项目 / 发布代码 / 同步远端”时，默认同时推送 `main` 与 `dev` 到两个平台：
+
+- GitHub：`origin` -> `https://github.com/Blue-Seventeen/sub2api.git`
+- GitCode：`gitcode` -> `https://gitcode.com/Blue17/sub2api.git`
+
+推荐命令：
+
+```powershell
+git push origin main dev
+git push gitcode main dev
+```
+
+注意：`upstream` 仅用于同步官方项目，不允许把本 fork 的定制提交 push 到 `upstream`。
