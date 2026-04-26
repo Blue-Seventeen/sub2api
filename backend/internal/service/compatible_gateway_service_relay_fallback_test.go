@@ -280,7 +280,7 @@ func TestCompatibleGatewayServiceForward_RetriesTransientCompatibleStatusOnSameE
 		Type:        AccountTypeAPIKey,
 		Concurrency: 1,
 		Credentials: map[string]any{
-			"base_url": "https://api.example.test/v1",
+			"base_url": "https://api.hack3rx.cn/v1",
 			"api_key":  "test-key",
 		},
 	}
@@ -304,7 +304,7 @@ func TestCompatibleGatewayServiceForward_RetriesTransientCompatibleStatusOnSameE
 	if len(upstream.urls) != 2 {
 		t.Fatalf("len(upstream.urls) = %d, want 2", len(upstream.urls))
 	}
-	if upstream.urls[0] != "https://api.example.test/v1/chat/completions" || upstream.urls[1] != upstream.urls[0] {
+	if upstream.urls[0] != "https://api.hack3rx.cn/v1/chat/completions" || upstream.urls[1] != upstream.urls[0] {
 		t.Fatalf("upstream urls = %#v, want same endpoint retried once", upstream.urls)
 	}
 	if rec.Code != http.StatusOK {
@@ -334,7 +334,7 @@ func TestCompatibleGatewayServiceForward_MoonshotCustomRelayMessagesFallbackToCh
 		Type:        AccountTypeAPIKey,
 		Concurrency: 1,
 		Credentials: map[string]any{
-			"base_url": "https://api.example.test/v1",
+			"base_url": "https://api.hack3rx.cn/v1",
 			"api_key":  "test-key",
 		},
 	}
@@ -355,13 +355,13 @@ func TestCompatibleGatewayServiceForward_MoonshotCustomRelayMessagesFallbackToCh
 	if len(upstream.urls) != 3 {
 		t.Fatalf("len(upstream.urls) = %d, want 3", len(upstream.urls))
 	}
-	if upstream.urls[0] != "https://api.example.test/anthropic/v1/messages" {
+	if upstream.urls[0] != "https://api.hack3rx.cn/anthropic/v1/messages" {
 		t.Fatalf("first upstream url = %q", upstream.urls[0])
 	}
-	if upstream.urls[1] != "https://api.example.test/v1/messages" {
+	if upstream.urls[1] != "https://api.hack3rx.cn/v1/messages" {
 		t.Fatalf("second upstream url = %q", upstream.urls[1])
 	}
-	if upstream.urls[2] != "https://api.example.test/v1/chat/completions" {
+	if upstream.urls[2] != "https://api.hack3rx.cn/v1/chat/completions" {
 		t.Fatalf("third upstream url = %q", upstream.urls[2])
 	}
 	if got := rec.Header().Get("Content-Type"); !strings.Contains(got, "application/json") {
@@ -401,7 +401,7 @@ func TestCompatibleGatewayServiceForward_MoonshotMessagesFallbackToChatAfterHTML
 		Type:        AccountTypeAPIKey,
 		Concurrency: 1,
 		Credentials: map[string]any{
-			"base_url": "https://api.example.test/v1",
+			"base_url": "https://api.hack3rx.cn/v1",
 			"api_key":  "test-key",
 		},
 	}
@@ -425,13 +425,13 @@ func TestCompatibleGatewayServiceForward_MoonshotMessagesFallbackToChatAfterHTML
 	if len(upstream.urls) != 3 {
 		t.Fatalf("len(upstream.urls) = %d, want 3", len(upstream.urls))
 	}
-	if upstream.urls[0] != "https://api.example.test/anthropic/v1/messages" {
+	if upstream.urls[0] != "https://api.hack3rx.cn/anthropic/v1/messages" {
 		t.Fatalf("first URL = %q", upstream.urls[0])
 	}
-	if upstream.urls[1] != "https://api.example.test/v1/messages" {
+	if upstream.urls[1] != "https://api.hack3rx.cn/v1/messages" {
 		t.Fatalf("second URL = %q", upstream.urls[1])
 	}
-	if upstream.urls[2] != "https://api.example.test/v1/chat/completions" {
+	if upstream.urls[2] != "https://api.hack3rx.cn/v1/chat/completions" {
 		t.Fatalf("third URL = %q", upstream.urls[2])
 	}
 	if rec.Code != http.StatusOK {
@@ -462,7 +462,7 @@ func TestCompatibleGatewayServiceForward_MoonshotMessagesFallbackToChatAfterReas
 		Type:        AccountTypeAPIKey,
 		Concurrency: 1,
 		Credentials: map[string]any{
-			"base_url": "https://api.example.test/v1",
+			"base_url": "https://api.hack3rx.cn/v1",
 			"api_key":  "test-key",
 		},
 	}
@@ -486,13 +486,13 @@ func TestCompatibleGatewayServiceForward_MoonshotMessagesFallbackToChatAfterReas
 	if len(upstream.urls) != 3 {
 		t.Fatalf("len(upstream.urls) = %d, want 3", len(upstream.urls))
 	}
-	if upstream.urls[0] != "https://api.example.test/anthropic/v1/messages" {
+	if upstream.urls[0] != "https://api.hack3rx.cn/anthropic/v1/messages" {
 		t.Fatalf("first URL = %q", upstream.urls[0])
 	}
-	if upstream.urls[1] != "https://api.example.test/v1/messages" {
+	if upstream.urls[1] != "https://api.hack3rx.cn/v1/messages" {
 		t.Fatalf("second URL = %q", upstream.urls[1])
 	}
-	if upstream.urls[2] != "https://api.example.test/v1/chat/completions" {
+	if upstream.urls[2] != "https://api.hack3rx.cn/v1/chat/completions" {
 		t.Fatalf("third URL = %q", upstream.urls[2])
 	}
 	if rec.Code != http.StatusOK {
@@ -523,7 +523,7 @@ func TestCompatibleGatewayServiceForward_MoonshotMessagesCachesChatFallbackModeA
 		Type:        AccountTypeAPIKey,
 		Concurrency: 1,
 		Credentials: map[string]any{
-			"base_url": "https://api.example.test/v1",
+			"base_url": "https://api.hack3rx.cn/v1",
 			"api_key":  "test-key",
 		},
 	}
@@ -560,7 +560,7 @@ func TestCompatibleGatewayServiceForward_MoonshotMessagesCachesChatFallbackModeA
 	if len(upstream.urls) != 4 {
 		t.Fatalf("len(upstream.urls) after cached request = %d, want 4", len(upstream.urls))
 	}
-	if upstream.urls[3] != "https://api.example.test/v1/chat/completions" {
+	if upstream.urls[3] != "https://api.hack3rx.cn/v1/chat/completions" {
 		t.Fatalf("cached URL = %q, want chat fallback endpoint", upstream.urls[3])
 	}
 
@@ -585,13 +585,13 @@ func TestCompatibleGatewayServiceForward_MoonshotMessagesCachesChatFallbackModeA
 	if len(upstream.urls) != 7 {
 		t.Fatalf("len(upstream.urls) after invalidation = %d, want 7", len(upstream.urls))
 	}
-	if upstream.urls[4] != "https://api.example.test/anthropic/v1/messages" {
+	if upstream.urls[4] != "https://api.hack3rx.cn/anthropic/v1/messages" {
 		t.Fatalf("reprobe first URL = %q", upstream.urls[4])
 	}
-	if upstream.urls[5] != "https://api.example.test/v1/messages" {
+	if upstream.urls[5] != "https://api.hack3rx.cn/v1/messages" {
 		t.Fatalf("reprobe second URL = %q", upstream.urls[5])
 	}
-	if upstream.urls[6] != "https://api.example.test/v1/chat/completions" {
+	if upstream.urls[6] != "https://api.hack3rx.cn/v1/chat/completions" {
 		t.Fatalf("reprobe third URL = %q", upstream.urls[6])
 	}
 }
@@ -615,7 +615,7 @@ func TestCompatibleGatewayServiceForward_MoonshotMessagesFallbackPreservesToolUs
 		Type:        AccountTypeAPIKey,
 		Concurrency: 1,
 		Credentials: map[string]any{
-			"base_url": "https://api.example.test/v1",
+			"base_url": "https://api.hack3rx.cn/v1",
 			"api_key":  "test-key",
 		},
 	}
@@ -678,7 +678,7 @@ func TestCompatibleGatewayServiceForward_MoonshotMessagesStreamKeepsLateUsageChu
 		Type:        AccountTypeAPIKey,
 		Concurrency: 1,
 		Credentials: map[string]any{
-			"base_url": "https://api.example.test/v1",
+			"base_url": "https://api.hack3rx.cn/v1",
 			"api_key":  "test-key",
 		},
 	}
@@ -702,13 +702,13 @@ func TestCompatibleGatewayServiceForward_MoonshotMessagesStreamKeepsLateUsageChu
 	if len(upstream.urls) != 3 {
 		t.Fatalf("len(upstream.urls) = %d, want 3", len(upstream.urls))
 	}
-	if upstream.urls[0] != "https://api.example.test/anthropic/v1/messages" {
+	if upstream.urls[0] != "https://api.hack3rx.cn/anthropic/v1/messages" {
 		t.Fatalf("first upstream url = %q", upstream.urls[0])
 	}
-	if upstream.urls[1] != "https://api.example.test/v1/messages" {
+	if upstream.urls[1] != "https://api.hack3rx.cn/v1/messages" {
 		t.Fatalf("second upstream url = %q", upstream.urls[1])
 	}
-	if upstream.urls[2] != "https://api.example.test/v1/chat/completions" {
+	if upstream.urls[2] != "https://api.hack3rx.cn/v1/chat/completions" {
 		t.Fatalf("third upstream url = %q", upstream.urls[2])
 	}
 	if result.Usage.InputTokens != 9 || result.Usage.OutputTokens != 7 {
@@ -752,7 +752,7 @@ func TestCompatibleGatewayServiceForward_MoonshotMessagesStreamEmitsStopBeforeEO
 		Type:        AccountTypeAPIKey,
 		Concurrency: 1,
 		Credentials: map[string]any{
-			"base_url": "https://api.example.test/v1",
+			"base_url": "https://api.hack3rx.cn/v1",
 			"api_key":  "test-key",
 		},
 	}
@@ -843,7 +843,7 @@ func TestCompatibleGatewayServiceForward_MoonshotMessagesStreamFallbackPreserves
 		Type:        AccountTypeAPIKey,
 		Concurrency: 1,
 		Credentials: map[string]any{
-			"base_url": "https://api.example.test/v1",
+			"base_url": "https://api.hack3rx.cn/v1",
 			"api_key":  "test-key",
 		},
 	}
