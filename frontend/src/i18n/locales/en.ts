@@ -3436,7 +3436,8 @@ export default {
         todayTokens: 'Today Tokens',
         todayCost: 'Today Cost',
         usageTrend: '30-Day Cost & Request Trend',
-        noData: 'No usage data available for this account'
+        noData: 'No usage data available for this account',
+        loadFailed: 'Failed to load account usage statistics. Please try again or check backend logs.'
       },
       usageWindow: {
         statsTitle: '5-Hour Window Usage Statistics',

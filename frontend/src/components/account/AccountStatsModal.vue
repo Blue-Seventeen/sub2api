@@ -41,7 +41,19 @@
         <LoadingSpinner />
       </div>
 
-      <template v-else-if="stats">
+      <!-- Error State -->
+      <div
+        v-else-if="loadError"
+        class="flex flex-col items-center justify-center py-12 text-center text-red-600 dark:text-red-400"
+      >
+        <Icon name="exclamationCircle" size="xl" class="mb-4 h-12 w-12" />
+        <p class="text-sm font-medium">{{ t('admin.accounts.stats.loadFailed') }}</p>
+        <p v-if="loadErrorMessage" class="mt-2 max-w-xl break-words text-xs text-gray-500 dark:text-gray-400">
+          {{ loadErrorMessage }}
+        </p>
+      </div>
+
+      <template v-else-if="stats && hasUsageData">
         <!-- Row 1: Main Stats Cards -->
         <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
           <!-- 30-Day Total Cost -->
@@ -462,7 +474,7 @@
 
       <!-- No Data State -->
       <div
-        v-else-if="!loading"
+        v-else
         class="flex flex-col items-center justify-center py-12 text-gray-500 dark:text-gray-400"
       >
         <Icon name="chartBar" size="xl" class="mb-4 h-12 w-12" :stroke-width="1.5" />
@@ -530,6 +542,8 @@ const emit = defineEmits<{
 
 const loading = ref(false)
 const stats = ref<AccountUsageStatsResponse | null>(null)
+const loadError = ref(false)
+const loadErrorMessage = ref('')
 
 // Dark mode detection
 const isDarkMode = computed(() => {
@@ -541,6 +555,33 @@ const chartColors = computed(() => ({
   text: isDarkMode.value ? '#e5e7eb' : '#374151',
   grid: isDarkMode.value ? '#374151' : '#e5e7eb'
 }))
+
+const hasUsageData = computed(() => {
+  const currentStats = stats.value
+  if (!currentStats) return false
+
+  const summary = currentStats.summary
+  return (
+    (currentStats.history?.length ?? 0) > 0 ||
+    (currentStats.models?.length ?? 0) > 0 ||
+    (currentStats.endpoints?.length ?? 0) > 0 ||
+    (currentStats.upstream_endpoints?.length ?? 0) > 0 ||
+    (summary?.total_requests ?? 0) > 0 ||
+    (summary?.total_tokens ?? 0) > 0 ||
+    (summary?.total_cost ?? 0) > 0 ||
+    (summary?.total_user_cost ?? 0) > 0 ||
+    (summary?.total_standard_cost ?? 0) > 0
+  )
+})
+
+const formatLoadError = (error: unknown): string => {
+  if (error && typeof error === 'object' && 'message' in error) {
+    const message = (error as { message?: unknown }).message
+    return typeof message === 'string' ? message : ''
+  }
+  return ''
+}
+
 
 // Line chart data
 const trendChartData = computed(() => {
@@ -680,25 +721,32 @@ const lineChartOptions = computed(() => ({
 
 // Load stats when modal opens
 watch(
-  () => props.show,
-  async (newVal) => {
+  () => [props.show, props.account?.id] as const,
+  async ([newVal]) => {
     if (newVal && props.account) {
       await loadStats()
     } else {
       stats.value = null
+      loadError.value = false
+      loadErrorMessage.value = ''
     }
-  }
+  },
+  { immediate: true }
 )
 
-const loadStats = async () => {
+async function loadStats() {
   if (!props.account) return
 
   loading.value = true
+  loadError.value = false
+  loadErrorMessage.value = ''
   try {
     stats.value = await adminAPI.accounts.getStats(props.account.id, 30)
   } catch (error) {
     console.error('Failed to load account stats:', error)
     stats.value = null
+    loadError.value = true
+    loadErrorMessage.value = formatLoadError(error)
   } finally {
     loading.value = false
   }
