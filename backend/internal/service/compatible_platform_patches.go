@@ -14,17 +14,26 @@ func normalizeTopPForCompatibleBody(body []byte, _ *Account, _ string) ([]byte, 
 	return normalizeTopPForCompatibleBodyRaw(body), nil
 }
 
-func patchMoonshotCompatibleChatBody(body []byte, _ *Account, _ string) ([]byte, error) {
+func patchMoonshotCompatibleChatBody(body []byte, account *Account, _ string) ([]byte, error) {
 	body = normalizeTopPForCompatibleBodyRaw(body)
-	body = collapseMoonshotHistoricalToolCallsToText(body)
-	body = ensureMoonshotReasoningContentForToolCalls(body)
-	body = stripMoonshotReasoningEffortForToolCalls(body)
+	if !moonshotAccountFeatureEnabled(account, "kimi_official_fast_path_enabled", true) ||
+		!moonshotAccountFeatureEnabled(account, "kimi_native_chat_enabled", true) {
+		body = collapseMoonshotHistoricalToolCallsToText(body)
+		body = ensureMoonshotReasoningContentForToolCalls(body)
+		body = stripMoonshotReasoningEffortForToolCalls(body)
+		body = ensureCompatibleStreamingUsageIncluded(body)
+		return body, nil
+	}
+	if err := rejectMoonshotRequiredToolChoice(body); err != nil {
+		return nil, err
+	}
 	body = ensureCompatibleStreamingUsageIncluded(body)
 	return body, nil
 }
 
 func patchMoonshotCompatibleChatBodyForAnthropicFallback(body []byte, _ *Account, _ string) ([]byte, error) {
 	body = normalizeTopPForCompatibleBodyRaw(body)
+	body = normalizeMoonshotRequiredToolChoiceToAuto(body)
 	body = collapseMoonshotHistoricalToolCallsToText(body)
 	body = ensureMoonshotReasoningContentForToolCalls(body)
 	body = stripMoonshotReasoningEffortForToolCalls(body)
@@ -32,8 +41,11 @@ func patchMoonshotCompatibleChatBodyForAnthropicFallback(body []byte, _ *Account
 	return body, nil
 }
 
-func patchMoonshotCompatibleMessagesBody(body []byte, _ *Account, _ string) ([]byte, error) {
-	body = relaxMoonshotThinkingForToolUse(body)
+func patchMoonshotCompatibleMessagesBody(body []byte, account *Account, _ string) ([]byte, error) {
+	if !moonshotAccountFeatureEnabled(account, "kimi_official_fast_path_enabled", true) ||
+		!moonshotAccountFeatureEnabled(account, "kimi_native_messages_enabled", true) {
+		body = relaxMoonshotThinkingForToolUse(body)
+	}
 	return body, nil
 }
 
@@ -71,6 +83,45 @@ func ensureCompatibleStreamingUsageIncluded(body []byte) []byte {
 		return body
 	}
 	return updated
+}
+
+func rejectMoonshotRequiredToolChoice(body []byte) error {
+	if len(body) == 0 {
+		return nil
+	}
+	if !isMoonshotRequiredToolChoice(body) {
+		return nil
+	}
+	return &CompatibleClientError{
+		StatusCode: 400,
+		ErrorType:  "invalid_request_error",
+		Message:    "Moonshot Kimi official chat does not support tool_choice=required; use tool_choice=auto or a provider with required tool-choice support",
+	}
+}
+
+func normalizeMoonshotRequiredToolChoiceToAuto(body []byte) []byte {
+	if !isMoonshotRequiredToolChoice(body) {
+		return body
+	}
+	updated, err := sjson.SetBytes(body, "tool_choice", "auto")
+	if err != nil {
+		return body
+	}
+	return updated
+}
+
+func isMoonshotRequiredToolChoice(body []byte) bool {
+	toolChoice := gjson.GetBytes(body, "tool_choice")
+	if !toolChoice.Exists() {
+		return false
+	}
+	if toolChoice.Type == gjson.String {
+		return strings.EqualFold(strings.TrimSpace(toolChoice.String()), "required")
+	}
+	if typed := gjson.GetBytes(body, "tool_choice.type"); typed.Exists() {
+		return strings.EqualFold(strings.TrimSpace(typed.String()), "required")
+	}
+	return false
 }
 
 func collapseMoonshotHistoricalToolCallsToText(body []byte) []byte {

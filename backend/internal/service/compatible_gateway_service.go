@@ -42,6 +42,19 @@ func (e *CompatibleUpstreamError) Error() string {
 	return fmt.Sprintf("compatible upstream error: %d %s", e.StatusCode, e.Message)
 }
 
+type CompatibleClientError struct {
+	StatusCode int
+	ErrorType  string
+	Message    string
+}
+
+func (e *CompatibleClientError) Error() string {
+	if e == nil {
+		return "compatible client error"
+	}
+	return e.Message
+}
+
 type compatibleUpstreamKind string
 
 const (
@@ -63,6 +76,10 @@ type compatibleEndpointModeCacheEntry struct {
 	UpdatedAt time.Time
 }
 
+type KimiFeatureClass string
+type KimiRelayDecision string
+type KimiOfficialCapability string
+
 type compatibleURLCandidate struct {
 	URL  string
 	Mode compatibleEndpointMode
@@ -77,6 +94,7 @@ type compatiblePreparedRequest struct {
 	UpstreamEndpoint string
 	RequestBody      []byte
 	URL              string
+	KimiFeatureClass KimiFeatureClass
 }
 
 func NewCompatibleGatewayService(
@@ -237,6 +255,14 @@ func (s *CompatibleGatewayService) prepareRequest(account *Account, route Compat
 				prepared.RequestBody = preparedBody
 			}
 		} else {
+			if account.Platform == PlatformMoonshot {
+				if !moonshotAccountFeatureEnabled(account, "kimi_responses_bridge_enabled", true) {
+					return nil, moonshotResponsesBridgeError("Moonshot Kimi Responses bridge is disabled for this account")
+				}
+				if err := validateMoonshotResponsesBridgeRequest(body); err != nil {
+					return nil, err
+				}
+			}
 			var responsesReq apicompat.ResponsesRequest
 			if err := json.Unmarshal(body, &responsesReq); err != nil {
 				return nil, fmt.Errorf("parse responses request: %w", err)
@@ -309,6 +335,10 @@ func (s *CompatibleGatewayService) prepareRequest(account *Account, route Compat
 		return nil, fmt.Errorf("unsupported compatible route: %s", route)
 	}
 
+	if account.Platform == PlatformMoonshot {
+		prepared.KimiFeatureClass = kimiFeatureClassForBody(route, upstreamModel, prepared.RequestBody)
+	}
+
 	return prepared, nil
 }
 
@@ -332,6 +362,12 @@ func shouldUseCompatibleNativeMessages(account *Account, preset CompatibleProvid
 	if preset.SupportsMessages == nil || !preset.SupportsMessages(upstreamModel) {
 		return false
 	}
+	if account != nil && account.Platform == PlatformMoonshot {
+		if !moonshotAccountFeatureEnabled(account, "kimi_official_fast_path_enabled", true) ||
+			!moonshotAccountFeatureEnabled(account, "kimi_native_messages_enabled", true) {
+			return false
+		}
+	}
 	return account != nil
 }
 
@@ -343,6 +379,107 @@ func rewriteCompatibleRequestModel(body []byte, originalModel, upstreamModel str
 		return body, nil
 	}
 	return sjson.SetBytes(body, "model", upstreamModel)
+}
+
+func validateMoonshotResponsesBridgeRequest(body []byte) error {
+	if prev := strings.TrimSpace(gjson.GetBytes(body, "previous_response_id").String()); prev != "" {
+		return moonshotResponsesBridgeError("previous_response_id is not supported by the Moonshot Kimi Responses bridge")
+	}
+	if isMoonshotRequiredToolChoice(body) {
+		return moonshotResponsesBridgeError("tool_choice=required is not supported by the Moonshot Kimi Responses bridge; use tool_choice=auto")
+	}
+	for _, rawTool := range gjson.GetBytes(body, "tools").Array() {
+		toolType := strings.TrimSpace(rawTool.Get("type").String())
+		if toolType == "" || toolType == "function" {
+			continue
+		}
+		return moonshotResponsesBridgeError("non-function Responses tools are not supported by the Moonshot Kimi bridge")
+	}
+	input := gjson.GetBytes(body, "input")
+	if input.IsArray() {
+		for _, item := range input.Array() {
+			itemType := strings.TrimSpace(item.Get("type").String())
+			switch itemType {
+			case "", "message", "function_call", "function_call_output":
+				continue
+			default:
+				return moonshotResponsesBridgeError("unsupported Responses input item type for the Moonshot Kimi bridge: " + itemType)
+			}
+		}
+	}
+	return nil
+}
+
+func moonshotResponsesBridgeError(message string) error {
+	return &CompatibleClientError{
+		StatusCode: http.StatusBadRequest,
+		ErrorType:  "invalid_request_error",
+		Message:    message,
+	}
+}
+
+func moonshotAccountFeatureEnabled(account *Account, key string, defaultValue bool) bool {
+	if account == nil || account.Extra == nil {
+		return defaultValue
+	}
+	if _, ok := account.Extra[key]; !ok {
+		return defaultValue
+	}
+	return account.GetExtraBool(key)
+}
+
+func kimiFeatureClassForBody(route CompatibleRequestRoute, upstreamModel string, body []byte) KimiFeatureClass {
+	toolChoiceClass := "none"
+	toolChoice := gjson.GetBytes(body, "tool_choice")
+	if toolChoice.Exists() {
+		switch {
+		case isMoonshotRequiredToolChoice(body):
+			toolChoiceClass = "required"
+		case toolChoice.Type == gjson.String:
+			toolChoiceClass = strings.ToLower(strings.TrimSpace(toolChoice.String()))
+		default:
+			if typed := strings.TrimSpace(gjson.GetBytes(body, "tool_choice.type").String()); typed != "" {
+				toolChoiceClass = strings.ToLower(typed)
+			} else {
+				toolChoiceClass = "set"
+			}
+		}
+	}
+	return KimiFeatureClass(strings.Join([]string{
+		"route=" + strings.ToLower(strings.TrimSpace(string(route))),
+		"model=" + strings.ToLower(strings.TrimSpace(upstreamModel)),
+		"tools=" + boolFeature(len(gjson.GetBytes(body, "tools").Array()) > 0),
+		"thinking=" + boolFeature(moonshotBodyHasThinking(body)),
+		"tool_history=" + boolFeature(moonshotBodyHasToolHistory(body)),
+		"tool_choice=" + toolChoiceClass,
+	}, ";"))
+}
+
+func boolFeature(v bool) string {
+	if v {
+		return "1"
+	}
+	return "0"
+}
+
+func moonshotBodyHasThinking(body []byte) bool {
+	return gjson.GetBytes(body, "thinking").Exists() ||
+		gjson.GetBytes(body, "output_config.effort").Exists() ||
+		gjson.GetBytes(body, "reasoning").Exists() ||
+		gjson.GetBytes(body, "reasoning_effort").Exists() ||
+		bytes.Contains(body, []byte(`"reasoning_content"`)) ||
+		bytes.Contains(body, []byte(`"type":"thinking"`)) ||
+		bytes.Contains(body, []byte(`"type": "thinking"`))
+}
+
+func moonshotBodyHasToolHistory(body []byte) bool {
+	return bytes.Contains(body, []byte(`"tool_calls"`)) ||
+		bytes.Contains(body, []byte(`"role":"tool"`)) ||
+		bytes.Contains(body, []byte(`"role": "tool"`)) ||
+		bytes.Contains(body, []byte(`"type":"tool_use"`)) ||
+		bytes.Contains(body, []byte(`"type": "tool_use"`)) ||
+		bytes.Contains(body, []byte(`"type":"tool_result"`)) ||
+		bytes.Contains(body, []byte(`"type": "tool_result"`))
 }
 
 func (s *CompatibleGatewayService) buildURLForPreparedRequest(account *Account, prepared *compatiblePreparedRequest, baseURL string) string {
@@ -436,6 +573,12 @@ func shouldFallbackMoonshotMessagesToChat(account *Account, prepared *compatible
 		return false
 	}
 
+	if strings.Contains(msg, "failed to parse request body") ||
+		strings.Contains(msg, "invalid request body") ||
+		strings.Contains(msg, "parse request body") {
+		return true
+	}
+
 	hasToolCallContext := strings.Contains(msg, "assistant tool call message") ||
 		(strings.Contains(msg, "tool call") && strings.Contains(msg, "assistant"))
 	if !hasToolCallContext {
@@ -482,11 +625,33 @@ func (s *CompatibleGatewayService) endpointModeCacheKey(account *Account, prepar
 	if account != nil {
 		accountID = account.ID
 	}
+	if account != nil && account.Platform == PlatformMoonshot {
+		upstreamModel := ""
+		featureClass := KimiFeatureClass("")
+		if prepared != nil {
+			upstreamModel = prepared.UpstreamModel
+			featureClass = prepared.KimiFeatureClass
+			if featureClass == "" {
+				featureClass = kimiFeatureClassForBody(compatiblePreparedClientRoute(prepared), prepared.UpstreamModel, prepared.RequestBody)
+			}
+		}
+		return fmt.Sprintf("%d|%s|%s|%s|%s",
+			accountID,
+			strings.TrimSpace(baseURL),
+			compatiblePreparedClientRoute(prepared),
+			strings.ToLower(strings.TrimSpace(upstreamModel)),
+			featureClass,
+		)
+	}
 	return fmt.Sprintf("%d|%s|%s", accountID, strings.TrimSpace(baseURL), compatiblePreparedClientRoute(prepared))
 }
 
 func (s *CompatibleGatewayService) preferredEndpointMode(account *Account, prepared *compatiblePreparedRequest, baseURL string) compatibleEndpointMode {
 	if s == nil {
+		return compatibleEndpointModeNative
+	}
+	if account != nil && account.Platform == PlatformMoonshot &&
+		!moonshotAccountFeatureEnabled(account, "kimi_endpoint_mode_cache_enabled", true) {
 		return compatibleEndpointModeNative
 	}
 	key := s.endpointModeCacheKey(account, prepared, baseURL)
@@ -561,6 +726,10 @@ func (s *CompatibleGatewayService) recordEndpointMode(account *Account, prepared
 	if s == nil {
 		return
 	}
+	if account != nil && account.Platform == PlatformMoonshot &&
+		!moonshotAccountFeatureEnabled(account, "kimi_endpoint_mode_cache_enabled", true) {
+		return
+	}
 	s.endpointModeCache.Store(s.endpointModeCacheKey(account, prepared, baseURL), compatibleEndpointModeCacheEntry{
 		Mode:      mode,
 		UpdatedAt: time.Now(),
@@ -626,6 +795,7 @@ func (s *CompatibleGatewayService) applyHeaderPatches(req *http.Request, account
 func shouldAddMoonshotMessagesChatFallback(account *Account, route CompatibleRequestRoute, prepared *compatiblePreparedRequest) bool {
 	return account != nil &&
 		account.Platform == PlatformMoonshot &&
+		moonshotAccountFeatureEnabled(account, "kimi_chat_fallback_enabled", true) &&
 		route == CompatibleRouteMessages &&
 		prepared != nil &&
 		prepared.UpstreamKind == compatibleUpstreamMessages
@@ -667,6 +837,7 @@ func (s *CompatibleGatewayService) prepareMoonshotAnthropicMessagesChatFallbackR
 		UpstreamKind:     compatibleUpstreamChat,
 		UpstreamEndpoint: "/v1/chat/completions",
 		RequestBody:      chatBody,
+		KimiFeatureClass: kimiFeatureClassForBody(CompatibleRouteMessages, upstreamModel, body),
 	}, nil
 }
 

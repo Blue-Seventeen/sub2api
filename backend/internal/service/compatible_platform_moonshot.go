@@ -10,13 +10,14 @@ func moonshotCompatibleProviderPreset() CompatibleProviderPreset {
 	return CompatibleProviderPreset{
 		Platform:       PlatformMoonshot,
 		DisplayName:    compatiblePlatformDisplayName(PlatformMoonshot),
-		DefaultBaseURL: "https://api.moonshot.cn",
+		DefaultBaseURL: "https://api.moonshot.ai",
 		DefaultModels: NormalizeCompatibleModelList([]claude.Model{
+			{ID: "kimi-k2.6", Type: "model", DisplayName: "Kimi K2.6"},
 			{ID: "kimi-k2.5", Type: "model", DisplayName: "Kimi K2.5"},
 			{ID: "kimi-k2-thinking", Type: "model", DisplayName: "Kimi K2 Thinking"},
 			{ID: "kimi-k2-thinking-turbo", Type: "model", DisplayName: "Kimi K2 Thinking Turbo"},
 		}),
-		DefaultTestModel:  "kimi-k2.5",
+		DefaultTestModel:  "kimi-k2.6",
 		AuthMode:          CompatibleAuthBearer,
 		SupportsChat:      true,
 		SupportsResponses: false,

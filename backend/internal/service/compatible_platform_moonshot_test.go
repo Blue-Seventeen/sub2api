@@ -3,7 +3,9 @@
 package service
 
 import (
+	"errors"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/tidwall/gjson"
@@ -15,11 +17,11 @@ func TestMoonshotCompatibleProviderPreset(t *testing.T) {
 	if preset.Platform != PlatformMoonshot {
 		t.Fatalf("Platform = %q, want %q", preset.Platform, PlatformMoonshot)
 	}
-	if preset.DefaultBaseURL != "https://api.moonshot.cn" {
-		t.Fatalf("DefaultBaseURL = %q, want %q", preset.DefaultBaseURL, "https://api.moonshot.cn")
+	if preset.DefaultBaseURL != "https://api.moonshot.ai" {
+		t.Fatalf("DefaultBaseURL = %q, want %q", preset.DefaultBaseURL, "https://api.moonshot.ai")
 	}
-	if preset.DefaultTestModel != "kimi-k2.5" {
-		t.Fatalf("DefaultTestModel = %q, want %q", preset.DefaultTestModel, "kimi-k2.5")
+	if preset.DefaultTestModel != "kimi-k2.6" {
+		t.Fatalf("DefaultTestModel = %q, want %q", preset.DefaultTestModel, "kimi-k2.6")
 	}
 	if preset.AuthMode != CompatibleAuthBearer {
 		t.Fatalf("AuthMode = %q, want %q", preset.AuthMode, CompatibleAuthBearer)
@@ -36,11 +38,11 @@ func TestMoonshotCompatibleProviderPreset(t *testing.T) {
 	if !preset.SupportsMessages("kimi-k2.5") {
 		t.Fatal("SupportsMessages(kimi-k2.5) = false, want true")
 	}
-	if len(preset.DefaultModels) != 3 {
-		t.Fatalf("len(DefaultModels) = %d, want 3", len(preset.DefaultModels))
+	if len(preset.DefaultModels) != 4 {
+		t.Fatalf("len(DefaultModels) = %d, want 4", len(preset.DefaultModels))
 	}
 
-	wantModels := []string{"kimi-k2.5", "kimi-k2-thinking", "kimi-k2-thinking-turbo"}
+	wantModels := []string{"kimi-k2.6", "kimi-k2.5", "kimi-k2-thinking", "kimi-k2-thinking-turbo"}
 	for i, want := range wantModels {
 		if preset.DefaultModels[i].ID != want {
 			t.Fatalf("DefaultModels[%d].ID = %q, want %q", i, preset.DefaultModels[i].ID, want)
@@ -151,7 +153,60 @@ func TestMoonshotCompatibleProviderPreset_ChatStreamingAddsUsageRequest(t *testi
 	}
 }
 
-func TestPatchMoonshotCompatibleChatBody_StripsReasoningEffortForToolCalls(t *testing.T) {
+func TestMoonshotCompatibleProviderPreset_ChatRejectsRequiredToolChoice(t *testing.T) {
+	svc := &CompatibleGatewayService{}
+	account := &Account{
+		Platform: PlatformMoonshot,
+		Type:     AccountTypeAPIKey,
+	}
+
+	body := []byte(`{
+		"model":"kimi-k2.5",
+		"messages":[{"role":"user","content":"hi"}],
+		"tools":[{"type":"function","function":{"name":"pwd","parameters":{"type":"object"}}}],
+		"tool_choice":"required"
+	}`)
+
+	_, err := svc.prepareRequest(account, CompatibleRouteChatCompletions, body)
+	if err == nil {
+		t.Fatal("prepareRequest() error = nil, want deterministic compatibility error")
+	}
+	var clientErr *CompatibleClientError
+	if !errors.As(err, &clientErr) {
+		t.Fatalf("prepareRequest() error = %T, want *CompatibleClientError", err)
+	}
+	if clientErr.StatusCode != http.StatusBadRequest {
+		t.Fatalf("StatusCode = %d, want 400", clientErr.StatusCode)
+	}
+}
+
+func TestMoonshotCompatibleProviderPreset_ResponsesBridgeRejectsPreviousResponseID(t *testing.T) {
+	svc := &CompatibleGatewayService{}
+	account := &Account{
+		Platform: PlatformMoonshot,
+		Type:     AccountTypeAPIKey,
+	}
+
+	body := []byte(`{
+		"model":"kimi-k2.5",
+		"previous_response_id":"resp_123",
+		"input":[{"role":"user","content":[{"type":"input_text","text":"hi"}]}]
+	}`)
+
+	_, err := svc.prepareRequest(account, CompatibleRouteResponses, body)
+	if err == nil {
+		t.Fatal("prepareRequest() error = nil, want deterministic compatibility error")
+	}
+	var clientErr *CompatibleClientError
+	if !errors.As(err, &clientErr) {
+		t.Fatalf("prepareRequest() error = %T, want *CompatibleClientError", err)
+	}
+	if !strings.Contains(clientErr.Message, "previous_response_id") {
+		t.Fatalf("Message = %q, want previous_response_id", clientErr.Message)
+	}
+}
+
+func TestPatchMoonshotCompatibleChatBody_PreservesOfficialToolHistory(t *testing.T) {
 	body := []byte(`{
 		"model":"kimi-k2.5",
 		"messages":[
@@ -163,7 +218,7 @@ func TestPatchMoonshotCompatibleChatBody_StripsReasoningEffortForToolCalls(t *te
 					{
 						"id":"call_123",
 						"type":"function",
-						"function":{"name":"pwd","arguments":"{}"}
+						"function":{"name":"pwd","arguments":"{\"command\":\"rtk read G:\\SoftwareDevelopment\\project\\styles.css --tail-lines 20\"}"}
 					}
 				]
 			},
@@ -181,20 +236,17 @@ func TestPatchMoonshotCompatibleChatBody_StripsReasoningEffortForToolCalls(t *te
 	if err != nil {
 		t.Fatalf("patchMoonshotCompatibleChatBody() error = %v", err)
 	}
-	if gjson.GetBytes(patched, "messages.1.tool_calls").Exists() {
-		t.Fatal("messages.1.tool_calls should be collapsed to plain text")
+	if !gjson.GetBytes(patched, "messages.1.tool_calls").Exists() {
+		t.Fatal("messages.1.tool_calls should be preserved for official Kimi chat")
 	}
-	if got := gjson.GetBytes(patched, "messages.1.content").String(); got != "Previous assistant tool call: id=call_123; name=pwd; arguments={}" {
-		t.Fatalf("messages.1.content = %q, want collapsed tool_use text", got)
+	if got := gjson.GetBytes(patched, "messages.1.tool_calls.0.function.arguments").String(); !strings.Contains(got, `G:\SoftwareDevelopment\project\styles.css`) {
+		t.Fatalf("tool call arguments = %q, want Windows path backslashes preserved", got)
 	}
-	if got := gjson.GetBytes(patched, "messages.2.role").String(); got != "user" {
-		t.Fatalf("messages.2.role = %q, want %q", got, "user")
+	if got := gjson.GetBytes(patched, "messages.2.role").String(); got != "tool" {
+		t.Fatalf("messages.2.role = %q, want %q", got, "tool")
 	}
-	if got := gjson.GetBytes(patched, "messages.2.content").String(); got != "Previous tool result for id=call_123\nC:/Users/cy/Downloads" {
-		t.Fatalf("messages.2.content = %q, want collapsed tool_result text", got)
-	}
-	if gjson.GetBytes(patched, "reasoning_effort").Exists() {
-		t.Fatal("reasoning_effort should be removed when tool_calls are present")
+	if !gjson.GetBytes(patched, "reasoning_effort").Exists() {
+		t.Fatal("reasoning_effort should be preserved for official Kimi chat")
 	}
 	if !gjson.GetBytes(patched, "stream_options.include_usage").Bool() {
 		t.Fatal("stream_options.include_usage = false, want true")
@@ -254,7 +306,7 @@ func TestPatchMoonshotCompatibleChatBodyForAnthropicFallback_CollapsesHistorical
 	}
 }
 
-func TestPatchMoonshotCompatibleMessagesBody_RelaxesThinkingForToolUse(t *testing.T) {
+func TestPatchMoonshotCompatibleMessagesBody_PreservesThinkingForToolUse(t *testing.T) {
 	body := []byte(`{
 		"model":"kimi-k2.5",
 		"thinking":{"type":"enabled"},
@@ -269,8 +321,8 @@ func TestPatchMoonshotCompatibleMessagesBody_RelaxesThinkingForToolUse(t *testin
 	if err != nil {
 		t.Fatalf("patchMoonshotCompatibleMessagesBody() error = %v", err)
 	}
-	if gjson.GetBytes(patched, "thinking").Exists() {
-		t.Fatal("thinking should be removed when tool_use/tool_result blocks are present")
+	if !gjson.GetBytes(patched, "thinking").Exists() {
+		t.Fatal("thinking should be preserved for official Kimi Anthropic messages")
 	}
 	if got := gjson.GetBytes(patched, "messages.1.content.0.type").String(); got != "tool_use" {
 		t.Fatalf("messages.1.content.0.type = %q, want %q", got, "tool_use")
@@ -280,7 +332,7 @@ func TestPatchMoonshotCompatibleMessagesBody_RelaxesThinkingForToolUse(t *testin
 	}
 }
 
-func TestPatchMoonshotCompatibleMessagesBody_RemovesOutputConfigEffortForToolUse(t *testing.T) {
+func TestPatchMoonshotCompatibleMessagesBody_PreservesOutputConfigEffortForToolUse(t *testing.T) {
 	body := []byte(`{
 		"model":"kimi-k2.5",
 		"output_config":{"effort":"high"},
@@ -295,8 +347,8 @@ func TestPatchMoonshotCompatibleMessagesBody_RemovesOutputConfigEffortForToolUse
 	if err != nil {
 		t.Fatalf("patchMoonshotCompatibleMessagesBody() error = %v", err)
 	}
-	if gjson.GetBytes(patched, "output_config").Exists() {
-		t.Fatal("output_config should be removed when tool_use/tool_result blocks are present")
+	if !gjson.GetBytes(patched, "output_config").Exists() {
+		t.Fatal("output_config should be preserved for official Kimi Anthropic messages")
 	}
 	if got := gjson.GetBytes(patched, "messages.1.content.0.type").String(); got != "tool_use" {
 		t.Fatalf("messages.1.content.0.type = %q, want %q", got, "tool_use")

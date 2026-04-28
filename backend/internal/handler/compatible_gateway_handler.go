@@ -351,6 +351,20 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 				return
 			}
 
+			var clientErr *service.CompatibleClientError
+			if errors.As(err, &clientErr) {
+				status := clientErr.StatusCode
+				if status == 0 {
+					status = http.StatusBadRequest
+				}
+				errType := clientErr.ErrorType
+				if strings.TrimSpace(errType) == "" {
+					errType = "invalid_request_error"
+				}
+				h.writeRouteError(c, route, status, errType, clientErr.Message, streamStarted)
+				return
+			}
+
 			h.writeRouteError(c, route, http.StatusBadGateway, "upstream_error", err.Error(), streamStarted)
 			return
 		}

@@ -323,7 +323,7 @@ func TestCompatibleGatewayServiceForward_MoonshotCustomRelayMessagesFallbackToCh
 	upstream := &compatibleGatewayHTTPUpstreamRecorder{
 		responses: []*http.Response{
 			newCompatibleGatewayHTTPResponse(http.StatusNotFound, `{"error":{"message":"endpoint not found"}}`),
-			newCompatibleGatewayHTTPResponse(http.StatusBadRequest, `{"error":{"message":"unsupported route"}}`),
+			newCompatibleGatewayHTTPResponse(http.StatusBadRequest, `{"error":{"message":"Failed to parse request body"}}`),
 			newCompatibleGatewayHTTPResponse(http.StatusOK, `{"id":"chatcmpl-kimi","object":"chat.completion","model":"Kimi-K2.5","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":7,"total_tokens":16}}`),
 		},
 	}
