@@ -70,7 +70,7 @@ import { useRouter } from 'vue-router'
 import { extractI18nErrorMessage } from '@/utils/apiError'
 import { paymentAPI } from '@/api/payment'
 import { useAppStore } from '@/stores'
-import { getPaymentPopupFeatures } from '@/components/payment/providerConfig'
+import { getPaymentPopupFeatures, isolatePopupOpener } from '@/components/payment/providerConfig'
 import type { Stripe, StripeElements } from '@stripe/stripe-js'
 import Icon from '@/components/icons/Icon.vue'
 
@@ -161,6 +161,7 @@ async function handlePay() {
         clientSecret: props.clientSecret,
         publishableKey: props.publishableKey,
       }, window.location.origin)
+      isolatePopupOpener(popup)
     }
     window.addEventListener('message', onReady)
 

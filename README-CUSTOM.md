@@ -18,7 +18,7 @@
 | 项目 | 当前约定 |
 |---|---|
 | 当前主线 | `dev` |
-| 当前 upstream 基线 | 已同步到 `v0.1.119` |
+| 当前 upstream 基线 | 已同步到 `v0.1.120` |
 | 早期 fork 保护基线 | `2b72deb8fd45dc3a526bda2299b16df8d471107c` |
 | 部署策略 | `dev` 是真实可部署主线；`sub2api-custom-localtest` 仅用于本地测试 |
 | 架构原则 | 保留 Sub2API 的 Account / Group / Channel / 调度 / sticky / failover / billing，渐进吸收协议优先兼容内核 |
@@ -29,6 +29,7 @@
 |---|---|---|---|
 | 多上游兼容 | GLM / DeepSeek / 豆包 / Qwen / Kimi 等兼容平台扩展 | 这是“任意客户端 × 任意上游”的基础 | `backend/internal/service/compatible_*`, `backend/internal/pkg/apicompat/*` |
 | Claude Code × Kimi | Moonshot/Kimi native-first、relay fallback、chat fallback、tool restore、tokenizer usage 修复 | 解决 Claude Code 中 Kimi 工具调用/usage/stream 不稳定 | `compatible_gateway_service.go`, `compatible_platform_moonshot.go`, `compatible_claude_kimi_tool_restore.go`, `moonshot_tokenizer.go` |
+| Kimi 官方通道 | Moonshot 官方兼容平台、默认官方 base URL、模型/平台展示补齐 | 保留 Kimi 官方线路，不被 generic compatible 平台覆盖 | `compatible_platform_moonshot.go`, `compatible_gateway_service.go`, `PlatformTypeBadge.vue`, `platformColors.ts` |
 | Claude Code × GPT | `/v1/messages` 到 OpenAI 链路诊断、benchmark、OpenAI passthrough instructions 修复 | 用于定位 GPT 在 Claude Code 下的兼容性与速度问题 | `openai_gateway_handler.go`, `openai_gateway_messages.go`, `openai_gateway_service.go` |
 | GLM 计费 | GLM token usage fallback，避免 token=0 | 防止计费异常和免费跑 | `compatible_usage_estimate.go`, `billing_service.go` |
 | Cherry Studio 图片 | GPT-images / New-API upstream 图片响应归一 | 保证 Cherry Studio 生图链路稳定 | `openai_images.go`, `apicompat/*`, image normalizer 相关逻辑 |
@@ -40,6 +41,11 @@
 | 代理池 | 代理检测、成功队列、账号选择最优代理 | 提升上游请求成功率 | `proxy_*`, `account_proxy*`, `frontend` 代理管理页 |
 | 设置增强 | 站点 Logo、自定义菜单、外链新页面打开、邀请码注册 HTML 提示 | 属于运营配置能力 | `setting_service.go`, `SettingsView.vue`, `AppSidebar.vue` |
 | 多机部署 | 定时备份本机开关 | 多机共库时由每台服务器本地文件决定是否执行定时备份，默认关闭 | `backup_service.go`, `backup_service_schedule_local_test.go` |
+| OpenAI Fast/Flex Policy | `service_tier` 策略、默认空规则/pass、低价 tier 自动标准化、最终有效 tier 计费 | 吸收 upstream 能力但保持本 fork 不允许低价模式的运营约束 | `setting_service.go`, `openai_gateway_service.go`, `openai_fast_policy_test.go`, `SettingsView.vue` |
+| 请求体读失败观测 | 对 `unexpected EOF`、`context canceled`、`connection reset`、timeout、未知读失败分桶记录 | 不改变客户端错误文本，同时让 ops 能定位入口链路问题 | `request_body_read_error.go`, `ops_error_logger.go`, `ops_repo.go`, `OpsErrorDetailModal.vue` |
+| Vertex Service Account | Gemini / Anthropic 通过 Vertex service account 认证，支持代理 token exchange 与模型预检 fallback | 扩展企业账号接入能力，保留现有 API key / proxy / fallback 行为 | `vertex_service_account.go`, `gemini_messages_compat_service.go`, `CreateAccountModal.vue`, `EditAccountModal.vue` |
+| 热路径性能保护 | usage logging 队列、upstream HTTP client cache、API key rate-limit reset、usage 导出 COUNT 优化 | 降低高峰请求尾延迟和大表查询压力 | `usage_record_worker_pool.go`, `http_upstream.go`, `billing_cache_service.go`, `UsageView.vue` |
+| 安全/隐私细化 | 调试 prompt 日志脱敏、新窗口 opener 隔离、compatible body limit 错误处理、备份 retention 删除失败保护 | 减少生产误配置泄露、tabnabbing、截断响应和 S3 孤儿对象风险 | `gateway_service.go`, `providerConfig.ts`, `compatible_gateway_service.go`, `backup_service.go` |
 | 测试稳定性 | config 测试隔离、wire 生成检查 | 保证 dev 可部署 | `backend/internal/config/*`, `backend/cmd/server/wire_gen_test.go` |
 
 ## 3. 使用记录页面专项保护清单
@@ -258,6 +264,7 @@ upstream 的 Affiliate / 邀请返利模块属于冗余功能，后续同步 ups
 - 定时备份启用状态不再走共享数据库，也不再走 Redis 锁；每台服务器只读取自己的本地文件 `backup_schedule.local.json`。
 - 本地文件默认路径：`DATA_DIR/backup_schedule.local.json`；未设置 `DATA_DIR` 时优先使用 `/app/data/backup_schedule.local.json`，否则使用当前目录。
 - 本地文件不存在或解析失败时默认视为未启用，避免新节点上线后自动重复跑备份。
+- 升级注意：旧数据库里即使已有 `enabled=true`，升级后也必须在目标备份节点重新启用本机开关，否则定时备份不会自动执行。
 - 只影响定时备份，不影响手动备份。
 
 重点文件：
@@ -267,16 +274,128 @@ upstream 的 Affiliate / 邀请返利模块属于冗余功能，后续同步 ups
 - `backend/internal/service/wire.go`
 - `backend/cmd/server/wire_gen.go`
 
-## 8. localtest 环境说明
+## 8. v0.1.120 同步新增保护点
+
+### 8.1 OpenAI Fast/Flex Policy
+
+- 默认配置必须保持 disabled / 空规则 / pass，不允许 upstream 默认 filter priority 改变现有请求行为。
+- `normalizeOpenAIServiceTier` 允许 `priority`、`auto`、`default`、`scale` 等标准值；未知 tier 继续剥离。
+- 本 fork 不允许命中低价模式：用户请求低价 `flex` 时必须自动调整为标准模式，不能向上游透传低价 tier。
+- 策略过滤后必须使用“最终有效 `service_tier`”计费，避免上游按 standard/default 执行但账单仍按 priority 或其他 tier 计费。
+- HTTP / WS / passthrough 路由需要保持兼容；filter / block 只允许在管理员显式配置规则后生效。
+
+重点文件：
+
+- `backend/internal/service/setting_service.go`
+- `backend/internal/service/openai_gateway_service.go`
+- `backend/internal/service/openai_fast_policy_test.go`
+- `backend/internal/service/openai_passthrough_normalization_test.go`
+- `backend/internal/service/openai_ws_v2/*`
+- `backend/internal/handler/admin/setting_handler.go`
+- `backend/internal/handler/dto/settings.go`
+- `frontend/src/views/admin/SettingsView.vue`
+
+### 8.2 Request Body 读取失败内部观测
+
+- 客户端响应必须保持兼容：非超限读取失败仍返回 `400 invalid_request_error` 与 `Failed to read request body`。
+- `http.MaxBytesError` / body 超限仍保持现有 `413` 逻辑，不改 SDK 可见行为。
+- 内部稳定分类包括：`request_body_unexpected_eof`、`request_body_context_canceled`、`request_body_connection_reset`、`request_body_timeout`、`request_body_read_error`。
+- 应用日志和 ops 只记录分类、原始 error、path、method、content_length、transfer_encoding、user_agent、client_request_id，不记录请求体内容。
+- `OpsErrorLoggerMiddleware` 需要把这类错误写入 `network_error_type`，并标记为 `network / client_request / client`。
+
+重点文件：
+
+- `backend/internal/handler/request_body_read_error.go`
+- `backend/internal/handler/request_body_read_error_test.go`
+- `backend/internal/pkg/httputil/body.go`
+- `backend/internal/pkg/httputil/body_test.go`
+- `backend/internal/handler/ops_error_logger.go`
+- `backend/internal/repository/ops_repo.go`
+- `backend/internal/repository/ops_repo_network_error_type_test.go`
+- `frontend/src/views/admin/ops/components/OpsErrorDetailModal.vue`
+
+### 8.3 Vertex Service Account
+
+- Gemini / Anthropic 兼容链路支持通过 Vertex service account 获取访问令牌。
+- service account token exchange 必须继承账号代理配置，避免云端访问策略和普通上游请求不一致。
+- Gemini `/v1beta/models` 预检在 Vertex service account 账号下应使用兼容 fallback，不能因为 native endpoint 差异误判账号不可用。
+- 新增 UI 文案和表单字段必须同时覆盖创建、编辑、批量编辑和中英文 locale。
+
+重点文件：
+
+- `backend/internal/service/vertex_service_account.go`
+- `backend/internal/service/vertex_service_account_test.go`
+- `backend/internal/service/gateway_anthropic_vertex_service_account_test.go`
+- `backend/internal/service/gemini_messages_compat_service.go`
+- `frontend/src/components/account/CreateAccountModal.vue`
+- `frontend/src/components/account/EditAccountModal.vue`
+- `frontend/src/components/account/BulkEditAccountModal.vue`
+- `frontend/src/components/common/PlatformTypeBadge.vue`
+- `frontend/src/types/index.ts`
+- `frontend/src/i18n/locales/zh.ts`
+- `frontend/src/i18n/locales/en.ts`
+
+### 8.4 热路径与安全回归保护
+
+- usage logging 队列满时不得回退为请求 goroutine 内同步执行重任务；overflow fallback 应走 bounded async 或显式降级，避免高峰尾延迟被放大。
+- upstream HTTP client cache 淘汰不能长时间持有全局写锁并同步关闭大量连接。
+- API key rate-limit 窗口过期时需要避免同 key 高并发重复启动 reset goroutine。
+- 管理后台 usage 导出默认避免每页精确 `COUNT(*)`，精确总数应按需启用。
+- Kimi / Moonshot 官方兼容通道需要保留 native-first 与官方默认 base URL，已有账号显式 `base_url` 不得被覆盖。
+- compatible gateway 读取 upstream body 时必须处理 body limit 读错，不能返回空或截断 body。
+- 调试日志不得在生产误开时输出完整 prompt body；支付和备份下载新窗口必须隔离 `window.opener`。
+- 备份 retention 删除 S3 对象失败时不得丢失元数据，避免后续无法清理孤儿对象。
+- 备份定时启用状态是本机文件开关，默认关闭；多节点部署只能在选定节点启用，否则会重复备份。
+
+重点文件：
+
+- `backend/internal/service/usage_record_worker_pool.go`
+- `backend/internal/repository/http_upstream.go`
+- `backend/internal/service/billing_cache_service.go`
+- `backend/internal/service/compatible_gateway_service.go`
+- `backend/internal/service/gateway_service.go`
+- `backend/internal/service/backup_service.go`
+- `frontend/src/views/admin/UsageView.vue`
+- `frontend/src/views/admin/__tests__/UsageView.spec.ts`
+- `frontend/src/views/user/PaymentView.vue`
+- `frontend/src/components/payment/providerConfig.ts`
+- `frontend/src/components/payment/StripePaymentInline.vue`
+- `frontend/src/components/admin/account/AccountBulkActionsBar.vue`
+- `frontend/src/views/admin/BackupView.vue`
+
+### 8.5 验证重点
+
+同步 `v0.1.120` 后至少确认：
+
+- Fast/Flex policy 默认不改变现有请求，低价 `flex` 会被标准化，账单使用最终有效 tier。
+- Request body 读失败只增强内部日志和 ops，不改变客户端 JSON 结构和错误文本。
+- Vertex service account 账号创建、编辑、批量编辑、代理 token exchange、Gemini 模型预检可用。
+- Compatible / Kimi 官方通道保持 native-first、relay fallback、chat fallback 与官方默认 base URL 行为。
+- usage logging、HTTP client cache、rate-limit reset、usage 导出 COUNT 优化不改变正常计费和查询结果。
+- compatible body limit、debug 日志脱敏、opener 隔离、backup retention 删除失败保护均有专项回归。
+- 升级后在唯一备份节点重新开启本机定时备份开关，多节点不要同时开启。
+
+建议测试命令：
+
+```powershell
+cd backend
+go test ./internal/handler ./internal/repository ./internal/pkg/httputil ./internal/service ./internal/service/openai_ws_v2 ./cmd/server -count=1
+
+cd ../frontend
+npm run typecheck
+npm run test:run -- accountsLocale providerConfig
+```
+
+## 9. localtest 环境说明
 
 - `sub2api-custom-localtest` 是测试环境，可覆盖、重建容器、清理数据。
 - `sub2api-custom-src/dev` 是真实可部署主线，不能提交临时打包目录、迁移中间文件、benchmark 临时输出。
 - localtest 的 `deploy/.env`、`deploy/data`、`deploy/redis_data`、`deploy/postgres_data` 默认不应被 dev 覆盖。
 - PostgreSQL 本地测试环境优先使用 named volume，避免 Windows bind mount 导致权限问题。
 
-## 9. 上游同步后的最小验收清单
+## 10. 上游同步后的最小验收清单
 
-### 9.1 后端测试
+### 10.1 后端测试
 
 至少执行：
 
@@ -289,7 +408,7 @@ go test ./internal/server/middleware -run "TestAPIKeyAuth|TestApiKeyAuthWithSubs
 
 如同步触及 usage / gateway / promotion / backup，还应补跑对应专项测试。
 
-### 9.2 前端测试
+### 10.2 前端测试
 
 至少执行：
 
@@ -307,7 +426,7 @@ pnpm run build
 - requested model / upstream model / endpoint 分布图是否正常
 - CSV 导出字段是否完整
 
-### 9.3 人工链路验收
+### 10.3 人工链路验收
 
 - Claude Code -> Sub2API -> Kimi
 - Claude Code -> Sub2API -> GLM
@@ -319,7 +438,7 @@ pnpm run build
 - `/admin/usage` 与用户侧 `/usage`
 - 定时备份配置与本机启用开关行为
 
-## 10. 后续新增定制功能时的记录要求
+## 11. 后续新增定制功能时的记录要求
 
 以后新增 fork 能力时，必须同步补充本文件：
 
@@ -332,7 +451,7 @@ pnpm run build
 如果只改代码不改本文件，下一次 upstream 同步时很容易被误删。
 
 
-## 11. 远端推送约定
+## 12. 远端推送约定
 
 本项目当前维护两个自有远端，后续执行“推送项目 / 发布代码 / 同步远端”时，默认同时推送 `main` 与 `dev` 到两个平台：
 
