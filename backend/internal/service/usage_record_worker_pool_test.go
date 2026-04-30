@@ -135,6 +135,72 @@ func TestUsageRecordWorkerPool_OverflowSync(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 }
 
+func TestUsageRecordWorkerPool_OverflowSyncFallsBackToCallerWhenFallbackPoolFull(t *testing.T) {
+	pool := NewUsageRecordWorkerPoolWithOptions(UsageRecordWorkerPoolOptions{
+		WorkerCount:           1,
+		QueueSize:             1,
+		TaskTimeout:           time.Second,
+		OverflowPolicy:        config.UsageRecordOverflowPolicySync,
+		OverflowSamplePercent: 0,
+	})
+	t.Cleanup(pool.Stop)
+
+	blockMain := make(chan struct{})
+	mainStarted := make(chan struct{})
+	mainQueuedDone := make(chan struct{})
+	fallbackStarted := make(chan struct{})
+	releaseFallback := make(chan struct{})
+	fallbackQueuedDone := make(chan struct{})
+
+	require.Equal(t, UsageRecordSubmitModeEnqueued, pool.Submit(func(ctx context.Context) {
+		close(mainStarted)
+		<-blockMain
+	}))
+	<-mainStarted
+	require.Equal(t, UsageRecordSubmitModeEnqueued, pool.Submit(func(ctx context.Context) {
+		close(mainQueuedDone)
+	}))
+
+	require.Equal(t, UsageRecordSubmitModeFallback, pool.Submit(func(ctx context.Context) {
+		close(fallbackStarted)
+		<-releaseFallback
+	}))
+	select {
+	case <-fallbackStarted:
+	case <-time.After(time.Second):
+		t.Fatal("fallback task not started")
+	}
+	require.Equal(t, UsageRecordSubmitModeFallback, pool.Submit(func(ctx context.Context) {
+		close(fallbackQueuedDone)
+	}))
+
+	callerExecuted := false
+	mode := pool.Submit(func(ctx context.Context) {
+		callerExecuted = true
+	})
+	require.Equal(t, UsageRecordSubmitModeSync, mode)
+	require.True(t, callerExecuted)
+
+	close(releaseFallback)
+	select {
+	case <-fallbackQueuedDone:
+	case <-time.After(time.Second):
+		t.Fatal("queued fallback task not executed")
+	}
+
+	close(blockMain)
+	select {
+	case <-mainQueuedDone:
+	case <-time.After(time.Second):
+		t.Fatal("queued main task not executed")
+	}
+
+	require.Eventually(t, func() bool {
+		stats := pool.Stats()
+		return stats.SyncFallbackTasks >= 3 && stats.AsyncFallbackTasks >= 2 && stats.DroppedQueueFull == 0
+	}, time.Second, 10*time.Millisecond)
+}
+
 func TestUsageRecordWorkerPool_OverflowSample(t *testing.T) {
 	pool := NewUsageRecordWorkerPoolWithOptions(UsageRecordWorkerPoolOptions{
 		WorkerCount:           1,

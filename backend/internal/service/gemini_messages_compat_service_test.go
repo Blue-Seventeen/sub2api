@@ -15,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 type geminiCompatHTTPUpstreamStub struct {
@@ -42,6 +43,39 @@ func (s *geminiCompatHTTPUpstreamStub) DoWithTLS(req *http.Request, proxyURL str
 }
 
 // TestConvertClaudeToolsToGeminiTools_CustomType 测试custom类型工具转换
+func TestGeminiForwardAIStudioGET_ServiceAccountListModelsUsesFallback(t *testing.T) {
+	httpStub := &geminiCompatHTTPUpstreamStub{}
+	svc := &GeminiMessagesCompatService{httpUpstream: httpStub}
+	account := &Account{
+		ID:       123,
+		Platform: PlatformGemini,
+		Type:     AccountTypeServiceAccount,
+	}
+
+	res, err := svc.ForwardAIStudioGET(context.Background(), account, "/v1beta/models")
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, "application/json", res.Headers.Get("Content-Type"))
+	require.Greater(t, gjson.GetBytes(res.Body, "models.#").Int(), int64(0))
+	require.Equal(t, 0, httpStub.calls)
+}
+
+func TestGeminiForwardAIStudioGET_ServiceAccountGetModelUsesFallback(t *testing.T) {
+	httpStub := &geminiCompatHTTPUpstreamStub{}
+	svc := &GeminiMessagesCompatService{httpUpstream: httpStub}
+	account := &Account{
+		ID:       123,
+		Platform: PlatformGemini,
+		Type:     AccountTypeServiceAccount,
+	}
+
+	res, err := svc.ForwardAIStudioGET(context.Background(), account, "/v1beta/models/gemini-3.1-pro-preview-customtools")
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, "models/gemini-3.1-pro-preview-customtools", gjson.GetBytes(res.Body, "name").String())
+	require.Equal(t, 0, httpStub.calls)
+}
+
 func TestConvertClaudeToolsToGeminiTools_CustomType(t *testing.T) {
 	tests := []struct {
 		name        string

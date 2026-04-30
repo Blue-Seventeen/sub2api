@@ -3062,7 +3062,8 @@ export default {
         refreshToken: '批量刷新令牌',
         resetStatusSuccess: '已成功重置 {count} 个账号状态',
         refreshTokenSuccess: '已成功刷新 {count} 个账号令牌',
-        partialSuccess: '操作部分完成：{success} 成功，{failed} 失败'
+        partialSuccess: '操作部分完成：{success} 成功，{failed} 失败',
+        editFiltered: '批量编辑筛选结果'
       },
       bulkEdit: {
         title: '批量编辑账号',
@@ -3075,6 +3076,7 @@ export default {
         partialSuccess: '部分更新成功：成功 {success} 个，失败 {failed} 个',
         failed: '批量更新失败',
         noSelection: '请选择要编辑的账号',
+        noFilter: '请至少应用一个筛选条件后再编辑筛选结果',
         noFieldsSelected: '请至少选择一个要更新的字段',
         mixedPlatformWarning: '所选账号跨越多个平台（{platforms}）。显示的模型映射预设为合并结果——请确保映射对每个平台都适用。'
       },
@@ -3102,6 +3104,32 @@ export default {
       accountName: '账号名称',
       enterAccountName: '请输入账号名称',
       accountType: '账号类型',
+      vertex: {
+        serviceAccountJson: '服务账号 JSON',
+        jsonLoaded: '已读取服务账号 JSON',
+        dropJson: '拖入服务账号 JSON',
+        jsonHiddenHint: '密钥内容不会在表单中显示。',
+        jsonDropHint: '将 .json 文件拖到这里，或点击按钮选择文件。',
+        chooseJson: '选择 JSON',
+        createJsonHint:
+          '上传或拖入 JSON 后会自动读取 project_id，密钥内容仅用于创建账号提交。',
+        projectId: 'Project ID',
+        projectPlaceholder: '从 JSON 自动读取',
+        location: 'Location',
+        locationHint: '不同 Vertex 模型可用 location 可能不同，这里选择账号默认 endpoint location。',
+        editJsonHint:
+          'Service Account JSON 不在编辑页显示；需要更换 JSON 时请删除账号后重新创建。',
+        jsonMissingFields: 'Service Account JSON 缺少 project_id、client_email 或 private_key',
+        jsonInvalid: 'Service Account JSON 格式无效',
+        projectIdMissing: 'Service Account JSON 缺少 project_id',
+        clientEmailMissing: 'Service Account JSON 缺少 client_email',
+        locationRequired: '请选择 Vertex location',
+        jsonRequired: '请上传 Service Account JSON',
+        anthropicDesc:
+          '使用 Google Cloud Service Account JSON 通过 Vertex AI 调用 Anthropic Claude。',
+        geminiDesc:
+          '使用 Google Cloud Service Account JSON 访问 Vertex AI Gemini。建议将 Vertex 账号放入独立分组，避免和 AI Studio/Gemini OAuth 同模型混调。'
+      },
       claudeCode: 'Claude Code',
       claudeConsole: 'Claude Console',
       bedrockLabel: 'AWS Bedrock',

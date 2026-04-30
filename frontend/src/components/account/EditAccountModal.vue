@@ -556,18 +556,18 @@
       <div v-if="(account.platform === 'gemini' || account.platform === 'anthropic') && account.type === 'service_account'" class="space-y-4">
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
-            <label class="input-label">Project ID</label>
+            <label class="input-label">{{ t('admin.accounts.vertex.projectId') }}</label>
             <input
               v-model="editVertexProjectId"
               type="text"
               class="input font-mono"
               readonly
-              placeholder="从 JSON 自动读取"
+              :placeholder="t('admin.accounts.vertex.projectPlaceholder')"
             />
-            <p class="input-hint">Service Account JSON 不在编辑页显示；需要更换 JSON 时请删除账号后重新创建。</p>
+            <p class="input-hint">{{ t('admin.accounts.vertex.editJsonHint') }}</p>
           </div>
           <div>
-            <label class="input-label">Location</label>
+            <label class="input-label">{{ t('admin.accounts.vertex.location') }}</label>
             <select
               v-model="editVertexLocation"
               required
@@ -587,7 +587,7 @@
                 </option>
               </optgroup>
             </select>
-            <p class="input-hint">不同 Vertex 模型可用 location 可能不同，这里选择账号默认 endpoint location。</p>
+            <p class="input-hint">{{ t('admin.accounts.vertex.locationHint') }}</p>
           </div>
         </div>
       </div>
@@ -3183,20 +3183,20 @@ const handleSubmit = async () => {
       const newCredentials: Record<string, unknown> = { ...currentCredentials }
 
       if (!editVertexProjectId.value.trim()) {
-        appStore.showError('Service Account JSON 缺少 project_id')
+        appStore.showError(t('admin.accounts.vertex.projectIdMissing'))
         return
       }
       if (!editVertexClientEmail.value.trim()) {
-        appStore.showError('Service Account JSON 缺少 client_email')
+        appStore.showError(t('admin.accounts.vertex.clientEmailMissing'))
         return
       }
       if (!editVertexLocation.value.trim()) {
-        appStore.showError('请填写 Vertex location')
+        appStore.showError(t('admin.accounts.vertex.locationRequired'))
         return
       }
 
       if (!currentCredentials.service_account_json && !currentCredentials.service_account) {
-        appStore.showError('请上传 Service Account JSON')
+        appStore.showError(t('admin.accounts.vertex.jsonRequired'))
         return
       }
       newCredentials.project_id = editVertexProjectId.value.trim()

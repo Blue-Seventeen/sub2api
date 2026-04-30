@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isolatePopupOpener, PROVIDER_CONFIG_FIELDS } from '@/components/payment/providerConfig'
+import { getPaymentPopupFeatures, isolatePopupOpener, PROVIDER_CONFIG_FIELDS } from '@/components/payment/providerConfig'
 
 function findField(key: string) {
   const fields = PROVIDER_CONFIG_FIELDS.wxpay || []
@@ -20,6 +20,14 @@ describe('PROVIDER_CONFIG_FIELDS.wxpay', () => {
 })
 
 describe('isolatePopupOpener', () => {
+  it('keeps popup features compatible with window.open return handles', () => {
+    const features = getPaymentPopupFeatures()
+
+    expect(features).not.toContain('noopener')
+    expect(features).not.toContain('noreferrer')
+    expect(features).toContain('resizable=yes')
+  })
+
   it('clears opener on ordinary payment popups', () => {
     const win = { opener: { location: 'about:blank' } } as unknown as Window
 

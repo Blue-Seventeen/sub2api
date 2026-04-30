@@ -1,6 +1,7 @@
 package service
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 
@@ -51,6 +52,24 @@ func TestBuildVertexGeminiURLRejectsInvalidLocation(t *testing.T) {
 	_, err := buildVertexGeminiURL("my-project", "us-central1/path", "gemini-3-pro", "generateContent", false)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid vertex location")
+}
+
+func TestNewVertexServiceAccountHTTPClientUsesProxy(t *testing.T) {
+	client, err := newVertexServiceAccountHTTPClient("http://127.0.0.1:18080")
+	require.NoError(t, err)
+	require.NotNil(t, client.Transport)
+
+	transport, ok := client.Transport.(*http.Transport)
+	require.True(t, ok)
+	proxyURL, err := transport.Proxy(&http.Request{})
+	require.NoError(t, err)
+	require.Equal(t, "http://127.0.0.1:18080", proxyURL.String())
+}
+
+func TestNewVertexServiceAccountHTTPClientRejectsInvalidProxy(t *testing.T) {
+	_, err := newVertexServiceAccountHTTPClient("http://[::1")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid service account proxy url")
 }
 
 func TestParseVertexServiceAccountKey(t *testing.T) {

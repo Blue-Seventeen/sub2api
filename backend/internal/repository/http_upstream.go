@@ -271,6 +271,9 @@ func (s *httpUpstreamService) getClientEntryWithTLS(proxyURL string, accountID i
 		if len(s.clients) >= s.maxUpstreamClients() {
 			victim, ok := s.evictOneCandidateLocked(now)
 			if !ok {
+				victim, ok = s.evictOneCandidateFullScanLocked(now)
+			}
+			if !ok {
 				s.mu.Unlock()
 				closeUpstreamClientEntries(evicted)
 				return nil, errUpstreamClientLimitReached
@@ -429,6 +432,9 @@ func (s *httpUpstreamService) getClientEntry(proxyURL string, accountID int64, a
 		if len(s.clients) >= s.maxUpstreamClients() {
 			victim, ok := s.evictOneCandidateLocked(now)
 			if !ok {
+				victim, ok = s.evictOneCandidateFullScanLocked(now)
+			}
+			if !ok {
 				s.mu.Unlock()
 				closeUpstreamClientEntries(evicted)
 				return nil, errUpstreamClientLimitReached
@@ -559,6 +565,14 @@ func (s *httpUpstreamService) evictIdleBatchLocked(now time.Time) []*upstreamCli
 // evictOneCandidateLocked 淘汰一个空闲客户端（需持有锁）。
 // 在固定采样窗口里优先选择已超时的空闲客户端，否则选择样本中最久未使用的空闲客户端。
 func (s *httpUpstreamService) evictOneCandidateLocked(now time.Time) (*upstreamClientEntry, bool) {
+	return s.evictOneCandidateWithScanLimitLocked(now, defaultClientEvictionScanLimit)
+}
+
+func (s *httpUpstreamService) evictOneCandidateFullScanLocked(now time.Time) (*upstreamClientEntry, bool) {
+	return s.evictOneCandidateWithScanLimitLocked(now, 0)
+}
+
+func (s *httpUpstreamService) evictOneCandidateWithScanLimitLocked(now time.Time, scanLimit int) (*upstreamClientEntry, bool) {
 	var (
 		expiredKey   string
 		expiredEntry *upstreamClientEntry
@@ -574,7 +588,7 @@ func (s *httpUpstreamService) evictOneCandidateLocked(now time.Time) (*upstreamC
 	}
 	scanned := 0
 	for key, entry := range s.clients {
-		if scanned >= defaultClientEvictionScanLimit {
+		if scanLimit > 0 && scanned >= scanLimit {
 			break
 		}
 		scanned++

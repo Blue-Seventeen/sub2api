@@ -190,7 +190,12 @@ func (p *ClaudeTokenProvider) getServiceAccountAccessToken(ctx context.Context, 
 		}
 	}
 
-	accessToken, ttl, err := exchangeVertexServiceAccountToken(ctx, key)
+	var proxyRepo ProxyRepository
+	if p.oauthService != nil {
+		proxyRepo = p.oauthService.proxyRepo
+	}
+	proxyURL := resolveAccountProxyURL(ctx, account, proxyRepo)
+	accessToken, ttl, err := exchangeVertexServiceAccountToken(ctx, key, proxyURL)
 	if err != nil {
 		return "", err
 	}

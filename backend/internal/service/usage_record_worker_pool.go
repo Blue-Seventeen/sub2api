@@ -182,6 +182,11 @@ func (p *UsageRecordWorkerPool) Submit(task UsageRecordTask) UsageRecordSubmitMo
 		if p.trySubmitFallback(task) {
 			return UsageRecordSubmitModeFallback
 		}
+		if p.fallbackPool != nil && !p.fallbackPool.Stopped() {
+			p.syncFallback.Add(1)
+			p.execute(task)
+			return UsageRecordSubmitModeSync
+		}
 	case config.UsageRecordOverflowPolicySample:
 		if p.shouldSyncFallback() {
 			if p.trySubmitFallback(task) {

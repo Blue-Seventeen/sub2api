@@ -152,6 +152,7 @@
       <template #table>
         <AccountBulkActionsBar
           :selected-ids="selIds"
+          :can-edit-filtered="hasActiveBulkEditFilters"
           @delete="handleBulkDelete"
           @reset-status="handleBulkResetStatus"
           @refresh-token="handleBulkRefreshToken"
@@ -1329,6 +1330,18 @@ const buildBulkEditFilterSnapshot = (): AccountBulkEditFilters => {
   }
 }
 
+const hasActiveBulkEditFilters = computed(() => {
+  const filters = buildBulkEditFilterSnapshot()
+  return Boolean(
+    filters.platform ||
+      filters.type ||
+      filters.status ||
+      filters.group ||
+      filters.privacy_mode ||
+      filters.search
+  )
+})
+
 const collectFilteredSelectionMetadata = async (filters: AccountBulkEditFilters) => {
   const selectedPlatforms = new Set<AccountPlatform>()
   const selectedTypes = new Set<AccountType>()
@@ -1371,6 +1384,10 @@ const openBulkEditSelected = () => {
 }
 
 const openBulkEditFiltered = async () => {
+  if (!hasActiveBulkEditFilters.value) {
+    appStore.showError(t('admin.accounts.bulkEdit.noFilter'))
+    return
+  }
   try {
     const filters = buildBulkEditFilterSnapshot()
     const { previewCount, selectedPlatforms, selectedTypes } = await collectFilteredSelectionMetadata(filters)

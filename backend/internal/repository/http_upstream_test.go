@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"sync/atomic"
@@ -256,6 +257,28 @@ func (s *HTTPUpstreamSuite) TestEvictOverLimitRemovesOldestIdle() {
 
 	require.LessOrEqual(s.T(), len(svc.clients), 2, "应保持在缓存上限内")
 	require.False(s.T(), hasEntry(svc, entry1), "最久未使用的连接池应被清理")
+}
+
+func (s *HTTPUpstreamSuite) TestEvictOneCandidateFullScanFindsIdleBeyondSampleWindow() {
+	svc := s.newService()
+	now := time.Now()
+	idle := &upstreamClientEntry{client: &http.Client{}}
+	atomic.StoreInt64(&idle.lastUsed, now.Add(-time.Hour).UnixNano())
+
+	svc.mu.Lock()
+	for i := 0; i < defaultClientEvictionScanLimit+10; i++ {
+		entry := &upstreamClientEntry{client: &http.Client{}}
+		atomic.StoreInt64(&entry.lastUsed, now.Add(-time.Duration(i)*time.Second).UnixNano())
+		atomic.StoreInt64(&entry.inFlight, 1)
+		svc.clients[fmt.Sprintf("busy-%d", i)] = entry
+	}
+	svc.clients["idle"] = idle
+	victim, ok := svc.evictOneCandidateFullScanLocked(now)
+	svc.mu.Unlock()
+
+	require.True(s.T(), ok)
+	require.Same(s.T(), idle, victim)
+	require.False(s.T(), hasEntry(svc, idle))
 }
 
 // TestIdleTTLDoesNotEvictActive 测试活跃请求保护

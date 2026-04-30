@@ -195,7 +195,12 @@ func (p *GeminiTokenProvider) getServiceAccountAccessToken(ctx context.Context, 
 		}
 	}
 
-	accessToken, ttl, err := exchangeVertexServiceAccountToken(ctx, key)
+	var proxyRepo ProxyRepository
+	if p.geminiOAuthService != nil {
+		proxyRepo = p.geminiOAuthService.proxyRepo
+	}
+	proxyURL := resolveAccountProxyURL(ctx, account, proxyRepo)
+	accessToken, ttl, err := exchangeVertexServiceAccountToken(ctx, key, proxyURL)
 	if err != nil {
 		return "", err
 	}

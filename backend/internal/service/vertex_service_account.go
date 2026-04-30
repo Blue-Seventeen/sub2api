@@ -141,7 +141,7 @@ func vertexServiceAccountCacheKey(account *Account, key *vertexServiceAccountKey
 	return "vertex:service_account:" + fingerprint
 }
 
-func exchangeVertexServiceAccountToken(ctx context.Context, key *vertexServiceAccountKey) (string, time.Duration, error) {
+func exchangeVertexServiceAccountToken(ctx context.Context, key *vertexServiceAccountKey, proxyURL string) (string, time.Duration, error) {
 	now := time.Now()
 	claims := jwt.MapClaims{
 		"iss":   key.ClientEmail,
@@ -173,7 +173,10 @@ func exchangeVertexServiceAccountToken(ctx context.Context, key *vertexServiceAc
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	client := &http.Client{Timeout: 15 * time.Second}
+	client, err := newVertexServiceAccountHTTPClient(proxyURL)
+	if err != nil {
+		return "", 0, err
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", 0, fmt.Errorf("service account token request failed: %w", err)
@@ -204,6 +207,22 @@ func exchangeVertexServiceAccountToken(ctx context.Context, key *vertexServiceAc
 		ttl -= vertexServiceAccountCacheSkew
 	}
 	return parsed.AccessToken, ttl, nil
+}
+
+func newVertexServiceAccountHTTPClient(proxyURL string) (*http.Client, error) {
+	client := &http.Client{Timeout: 15 * time.Second}
+	proxyURL = strings.TrimSpace(proxyURL)
+	if proxyURL == "" {
+		return client, nil
+	}
+	parsedProxyURL, err := url.Parse(proxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid service account proxy url: %w", err)
+	}
+	client.Transport = &http.Transport{
+		Proxy: http.ProxyURL(parsedProxyURL),
+	}
+	return client, nil
 }
 
 func buildVertexGeminiURL(projectID, location, model, action string, stream bool) (string, error) {

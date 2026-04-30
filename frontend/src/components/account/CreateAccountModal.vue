@@ -269,7 +269,7 @@
           v-if="accountCategory === 'service_account'"
           class="mt-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800 dark:border-sky-800/40 dark:bg-sky-900/20 dark:text-sky-200"
         >
-          <p>使用 Google Cloud Service Account JSON 通过 Vertex AI 调用 Anthropic Claude。建议配置模型映射，将客户端 Claude 模型名映射到 Vertex 模型 ID。</p>
+          <p>{{ t('admin.accounts.vertex.anthropicDesc') }}</p>
         </div>
       </div>
 
@@ -472,7 +472,7 @@
           v-if="accountCategory === 'service_account'"
           class="mt-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800 dark:border-sky-800/40 dark:bg-sky-900/20 dark:text-sky-200"
         >
-          <p>使用 Google Cloud Service Account JSON 访问 Vertex AI Gemini。建议将 Vertex 账号放入独立分组，避免和 AI Studio/Gemini OAuth 同模型混调。</p>
+          <p>{{ t('admin.accounts.vertex.geminiDesc') }}</p>
         </div>
 
         <!-- OAuth Type Selection (only show when oauth-based is selected) -->
@@ -827,7 +827,7 @@
       <!-- Vertex Service Account -->
       <div v-if="(form.platform === 'gemini' || form.platform === 'anthropic') && accountCategory === 'service_account'" class="space-y-4">
         <div>
-          <label class="input-label">Service Account JSON</label>
+          <label class="input-label">{{ t('admin.accounts.vertex.serviceAccountJson') }}</label>
           <input
             ref="vertexServiceAccountFileInput"
             type="file"
@@ -851,10 +851,10 @@
               <div class="min-w-0">
                 <div class="flex items-center gap-2 text-sm font-medium text-gray-900 dark:text-white">
                   <Icon name="upload" size="sm" />
-                  <span>{{ vertexClientEmail ? '已读取 Service Account JSON' : '拖入 Service Account JSON' }}</span>
+                  <span>{{ vertexClientEmail ? t('admin.accounts.vertex.jsonLoaded') : t('admin.accounts.vertex.dropJson') }}</span>
                 </div>
                 <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  {{ vertexClientEmail ? '密钥内容不会在表单中显示。' : '把 .json 文件拖到这里，或点击按钮选择文件。' }}
+                  {{ vertexClientEmail ? t('admin.accounts.vertex.jsonHiddenHint') : t('admin.accounts.vertex.jsonDropHint') }}
                 </p>
               </div>
               <button
@@ -863,7 +863,7 @@
                 @click="vertexServiceAccountFileInput?.click()"
               >
                 <Icon name="upload" size="sm" />
-                选择 JSON
+                {{ t('admin.accounts.vertex.chooseJson') }}
               </button>
             </div>
             <div
@@ -874,22 +874,22 @@
               <div class="truncate">Client Email: <span class="font-mono">{{ vertexClientEmail }}</span></div>
             </div>
           </div>
-          <p class="input-hint">上传或拖入 JSON 后会自动读取 project_id，密钥内容仅用于创建账号提交。</p>
+          <p class="input-hint">{{ t('admin.accounts.vertex.createJsonHint') }}</p>
         </div>
 
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
-            <label class="input-label">Project ID</label>
+            <label class="input-label">{{ t('admin.accounts.vertex.projectId') }}</label>
             <input
               v-model="vertexProjectId"
               type="text"
               class="input font-mono"
               readonly
-              placeholder="从 JSON 自动读取"
+              :placeholder="t('admin.accounts.vertex.projectPlaceholder')"
             />
           </div>
           <div>
-            <label class="input-label">Location</label>
+            <label class="input-label">{{ t('admin.accounts.vertex.location') }}</label>
             <select
               v-model="vertexLocation"
               required
@@ -909,7 +909,7 @@
                 </option>
               </optgroup>
             </select>
-            <p class="input-hint">不同 Vertex 模型可用 location 可能不同，这里选择账号默认 endpoint location。</p>
+            <p class="input-hint">{{ t('admin.accounts.vertex.locationHint') }}</p>
           </div>
         </div>
       </div>
@@ -4485,7 +4485,7 @@ const applyVertexServiceAccountJson = (value: string) => {
     const clientEmail = typeof parsed.client_email === 'string' ? parsed.client_email.trim() : ''
     const privateKey = typeof parsed.private_key === 'string' ? parsed.private_key.trim() : ''
     if (!projectId || !clientEmail || !privateKey) {
-      appStore.showError('Service Account JSON 缺少 project_id、client_email 或 private_key')
+      appStore.showError(t('admin.accounts.vertex.jsonMissingFields'))
       return false
     }
     vertexProjectId.value = projectId
@@ -4493,7 +4493,7 @@ const applyVertexServiceAccountJson = (value: string) => {
     vertexServiceAccountJson.value = JSON.stringify(parsed)
     return true
   } catch {
-    appStore.showError('Service Account JSON 格式无效')
+    appStore.showError(t('admin.accounts.vertex.jsonInvalid'))
     return false
   }
 }
@@ -4640,7 +4640,7 @@ const handleSubmit = async () => {
       return
     }
     if (!vertexLocation.value.trim()) {
-      appStore.showError('请填写 Vertex location')
+      appStore.showError(t('admin.accounts.vertex.locationRequired'))
       return
     }
     const credentials: Record<string, unknown> = {

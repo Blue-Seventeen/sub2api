@@ -20,6 +20,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/gemini"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/googleapi"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -2607,6 +2608,10 @@ func (s *GeminiMessagesCompatService) ForwardAIStudioGET(ctx context.Context, ac
 		return nil, errors.New("invalid path")
 	}
 
+	if account.Type == AccountTypeServiceAccount {
+		return buildVertexServiceAccountGeminiModelsResponse(path)
+	}
+
 	baseURL := account.GetGeminiBaseURL(geminicli.AIStudioBaseURL)
 	normalizedBaseURL, err := s.validateUpstreamBaseURL(baseURL)
 	if err != nil {
@@ -2656,6 +2661,32 @@ func (s *GeminiMessagesCompatService) ForwardAIStudioGET(ctx context.Context, ac
 	return &UpstreamHTTPResult{
 		StatusCode: resp.StatusCode,
 		Headers:    filteredHeaders,
+		Body:       body,
+	}, nil
+}
+
+func buildVertexServiceAccountGeminiModelsResponse(path string) (*UpstreamHTTPResult, error) {
+	var payload any
+	switch {
+	case path == "/v1beta/models":
+		payload = gemini.FallbackModelsList()
+	case strings.HasPrefix(path, "/v1beta/models/"):
+		modelName := strings.TrimSpace(strings.TrimPrefix(path, "/v1beta/models/"))
+		if modelName == "" {
+			return nil, errors.New("missing model in path")
+		}
+		payload = gemini.FallbackModel(modelName)
+	default:
+		return nil, fmt.Errorf("unsupported Vertex service account models path: %s", path)
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return &UpstreamHTTPResult{
+		StatusCode: http.StatusOK,
+		Headers:    http.Header{"Content-Type": []string{"application/json"}},
 		Body:       body,
 	}, nil
 }

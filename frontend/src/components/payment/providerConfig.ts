@@ -59,7 +59,7 @@ export function getPaymentPopupFeatures(): string {
   const height = Math.min(PAYMENT_POPUP_PREFERRED_HEIGHT, availH - 40)
   const left = Math.max(0, Math.floor((availW - width) / 2))
   const top = Math.max(0, Math.floor((availH - height) / 2))
-  return `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes,noopener,noreferrer`
+  return `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
 }
 
 export function isolatePopupOpener(win: Window | null): void {

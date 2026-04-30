@@ -2746,7 +2746,8 @@ export default {
         refreshToken: 'Refresh Token',
         resetStatusSuccess: 'Successfully reset {count} account(s) status',
         refreshTokenSuccess: 'Successfully refreshed {count} account(s) token',
-        partialSuccess: 'Partially completed: {success} succeeded, {failed} failed'
+        partialSuccess: 'Partially completed: {success} succeeded, {failed} failed',
+        editFiltered: 'Bulk Edit Filtered'
       },
       bulkEdit: {
         title: 'Bulk Edit Accounts',
@@ -2760,6 +2761,7 @@ export default {
         partialSuccess: 'Partially updated: {success} succeeded, {failed} failed',
         failed: 'Bulk update failed',
         noSelection: 'Please select accounts to edit',
+        noFilter: 'Apply at least one filter before editing filtered accounts',
         noFieldsSelected: 'Select at least one field to update',
         mixedPlatformWarning: 'Selected accounts span multiple platforms ({platforms}). Model mapping presets shown are combined — ensure mappings are appropriate for each platform.'
       },
@@ -2785,6 +2787,32 @@ export default {
       accountName: 'Account Name',
       enterAccountName: 'Enter account name',
       accountType: 'Account Type',
+      vertex: {
+        serviceAccountJson: 'Service Account JSON',
+        jsonLoaded: 'Service Account JSON loaded',
+        dropJson: 'Drop Service Account JSON',
+        jsonHiddenHint: 'Secret key content is not shown in the form.',
+        jsonDropHint: 'Drop a .json file here, or click the button to choose one.',
+        chooseJson: 'Choose JSON',
+        createJsonHint:
+          'After uploading or dropping JSON, project_id is read automatically. Secret key content is only used when creating the account.',
+        projectId: 'Project ID',
+        projectPlaceholder: 'Read from JSON automatically',
+        location: 'Location',
+        locationHint: 'Different Vertex models may require different locations. This selects the default endpoint location for this account.',
+        editJsonHint:
+          'Service Account JSON is not shown on the edit page. To replace it, delete the account and create it again.',
+        jsonMissingFields: 'Service Account JSON is missing project_id, client_email, or private_key',
+        jsonInvalid: 'Invalid Service Account JSON',
+        projectIdMissing: 'Service Account JSON is missing project_id',
+        clientEmailMissing: 'Service Account JSON is missing client_email',
+        locationRequired: 'Please select Vertex location',
+        jsonRequired: 'Please upload Service Account JSON',
+        anthropicDesc:
+          'Use Google Cloud Service Account JSON to call Anthropic Claude through Vertex AI.',
+        geminiDesc:
+          'Use Google Cloud Service Account JSON to access Vertex AI Gemini. Put Vertex accounts in a dedicated group to avoid mixing them with AI Studio/Gemini OAuth accounts for the same model.'
+      },
       claudeCode: 'Claude Code',
       claudeConsole: 'Claude Console',
       bedrockLabel: 'AWS Bedrock',
