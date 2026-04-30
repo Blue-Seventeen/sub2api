@@ -59,7 +59,16 @@ export function getPaymentPopupFeatures(): string {
   const height = Math.min(PAYMENT_POPUP_PREFERRED_HEIGHT, availH - 40)
   const left = Math.max(0, Math.floor((availW - width) / 2))
   const top = Math.max(0, Math.floor((availH - height) / 2))
-  return `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
+  return `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes,noopener,noreferrer`
+}
+
+export function isolatePopupOpener(win: Window | null): void {
+  if (!win) return
+  try {
+    win.opener = null
+  } catch {
+    // Best-effort opener isolation; blocked cross-origin assignment should not break payment fallback.
+  }
 }
 
 /** Webhook paths for each provider (relative to origin). */

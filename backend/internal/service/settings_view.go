@@ -367,6 +367,35 @@ type BetaPolicySettings struct {
 }
 
 // OverloadCooldownSettings 529过载冷却配置
+const (
+	OpenAIFastTierAny      = "all"
+	OpenAIFastTierPriority = "priority"
+	OpenAIFastTierFlex     = "flex"
+	OpenAIFastTierAuto     = "auto"
+	OpenAIFastTierDefault  = "default"
+	OpenAIFastTierScale    = "scale"
+)
+
+type OpenAIFastPolicyRule struct {
+	ServiceTier          string   `json:"service_tier"`
+	Action               string   `json:"action"`
+	Scope                string   `json:"scope"`
+	ErrorMessage         string   `json:"error_message,omitempty"`
+	ModelWhitelist       []string `json:"model_whitelist,omitempty"`
+	FallbackAction       string   `json:"fallback_action,omitempty"`
+	FallbackErrorMessage string   `json:"fallback_error_message,omitempty"`
+}
+
+type OpenAIFastPolicySettings struct {
+	Rules []OpenAIFastPolicyRule `json:"rules"`
+}
+
+func DefaultOpenAIFastPolicySettings() *OpenAIFastPolicySettings {
+	return &OpenAIFastPolicySettings{
+		Rules: []OpenAIFastPolicyRule{},
+	}
+}
+
 type OverloadCooldownSettings struct {
 	// Enabled 是否在收到529时暂停账号调度
 	Enabled bool `json:"enabled"`

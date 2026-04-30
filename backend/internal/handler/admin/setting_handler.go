@@ -247,6 +247,33 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 }
 
 // UpdateSettingsRequest 更新设置请求
+func openAIFastPolicySettingsToDTO(s *service.OpenAIFastPolicySettings) *dto.OpenAIFastPolicySettings {
+	if s == nil {
+		return nil
+	}
+	rules := make([]dto.OpenAIFastPolicyRule, len(s.Rules))
+	for i, r := range s.Rules {
+		rules[i] = dto.OpenAIFastPolicyRule(r)
+	}
+	return &dto.OpenAIFastPolicySettings{Rules: rules}
+}
+
+func openAIFastPolicySettingsFromDTO(s *dto.OpenAIFastPolicySettings) *service.OpenAIFastPolicySettings {
+	if s == nil {
+		return nil
+	}
+	rules := make([]service.OpenAIFastPolicyRule, len(s.Rules))
+	for i, r := range s.Rules {
+		rules[i] = service.OpenAIFastPolicyRule(r)
+		tier := strings.ToLower(strings.TrimSpace(rules[i].ServiceTier))
+		if tier == "" {
+			tier = service.OpenAIFastTierAny
+		}
+		rules[i].ServiceTier = tier
+	}
+	return &service.OpenAIFastPolicySettings{Rules: rules}
+}
+
 type UpdateSettingsRequest struct {
 	// 注册设置
 	RegistrationEnabled              bool     `json:"registration_enabled"`
@@ -451,7 +478,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
-
 	previousSettings, err := h.settingService.GetAllSettings(c.Request.Context())
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -2495,6 +2521,38 @@ type UpdateStreamTimeoutSettingsRequest struct {
 
 // UpdateStreamTimeoutSettings 更新流超时处理配置
 // PUT /api/v1/admin/settings/stream-timeout
+func (h *SettingHandler) GetOpenAIFastPolicySettings(c *gin.Context) {
+	settings, err := h.settingService.GetOpenAIFastPolicySettings(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, openAIFastPolicySettingsToDTO(settings))
+}
+
+type UpdateOpenAIFastPolicySettingsRequest struct {
+	Rules []dto.OpenAIFastPolicyRule `json:"rules"`
+}
+
+func (h *SettingHandler) UpdateOpenAIFastPolicySettings(c *gin.Context) {
+	var req UpdateOpenAIFastPolicySettingsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	settings := openAIFastPolicySettingsFromDTO(&dto.OpenAIFastPolicySettings{Rules: req.Rules})
+	if err := h.settingService.SetOpenAIFastPolicySettings(c.Request.Context(), settings); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	updated, err := h.settingService.GetOpenAIFastPolicySettings(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, openAIFastPolicySettingsToDTO(updated))
+}
+
 func (h *SettingHandler) UpdateStreamTimeoutSettings(c *gin.Context) {
 	var req UpdateStreamTimeoutSettingsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

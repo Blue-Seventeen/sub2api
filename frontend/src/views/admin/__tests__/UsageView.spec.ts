@@ -3,7 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 
 import UsageView from '../UsageView.vue'
 
-const { list, getStats, getSnapshotV2, getById } = vi.hoisted(() => {
+const { list, getStats, getSnapshotV2, getModelStats, getById, adminUsageList, saveAsMock } = vi.hoisted(() => {
   vi.stubGlobal('localStorage', {
     getItem: vi.fn(() => null),
     setItem: vi.fn(),
@@ -14,7 +14,10 @@ const { list, getStats, getSnapshotV2, getById } = vi.hoisted(() => {
     list: vi.fn(),
     getStats: vi.fn(),
     getSnapshotV2: vi.fn(),
+    getModelStats: vi.fn(),
     getById: vi.fn(),
+    adminUsageList: vi.fn(),
+    saveAsMock: vi.fn(),
   }
 })
 
@@ -40,6 +43,7 @@ vi.mock('@/api/admin', () => ({
     },
     dashboard: {
       getSnapshotV2,
+      getModelStats,
     },
     users: {
       getById,
@@ -49,8 +53,22 @@ vi.mock('@/api/admin', () => ({
 
 vi.mock('@/api/admin/usage', () => ({
   adminUsageAPI: {
-    list: vi.fn(),
+    list: adminUsageList,
   },
+}))
+
+vi.mock('file-saver', () => ({
+  saveAs: saveAsMock,
+}))
+
+vi.mock('xlsx', () => ({
+  utils: {
+    aoa_to_sheet: vi.fn(() => ({})),
+    sheet_add_aoa: vi.fn(),
+    book_new: vi.fn(() => ({})),
+    book_append_sheet: vi.fn(),
+  },
+  write: vi.fn(() => new ArrayBuffer(0)),
 }))
 
 vi.mock('@/stores/app', () => ({
@@ -109,8 +127,11 @@ describe('admin UsageView distribution metric toggles', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     list.mockReset()
+    adminUsageList.mockReset()
+    saveAsMock.mockReset()
     getStats.mockReset()
     getSnapshotV2.mockReset()
+    getModelStats.mockReset()
     getById.mockReset()
 
     list.mockResolvedValue({
@@ -132,6 +153,14 @@ describe('admin UsageView distribution metric toggles', () => {
       trend: [],
       models: [],
       groups: [],
+    })
+    getModelStats.mockResolvedValue({
+      models: [],
+    })
+    adminUsageList.mockResolvedValue({
+      items: [],
+      total: 0,
+      pages: 0,
     })
   })
 
@@ -192,5 +221,83 @@ describe('admin UsageView distribution metric toggles', () => {
     expect(modelChart.find('.metric').text()).toBe('actual_cost')
     expect(groupChart.find('.metric').text()).toBe('actual_cost')
     expect(getSnapshotV2).toHaveBeenCalledTimes(1)
+  })
+
+  it('requests exact export total only on the first page', async () => {
+    const makeLog = (id: number) => ({
+      id,
+      created_at: `2026-04-29T00:${String(id % 60).padStart(2, '0')}:00Z`,
+      model: 'gpt-test',
+      input_tokens: 1,
+      output_tokens: 2,
+      cache_read_tokens: 0,
+      cache_creation_tokens: 0,
+      input_cost: 0,
+      output_cost: 0,
+      cache_read_cost: 0,
+      cache_creation_cost: 0,
+      total_cost: 0,
+      actual_cost: 0,
+      duration_ms: 10,
+    })
+
+    adminUsageList
+      .mockResolvedValueOnce({
+        items: Array.from({ length: 100 }, (_, idx) => makeLog(idx + 1)),
+        total: 101,
+        pages: 2,
+      })
+      .mockResolvedValueOnce({
+        items: [makeLog(101)],
+        total: 101,
+        pages: 2,
+      })
+
+    const ExportUsageFiltersStub = {
+      emits: ['export'],
+      template: '<button class="export-usage" @click="$emit(\'export\')">export</button>',
+    }
+
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          UsageStatsCards: true,
+          UsageFilters: ExportUsageFiltersStub,
+          UsageTable: true,
+          UsageExportProgress: true,
+          UsageCleanupDialog: true,
+          UserBalanceHistoryModal: true,
+          Pagination: true,
+          Select: true,
+          DateRangePicker: true,
+          Icon: true,
+          TokenUsageTrend: true,
+          ModelDistributionChart: ModelDistributionChartStub,
+          GroupDistributionChart: GroupDistributionChartStub,
+          EndpointDistributionChart: true,
+        },
+      },
+    })
+
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+
+    await wrapper.find('.export-usage').trigger('click')
+    await flushPromises()
+    await flushPromises()
+
+    expect(adminUsageList).toHaveBeenCalledTimes(2)
+    expect(adminUsageList.mock.calls[0][0]).toEqual(expect.objectContaining({
+      page: 1,
+      page_size: 100,
+      exact_total: true,
+    }))
+    expect(adminUsageList.mock.calls[1][0]).toEqual(expect.objectContaining({
+      page: 2,
+      page_size: 100,
+      exact_total: false,
+    }))
+    expect(saveAsMock).toHaveBeenCalledTimes(1)
   })
 })

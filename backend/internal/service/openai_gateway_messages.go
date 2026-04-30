@@ -88,6 +88,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	if err != nil {
 		return nil, fmt.Errorf("marshal responses request: %w", err)
 	}
+	serviceTier := extractOpenAIServiceTierFromBody(responsesBody)
 
 	if account.Type == AccountTypeOAuth {
 		var reqBody map[string]any
@@ -150,6 +151,14 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 				responsesBody = updated
 			}
 		}
+	}
+	responsesBody, serviceTier, err = s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, responsesBody)
+	if err != nil {
+		var blocked *OpenAIFastBlockedError
+		if errors.As(err, &blocked) {
+			writeAnthropicError(c, http.StatusForbidden, "forbidden_error", blocked.Message)
+		}
+		return nil, err
 	}
 	setOpsUpstreamRequestBody(c, responsesBody)
 	reqLog.Debug("openai messages: bridge request prepared",
@@ -277,10 +286,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 
 	// Propagate ServiceTier and ReasoningEffort to result for billing
 	if handleErr == nil && result != nil {
-		if responsesReq.ServiceTier != "" {
-			st := responsesReq.ServiceTier
-			result.ServiceTier = &st
-		}
+		result.ServiceTier = serviceTier
 		if responsesReq.Reasoning != nil && responsesReq.Reasoning.Effort != "" {
 			re := responsesReq.Reasoning.Effort
 			result.ReasoningEffort = &re

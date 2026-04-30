@@ -20,6 +20,8 @@ const (
 	defaultUsageRecordTaskTimeoutSeconds   = 5
 	defaultUsageRecordOverflowPolicy       = config.UsageRecordOverflowPolicySample
 	defaultUsageRecordOverflowSampleRatio  = 10
+	defaultUsageRecordFallbackMaxWorkers   = 16
+	defaultUsageRecordFallbackMaxQueueSize = 1024
 	defaultUsageRecordAutoScaleEnabled     = true
 	defaultUsageRecordAutoScaleMinWorkers  = 128
 	defaultUsageRecordAutoScaleMaxWorkers  = 512
@@ -43,6 +45,7 @@ const (
 	UsageRecordSubmitModeEnqueued UsageRecordSubmitMode = "enqueued"
 	UsageRecordSubmitModeDropped  UsageRecordSubmitMode = "dropped"
 	UsageRecordSubmitModeSync     UsageRecordSubmitMode = "sync_fallback"
+	UsageRecordSubmitModeFallback UsageRecordSubmitMode = "async_fallback"
 )
 
 // UsageRecordWorkerPoolOptions 使用量记录池配置。
@@ -65,30 +68,35 @@ type UsageRecordWorkerPoolOptions struct {
 
 // UsageRecordWorkerPoolStats 使用量记录池运行时统计。
 type UsageRecordWorkerPoolStats struct {
-	MaxConcurrency     int
-	RunningWorkers     int64
-	WaitingTasks       uint64
-	SubmittedTasks     uint64
-	CompletedTasks     uint64
-	SuccessfulTasks    uint64
-	FailedTasks        uint64
-	DroppedTasks       uint64
-	DroppedQueueFull   uint64
-	DroppedPoolStopped uint64
-	SyncFallbackTasks  uint64
+	MaxConcurrency      int
+	RunningWorkers      int64
+	WaitingTasks        uint64
+	SubmittedTasks      uint64
+	CompletedTasks      uint64
+	SuccessfulTasks     uint64
+	FailedTasks         uint64
+	DroppedTasks        uint64
+	DroppedQueueFull    uint64
+	DroppedFallbackFull uint64
+	DroppedPoolStopped  uint64
+	SyncFallbackTasks   uint64
+	AsyncFallbackTasks  uint64
 }
 
 // UsageRecordWorkerPool 提供“有界队列 + 固定 worker”的异步执行器。
 // 用于替代请求路径里的直接 goroutine，避免高并发时无界堆积。
 type UsageRecordWorkerPool struct {
 	pool                  pond.Pool
+	fallbackPool          pond.Pool
 	taskTimeout           time.Duration
 	overflowPolicy        string
 	overflowSamplePercent int
 	overflowCounter       atomic.Uint64
 	droppedQueueFull      atomic.Uint64
+	droppedFallbackFull   atomic.Uint64
 	droppedPoolStopped    atomic.Uint64
 	syncFallback          atomic.Uint64
+	asyncFallback         atomic.Uint64
 	lastDropLogNanos      atomic.Int64
 	autoScaleEnabled      bool
 	autoScaleMinWorkers   int
@@ -134,6 +142,10 @@ func NewUsageRecordWorkerPoolWithOptions(opts UsageRecordWorkerPoolOptions) *Usa
 		opts.WorkerCount,
 		pond.WithQueueSize(opts.QueueSize),
 	)
+	p.fallbackPool = pond.NewPool(
+		usageRecordFallbackWorkerCount(opts.WorkerCount),
+		pond.WithQueueSize(usageRecordFallbackQueueSize(opts.QueueSize)),
+	)
 	if p.autoScaleEnabled {
 		p.startAutoScaler()
 	}
@@ -167,14 +179,14 @@ func (p *UsageRecordWorkerPool) Submit(task UsageRecordTask) UsageRecordSubmitMo
 
 	switch p.overflowPolicy {
 	case config.UsageRecordOverflowPolicySync:
-		p.syncFallback.Add(1)
-		p.execute(task)
-		return UsageRecordSubmitModeSync
+		if p.trySubmitFallback(task) {
+			return UsageRecordSubmitModeFallback
+		}
 	case config.UsageRecordOverflowPolicySample:
 		if p.shouldSyncFallback() {
-			p.syncFallback.Add(1)
-			p.execute(task)
-			return UsageRecordSubmitModeSync
+			if p.trySubmitFallback(task) {
+				return UsageRecordSubmitModeFallback
+			}
 		}
 	}
 
@@ -189,17 +201,19 @@ func (p *UsageRecordWorkerPool) Stats() UsageRecordWorkerPoolStats {
 		return UsageRecordWorkerPoolStats{}
 	}
 	return UsageRecordWorkerPoolStats{
-		MaxConcurrency:     p.pool.MaxConcurrency(),
-		RunningWorkers:     p.pool.RunningWorkers(),
-		WaitingTasks:       p.pool.WaitingTasks(),
-		SubmittedTasks:     p.pool.SubmittedTasks(),
-		CompletedTasks:     p.pool.CompletedTasks(),
-		SuccessfulTasks:    p.pool.SuccessfulTasks(),
-		FailedTasks:        p.pool.FailedTasks(),
-		DroppedTasks:       p.pool.DroppedTasks(),
-		DroppedQueueFull:   p.droppedQueueFull.Load(),
-		DroppedPoolStopped: p.droppedPoolStopped.Load(),
-		SyncFallbackTasks:  p.syncFallback.Load(),
+		MaxConcurrency:      p.pool.MaxConcurrency(),
+		RunningWorkers:      p.pool.RunningWorkers(),
+		WaitingTasks:        p.pool.WaitingTasks(),
+		SubmittedTasks:      p.pool.SubmittedTasks(),
+		CompletedTasks:      p.pool.CompletedTasks(),
+		SuccessfulTasks:     p.pool.SuccessfulTasks(),
+		FailedTasks:         p.pool.FailedTasks(),
+		DroppedTasks:        p.pool.DroppedTasks(),
+		DroppedQueueFull:    p.droppedQueueFull.Load(),
+		DroppedFallbackFull: p.droppedFallbackFull.Load(),
+		DroppedPoolStopped:  p.droppedPoolStopped.Load(),
+		SyncFallbackTasks:   p.syncFallback.Load(),
+		AsyncFallbackTasks:  p.asyncFallback.Load(),
 	}
 }
 
@@ -214,6 +228,9 @@ func (p *UsageRecordWorkerPool) Stop() {
 		}
 		p.lifecycleWg.Wait()
 		p.pool.StopAndWait()
+		if p.fallbackPool != nil {
+			p.fallbackPool.StopAndWait()
+		}
 	})
 }
 
@@ -314,6 +331,29 @@ func (p *UsageRecordWorkerPool) shouldSyncFallback() bool {
 	return int((n-1)%100) < p.overflowSamplePercent
 }
 
+func (p *UsageRecordWorkerPool) trySubmitFallback(task UsageRecordTask) bool {
+	if p.fallbackPool == nil || p.fallbackPool.Stopped() {
+		p.droppedPoolStopped.Add(1)
+		return false
+	}
+
+	_, ok := p.fallbackPool.TrySubmit(func() {
+		p.execute(task)
+	})
+	if ok {
+		p.syncFallback.Add(1)
+		p.asyncFallback.Add(1)
+		return true
+	}
+
+	if p.fallbackPool.Stopped() {
+		p.droppedPoolStopped.Add(1)
+		return false
+	}
+	p.droppedFallbackFull.Add(1)
+	return false
+}
+
 func (p *UsageRecordWorkerPool) execute(task UsageRecordTask) {
 	ctx, cancel := context.WithTimeout(context.Background(), p.taskTimeout)
 	defer cancel()
@@ -348,8 +388,10 @@ func (p *UsageRecordWorkerPool) logDrop(reason string) {
 		zap.Int64("running_workers", stats.RunningWorkers),
 		zap.Uint64("waiting_tasks", stats.WaitingTasks),
 		zap.Uint64("dropped_queue_full", stats.DroppedQueueFull),
+		zap.Uint64("dropped_fallback_full", stats.DroppedFallbackFull),
 		zap.Uint64("dropped_pool_stopped", stats.DroppedPoolStopped),
 		zap.Uint64("sync_fallback_tasks", stats.SyncFallbackTasks),
+		zap.Uint64("async_fallback_tasks", stats.AsyncFallbackTasks),
 	).Warn("usage_record.task_dropped")
 }
 
@@ -414,6 +456,34 @@ func usageRecordPoolOptionsFromConfig(cfg *config.Config) UsageRecordWorkerPoolO
 		opts.AutoScaleCooldown = time.Duration(cfg.Gateway.UsageRecord.AutoScaleCooldownSeconds) * time.Second
 	}
 	return normalizeUsageRecordPoolOptions(opts)
+}
+
+func usageRecordFallbackWorkerCount(workerCount int) int {
+	if workerCount <= 1 {
+		return 1
+	}
+	fallbackWorkers := workerCount / 8
+	if fallbackWorkers < 1 {
+		return 1
+	}
+	if fallbackWorkers > defaultUsageRecordFallbackMaxWorkers {
+		return defaultUsageRecordFallbackMaxWorkers
+	}
+	return fallbackWorkers
+}
+
+func usageRecordFallbackQueueSize(queueSize int) int {
+	if queueSize <= 1 {
+		return 1
+	}
+	fallbackQueueSize := queueSize / 16
+	if fallbackQueueSize < 1 {
+		return 1
+	}
+	if fallbackQueueSize > defaultUsageRecordFallbackMaxQueueSize {
+		return defaultUsageRecordFallbackMaxQueueSize
+	}
+	return fallbackQueueSize
 }
 
 func normalizeUsageRecordPoolOptions(opts UsageRecordWorkerPoolOptions) UsageRecordWorkerPoolOptions {

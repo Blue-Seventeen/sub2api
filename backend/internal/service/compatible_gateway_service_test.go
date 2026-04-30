@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
@@ -206,5 +207,66 @@ func TestCompatibleGatewayServiceHandleChatPassthrough_NonStreamTracksDuration(t
 	}
 	if result.Usage.OutputTokens != 8 {
 		t.Fatalf("OutputTokens = %d, want 8", result.Usage.OutputTokens)
+	}
+}
+
+func TestCompatibleGatewayService_NonStreamTooLargeReturnsBadGateway(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cfg := &config.Config{}
+	cfg.Gateway.UpstreamResponseReadMaxBytes = 3
+	prepared := &compatiblePreparedRequest{
+		OriginalModel: "claude-sonnet-4",
+		UpstreamModel: "glm-4.5",
+		ClientStream:  false,
+	}
+
+	tests := []struct {
+		name         string
+		handler      func(*CompatibleGatewayService, *http.Response, *gin.Context, *compatiblePreparedRequest, time.Time) *ForwardResult
+		wantFragment string
+	}{
+		{
+			name: "messages",
+			handler: func(svc *CompatibleGatewayService, resp *http.Response, c *gin.Context, prepared *compatiblePreparedRequest, start time.Time) *ForwardResult {
+				return svc.handleMessagesResponse(resp, c, prepared, start)
+			},
+			wantFragment: "Upstream response too large",
+		},
+		{
+			name: "responses",
+			handler: func(svc *CompatibleGatewayService, resp *http.Response, c *gin.Context, prepared *compatiblePreparedRequest, start time.Time) *ForwardResult {
+				return svc.handleResponsesResponse(resp, c, prepared, start)
+			},
+			wantFragment: "Upstream response too large",
+		},
+		{
+			name: "chat_passthrough",
+			handler: func(svc *CompatibleGatewayService, resp *http.Response, c *gin.Context, prepared *compatiblePreparedRequest, start time.Time) *ForwardResult {
+				return svc.handleChatPassthrough(resp, c, prepared, start)
+			},
+			wantFragment: "Upstream response too large",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			resp := newCompatibleGatewayHTTPResponse(http.StatusOK, "toolong")
+			svc := &CompatibleGatewayService{cfg: cfg, gatewayService: &GatewayService{}}
+
+			result := tt.handler(svc, resp, c, prepared, time.Now().Add(-time.Millisecond))
+
+			if result == nil {
+				t.Fatal("result is nil")
+			}
+			if recorder.Code != http.StatusBadGateway {
+				t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusBadGateway, recorder.Body.String())
+			}
+			if !strings.Contains(recorder.Body.String(), tt.wantFragment) {
+				t.Fatalf("body = %q, want fragment %q", recorder.Body.String(), tt.wantFragment)
+			}
+		})
 	}
 }

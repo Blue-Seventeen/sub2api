@@ -17,11 +17,11 @@ func TestNormalizeResponsesRequestServiceTier(t *testing.T) {
 
 	req.ServiceTier = "flex"
 	normalizeResponsesRequestServiceTier(req)
-	require.Empty(t, req.ServiceTier)
+	require.Equal(t, "flex", req.ServiceTier)
 
 	req.ServiceTier = "default"
 	normalizeResponsesRequestServiceTier(req)
-	require.Empty(t, req.ServiceTier)
+	require.Equal(t, "default", req.ServiceTier)
 }
 
 func TestNormalizeResponsesBodyServiceTier(t *testing.T) {
@@ -34,11 +34,11 @@ func TestNormalizeResponsesBodyServiceTier(t *testing.T) {
 
 	body, tier, err = normalizeResponsesBodyServiceTier([]byte(`{"model":"gpt-5.1","service_tier":"flex"}`))
 	require.NoError(t, err)
-	require.Empty(t, tier)
-	require.False(t, gjson.GetBytes(body, "service_tier").Exists())
+	require.Equal(t, "flex", tier)
+	require.Equal(t, "flex", gjson.GetBytes(body, "service_tier").String())
 
 	body, tier, err = normalizeResponsesBodyServiceTier([]byte(`{"model":"gpt-5.1","service_tier":"default"}`))
 	require.NoError(t, err)
-	require.Empty(t, tier)
-	require.False(t, gjson.GetBytes(body, "service_tier").Exists())
+	require.Equal(t, "default", tier)
+	require.Equal(t, "default", gjson.GetBytes(body, "service_tier").String())
 }

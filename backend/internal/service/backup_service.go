@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -14,7 +16,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/redis/go-redis/v9"
 	"github.com/robfig/cron/v3"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -29,8 +30,10 @@ const (
 
 	maxBackupRecords = 100
 
-	backupScheduleLockKey = "sub2api:backup:scheduler:lock"
-	backupScheduleLockTTL = 35 * time.Minute
+	backupScheduleLocalConfigFile      = "backup_schedule.local.json"
+	backupScheduleReconcileInterval    = time.Minute
+	backupScheduleReconcileTimeout     = 10 * time.Second
+	backupScheduleReconcileStopTimeout = 5 * time.Second
 )
 
 var (
@@ -62,37 +65,6 @@ type BackupObjectStore interface {
 // BackupObjectStoreFactory creates an object store from S3 config
 type BackupObjectStoreFactory func(ctx context.Context, cfg *BackupS3Config) (BackupObjectStore, error)
 
-// BackupScheduleLockStore coordinates scheduled backup execution across nodes.
-type BackupScheduleLockStore interface {
-	Acquire(ctx context.Context, key string, value string, ttl time.Duration) (bool, error)
-	Release(ctx context.Context, key string, value string) error
-}
-
-type redisBackupScheduleLockStore struct {
-	rdb *redis.Client
-}
-
-func newRedisBackupScheduleLockStore(rdb *redis.Client) BackupScheduleLockStore {
-	if rdb == nil {
-		return nil
-	}
-	return &redisBackupScheduleLockStore{rdb: rdb}
-}
-
-func (s *redisBackupScheduleLockStore) Acquire(ctx context.Context, key string, value string, ttl time.Duration) (bool, error) {
-	return s.rdb.SetNX(ctx, key, value, ttl).Result()
-}
-
-func (s *redisBackupScheduleLockStore) Release(ctx context.Context, key string, value string) error {
-	const releaseScript = `
-if redis.call("GET", KEYS[1]) == ARGV[1] then
-	return redis.call("DEL", KEYS[1])
-end
-return 0
-`
-	return s.rdb.Eval(ctx, releaseScript, []string{key}, value).Err()
-}
-
 // ─── 数据模型 ───
 
 // BackupS3Config S3 兼容存储配置（支持 Cloudflare R2）
@@ -117,6 +89,10 @@ type BackupScheduleConfig struct {
 	CronExpr    string `json:"cron_expr"`    // cron 表达式，如 "0 2 * * *" 每天凌晨2点
 	RetainDays  int    `json:"retain_days"`  // 备份文件过期天数，默认14，0=不自动清理
 	RetainCount int    `json:"retain_count"` // 最多保留份数，0=不限制
+}
+
+type backupScheduleLocalConfig struct {
+	Enabled bool `json:"enabled"`
 }
 
 // BackupRecord 备份记录
@@ -154,13 +130,18 @@ type BackupService struct {
 	store   BackupObjectStore
 	s3Cfg   *BackupS3Config
 
-	scheduleLock BackupScheduleLockStore
+	scheduleLocalConfigPath string
 
 	recordsMu sync.Mutex // 保护 records 的 load/save 操作
 
-	cronMu      sync.Mutex
-	cronSched   *cron.Cron
-	cronEntryID cron.EntryID
+	cronMu       sync.Mutex
+	cronSched    *cron.Cron
+	cronEntryID  cron.EntryID
+	cronApplyKey string
+
+	scheduleReconcileInterval time.Duration
+	scheduleReconcileCancel   context.CancelFunc
+	scheduleReconcileDone     chan struct{}
 
 	wg           sync.WaitGroup     // 追踪活跃的备份/恢复 goroutine
 	shuttingDown atomic.Bool        // 阻止新备份启动
@@ -174,23 +155,73 @@ func NewBackupService(
 	encryptor SecretEncryptor,
 	storeFactory BackupObjectStoreFactory,
 	dumper DBDumper,
-	lockStores ...BackupScheduleLockStore,
 ) *BackupService {
 	bgCtx, bgCancel := context.WithCancel(context.Background())
-	var scheduleLock BackupScheduleLockStore
-	if len(lockStores) > 0 {
-		scheduleLock = lockStores[0]
-	}
 	return &BackupService{
-		settingRepo:  settingRepo,
-		dbCfg:        &cfg.Database,
-		encryptor:    encryptor,
-		storeFactory: storeFactory,
-		dumper:       dumper,
-		scheduleLock: scheduleLock,
-		bgCtx:        bgCtx,
-		bgCancel:     bgCancel,
+		settingRepo:               settingRepo,
+		dbCfg:                     &cfg.Database,
+		encryptor:                 encryptor,
+		storeFactory:              storeFactory,
+		dumper:                    dumper,
+		scheduleLocalConfigPath:   defaultBackupScheduleLocalConfigPath(),
+		scheduleReconcileInterval: backupScheduleReconcileInterval,
+		bgCtx:                     bgCtx,
+		bgCancel:                  bgCancel,
 	}
+}
+
+func defaultBackupScheduleLocalConfigPath() string {
+	if dataDir := strings.TrimSpace(os.Getenv("DATA_DIR")); dataDir != "" {
+		return filepath.Join(dataDir, backupScheduleLocalConfigFile)
+	}
+	if info, err := os.Stat("/app/data"); err == nil && info.IsDir() {
+		return filepath.Join("/app/data", backupScheduleLocalConfigFile)
+	}
+	return filepath.Join(".", backupScheduleLocalConfigFile)
+}
+
+func (s *BackupService) startScheduleReconciler() {
+	if s.scheduleReconcileInterval <= 0 {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	s.scheduleReconcileCancel = cancel
+	s.scheduleReconcileDone = done
+	interval := s.scheduleReconcileInterval
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				reconcileCtx, reconcileCancel := context.WithTimeout(ctx, backupScheduleReconcileTimeout)
+				if err := s.reconcileCronSchedule(reconcileCtx); err != nil {
+					logger.LegacyPrintf("service.backup", "[Backup] failed to reconcile scheduled backup config: %v", err)
+				}
+				reconcileCancel()
+			}
+		}
+	}()
+}
+
+func (s *BackupService) stopScheduleReconciler() {
+	if s.scheduleReconcileCancel != nil {
+		s.scheduleReconcileCancel()
+		s.scheduleReconcileCancel = nil
+	}
+	if s.scheduleReconcileDone == nil {
+		return
+	}
+	select {
+	case <-s.scheduleReconcileDone:
+	case <-time.After(backupScheduleReconcileStopTimeout):
+		logger.LegacyPrintf("service.backup", "[Backup] scheduled backup reconciler stop timed out")
+	}
+	s.scheduleReconcileDone = nil
 }
 
 // Start 启动定时备份调度器并清理孤立记录
@@ -204,16 +235,10 @@ func (s *BackupService) Start() {
 	// 加载已有的定时配置
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	schedule, err := s.GetSchedule(ctx)
-	if err != nil {
-		logger.LegacyPrintf("service.backup", "[Backup] 加载定时备份配置失败: %v", err)
-		return
+	if err := s.reconcileCronSchedule(ctx); err != nil {
+		logger.LegacyPrintf("service.backup", "[Backup] failed to apply scheduled backup config: %v", err)
 	}
-	if schedule.Enabled && schedule.CronExpr != "" {
-		if err := s.applyCronSchedule(schedule); err != nil {
-			logger.LegacyPrintf("service.backup", "[Backup] 应用定时备份配置失败: %v", err)
-		}
-	}
+	s.startScheduleReconciler()
 }
 
 // recoverStaleRecords 启动时将孤立的 running 记录标记为 failed
@@ -246,6 +271,7 @@ func (s *BackupService) recoverStaleRecords() {
 // Stop 停止定时备份并等待活跃操作完成
 func (s *BackupService) Stop() {
 	s.shuttingDown.Store(true)
+	s.stopScheduleReconciler()
 
 	s.cronMu.Lock()
 	if s.cronSched != nil {
@@ -348,19 +374,125 @@ func (s *BackupService) TestS3Connection(ctx context.Context, cfg BackupS3Config
 
 // ─── 定时备份管理 ───
 
+func (s *BackupService) loadLocalScheduleEnabled() bool {
+	path := strings.TrimSpace(s.scheduleLocalConfigPath)
+	if path == "" {
+		path = defaultBackupScheduleLocalConfigPath()
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			logger.LegacyPrintf("service.backup", "[Backup] failed to read local schedule config %s: %v", path, err)
+		}
+		return false
+	}
+
+	var cfg backupScheduleLocalConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		logger.LegacyPrintf("service.backup", "[Backup] failed to parse local schedule config %s: %v", path, err)
+		return false
+	}
+	return cfg.Enabled
+}
+
+func (s *BackupService) prepareLocalScheduleEnabled(enabled bool) (func() error, func(), error) {
+	path := strings.TrimSpace(s.scheduleLocalConfigPath)
+	if path == "" {
+		path = defaultBackupScheduleLocalConfigPath()
+		s.scheduleLocalConfigPath = path
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, nil, fmt.Errorf("create local schedule config dir: %w", err)
+	}
+	data, err := json.MarshalIndent(backupScheduleLocalConfig{Enabled: enabled}, "", "  ")
+	if err != nil {
+		return nil, nil, fmt.Errorf("marshal local schedule config: %w", err)
+	}
+	data = append(data, '\n')
+
+	tmpFile, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-")
+	if err != nil {
+		return nil, nil, fmt.Errorf("create local schedule config temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	cleanup := func() {
+		_ = os.Remove(tmpPath)
+	}
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close()
+		cleanup()
+		return nil, nil, fmt.Errorf("write local schedule config temp file: %w", err)
+	}
+	if err := tmpFile.Chmod(0o600); err != nil {
+		_ = tmpFile.Close()
+		cleanup()
+		return nil, nil, fmt.Errorf("chmod local schedule config temp file: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		cleanup()
+		return nil, nil, fmt.Errorf("close local schedule config temp file: %w", err)
+	}
+
+	commit := func() error {
+		if err := os.Rename(tmpPath, path); err != nil {
+			if _, statErr := os.Stat(path); statErr != nil {
+				return fmt.Errorf("save local schedule config: %w", err)
+			}
+			backupPath := path + ".bak-" + uuid.NewString()
+			if backupErr := os.Rename(path, backupPath); backupErr != nil {
+				return fmt.Errorf("backup existing local schedule config: %w", backupErr)
+			}
+			committed := false
+			defer func() {
+				if committed {
+					_ = os.Remove(backupPath)
+					return
+				}
+				_ = os.Rename(backupPath, path)
+			}()
+			if retryErr := os.Rename(tmpPath, path); retryErr != nil {
+				return fmt.Errorf("save local schedule config: %w", retryErr)
+			}
+			committed = true
+		}
+		return nil
+	}
+	return commit, cleanup, nil
+}
+
+func (s *BackupService) saveLocalScheduleEnabled(enabled bool) error {
+	commit, cleanup, err := s.prepareLocalScheduleEnabled(enabled)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	return commit()
+}
+
 func (s *BackupService) GetSchedule(ctx context.Context) (*BackupScheduleConfig, error) {
+	localEnabled := s.loadLocalScheduleEnabled()
+	cfg := BackupScheduleConfig{Enabled: localEnabled}
+
 	raw, err := s.settingRepo.GetValue(ctx, settingKeyBackupSchedule)
 	if err != nil || raw == "" {
-		return &BackupScheduleConfig{}, nil
+		return &cfg, nil
 	}
-	var cfg BackupScheduleConfig
 	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
-		return &BackupScheduleConfig{}, nil
+		cfg = BackupScheduleConfig{}
 	}
+	cfg.Enabled = localEnabled
 	return &cfg, nil
 }
 
+func (s *BackupService) isCronSchedulerInitialized() bool {
+	s.cronMu.Lock()
+	defer s.cronMu.Unlock()
+	return s.cronSched != nil
+}
+
 func (s *BackupService) UpdateSchedule(ctx context.Context, cfg BackupScheduleConfig) (*BackupScheduleConfig, error) {
+	cfg.CronExpr = strings.TrimSpace(cfg.CronExpr)
 	if cfg.Enabled && cfg.CronExpr == "" {
 		return nil, infraerrors.BadRequest("INVALID_CRON", "cron expression is required when schedule is enabled")
 	}
@@ -371,13 +503,26 @@ func (s *BackupService) UpdateSchedule(ctx context.Context, cfg BackupScheduleCo
 			return nil, infraerrors.BadRequest("INVALID_CRON", fmt.Sprintf("invalid cron expression: %v", err))
 		}
 	}
+	if cfg.Enabled && !s.isCronSchedulerInitialized() {
+		return nil, fmt.Errorf("cron scheduler not initialized")
+	}
+	commitLocalSchedule, cleanupLocalSchedule, err := s.prepareLocalScheduleEnabled(cfg.Enabled)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanupLocalSchedule()
 
-	data, err := json.Marshal(cfg)
+	sharedCfg := cfg
+	sharedCfg.Enabled = false
+	data, err := json.Marshal(sharedCfg)
 	if err != nil {
 		return nil, fmt.Errorf("marshal schedule config: %w", err)
 	}
 	if err := s.settingRepo.Set(ctx, settingKeyBackupSchedule, string(data)); err != nil {
 		return nil, fmt.Errorf("save schedule config: %w", err)
+	}
+	if err := commitLocalSchedule(); err != nil {
+		return nil, err
 	}
 
 	// 应用或停止定时任务
@@ -392,6 +537,38 @@ func (s *BackupService) UpdateSchedule(ctx context.Context, cfg BackupScheduleCo
 	return &cfg, nil
 }
 
+func backupScheduleApplyKey(cfg *BackupScheduleConfig) string {
+	if cfg == nil || !cfg.Enabled {
+		return ""
+	}
+	return strings.TrimSpace(cfg.CronExpr)
+}
+
+func (s *BackupService) isCronScheduleApplied(cfg *BackupScheduleConfig) bool {
+	key := backupScheduleApplyKey(cfg)
+	if key == "" {
+		return false
+	}
+	s.cronMu.Lock()
+	defer s.cronMu.Unlock()
+	return s.cronEntryID != 0 && s.cronApplyKey == key
+}
+
+func (s *BackupService) reconcileCronSchedule(ctx context.Context) error {
+	schedule, err := s.GetSchedule(ctx)
+	if err != nil {
+		return err
+	}
+	if schedule == nil || !schedule.Enabled || strings.TrimSpace(schedule.CronExpr) == "" {
+		s.removeCronSchedule()
+		return nil
+	}
+	if s.isCronScheduleApplied(schedule) {
+		return nil
+	}
+	return s.applyCronSchedule(schedule)
+}
+
 func (s *BackupService) applyCronSchedule(cfg *BackupScheduleConfig) error {
 	s.cronMu.Lock()
 	defer s.cronMu.Unlock()
@@ -399,27 +576,38 @@ func (s *BackupService) applyCronSchedule(cfg *BackupScheduleConfig) error {
 	if s.cronSched == nil {
 		return fmt.Errorf("cron scheduler not initialized")
 	}
+	cronExpr := strings.TrimSpace(cfg.CronExpr)
+	if cronExpr == "" {
+		return infraerrors.BadRequest("INVALID_CRON", "cron expression is required when schedule is enabled")
+	}
 
 	// 移除旧任务
 	if s.cronEntryID != 0 {
 		s.cronSched.Remove(s.cronEntryID)
 		s.cronEntryID = 0
+		s.cronApplyKey = ""
 	}
 
-	entryID, err := s.cronSched.AddFunc(cfg.CronExpr, func() {
+	entryID, err := s.cronSched.AddFunc(cronExpr, func() {
 		s.runScheduledBackup()
 	})
 	if err != nil {
 		return infraerrors.BadRequest("INVALID_CRON", fmt.Sprintf("failed to schedule: %v", err))
 	}
 	s.cronEntryID = entryID
-	logger.LegacyPrintf("service.backup", "[Backup] 定时备份已启用: %s", cfg.CronExpr)
+	s.cronApplyKey = cronExpr
+	logger.LegacyPrintf("service.backup", "[Backup] 定时备份已启用: %s", cronExpr)
 	return nil
 }
 
 func (s *BackupService) removeCronSchedule() {
 	s.cronMu.Lock()
 	defer s.cronMu.Unlock()
+	defer func() {
+		if s.cronEntryID == 0 {
+			s.cronApplyKey = ""
+		}
+	}()
 	if s.cronSched != nil && s.cronEntryID != 0 {
 		s.cronSched.Remove(s.cronEntryID)
 		s.cronEntryID = 0
@@ -434,16 +622,12 @@ func (s *BackupService) runScheduledBackup() {
 	ctx, cancel := context.WithTimeout(s.bgCtx, 30*time.Minute)
 	defer cancel()
 
-	lockValue, locked := s.acquireScheduledBackupLock(ctx)
-	if !locked {
-		return
-	}
-	if lockValue != "" {
-		defer s.releaseScheduledBackupLock(lockValue)
-	}
-
 	// 读取定时备份配置中的过期天数
 	schedule, _ := s.GetSchedule(ctx)
+	if schedule == nil || !schedule.Enabled {
+		logger.LegacyPrintf("service.backup", "[Backup] scheduled backup skipped: local schedule is disabled")
+		return
+	}
 	expireDays := 14 // 默认14天过期
 	if schedule != nil && schedule.RetainDays > 0 {
 		expireDays = schedule.RetainDays
@@ -471,35 +655,6 @@ func (s *BackupService) runScheduledBackup() {
 }
 
 // ─── 备份/恢复核心 ───
-
-func (s *BackupService) acquireScheduledBackupLock(ctx context.Context) (string, bool) {
-	if s.scheduleLock == nil {
-		return "", true
-	}
-
-	lockValue := uuid.NewString()
-	locked, err := s.scheduleLock.Acquire(ctx, backupScheduleLockKey, lockValue, backupScheduleLockTTL)
-	if err != nil {
-		logger.LegacyPrintf("service.backup", "[Backup] scheduled backup skipped: failed to acquire Redis lock: %v", err)
-		return "", false
-	}
-	if !locked {
-		logger.LegacyPrintf("service.backup", "[Backup] scheduled backup skipped: another node is running backup")
-		return "", false
-	}
-	return lockValue, true
-}
-
-func (s *BackupService) releaseScheduledBackupLock(lockValue string) {
-	if s.scheduleLock == nil || lockValue == "" {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := s.scheduleLock.Release(ctx, backupScheduleLockKey, lockValue); err != nil {
-		logger.LegacyPrintf("service.backup", "[Backup] failed to release scheduled backup Redis lock: %v", err)
-	}
-}
 
 // CreateBackup 创建全量数据库备份并上传到 S3（流式处理）
 // expireDays: 备份过期天数，0=永不过期，默认14天
@@ -1191,23 +1346,36 @@ func (s *BackupService) cleanupOldBackups(ctx context.Context, schedule *BackupS
 	}
 
 	// 删除 S3 上的文件
+	var cleanupErr error
+	deletedCount := 0
 	for _, r := range toDelete {
 		if r.S3Key != "" {
-			_ = s.deleteS3Object(ctx, r.S3Key)
+			if err := s.deleteS3Object(ctx, r.S3Key); err != nil {
+				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("delete backup object %s: %w", r.S3Key, err))
+				toKeep = append(toKeep, r)
+				logger.LegacyPrintf("service.backup", "[Backup] 清理过期备份 %s 的 S3 对象失败，将保留记录供下次重试: %v", r.ID, err)
+				continue
+			}
 		}
+		deletedCount++
 	}
 
-	if len(toDelete) > 0 {
-		logger.LegacyPrintf("service.backup", "[Backup] 自动清理了 %d 个过期备份", len(toDelete))
-		return s.saveRecordsLocked(ctx, toKeep)
+	if deletedCount > 0 {
+		logger.LegacyPrintf("service.backup", "[Backup] 自动清理了 %d 个过期备份", deletedCount)
+		if err := s.saveRecordsLocked(ctx, toKeep); err != nil {
+			return err
+		}
 	}
-	return nil
+	return cleanupErr
 }
 
 func (s *BackupService) deleteS3Object(ctx context.Context, key string) error {
 	s3Cfg, err := s.loadS3Config(ctx)
-	if err != nil || s3Cfg == nil {
-		return nil
+	if err != nil {
+		return err
+	}
+	if s3Cfg == nil {
+		return ErrBackupS3NotConfigured
 	}
 	objectStore, err := s.getOrCreateStore(ctx, s3Cfg)
 	if err != nil {

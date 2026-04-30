@@ -111,6 +111,9 @@ backend/data/
 backend/config.yaml
 deploy/config.yaml
 backend/.installed
+backup_schedule.local.json
+backend/backup_schedule.local.json
+deploy/backup_schedule.local.json
 
 # ===================
 # 其他

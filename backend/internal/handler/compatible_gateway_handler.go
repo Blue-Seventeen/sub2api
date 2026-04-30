@@ -12,7 +12,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
-	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -97,7 +96,7 @@ func (h *CompatibleGatewayHandler) CountTokens(c *gin.Context) {
 		return
 	}
 
-	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
+	body, err := readRequestBodyWithObservability(c, nil)
 	if err != nil || len(body) == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"type": "error",
@@ -150,7 +149,7 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 		zap.String("platform", apiKey.Group.Platform),
 	)
 
-	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
+	body, err := readRequestBodyWithObservability(c, reqLog)
 	if err != nil {
 		if maxErr, ok := extractMaxBytesError(err); ok {
 			h.writeRouteError(c, route, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit), false)

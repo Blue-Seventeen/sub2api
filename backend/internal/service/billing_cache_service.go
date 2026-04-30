@@ -65,6 +65,7 @@ const (
 	cacheWriteTimeout         = 2 * time.Second // 单个写入操作超时
 	cacheWriteDropLogInterval = 5 * time.Second // 丢弃日志节流间隔
 	balanceLoadTimeout        = 3 * time.Second
+	rateLimitResetDedupeTTL   = time.Second
 )
 
 // cacheWriteTask 缓存写入任务
@@ -96,12 +97,13 @@ type BillingCacheService struct {
 	cfg                   *config.Config
 	circuitBreaker        *billingCircuitBreaker
 
-	cacheWriteChan     chan cacheWriteTask
-	cacheWriteWg       sync.WaitGroup
-	cacheWriteStopOnce sync.Once
-	cacheWriteMu       sync.RWMutex
-	stopped            atomic.Bool
-	balanceLoadSF      singleflight.Group
+	cacheWriteChan         chan cacheWriteTask
+	cacheWriteWg           sync.WaitGroup
+	cacheWriteStopOnce     sync.Once
+	cacheWriteMu           sync.RWMutex
+	stopped                atomic.Bool
+	balanceLoadSF          singleflight.Group
+	rateLimitResetInFlight sync.Map
 	// 丢弃日志节流计数器（减少高负载下日志噪音）
 	cacheWriteDropFullCount     uint64
 	cacheWriteDropFullLastLog   int64
@@ -526,6 +528,18 @@ func (s *BillingCacheService) InvalidateSubscription(ctx context.Context, userID
 	return nil
 }
 
+// InvalidateAPIKeyRateLimit invalidates the Redis rate-limit usage cache for an API key.
+func (s *BillingCacheService) InvalidateAPIKeyRateLimit(ctx context.Context, keyID int64) error {
+	if s.cache == nil {
+		return nil
+	}
+	if err := s.cache.InvalidateAPIKeyRateLimit(ctx, keyID); err != nil {
+		logger.LegacyPrintf("service.billing_cache", "Warning: invalidate api key rate limit cache failed for key %d: %v", keyID, err)
+		return err
+	}
+	return nil
+}
+
 // ============================================
 // API Key 限速缓存方法
 // ============================================
@@ -614,26 +628,32 @@ func (s *BillingCacheService) evaluateRateLimits(ctx context.Context, apiKey *AP
 	// Trigger async DB reset if any window expired
 	if needsReset {
 		keyID := apiKey.ID
-		go func() {
-			resetCtx, cancel := context.WithTimeout(context.Background(), cacheWriteTimeout)
-			defer cancel()
-			if s.apiKeyRateLimitLoader != nil {
-				// Use the repo directly - reset then reload cache
-				if loader, ok := s.apiKeyRateLimitLoader.(interface {
-					ResetRateLimitWindows(ctx context.Context, id int64) error
-				}); ok {
-					if err := loader.ResetRateLimitWindows(resetCtx, keyID); err != nil {
-						logger.LegacyPrintf("service.billing_cache", "Warning: reset rate limit windows failed for api key %d: %v", keyID, err)
+		if _, loaded := s.rateLimitResetInFlight.LoadOrStore(keyID, struct{}{}); !loaded {
+			go func() {
+				defer time.AfterFunc(rateLimitResetDedupeTTL, func() {
+					s.rateLimitResetInFlight.Delete(keyID)
+				})
+
+				resetCtx, cancel := context.WithTimeout(context.Background(), cacheWriteTimeout)
+				defer cancel()
+				if s.apiKeyRateLimitLoader != nil {
+					// Use the repo directly - reset then reload cache
+					if loader, ok := s.apiKeyRateLimitLoader.(interface {
+						ResetRateLimitWindows(ctx context.Context, id int64) error
+					}); ok {
+						if err := loader.ResetRateLimitWindows(resetCtx, keyID); err != nil {
+							logger.LegacyPrintf("service.billing_cache", "Warning: reset rate limit windows failed for api key %d: %v", keyID, err)
+						}
 					}
 				}
-			}
-			// Invalidate cache so next request loads fresh data
-			if s.cache != nil {
-				if err := s.cache.InvalidateAPIKeyRateLimit(resetCtx, keyID); err != nil {
-					logger.LegacyPrintf("service.billing_cache", "Warning: invalidate rate limit cache failed for api key %d: %v", keyID, err)
+				// Invalidate cache so next request loads fresh data
+				if s.cache != nil {
+					if err := s.cache.InvalidateAPIKeyRateLimit(resetCtx, keyID); err != nil {
+						logger.LegacyPrintf("service.billing_cache", "Warning: invalidate rate limit cache failed for api key %d: %v", keyID, err)
+					}
 				}
-			}
-		}()
+			}()
+		}
 	}
 
 	// Check limits

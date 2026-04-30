@@ -39,7 +39,7 @@
 | 自动运维 | 账号自动刷新、测试、恢复、删除、规则筛选 | 维护账号池稳定性 | `account_auto_ops*`, `proxy_auto_probe*` |
 | 代理池 | 代理检测、成功队列、账号选择最优代理 | 提升上游请求成功率 | `proxy_*`, `account_proxy*`, `frontend` 代理管理页 |
 | 设置增强 | 站点 Logo、自定义菜单、外链新页面打开、邀请码注册 HTML 提示 | 属于运营配置能力 | `setting_service.go`, `SettingsView.vue`, `AppSidebar.vue` |
-| 双机部署 | 定时备份 Redis 分布式锁 | 双机共库时避免重复提交 S3 备份 | `backup_service.go`, `backup_service_lock_test.go` |
+| 多机部署 | 定时备份本机开关 | 多机共库时由每台服务器本地文件决定是否执行定时备份，默认关闭 | `backup_service.go`, `backup_service_schedule_local_test.go` |
 | 测试稳定性 | config 测试隔离、wire 生成检查 | 保证 dev 可部署 | `backend/internal/config/*`, `backend/cmd/server/wire_gen_test.go` |
 
 ## 3. 使用记录页面专项保护清单
@@ -254,15 +254,16 @@ upstream 的 Affiliate / 邀请返利模块属于冗余功能，后续同步 ups
 
 ## 7. 备份与双机部署保护
 
-- 多机器共用同一 PostgreSQL / Redis 时，`backup_schedule` 虽然仍存在数据库 settings 中，但实际执行前必须通过 Redis 分布式锁抢占。
-- 锁 key：`sub2api:backup:scheduler:lock`
-- 当前锁 TTL：`35m`
+- 多机器共用同一 PostgreSQL / Redis 时，`backup_schedule` 仍在数据库 settings 中保存 cron、保留天数、保留份数等共享参数。
+- 定时备份启用状态不再走共享数据库，也不再走 Redis 锁；每台服务器只读取自己的本地文件 `backup_schedule.local.json`。
+- 本地文件默认路径：`DATA_DIR/backup_schedule.local.json`；未设置 `DATA_DIR` 时优先使用 `/app/data/backup_schedule.local.json`，否则使用当前目录。
+- 本地文件不存在或解析失败时默认视为未启用，避免新节点上线后自动重复跑备份。
 - 只影响定时备份，不影响手动备份。
 
 重点文件：
 
 - `backend/internal/service/backup_service.go`
-- `backend/internal/service/backup_service_lock_test.go`
+- `backend/internal/service/backup_service_schedule_local_test.go`
 - `backend/internal/service/wire.go`
 - `backend/cmd/server/wire_gen.go`
 
@@ -316,7 +317,7 @@ pnpm run build
 - `/promotion` 与 `/admin/promotion`
 - `/admin/settings` 邀请码注册提示、站点 Logo、自定义菜单
 - `/admin/usage` 与用户侧 `/usage`
-- 定时备份配置与 Redis 锁行为
+- 定时备份配置与本机启用开关行为
 
 ## 10. 后续新增定制功能时的记录要求
 

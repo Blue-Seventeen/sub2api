@@ -115,6 +115,7 @@ type OpsInsertErrorLogInput struct {
 	UpstreamStatusCode   *int
 	UpstreamErrorMessage *string
 	UpstreamErrorDetail  *string
+	NetworkErrorType     string
 	// UpstreamErrors captures all upstream error attempts observed during handling this request.
 	// It is populated during request processing (gin context) and sanitized+serialized by OpsService.
 	UpstreamErrors []*OpsUpstreamErrorEvent

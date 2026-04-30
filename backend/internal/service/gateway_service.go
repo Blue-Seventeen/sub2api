@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	mathrand "math/rand"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -20,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -50,10 +52,11 @@ const (
 	claudeCodeSystemPrompt = "You are Claude Code, Anthropic's official CLI for Claude."
 	maxCacheControlBlocks  = 4 // Anthropic API 允许的最大 cache_control 块数量
 
-	defaultUserGroupRateCacheTTL = 30 * time.Second
-	defaultModelsListCacheTTL    = 15 * time.Second
-	postUsageBillingTimeout      = 15 * time.Second
-	debugGatewayBodyEnv          = "SUB2API_DEBUG_GATEWAY_BODY"
+	defaultUserGroupRateCacheTTL  = 30 * time.Second
+	defaultModelsListCacheTTL     = 15 * time.Second
+	postUsageBillingTimeout       = 15 * time.Second
+	debugGatewayBodyEnv           = "SUB2API_DEBUG_GATEWAY_BODY"
+	debugGatewayBodyUnsafeFullEnv = "SUB2API_DEBUG_GATEWAY_BODY_UNSAFE_FULL"
 )
 
 const (
@@ -532,41 +535,42 @@ func (s *GatewayService) TempUnscheduleRetryableError(ctx context.Context, accou
 
 // GatewayService handles API gateway operations
 type GatewayService struct {
-	accountRepo           AccountRepository
-	groupRepo             GroupRepository
-	usageLogRepo          UsageLogRepository
-	usageBillingRepo      UsageBillingRepository
-	userRepo              UserRepository
-	userSubRepo           UserSubscriptionRepository
-	userGroupRateRepo     UserGroupRateRepository
-	cache                 GatewayCache
-	digestStore           *DigestSessionStore
-	cfg                   *config.Config
-	schedulerSnapshot     *SchedulerSnapshotService
-	billingService        *BillingService
-	rateLimitService      *RateLimitService
-	billingCacheService   *BillingCacheService
-	identityService       *IdentityService
-	httpUpstream          HTTPUpstream
-	deferredService       *DeferredService
-	concurrencyService    *ConcurrencyService
-	claudeTokenProvider   *ClaudeTokenProvider
-	sessionLimitCache     SessionLimitCache // 会话数量限制缓存（仅 Anthropic OAuth/SetupToken）
-	rpmCache              RPMCache          // RPM 计数缓存（仅 Anthropic OAuth/SetupToken）
-	userGroupRateResolver *userGroupRateResolver
-	userGroupRateCache    *gocache.Cache
-	userGroupRateSF       singleflight.Group
-	modelsListCache       *gocache.Cache
-	modelsListCacheTTL    time.Duration
-	settingService        *SettingService
-	responseHeaderFilter  *responseheaders.CompiledHeaderFilter
-	debugModelRouting     atomic.Bool
-	debugClaudeMimic      atomic.Bool
-	channelService        *ChannelService
-	resolver              *ModelPricingResolver
-	debugGatewayBodyFile  atomic.Pointer[os.File] // non-nil when SUB2API_DEBUG_GATEWAY_BODY is set
-	tlsFPProfileService   *TLSFingerprintProfileService
-	balanceNotifyService  *BalanceNotifyService
+	accountRepo                AccountRepository
+	groupRepo                  GroupRepository
+	usageLogRepo               UsageLogRepository
+	usageBillingRepo           UsageBillingRepository
+	userRepo                   UserRepository
+	userSubRepo                UserSubscriptionRepository
+	userGroupRateRepo          UserGroupRateRepository
+	cache                      GatewayCache
+	digestStore                *DigestSessionStore
+	cfg                        *config.Config
+	schedulerSnapshot          *SchedulerSnapshotService
+	billingService             *BillingService
+	rateLimitService           *RateLimitService
+	billingCacheService        *BillingCacheService
+	identityService            *IdentityService
+	httpUpstream               HTTPUpstream
+	deferredService            *DeferredService
+	concurrencyService         *ConcurrencyService
+	claudeTokenProvider        *ClaudeTokenProvider
+	sessionLimitCache          SessionLimitCache // 会话数量限制缓存（仅 Anthropic OAuth/SetupToken）
+	rpmCache                   RPMCache          // RPM 计数缓存（仅 Anthropic OAuth/SetupToken）
+	userGroupRateResolver      *userGroupRateResolver
+	userGroupRateCache         *gocache.Cache
+	userGroupRateSF            singleflight.Group
+	modelsListCache            *gocache.Cache
+	modelsListCacheTTL         time.Duration
+	settingService             *SettingService
+	responseHeaderFilter       *responseheaders.CompiledHeaderFilter
+	debugModelRouting          atomic.Bool
+	debugClaudeMimic           atomic.Bool
+	channelService             *ChannelService
+	resolver                   *ModelPricingResolver
+	debugGatewayBodyFile       atomic.Pointer[os.File] // non-nil when SUB2API_DEBUG_GATEWAY_BODY is set
+	debugGatewayBodyUnsafeFull atomic.Bool
+	tlsFPProfileService        *TLSFingerprintProfileService
+	balanceNotifyService       *BalanceNotifyService
 }
 
 // NewGatewayService creates a new GatewayService
@@ -642,6 +646,7 @@ func NewGatewayService(
 	)
 	svc.debugModelRouting.Store(parseDebugEnvBool(os.Getenv("SUB2API_DEBUG_MODEL_ROUTING")))
 	svc.debugClaudeMimic.Store(parseDebugEnvBool(os.Getenv("SUB2API_DEBUG_CLAUDE_MIMIC")))
+	svc.debugGatewayBodyUnsafeFull.Store(parseDebugEnvBool(os.Getenv(debugGatewayBodyUnsafeFullEnv)))
 	if path := strings.TrimSpace(os.Getenv(debugGatewayBodyEnv)); path != "" {
 		svc.initDebugGatewayBodyFile(path)
 	}
@@ -3608,7 +3613,11 @@ func (s *GatewayService) isModelSupportedByAccount(account *Account, requestedMo
 	}
 	// OAuth/SetupToken 账号使用 Anthropic 标准映射（短ID → 长ID）
 	if account.Platform == PlatformAnthropic && account.Type != AccountTypeAPIKey {
-		requestedModel = claude.NormalizeModelID(requestedModel)
+		if account.Type == AccountTypeServiceAccount {
+			requestedModel = normalizeVertexAnthropicModelID(claude.NormalizeModelID(requestedModel))
+		} else {
+			requestedModel = claude.NormalizeModelID(requestedModel)
+		}
 	}
 	// 其他平台使用账户的模型支持检查
 	return account.IsModelSupported(requestedModel)
@@ -3628,6 +3637,18 @@ func (s *GatewayService) GetAccessToken(ctx context.Context, account *Account) (
 		return apiKey, "apikey", nil
 	case AccountTypeBedrock:
 		return "", "bedrock", nil // Bedrock 使用 SigV4 签名或 API Key，由 forwardBedrock 处理
+	case AccountTypeServiceAccount:
+		if account.Platform != PlatformAnthropic {
+			return "", "", fmt.Errorf("unsupported service account platform: %s", account.Platform)
+		}
+		if s.claudeTokenProvider == nil {
+			return "", "", errors.New("claude token provider not configured")
+		}
+		accessToken, err := s.claudeTokenProvider.GetAccessToken(ctx, account)
+		if err != nil {
+			return "", "", err
+		}
+		return accessToken, "service_account", nil
 	default:
 		return "", "", fmt.Errorf("unsupported account type: %s", account.Type)
 	}
@@ -4237,6 +4258,18 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		mappedModel = account.GetMappedModel(reqModel)
 		if mappedModel != reqModel {
 			mappingSource = "account"
+		}
+	}
+	if mappingSource == "" && account.Platform == PlatformAnthropic && account.Type == AccountTypeServiceAccount {
+		if candidate, matched := account.ResolveMappedModel(reqModel); matched {
+			mappedModel = candidate
+			mappingSource = "account"
+		} else {
+			normalized := normalizeVertexAnthropicModelID(claude.NormalizeModelID(reqModel))
+			if normalized != reqModel {
+				mappedModel = normalized
+				mappingSource = "vertex"
+			}
 		}
 	}
 	if mappingSource == "" && account.Platform == PlatformAnthropic && account.Type != AccountTypeAPIKey {
@@ -5706,6 +5739,10 @@ func (s *GatewayService) handleBedrockNonStreamingResponse(
 }
 
 func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token, tokenType, modelID string, reqStream bool, mimicClaudeCode bool) (*http.Request, error) {
+	if account.Platform == PlatformAnthropic && account.Type == AccountTypeServiceAccount {
+		return s.buildUpstreamRequestAnthropicVertex(ctx, c, account, body, token, modelID, reqStream)
+	}
+
 	// 确定目标URL
 	targetURL := claudeAPIURL
 	if account.Type == AccountTypeAPIKey {
@@ -5888,6 +5925,60 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	if s.debugClaudeMimicEnabled() {
 		logClaudeMimicDebug(req, body, account, tokenType, mimicClaudeCode)
 	}
+
+	return req, nil
+}
+
+func (s *GatewayService) buildUpstreamRequestAnthropicVertex(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	body []byte,
+	token string,
+	modelID string,
+	reqStream bool,
+) (*http.Request, error) {
+	vertexBody, err := buildVertexAnthropicRequestBody(body)
+	if err != nil {
+		return nil, err
+	}
+	setOpsUpstreamRequestBody(c, vertexBody)
+	fullURL, err := buildVertexAnthropicURL(account.VertexProjectID(), account.VertexLocation(modelID), modelID, reqStream)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(vertexBody))
+	if err != nil {
+		return nil, err
+	}
+
+	if c != nil && c.Request != nil {
+		for key, values := range c.Request.Header {
+			lowerKey := strings.ToLower(strings.TrimSpace(key))
+			if !allowedHeaders[lowerKey] || lowerKey == "anthropic-version" {
+				continue
+			}
+			wireKey := resolveWireCasing(key)
+			for _, v := range values {
+				addHeaderRaw(req.Header, wireKey, v)
+			}
+		}
+	}
+
+	req.Header.Del("authorization")
+	req.Header.Del("x-api-key")
+	req.Header.Del("x-goog-api-key")
+	req.Header.Del("cookie")
+	req.Header.Del("anthropic-version")
+	setHeaderRaw(req.Header, "authorization", "Bearer "+token)
+	setHeaderRaw(req.Header, "content-type", "application/json")
+
+	s.debugLogGatewaySnapshot("UPSTREAM_FORWARD_VERTEX_ANTHROPIC", req.Header, vertexBody, map[string]string{
+		"url":        req.URL.String(),
+		"token_type": "service_account",
+		"model":      modelID,
+		"stream":     strconv.FormatBool(reqStream),
+	})
 
 	return req, nil
 }
@@ -6452,6 +6543,49 @@ func (s *GatewayService) shouldFailoverOn400(respBody []byte) bool {
 	return false
 }
 
+// sanitizeStreamError 返回不含网络地址的客户端可见错误描述。
+// 默认 (*net.OpError).Error() 会拼接 Source/Addr 字段，泄露内部 IP/端口与上游
+// 服务器地址（例如 "read tcp 10.0.0.1:54321->52.1.2.3:443: read: connection
+// reset by peer"）。该函数只保留可识别的错误类别，原始 err 仍在调用点写入日志。
+func sanitizeStreamError(err error) string {
+	if err == nil {
+		return ""
+	}
+	switch {
+	case errors.Is(err, io.ErrUnexpectedEOF):
+		return "unexpected EOF"
+	case errors.Is(err, io.EOF):
+		return "EOF"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline exceeded"
+	case errors.Is(err, syscall.ECONNRESET):
+		return "connection reset by peer"
+	case errors.Is(err, syscall.ECONNABORTED):
+		return "connection aborted"
+	case errors.Is(err, syscall.ETIMEDOUT):
+		return "connection timed out"
+	case errors.Is(err, syscall.EPIPE):
+		return "broken pipe"
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return "connection refused"
+	}
+	var netErr *net.OpError
+	if errors.As(err, &netErr) {
+		if netErr.Timeout() {
+			if netErr.Op != "" {
+				return netErr.Op + " timeout"
+			}
+			return "i/o timeout"
+		}
+		if netErr.Op != "" {
+			return netErr.Op + " network error"
+		}
+	}
+	return "upstream connection error"
+}
+
 // ExtractUpstreamErrorMessage 从上游响应体中提取错误消息
 // 支持 Claude 风格的错误格式：{"type":"error","error":{"type":"...","message":"..."}}
 func ExtractUpstreamErrorMessage(body []byte) string {
@@ -6889,14 +7023,31 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 	}
 	lastDataAt := time.Now()
 
-	// 仅发送一次错误事件，避免多次写入导致协议混乱（写失败时尽力通知客户端）
+	// 仅发送一次错误事件，避免多次写入导致协议混乱（写失败时尽力通知客户端）。
+	// 事件格式遵循 Anthropic SSE 标准：{"type":"error","error":{"type":<reason>,"message":<message>}}
+	// 这样 Anthropic SDK / Claude Code 等客户端能按标准 error 类型解析，UI 能显示具体错误文案，
+	// 服务端 ExtractUpstreamErrorMessage 也能从透传的 body 中提取 message。
 	errorEventSent := false
-	sendErrorEvent := func(reason string) {
+	sendErrorEvent := func(reason, message string) {
 		if errorEventSent {
 			return
 		}
 		errorEventSent = true
-		_, _ = fmt.Fprintf(w, "event: error\ndata: {\"error\":\"%s\"}\n\n", reason)
+		if message == "" {
+			message = reason
+		}
+		body, err := json.Marshal(map[string]any{
+			"type": "error",
+			"error": map[string]string{
+				"type":    reason,
+				"message": message,
+			},
+		})
+		if err != nil {
+			// json.Marshal 不可能在已知 string-only 输入上失败，保守 fallback
+			body = []byte(fmt.Sprintf(`{"type":"error","error":{"type":%q,"message":%q}}`, reason, message))
+		}
+		_, _ = fmt.Fprintf(w, "event: error\ndata: %s\n\n", body)
 		flusher.Flush()
 	}
 
@@ -7062,10 +7213,32 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 				// 客户端未断开，正常的错误处理
 				if errors.Is(ev.err, bufio.ErrTooLong) {
 					logger.LegacyPrintf("service.gateway", "SSE line too long: account=%d max_size=%d error=%v", account.ID, maxLineSize, ev.err)
-					sendErrorEvent("response_too_large")
+					sendErrorEvent("response_too_large", fmt.Sprintf("upstream SSE line exceeded %d bytes", maxLineSize))
 					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, ev.err
 				}
-				sendErrorEvent("stream_read_error")
+				// 上游中途读错误（unexpected EOF / connection reset 等，常见于 HTTP/2 GOAWAY）：
+				// 若尚未向客户端写过任何字节，包成 UpstreamFailoverError 让 handler 层走 failover/重试。
+				// 已经开始写流时 SSE 协议无 resume，只能透传错误事件给客户端。
+				// 注意:面向客户端的 disconnectMsg 必须用 sanitizeStreamError 剥离地址,
+				// 默认 *net.OpError 的 Error() 会泄露内部 IP/端口和上游地址。完整 ev.err
+				// 仅在下方 LegacyPrintf 内部日志中保留供运维诊断。
+				disconnectMsg := "upstream stream disconnected: " + sanitizeStreamError(ev.err)
+				if !c.Writer.Written() {
+					logger.LegacyPrintf("service.gateway", "Upstream stream read error before any client output (account=%d), failing over: %v", account.ID, ev.err)
+					body, _ := json.Marshal(map[string]any{
+						"type": "error",
+						"error": map[string]string{
+							"type":    "upstream_disconnected",
+							"message": disconnectMsg,
+						},
+					})
+					return nil, &UpstreamFailoverError{
+						StatusCode:             http.StatusBadGateway,
+						ResponseBody:           body,
+						RetryableOnSameAccount: true,
+					}
+				}
+				sendErrorEvent("stream_read_error", disconnectMsg)
 				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, fmt.Errorf("stream read error: %w", ev.err)
 			}
 			line := ev.line
@@ -7124,7 +7297,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			if s.rateLimitService != nil {
 				s.rateLimitService.HandleStreamTimeout(ctx, account, originalModel)
 			}
-			sendErrorEvent("stream_timeout")
+			sendErrorEvent("stream_timeout", fmt.Sprintf("upstream stream idle for %s", streamInterval))
 			return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, fmt.Errorf("stream data interval timeout")
 
 		case <-keepaliveCh:
@@ -9155,19 +9328,84 @@ func (s *GatewayService) initDebugGatewayBodyFile(path string) {
 
 	// 确保父目录存在
 	if dir := filepath.Dir(path); dir != "." {
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0700); err != nil {
 			slog.Error("failed to create gateway debug log directory", "dir", dir, "error", err)
 			return
 		}
 	}
 
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		slog.Error("failed to open gateway debug log file", "path", path, "error", err)
 		return
 	}
 	s.debugGatewayBodyFile.Store(f)
-	slog.Info("gateway debug logging enabled", "path", path)
+	unsafeFull := s.debugGatewayBodyUnsafeFull.Load()
+	slog.Info("gateway debug logging enabled", "path", path, "unsafe_full_body", unsafeFull)
+	if unsafeFull {
+		slog.Warn("gateway debug logging will write full request bodies; prompts and tool payloads may be persisted", "path", path)
+	}
+}
+
+func gatewayDebugBodyDigest(body []byte) string {
+	sum := sha256.Sum256(body)
+	return fmt.Sprintf("%x", sum[:8])
+}
+
+func sanitizeGatewayDebugJSONValue(value any, keyPath string) any {
+	switch v := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for k, child := range v {
+			lowerKey := strings.ToLower(k)
+			childPath := lowerKey
+			if keyPath != "" {
+				childPath = keyPath + "." + lowerKey
+			}
+			if shouldRedactGatewayDebugJSONField(lowerKey, childPath) {
+				out[k] = "[redacted]"
+				continue
+			}
+			out[k] = sanitizeGatewayDebugJSONValue(child, childPath)
+		}
+		return out
+	case []any:
+		out := make([]any, len(v))
+		for i, child := range v {
+			out[i] = sanitizeGatewayDebugJSONValue(child, keyPath+"[]")
+		}
+		return out
+	default:
+		return v
+	}
+}
+
+func shouldRedactGatewayDebugJSONField(key, keyPath string) bool {
+	switch key {
+	case "content", "system", "prompt", "input", "instructions", "input_schema", "metadata", "authorization", "api_key", "apikey", "token", "secret", "password":
+		return true
+	}
+	return strings.Contains(keyPath, "messages[].content") ||
+		strings.Contains(keyPath, "tools[].input_schema") ||
+		strings.Contains(keyPath, "tool_calls[].function.arguments")
+}
+
+func redactGatewayDebugBody(body []byte) string {
+	if len(body) == 0 {
+		return "  (empty)\n"
+	}
+
+	var parsed any
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return fmt.Sprintf("  [redacted non-json body: bytes=%d sha256_8=%s]\n", len(body), gatewayDebugBodyDigest(body))
+	}
+
+	redacted := sanitizeGatewayDebugJSONValue(parsed, "")
+	rendered, err := json.MarshalIndent(redacted, "  ", "  ")
+	if err != nil {
+		return fmt.Sprintf("  [redacted json body: bytes=%d sha256_8=%s]\n", len(body), gatewayDebugBodyDigest(body))
+	}
+	return fmt.Sprintf("  %s\n", rendered)
 }
 
 // debugLogGatewaySnapshot 将网关请求的完整快照（headers + body）写入独立的调试日志文件，
@@ -9212,9 +9450,7 @@ func (s *GatewayService) debugLogGatewaySnapshot(tag string, headers http.Header
 
 	// 3. body（完整输出，格式化 JSON 便于 diff）
 	fmt.Fprint(&buf, "--- body ---\n")
-	if len(body) == 0 {
-		fmt.Fprint(&buf, "  (empty)\n")
-	} else {
+	if s.debugGatewayBodyUnsafeFull.Load() {
 		var pretty bytes.Buffer
 		if json.Indent(&pretty, body, "  ", "  ") == nil {
 			fmt.Fprintf(&buf, "  %s\n", pretty.Bytes())
@@ -9222,6 +9458,8 @@ func (s *GatewayService) debugLogGatewaySnapshot(tag string, headers http.Header
 			// JSON 格式化失败时原样输出
 			fmt.Fprintf(&buf, "  %s\n", body)
 		}
+	} else {
+		fmt.Fprint(&buf, redactGatewayDebugBody(body))
 	}
 
 	// 写入文件（调试用，并发写入可能交错但不影响可读性）

@@ -885,6 +885,27 @@ export interface BetaPolicySettings {
   rules: BetaPolicyRule[];
 }
 
+export type OpenAIFastPolicyTier =
+  | "all"
+  | "priority"
+  | "auto"
+  | "default"
+  | "scale";
+
+export interface OpenAIFastPolicyRule {
+  service_tier: OpenAIFastPolicyTier;
+  action: "pass" | "filter" | "block";
+  scope: "all" | "oauth" | "apikey" | "bedrock";
+  error_message?: string;
+  model_whitelist?: string[];
+  fallback_action?: "pass" | "filter" | "block";
+  fallback_error_message?: string;
+}
+
+export interface OpenAIFastPolicySettings {
+  rules: OpenAIFastPolicyRule[];
+}
+
 /**
  * Get beta policy settings
  * @returns Beta policy settings
@@ -906,6 +927,23 @@ export async function updateBetaPolicySettings(
 ): Promise<BetaPolicySettings> {
   const { data } = await apiClient.put<BetaPolicySettings>(
     "/admin/settings/beta-policy",
+    settings,
+  );
+  return data;
+}
+
+export async function getOpenAIFastPolicySettings(): Promise<OpenAIFastPolicySettings> {
+  const { data } = await apiClient.get<OpenAIFastPolicySettings>(
+    "/admin/settings/openai-fast-policy",
+  );
+  return data;
+}
+
+export async function updateOpenAIFastPolicySettings(
+  settings: OpenAIFastPolicySettings,
+): Promise<OpenAIFastPolicySettings> {
+  const { data } = await apiClient.put<OpenAIFastPolicySettings>(
+    "/admin/settings/openai-fast-policy",
     settings,
   );
   return data;
@@ -987,6 +1025,8 @@ export const settingsAPI = {
   updateRectifierSettings,
   getBetaPolicySettings,
   updateBetaPolicySettings,
+  getOpenAIFastPolicySettings,
+  updateOpenAIFastPolicySettings,
   getWebSearchEmulationConfig,
   updateWebSearchEmulationConfig,
   testWebSearchEmulation,

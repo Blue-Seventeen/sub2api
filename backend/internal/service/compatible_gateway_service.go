@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -1045,6 +1047,35 @@ func sanitizeCompatibleUpstreamMessage(statusCode int, respBody []byte) string {
 	return upstreamMsg
 }
 
+func compatibleInvalidUpstreamResponse(c *gin.Context, body []byte) {
+	if c == nil || c.Writer.Written() {
+		return
+	}
+	c.Data(http.StatusBadGateway, gin.MIMEJSON, body)
+}
+
+func compatibleReadUpstreamResponseBody(
+	resp *http.Response,
+	cfg *config.Config,
+	c *gin.Context,
+	onTooLarge TooLargeWriter,
+	invalidBody []byte,
+) ([]byte, bool) {
+	if resp == nil {
+		compatibleInvalidUpstreamResponse(c, invalidBody)
+		return nil, false
+	}
+	body, err := ReadUpstreamResponseBody(resp.Body, cfg, c, onTooLarge)
+	if err == nil {
+		return body, true
+	}
+	if !errors.Is(err, ErrUpstreamResponseBodyTooLarge) {
+		setOpsUpstreamError(c, http.StatusBadGateway, "failed to read upstream response", "")
+		compatibleInvalidUpstreamResponse(c, invalidBody)
+	}
+	return nil, false
+}
+
 func (s *CompatibleGatewayService) forwardPreparedRequestAttempt(
 	ctx context.Context,
 	c *gin.Context,
@@ -1085,12 +1116,12 @@ func (s *CompatibleGatewayService) forwardPreparedRequestAttempt(
 }
 
 func (s *CompatibleGatewayService) handleMessagesResponse(resp *http.Response, c *gin.Context, prepared *compatiblePreparedRequest, startTime time.Time) *ForwardResult {
-	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, nil)
 	if handled, repaired := s.maybeRepairClaudeKimiMessagesResponse(resp, c, prepared, startTime); handled {
 		return repaired
 	}
 	usage := ClaudeUsage{}
 	if prepared.ClientStream {
+		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, nil)
 		c.Status(resp.StatusCode)
 		scanner := bufio.NewScanner(resp.Body)
 		scanner.Buffer(make([]byte, 0, 64*1024), defaultMaxLineSize)
@@ -1108,11 +1139,16 @@ func (s *CompatibleGatewayService) handleMessagesResponse(resp *http.Response, c
 				flushCompatibleSSEBuffer(c, &eventBuf)
 			}
 		}
+		logCompatibleStreamScannerError(prepared, scanner.Err())
 		flushCompatibleSSEBuffer(c, &eventBuf)
 		return buildCompatibleForwardResult(resp, prepared, usage, true, startTime, firstTokenMs)
 	}
 
-	body, _ := readUpstreamResponseBodyLimited(resp.Body, resolveUpstreamResponseReadLimit(s.cfg))
+	body, ok := compatibleReadUpstreamResponseBody(resp, s.cfg, c, anthropicTooLargeError, []byte(`{"type":"error","error":{"type":"api_error","message":"invalid upstream response"}}`))
+	if !ok {
+		return &ForwardResult{Model: prepared.OriginalModel, UpstreamModel: prepared.UpstreamModel, Duration: time.Since(startTime)}
+	}
+	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, nil)
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), body)
 	if parsed := parseClaudeUsageFromResponseBody(body); parsed != nil {
 		usage = *parsed
@@ -1121,8 +1157,8 @@ func (s *CompatibleGatewayService) handleMessagesResponse(resp *http.Response, c
 }
 
 func (s *CompatibleGatewayService) handleResponsesResponse(resp *http.Response, c *gin.Context, prepared *compatiblePreparedRequest, startTime time.Time) *ForwardResult {
-	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, nil)
 	if prepared.ClientStream {
+		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, nil)
 		c.Status(resp.StatusCode)
 		scanner := bufio.NewScanner(resp.Body)
 		scanner.Buffer(make([]byte, 0, 64*1024), defaultMaxLineSize)
@@ -1155,11 +1191,16 @@ func (s *CompatibleGatewayService) handleResponsesResponse(resp *http.Response, 
 				flushCompatibleSSEBuffer(c, &eventBuf)
 			}
 		}
+		logCompatibleStreamScannerError(prepared, scanner.Err())
 		flushCompatibleSSEBuffer(c, &eventBuf)
 		return buildCompatibleForwardResult(resp, prepared, usage, true, startTime, firstTokenMs)
 	}
 
-	body, _ := readUpstreamResponseBodyLimited(resp.Body, resolveUpstreamResponseReadLimit(s.cfg))
+	body, ok := compatibleReadUpstreamResponseBody(resp, s.cfg, c, openAITooLargeError, []byte(`{"error":{"message":"invalid upstream response"}}`))
+	if !ok {
+		return &ForwardResult{Model: prepared.OriginalModel, UpstreamModel: prepared.UpstreamModel, Duration: time.Since(startTime)}
+	}
+	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, nil)
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), body)
 	usage := ClaudeUsage{}
 	if parsed, ok := extractOpenAIUsageFromJSONBytes(body); ok {
@@ -1169,8 +1210,8 @@ func (s *CompatibleGatewayService) handleResponsesResponse(resp *http.Response, 
 }
 
 func (s *CompatibleGatewayService) handleChatPassthrough(resp *http.Response, c *gin.Context, prepared *compatiblePreparedRequest, startTime time.Time) *ForwardResult {
-	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, nil)
 	if prepared.ClientStream {
+		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, nil)
 		c.Status(resp.StatusCode)
 		scanner := bufio.NewScanner(resp.Body)
 		scanner.Buffer(make([]byte, 0, 64*1024), defaultMaxLineSize)
@@ -1195,11 +1236,16 @@ func (s *CompatibleGatewayService) handleChatPassthrough(resp *http.Response, c 
 				flushCompatibleSSEBuffer(c, &eventBuf)
 			}
 		}
+		logCompatibleStreamScannerError(prepared, scanner.Err())
 		flushCompatibleSSEBuffer(c, &eventBuf)
 		return buildCompatibleForwardResult(resp, prepared, usage, true, startTime, firstTokenMs)
 	}
 
-	body, _ := readUpstreamResponseBodyLimited(resp.Body, resolveUpstreamResponseReadLimit(s.cfg))
+	body, ok := compatibleReadUpstreamResponseBody(resp, s.cfg, c, openAITooLargeError, []byte(`{"error":{"message":"invalid upstream response"}}`))
+	if !ok {
+		return &ForwardResult{Model: prepared.OriginalModel, UpstreamModel: prepared.UpstreamModel, Duration: time.Since(startTime)}
+	}
+	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, nil)
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), body)
 	usage := ClaudeUsage{}
 	if parsed, ok := extractOpenAIUsageFromJSONBytes(body); ok {
@@ -1210,7 +1256,10 @@ func (s *CompatibleGatewayService) handleChatPassthrough(resp *http.Response, c 
 
 func (s *CompatibleGatewayService) handleChatAsResponses(resp *http.Response, c *gin.Context, prepared *compatiblePreparedRequest, startTime time.Time) *ForwardResult {
 	if !prepared.ClientStream {
-		body, _ := readUpstreamResponseBodyLimited(resp.Body, resolveUpstreamResponseReadLimit(s.cfg))
+		body, ok := compatibleReadUpstreamResponseBody(resp, s.cfg, c, openAITooLargeError, []byte(`{"error":{"message":"invalid upstream response"}}`))
+		if !ok {
+			return &ForwardResult{Model: prepared.OriginalModel, UpstreamModel: prepared.UpstreamModel, Duration: time.Since(startTime)}
+		}
 		var chatResp apicompat.ChatCompletionsResponse
 		if err := json.Unmarshal(body, &chatResp); err != nil {
 			c.Data(http.StatusBadGateway, gin.MIMEJSON, []byte(`{"error":{"message":"invalid upstream response"}}`))
@@ -1324,6 +1373,10 @@ func (s *CompatibleGatewayService) handleChatAsResponses(resp *http.Response, c 
 			return buildCompatibleForwardResult(resp, prepared, usage, true, startTime, firstTokenMs)
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		logCompatibleStreamScannerError(prepared, err)
+		return buildCompatibleForwardResult(resp, prepared, usage, true, startTime, firstTokenMs)
+	}
 	if !seenFinishReason {
 		finalFinishReason = "stop"
 	}
@@ -1345,7 +1398,10 @@ func (s *CompatibleGatewayService) handleChatAsResponses(resp *http.Response, c 
 
 func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *gin.Context, prepared *compatiblePreparedRequest, startTime time.Time) *ForwardResult {
 	if !prepared.ClientStream {
-		body, _ := readUpstreamResponseBodyLimited(resp.Body, resolveUpstreamResponseReadLimit(s.cfg))
+		body, ok := compatibleReadUpstreamResponseBody(resp, s.cfg, c, anthropicTooLargeError, []byte(`{"type":"error","error":{"type":"api_error","message":"invalid upstream response"}}`))
+		if !ok {
+			return &ForwardResult{Model: prepared.OriginalModel, UpstreamModel: prepared.UpstreamModel, Duration: time.Since(startTime)}
+		}
 		var chatResp apicompat.ChatCompletionsResponse
 		if err := json.Unmarshal(body, &chatResp); err != nil {
 			c.Data(http.StatusBadGateway, gin.MIMEJSON, []byte(`{"type":"error","error":{"type":"api_error","message":"invalid upstream response"}}`))
@@ -1498,6 +1554,10 @@ func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *
 			return buildCompatibleForwardResult(resp, prepared, usage, true, startTime, firstTokenMs)
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		logCompatibleStreamScannerError(prepared, err)
+		return buildCompatibleForwardResult(resp, prepared, usage, true, startTime, firstTokenMs)
+	}
 	if !seenFinishReason {
 		finalFinishReason = "stop"
 	}
@@ -1582,6 +1642,25 @@ func flushCompatibleSSEBuffer(c *gin.Context, buf *bytes.Buffer) {
 	_, _ = c.Writer.Write(buf.Bytes())
 	c.Writer.Flush()
 	buf.Reset()
+}
+
+func logCompatibleStreamScannerError(prepared *compatiblePreparedRequest, err error) {
+	if err == nil {
+		return
+	}
+	route := ""
+	upstreamEndpoint := ""
+	if prepared != nil {
+		route = string(compatiblePreparedClientRoute(prepared))
+		upstreamEndpoint = prepared.UpstreamEndpoint
+	}
+	logger.LegacyPrintf(
+		"service.compatible_gateway",
+		"compatible stream read error route=%s upstream_endpoint=%s: %v",
+		route,
+		upstreamEndpoint,
+		err,
+	)
 }
 
 func openAIUsageToClaudeUsage(usage OpenAIUsage) ClaudeUsage {

@@ -149,6 +149,7 @@ func newOpenAIRecordUsageServiceForTest(usageRepo UsageLogRepository, userRepo U
 		nil,
 		nil,
 		nil,
+		nil,
 	)
 	svc.userGroupRateResolver = newUserGroupRateResolver(
 		rateRepo,
@@ -918,8 +919,12 @@ func TestNormalizeOpenAIServiceTier(t *testing.T) {
 		require.Equal(t, "priority", *got)
 	})
 
-	t.Run("default ignored", func(t *testing.T) {
-		require.Nil(t, normalizeOpenAIServiceTier("default"))
+	t.Run("known tiers allowed", func(t *testing.T) {
+		for _, tier := range []string{"priority", "flex", "auto", "default", "scale"} {
+			got := normalizeOpenAIServiceTier(tier)
+			require.NotNil(t, got)
+			require.Equal(t, tier, *got)
+		}
 	})
 
 	t.Run("invalid ignored", func(t *testing.T) {
@@ -929,15 +934,16 @@ func TestNormalizeOpenAIServiceTier(t *testing.T) {
 
 func TestExtractOpenAIServiceTier(t *testing.T) {
 	require.Equal(t, "priority", *extractOpenAIServiceTier(map[string]any{"service_tier": "fast"}))
-	require.Nil(t, extractOpenAIServiceTier(map[string]any{"service_tier": "flex"}))
+	require.Equal(t, "flex", *extractOpenAIServiceTier(map[string]any{"service_tier": "flex"}))
+	require.Equal(t, "default", *extractOpenAIServiceTier(map[string]any{"service_tier": "default"}))
 	require.Nil(t, extractOpenAIServiceTier(map[string]any{"service_tier": 1}))
 	require.Nil(t, extractOpenAIServiceTier(nil))
 }
 
 func TestExtractOpenAIServiceTierFromBody(t *testing.T) {
 	require.Equal(t, "priority", *extractOpenAIServiceTierFromBody([]byte(`{"service_tier":"fast"}`)))
-	require.Nil(t, extractOpenAIServiceTierFromBody([]byte(`{"service_tier":"flex"}`)))
-	require.Nil(t, extractOpenAIServiceTierFromBody([]byte(`{"service_tier":"default"}`)))
+	require.Equal(t, "flex", *extractOpenAIServiceTierFromBody([]byte(`{"service_tier":"flex"}`)))
+	require.Equal(t, "default", *extractOpenAIServiceTierFromBody([]byte(`{"service_tier":"default"}`)))
 	require.Nil(t, extractOpenAIServiceTierFromBody(nil))
 }
 
@@ -947,9 +953,8 @@ func TestNormalizeOpenAIServiceTierInRequestBodyMap(t *testing.T) {
 	require.Equal(t, "priority", reqBody["service_tier"])
 
 	reqBody = map[string]any{"service_tier": "flex"}
-	require.True(t, normalizeOpenAIServiceTierInRequestBodyMap(reqBody))
-	_, exists := reqBody["service_tier"]
-	require.False(t, exists)
+	require.False(t, normalizeOpenAIServiceTierInRequestBodyMap(reqBody))
+	require.Equal(t, "flex", reqBody["service_tier"])
 }
 
 func TestNormalizeOpenAIServiceTierInBody(t *testing.T) {
@@ -960,8 +965,8 @@ func TestNormalizeOpenAIServiceTierInBody(t *testing.T) {
 
 	body, changed, err = normalizeOpenAIServiceTierInBody([]byte(`{"service_tier":"flex"}`))
 	require.NoError(t, err)
-	require.True(t, changed)
-	require.False(t, gjson.GetBytes(body, "service_tier").Exists())
+	require.False(t, changed)
+	require.Equal(t, "flex", gjson.GetBytes(body, "service_tier").String())
 }
 
 func TestOpenAIGatewayServiceRecordUsage_UsesRequestedModelAndUpstreamModelMetadataFields(t *testing.T) {

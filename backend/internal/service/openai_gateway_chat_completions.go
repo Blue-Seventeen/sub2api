@@ -93,6 +93,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	var (
 		responsesReq  *apicompat.ResponsesRequest
 		responsesBody []byte
+		serviceTier   *string
 		err           error
 	)
 	if isResponsesShape {
@@ -123,6 +124,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		if effort := gjson.GetBytes(responsesBody, "reasoning.effort").String(); effort != "" {
 			responsesReq.Reasoning = &apicompat.ResponsesReasoning{Effort: effort}
 		}
+		serviceTier = extractOpenAIServiceTierFromBody(responsesBody)
 	} else {
 		// Normal path: convert Chat Completions → Responses.
 		// ChatCompletionsToResponses always sets Stream=true (upstream always streams).
@@ -136,6 +138,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		if err != nil {
 			return nil, fmt.Errorf("marshal responses request: %w", err)
 		}
+		serviceTier = extractOpenAIServiceTierFromBody(responsesBody)
 	}
 
 	logFields := []zap.Field{
@@ -172,6 +175,15 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		if err != nil {
 			return nil, fmt.Errorf("remarshal after codex transform: %w", err)
 		}
+	}
+
+	responsesBody, serviceTier, err = s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, responsesBody)
+	if err != nil {
+		var blocked *OpenAIFastBlockedError
+		if errors.As(err, &blocked) {
+			writeChatCompletionsError(c, http.StatusForbidden, "permission_error", blocked.Message)
+		}
+		return nil, err
 	}
 
 	// 5. Get access token
@@ -263,10 +275,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 
 	// Propagate ServiceTier and ReasoningEffort to result for billing
 	if handleErr == nil && result != nil {
-		if responsesReq.ServiceTier != "" {
-			st := responsesReq.ServiceTier
-			result.ServiceTier = &st
-		}
+		result.ServiceTier = serviceTier
 		if responsesReq.Reasoning != nil && responsesReq.Reasoning.Effort != "" {
 			re := responsesReq.Reasoning.Effort
 			result.ReasoningEffort = &re

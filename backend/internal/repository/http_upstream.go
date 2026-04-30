@@ -48,7 +48,9 @@ const (
 	// 超出后会淘汰最久未使用的客户端
 	defaultMaxUpstreamClients = 5000
 	// defaultClientIdleTTLSeconds: 默认客户端空闲回收阈值（15分钟）
-	defaultClientIdleTTLSeconds = 900
+	defaultClientIdleTTLSeconds    = 900
+	defaultClientIdleSweepInterval = 30 * time.Second
+	defaultClientEvictionScanLimit = 64
 )
 
 var errUpstreamClientLimitReached = errors.New("upstream client cache limit reached")
@@ -91,9 +93,10 @@ type upstreamClientEntry struct {
 // 7. 代理变更时清空旧连接池，避免复用错误代理
 // 8. 账号并发数与连接池上限对应（账号隔离策略下）
 type httpUpstreamService struct {
-	cfg     *config.Config                  // 全局配置
-	mu      sync.RWMutex                    // 保护 clients map 的读写锁
-	clients map[string]*upstreamClientEntry // 客户端缓存池，key 由隔离策略决定
+	cfg                *config.Config                  // 全局配置
+	mu                 sync.RWMutex                    // 保护 clients map 的读写锁
+	clients            map[string]*upstreamClientEntry // 客户端缓存池，key 由隔离策略决定
+	lastIdleSweepNanos atomic.Int64
 }
 
 // NewHTTPUpstream 创建通用 HTTP 上游服务
@@ -240,6 +243,8 @@ func (s *httpUpstreamService) getClientEntryWithTLS(proxyURL string, accountID i
 	}
 	s.mu.RUnlock()
 
+	var evicted []*upstreamClientEntry
+
 	// 写锁慢路径
 	s.mu.Lock()
 	if entry, ok := s.clients[cacheKey]; ok {
@@ -257,17 +262,25 @@ func (s *httpUpstreamService) getClientEntryWithTLS(proxyURL string, accountID i
 			"cache_key", cacheKey,
 			"proxy_changed", entry.proxyKey != proxyKey,
 			"pool_changed", entry.poolKey != poolKey)
-		s.removeClientLocked(cacheKey, entry)
+		evicted = append(evicted, s.removeClientLocked(cacheKey, entry))
 	}
 
 	// 超出缓存上限时尝试淘汰
-	if enforceLimit && s.maxUpstreamClients() > 0 {
-		s.evictIdleLocked(now)
+	if enforceLimit && s.maxUpstreamClients() > 0 && len(s.clients) >= s.maxUpstreamClients() {
+		evicted = append(evicted, s.evictOverLimitLocked(now)...)
 		if len(s.clients) >= s.maxUpstreamClients() {
-			if !s.evictOldestIdleLocked() {
+			victim, ok := s.evictOneCandidateLocked(now)
+			if !ok {
 				s.mu.Unlock()
+				closeUpstreamClientEntries(evicted)
 				return nil, errUpstreamClientLimitReached
 			}
+			evicted = append(evicted, victim)
+		}
+		if len(s.clients) >= s.maxUpstreamClients() {
+			s.mu.Unlock()
+			closeUpstreamClientEntries(evicted)
+			return nil, errUpstreamClientLimitReached
 		}
 	}
 
@@ -277,6 +290,7 @@ func (s *httpUpstreamService) getClientEntryWithTLS(proxyURL string, accountID i
 	transport, err := buildUpstreamTransportWithTLSFingerprint(settings, parsedProxy, profile)
 	if err != nil {
 		s.mu.Unlock()
+		closeUpstreamClientEntries(evicted)
 		return nil, fmt.Errorf("build TLS fingerprint transport: %w", err)
 	}
 
@@ -296,9 +310,10 @@ func (s *httpUpstreamService) getClientEntryWithTLS(proxyURL string, accountID i
 	}
 	s.clients[cacheKey] = entry
 
-	s.evictIdleLocked(now)
-	s.evictOverLimitLocked()
+	evicted = append(evicted, s.evictIdleIfDueLocked(now)...)
+	evicted = append(evicted, s.evictOverLimitLocked(now)...)
 	s.mu.Unlock()
+	closeUpstreamClientEntries(evicted)
 	return entry, nil
 }
 
@@ -392,6 +407,8 @@ func (s *httpUpstreamService) getClientEntry(proxyURL string, accountID int64, a
 	}
 	s.mu.RUnlock()
 
+	var evicted []*upstreamClientEntry
+
 	// 写锁慢路径：创建或重建客户端
 	s.mu.Lock()
 	if entry, ok := s.clients[cacheKey]; ok {
@@ -403,17 +420,25 @@ func (s *httpUpstreamService) getClientEntry(proxyURL string, accountID int64, a
 			s.mu.Unlock()
 			return entry, nil
 		}
-		s.removeClientLocked(cacheKey, entry)
+		evicted = append(evicted, s.removeClientLocked(cacheKey, entry))
 	}
 
 	// 超出缓存上限时尝试淘汰，无法淘汰则拒绝新建
-	if enforceLimit && s.maxUpstreamClients() > 0 {
-		s.evictIdleLocked(now)
+	if enforceLimit && s.maxUpstreamClients() > 0 && len(s.clients) >= s.maxUpstreamClients() {
+		evicted = append(evicted, s.evictOverLimitLocked(now)...)
 		if len(s.clients) >= s.maxUpstreamClients() {
-			if !s.evictOldestIdleLocked() {
+			victim, ok := s.evictOneCandidateLocked(now)
+			if !ok {
 				s.mu.Unlock()
+				closeUpstreamClientEntries(evicted)
 				return nil, errUpstreamClientLimitReached
 			}
+			evicted = append(evicted, victim)
+		}
+		if len(s.clients) >= s.maxUpstreamClients() {
+			s.mu.Unlock()
+			closeUpstreamClientEntries(evicted)
+			return nil, errUpstreamClientLimitReached
 		}
 	}
 
@@ -422,6 +447,7 @@ func (s *httpUpstreamService) getClientEntry(proxyURL string, accountID int64, a
 	transport, err := buildUpstreamTransport(settings, parsedProxy)
 	if err != nil {
 		s.mu.Unlock()
+		closeUpstreamClientEntries(evicted)
 		return nil, fmt.Errorf("build transport: %w", err)
 	}
 	client := &http.Client{Transport: transport}
@@ -440,9 +466,10 @@ func (s *httpUpstreamService) getClientEntry(proxyURL string, accountID int64, a
 	s.clients[cacheKey] = entry
 
 	// 执行淘汰策略：先淘汰空闲超时的，再淘汰超出数量限制的
-	s.evictIdleLocked(now)
-	s.evictOverLimitLocked()
+	evicted = append(evicted, s.evictIdleIfDueLocked(now)...)
+	evicted = append(evicted, s.evictOverLimitLocked(now)...)
 	s.mu.Unlock()
+	closeUpstreamClientEntries(evicted)
 	return entry, nil
 }
 
@@ -467,81 +494,132 @@ func (s *httpUpstreamService) shouldReuseEntry(entry *upstreamClientEntry, isola
 // 参数:
 //   - key: 缓存键
 //   - entry: 客户端条目
-func (s *httpUpstreamService) removeClientLocked(key string, entry *upstreamClientEntry) {
+func (s *httpUpstreamService) removeClientLocked(key string, entry *upstreamClientEntry) *upstreamClientEntry {
 	delete(s.clients, key)
-	if entry != nil && entry.client != nil {
-		// 关闭空闲连接，释放系统资源
-		// 注意：这不会中断活跃连接
-		entry.client.CloseIdleConnections()
+	return entry
+}
+
+func closeUpstreamClientEntries(entries []*upstreamClientEntry) {
+	for _, entry := range entries {
+		if entry != nil && entry.client != nil {
+			entry.client.CloseIdleConnections()
+		}
 	}
 }
 
-// evictIdleLocked 淘汰空闲超时的客户端（需持有锁）
-// 遍历所有客户端，移除超过 TTL 且无活跃请求的条目
+func (s *httpUpstreamService) evictIdleIfDueLocked(now time.Time) []*upstreamClientEntry {
+	ttl := s.clientIdleTTL()
+	if ttl <= 0 {
+		return nil
+	}
+
+	nowUnix := now.UnixNano()
+	last := s.lastIdleSweepNanos.Load()
+	if last != 0 && nowUnix-last < int64(defaultClientIdleSweepInterval) {
+		return nil
+	}
+	if !s.lastIdleSweepNanos.CompareAndSwap(last, nowUnix) {
+		return nil
+	}
+	return s.evictIdleBatchLocked(now)
+}
+
+// evictIdleBatchLocked 淘汰一批空闲超时的客户端（需持有锁）
+// 每次只扫描固定数量的客户端，避免请求路径在全局写锁内做 O(n) 全量遍历。
 //
 // 参数:
 //   - now: 当前时间
-func (s *httpUpstreamService) evictIdleLocked(now time.Time) {
+func (s *httpUpstreamService) evictIdleBatchLocked(now time.Time) []*upstreamClientEntry {
 	ttl := s.clientIdleTTL()
 	if ttl <= 0 {
-		return
+		return nil
 	}
 	// 计算淘汰截止时间
 	cutoff := now.Add(-ttl).UnixNano()
+	evicted := make([]*upstreamClientEntry, 0)
+	scanned := 0
 	for key, entry := range s.clients {
+		if scanned >= defaultClientEvictionScanLimit {
+			break
+		}
+		scanned++
 		// 跳过有活跃请求的客户端
 		if atomic.LoadInt64(&entry.inFlight) != 0 {
 			continue
 		}
 		// 淘汰超时的空闲客户端
 		if atomic.LoadInt64(&entry.lastUsed) <= cutoff {
-			s.removeClientLocked(key, entry)
+			evicted = append(evicted, s.removeClientLocked(key, entry))
 		}
 	}
+	s.lastIdleSweepNanos.Store(now.UnixNano())
+	return evicted
 }
 
-// evictOldestIdleLocked 淘汰最久未使用且无活跃请求的客户端（需持有锁）
-func (s *httpUpstreamService) evictOldestIdleLocked() bool {
+// evictOneCandidateLocked 淘汰一个空闲客户端（需持有锁）。
+// 在固定采样窗口里优先选择已超时的空闲客户端，否则选择样本中最久未使用的空闲客户端。
+func (s *httpUpstreamService) evictOneCandidateLocked(now time.Time) (*upstreamClientEntry, bool) {
 	var (
-		oldestKey   string
-		oldestEntry *upstreamClientEntry
-		oldestTime  int64
+		expiredKey   string
+		expiredEntry *upstreamClientEntry
+		expiredTime  int64
+		oldestKey    string
+		oldestEntry  *upstreamClientEntry
+		oldestTime   int64
 	)
-	// 查找最久未使用且无活跃请求的客户端
+	ttl := s.clientIdleTTL()
+	cutoff := int64(0)
+	if ttl > 0 {
+		cutoff = now.Add(-ttl).UnixNano()
+	}
+	scanned := 0
 	for key, entry := range s.clients {
+		if scanned >= defaultClientEvictionScanLimit {
+			break
+		}
+		scanned++
 		// 跳过有活跃请求的客户端
 		if atomic.LoadInt64(&entry.inFlight) != 0 {
 			continue
 		}
 		lastUsed := atomic.LoadInt64(&entry.lastUsed)
+		if cutoff > 0 && lastUsed <= cutoff {
+			if expiredEntry == nil || lastUsed < expiredTime {
+				expiredKey = key
+				expiredEntry = entry
+				expiredTime = lastUsed
+			}
+			continue
+		}
 		if oldestEntry == nil || lastUsed < oldestTime {
 			oldestKey = key
 			oldestEntry = entry
 			oldestTime = lastUsed
 		}
 	}
-	// 所有客户端都有活跃请求，无法淘汰
-	if oldestEntry == nil {
-		return false
+	if expiredEntry != nil {
+		return s.removeClientLocked(expiredKey, expiredEntry), true
 	}
-	s.removeClientLocked(oldestKey, oldestEntry)
-	return true
+	if oldestEntry == nil {
+		return nil, false
+	}
+	return s.removeClientLocked(oldestKey, oldestEntry), true
 }
 
 // evictOverLimitLocked 淘汰超出数量限制的客户端（需持有锁）
-// 使用 LRU 策略，优先淘汰最久未使用且无活跃请求的客户端
-func (s *httpUpstreamService) evictOverLimitLocked() bool {
+// 使用有界采样策略，优先淘汰空闲过期客户端，再淘汰样本中最久未使用的空闲客户端。
+func (s *httpUpstreamService) evictOverLimitLocked(now time.Time) []*upstreamClientEntry {
 	maxClients := s.maxUpstreamClients()
 	if maxClients <= 0 {
-		return false
+		return nil
 	}
-	evicted := false
-	// 循环淘汰直到满足数量限制
-	for len(s.clients) > maxClients {
-		if !s.evictOldestIdleLocked() {
+	evicted := make([]*upstreamClientEntry, 0)
+	for len(s.clients) > maxClients && len(evicted) < defaultClientEvictionScanLimit {
+		victim, ok := s.evictOneCandidateLocked(now)
+		if !ok {
 			return evicted
 		}
-		evicted = true
+		evicted = append(evicted, victim)
 	}
 	return evicted
 }

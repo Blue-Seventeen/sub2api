@@ -84,6 +84,7 @@ type OpsErrorLogDetail struct {
 	UpstreamStatusCode   *int   `json:"upstream_status_code,omitempty"`
 	UpstreamErrorMessage string `json:"upstream_error_message,omitempty"`
 	UpstreamErrorDetail  string `json:"upstream_error_detail,omitempty"`
+	NetworkErrorType     string `json:"network_error_type,omitempty"`
 	UpstreamErrors       string `json:"upstream_errors,omitempty"` // JSON array (string) for display/parsing
 
 	// Timings (optional)

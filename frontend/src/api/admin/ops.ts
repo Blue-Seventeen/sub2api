@@ -986,6 +986,7 @@ export interface OpsErrorDetail extends OpsErrorLog {
   upstream_status_code?: number | null
   upstream_error_message?: string
   upstream_error_detail?: string
+  network_error_type?: string
   upstream_errors?: string
 
   auth_latency_ms?: number | null

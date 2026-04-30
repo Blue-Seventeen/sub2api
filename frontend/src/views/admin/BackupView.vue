@@ -488,8 +488,8 @@ async function loadSchedule() {
     scheduleForm.value = {
       enabled: cfg.enabled,
       cron_expr: cfg.cron_expr || '0 2 * * *',
-      retain_days: cfg.retain_days || 14,
-      retain_count: cfg.retain_count || 10,
+      retain_days: cfg.retain_days ?? 14,
+      retain_count: cfg.retain_count ?? 10,
     }
   } catch (error) {
     appStore.showError((error as { message?: string })?.message || t('errors.networkError'))
@@ -540,7 +540,7 @@ async function createBackup() {
 async function downloadBackup(id: string) {
   try {
     const result = await adminAPI.backup.getDownloadURL(id)
-    window.open(result.url, '_blank')
+    window.open(result.url, '_blank', 'noopener,noreferrer')
   } catch (error) {
     appStore.showError((error as { message?: string })?.message || t('errors.networkError'))
   }

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -18,8 +19,130 @@ import (
 )
 
 type openAIWSClientFrameConn struct {
-	conn                 *coderws.Conn
-	normalizeServiceTier bool
+	conn *coderws.Conn
+}
+
+type openAIWSPolicyEnforcingFrameConn struct {
+	inner   openaiwsv2.FrameConn
+	filter  func(msgType coderws.MessageType, payload []byte) ([]byte, *OpenAIFastBlockedError, error)
+	onBlock func(blocked *OpenAIFastBlockedError)
+}
+
+type openAIWSServiceTierQueue struct {
+	mu     sync.Mutex
+	values []*string
+}
+
+func (q *openAIWSServiceTierQueue) push(tier *string) {
+	if q == nil {
+		return
+	}
+	var cloned *string
+	if tier != nil {
+		value := *tier
+		cloned = &value
+	}
+	q.mu.Lock()
+	q.values = append(q.values, cloned)
+	q.mu.Unlock()
+}
+
+func (q *openAIWSServiceTierQueue) pop() *string {
+	if q == nil {
+		return nil
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if len(q.values) == 0 {
+		return nil
+	}
+	value := q.values[0]
+	copy(q.values, q.values[1:])
+	q.values[len(q.values)-1] = nil
+	q.values = q.values[:len(q.values)-1]
+	return value
+}
+
+func (q *openAIWSServiceTierQueue) peek() *string {
+	if q == nil {
+		return nil
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if len(q.values) == 0 {
+		return nil
+	}
+	return q.values[0]
+}
+
+var _ openaiwsv2.FrameConn = (*openAIWSPolicyEnforcingFrameConn)(nil)
+
+func (c *openAIWSPolicyEnforcingFrameConn) ReadFrame(ctx context.Context) (coderws.MessageType, []byte, error) {
+	if c == nil || c.inner == nil {
+		return coderws.MessageText, nil, errOpenAIWSConnClosed
+	}
+	msgType, payload, err := c.inner.ReadFrame(ctx)
+	if err != nil {
+		return msgType, payload, err
+	}
+	if c.filter == nil {
+		return msgType, payload, nil
+	}
+	updated, blocked, filterErr := c.filter(msgType, payload)
+	if filterErr != nil {
+		return msgType, payload, filterErr
+	}
+	if blocked != nil {
+		if c.onBlock != nil {
+			c.onBlock(blocked)
+		}
+		return msgType, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, blocked.Message, blocked)
+	}
+	return msgType, updated, nil
+}
+
+func (c *openAIWSPolicyEnforcingFrameConn) WriteFrame(ctx context.Context, msgType coderws.MessageType, payload []byte) error {
+	if c == nil || c.inner == nil {
+		return errOpenAIWSConnClosed
+	}
+	return c.inner.WriteFrame(ctx, msgType, payload)
+}
+
+func (c *openAIWSPolicyEnforcingFrameConn) Close() error {
+	if c == nil || c.inner == nil {
+		return nil
+	}
+	return c.inner.Close()
+}
+
+func openAIWSPassthroughPolicyModelForFrame(account *Account, payload []byte) string {
+	if account == nil || len(payload) == 0 {
+		return ""
+	}
+	original := strings.TrimSpace(gjson.GetBytes(payload, "model").String())
+	if original == "" {
+		return ""
+	}
+	return normalizeOpenAIModelForUpstream(account, account.GetMappedModel(original))
+}
+
+func openAIWSPassthroughPolicyModelFromSessionFrame(account *Account, payload []byte) string {
+	if account == nil || len(payload) == 0 {
+		return ""
+	}
+	if strings.TrimSpace(gjson.GetBytes(payload, "type").String()) != "session.update" {
+		return ""
+	}
+	original := strings.TrimSpace(gjson.GetBytes(payload, "session.model").String())
+	if original == "" {
+		return ""
+	}
+	return normalizeOpenAIModelForUpstream(account, account.GetMappedModel(original))
+}
+
+func openAIWSPassthroughIsResponseCreateFrame(payload []byte) bool {
+	eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
+	return eventType == "" || eventType == "response.create"
 }
 
 const openaiWSV2PassthroughModeFields = "ws_mode=passthrough ws_router=v2"
@@ -36,13 +159,6 @@ func (c *openAIWSClientFrameConn) ReadFrame(ctx context.Context) (coderws.Messag
 	msgType, payload, err := c.conn.Read(ctx)
 	if err != nil {
 		return coderws.MessageText, nil, err
-	}
-	if c.normalizeServiceTier {
-		normalizedPayload, _, normalizeErr := normalizeOpenAIServiceTierInBody(payload)
-		if normalizeErr != nil {
-			return msgType, nil, normalizeErr
-		}
-		payload = normalizedPayload
 	}
 	return msgType, payload, nil
 }
@@ -88,13 +204,25 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if strings.TrimSpace(token) == "" {
 		return errors.New("token is empty")
 	}
-	normalizedFirstClientMessage, _, err := normalizeOpenAIServiceTierInBody(firstClientMessage)
-	if err != nil {
-		return fmt.Errorf("normalize first client websocket request: %w", err)
-	}
-	firstClientMessage = normalizedFirstClientMessage
 	requestModel := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "model").String())
-	requestServiceTier := extractOpenAIServiceTierFromBody(firstClientMessage)
+	capturedSessionModel := openAIWSPassthroughPolicyModelForFrame(account, firstClientMessage)
+	updatedFirst, _, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, capturedSessionModel, firstClientMessage)
+	if policyErr != nil {
+		return fmt.Errorf("apply openai fast policy on first ws frame: %w", policyErr)
+	}
+	if blocked != nil {
+		if eventBytes := buildOpenAIFastPolicyBlockedWSEvent(blocked); eventBytes != nil {
+			writeCtx, cancelWrite := context.WithTimeout(ctx, s.openAIWSWriteTimeout())
+			_ = clientConn.Write(writeCtx, coderws.MessageText, eventBytes)
+			cancelWrite()
+		}
+		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, blocked.Message, blocked)
+	}
+	firstClientMessage = updatedFirst
+	serviceTierQueue := &openAIWSServiceTierQueue{}
+	if openAIWSPassthroughIsResponseCreateFrame(firstClientMessage) {
+		serviceTierQueue.push(extractOpenAIServiceTierFromBody(firstClientMessage))
+	}
 	requestPreviousResponseID := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "previous_response_id").String())
 	logOpenAIWSV2Passthrough(
 		"relay_start account_id=%d model=%s previous_response_id=%s first_message_type=%s first_message_bytes=%d",
@@ -166,9 +294,30 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	}
 
 	completedTurns := atomic.Int32{}
+	policyClientConn := &openAIWSPolicyEnforcingFrameConn{
+		inner: &openAIWSClientFrameConn{conn: clientConn},
+		filter: func(msgType coderws.MessageType, payload []byte) ([]byte, *OpenAIFastBlockedError, error) {
+			if msgType != coderws.MessageText {
+				return payload, nil, nil
+			}
+			if updated := openAIWSPassthroughPolicyModelFromSessionFrame(account, payload); updated != "" {
+				capturedSessionModel = updated
+			}
+			model := openAIWSPassthroughPolicyModelForFrame(account, payload)
+			if model == "" {
+				model = capturedSessionModel
+			}
+			out, tier, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, model, payload)
+			if policyErr == nil && blocked == nil &&
+				openAIWSPassthroughIsResponseCreateFrame(payload) {
+				serviceTierQueue.push(tier)
+			}
+			return out, blocked, policyErr
+		},
+	}
 	relayResult, relayExit := openaiwsv2.RunEntry(openaiwsv2.EntryInput{
 		Ctx:                ctx,
-		ClientConn:         &openAIWSClientFrameConn{conn: clientConn, normalizeServiceTier: true},
+		ClientConn:         policyClientConn,
 		UpstreamConn:       upstreamFrameConn,
 		FirstClientMessage: firstClientMessage,
 		Options: openaiwsv2.RelayOptions{
@@ -193,7 +342,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 						CacheReadInputTokens:     turn.Usage.CacheReadInputTokens,
 					},
 					Model:           turn.RequestModel,
-					ServiceTier:     requestServiceTier,
+					ServiceTier:     serviceTierQueue.pop(),
 					Stream:          true,
 					OpenAIWSMode:    true,
 					ResponseHeaders: cloneHeader(handshakeHeaders),
@@ -241,7 +390,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			CacheReadInputTokens:     relayResult.Usage.CacheReadInputTokens,
 		},
 		Model:           relayResult.RequestModel,
-		ServiceTier:     requestServiceTier,
+		ServiceTier:     serviceTierQueue.peek(),
 		Stream:          true,
 		OpenAIWSMode:    true,
 		ResponseHeaders: cloneHeader(handshakeHeaders),

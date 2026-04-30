@@ -553,7 +553,10 @@ func (s *CompatibleGatewayService) maybeRepairClaudeKimiMessagesResponse(
 		return true, s.repairClaudeKimiStreamingMessagesResponse(resp, c, prepared, startTime, restoreCtx, ledger)
 	}
 
-	body, _ := readUpstreamResponseBodyLimited(resp.Body, resolveUpstreamResponseReadLimit(s.cfg))
+	body, ok := compatibleReadUpstreamResponseBody(resp, s.cfg, c, anthropicTooLargeError, []byte(`{"type":"error","error":{"type":"api_error","message":"invalid upstream response"}}`))
+	if !ok {
+		return true, &ForwardResult{Model: prepared.OriginalModel, UpstreamModel: prepared.UpstreamModel, Duration: time.Since(startTime)}
+	}
 	body = s.repairClaudeKimiNonStreamingMessagesBody(c, body, restoreCtx, ledger)
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), body)
 	usage := ClaudeUsage{}

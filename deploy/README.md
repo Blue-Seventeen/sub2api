@@ -31,7 +31,7 @@
 - 生产数据库和 Redis 密码必须使用强密码。
 - PostgreSQL / Redis 如需公网监听，必须配合防火墙白名单。
 - Nginx 建议只暴露 80 / 443，Sub2API 容器端口应仅本机可访问。
-- 多实例共用数据库时，定时备份依赖 Redis 锁避免重复执行。
+- 多实例共用数据库时，定时备份不再依赖 Redis 锁；只有本机 `DATA_DIR/backup_schedule.local.json` 中启用的节点会执行，默认不启用。
 
 ## 迁移注意事项
 

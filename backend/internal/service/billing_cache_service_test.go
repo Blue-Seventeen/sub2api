@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -19,6 +20,29 @@ type billingCacheWorkerStub struct {
 type billingCacheUserGroupRateRepoStub struct {
 	UserGroupRateRepository
 	rate *float64
+}
+
+type billingRateLimitResetRepoStub struct {
+	APIKeyRepository
+	calls   atomic.Int64
+	started chan struct{}
+	release chan struct{}
+}
+
+func (s *billingRateLimitResetRepoStub) ResetRateLimitWindows(ctx context.Context, id int64) error {
+	s.calls.Add(1)
+	select {
+	case s.started <- struct{}{}:
+	default:
+	}
+	if s.release != nil {
+		select {
+		case <-s.release:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
 }
 
 func (s *billingCacheUserGroupRateRepoStub) GetByUserAndGroup(context.Context, int64, int64) (*float64, error) {
@@ -142,4 +166,50 @@ func TestBillingCacheServiceCheckBillingEligibility_FreeUserRateSkipsBalanceChec
 		nil,
 	)
 	require.NoError(t, err)
+}
+
+func TestBillingCacheServiceRateLimitReset_DeduplicatesConcurrentExpiredWindow(t *testing.T) {
+	repo := &billingRateLimitResetRepoStub{
+		started: make(chan struct{}, 1),
+		release: make(chan struct{}),
+	}
+	svc := NewBillingCacheService(&billingCacheWorkerStub{}, nil, nil, repo, nil, nil, &config.Config{})
+	t.Cleanup(svc.Stop)
+
+	expiredWindow := time.Now().Add(-RateLimitWindow5h - time.Minute)
+	apiKey := &APIKey{
+		ID:          123,
+		RateLimit5h: 100,
+	}
+
+	const goroutines = 32
+	var wg sync.WaitGroup
+	errCh := make(chan error, goroutines)
+	start := make(chan struct{})
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errCh <- svc.evaluateRateLimits(context.Background(), apiKey, 99, 0, 0, &expiredWindow, nil, nil)
+		}()
+	}
+	close(start)
+
+	select {
+	case <-repo.started:
+	case <-time.After(time.Second):
+		t.Fatal("reset did not start")
+	}
+
+	require.Eventually(t, func() bool {
+		return repo.calls.Load() == 1
+	}, time.Second, 10*time.Millisecond)
+	close(repo.release)
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		require.NoError(t, err)
+	}
+	require.Equal(t, int64(1), repo.calls.Load())
 }

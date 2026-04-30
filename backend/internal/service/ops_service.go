@@ -252,6 +252,7 @@ func (s *OpsService) prepareErrorLogInput(ctx context.Context, entry *OpsInsertE
 			}
 		}
 	}
+	entry.NetworkErrorType = truncateString(strings.TrimSpace(entry.NetworkErrorType), 50)
 
 	if err := sanitizeOpsUpstreamErrors(entry); err != nil {
 		return nil, false, err

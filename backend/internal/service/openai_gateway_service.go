@@ -334,6 +334,7 @@ type OpenAIGatewayService struct {
 	resolver              *ModelPricingResolver
 	channelService        *ChannelService
 	balanceNotifyService  *BalanceNotifyService
+	settingService        *SettingService
 
 	openaiWSPoolOnce              sync.Once
 	openaiWSStateStoreOnce        sync.Once
@@ -372,6 +373,7 @@ func NewOpenAIGatewayService(
 	resolver *ModelPricingResolver,
 	channelService *ChannelService,
 	balanceNotifyService *BalanceNotifyService,
+	settingService *SettingService,
 ) *OpenAIGatewayService {
 	svc := &OpenAIGatewayService{
 		accountRepo:         accountRepo,
@@ -402,6 +404,7 @@ func NewOpenAIGatewayService(
 		resolver:              resolver,
 		channelService:        channelService,
 		balanceNotifyService:  balanceNotifyService,
+		settingService:        settingService,
 		responseHeaderFilter:  compileResponseHeaderFilter(cfg),
 		codexSnapshotThrottle: newAccountWriteThrottle(openAICodexSnapshotPersistMinInterval),
 	}
@@ -2238,6 +2241,17 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 	}
 
+	if changed, _, policyErr := s.applyOpenAIFastPolicyToRequestBodyMap(ctx, account, upstreamModel, reqBody); policyErr != nil {
+		var blocked *OpenAIFastBlockedError
+		if errors.As(policyErr, &blocked) {
+			writeOpenAIFastPolicyBlockedResponse(c, blocked)
+		}
+		return nil, policyErr
+	} else if changed {
+		bodyModified = true
+		disablePatch()
+	}
+
 	// Handle max_output_tokens based on platform and account type
 	if !isCodexCLI {
 		if maxOutputTokens, hasMaxOutputTokens := reqBody["max_output_tokens"]; hasMaxOutputTokens {
@@ -2763,11 +2777,19 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		}
 		reqStream = gjson.GetBytes(body, "stream").Bool()
 	}
-	normalizedServiceTierBody, _, normalizeServiceTierErr := normalizeOpenAIServiceTierInBody(body)
-	if normalizeServiceTierErr != nil {
-		return nil, normalizeServiceTierErr
+	policyModel := upstreamPassthroughModel
+	if policyModel == "" {
+		policyModel = normalizeOpenAIModelForUpstream(account, account.GetMappedModel(reqModel))
 	}
-	body = normalizedServiceTierBody
+	updatedBody, _, policyErr := s.applyOpenAIFastPolicyToBody(ctx, account, policyModel, body)
+	if policyErr != nil {
+		var blocked *OpenAIFastBlockedError
+		if errors.As(policyErr, &blocked) {
+			writeOpenAIFastPolicyBlockedResponse(c, blocked)
+		}
+		return nil, policyErr
+	}
+	body = updatedBody
 
 	sanitizedBody, sanitized, err := sanitizeEmptyBase64InputImagesInOpenAIBody(body)
 	if err != nil {
@@ -5533,7 +5555,8 @@ func extractOpenAIRequestMetaFromBody(body []byte) (model string, stream bool, p
 }
 
 // normalizeOpenAIPassthroughOAuthBody 将透传 OAuth 请求体收敛为旧链路关键行为：
-// 1) store=false 2) 非 compact 保持 stream=true；compact 强制 stream=false
+// 1) 删除 ChatGPT internal API 不支持的顶层 Responses 参数
+// 2) store=false 3) 非 compact 保持 stream=true；compact 强制 stream=false
 func normalizeOpenAIPassthroughOAuthBody(body []byte, compact bool) ([]byte, bool, error) {
 	if len(body) == 0 {
 		return body, false, nil
@@ -5541,6 +5564,18 @@ func normalizeOpenAIPassthroughOAuthBody(body []byte, compact bool) ([]byte, boo
 
 	normalized := body
 	changed := false
+
+	for _, field := range openAIChatGPTInternalUnsupportedFields {
+		if value := gjson.GetBytes(normalized, field); !value.Exists() {
+			continue
+		}
+		next, err := sjson.DeleteBytes(normalized, field)
+		if err != nil {
+			return body, false, fmt.Errorf("normalize passthrough body delete %s: %w", field, err)
+		}
+		normalized = next
+		changed = true
+	}
 
 	if compact {
 		if store := gjson.GetBytes(normalized, "store"); store.Exists() {
@@ -5765,11 +5800,247 @@ func normalizeOpenAIServiceTier(raw string) *string {
 		value = "priority"
 	}
 	switch value {
-	case "priority":
+	case "priority", "flex", "auto", "default", "scale":
 		return &value
 	default:
 		return nil
 	}
+}
+
+type OpenAIFastBlockedError struct {
+	Message string
+}
+
+func (e *OpenAIFastBlockedError) Error() string { return e.Message }
+
+func (s *OpenAIGatewayService) evaluateOpenAIFastPolicy(ctx context.Context, account *Account, model, serviceTier string) (action, errMsg string) {
+	tier := strings.ToLower(strings.TrimSpace(serviceTier))
+	if tier == "" {
+		return BetaPolicyActionPass, ""
+	}
+	// Local business rule: flex is the low-cost tier. It must never reach the
+	// upstream, regardless of admin policy, so users are silently downgraded to
+	// standard mode by stripping service_tier.
+	if tier == OpenAIFastTierFlex {
+		return BetaPolicyActionFilter, ""
+	}
+	if s == nil || s.settingService == nil {
+		return BetaPolicyActionPass, ""
+	}
+	settings := openAIFastPolicySettingsFromContext(ctx)
+	if settings == nil {
+		fetched, err := s.settingService.GetOpenAIFastPolicySettings(ctx)
+		if err != nil || fetched == nil {
+			return BetaPolicyActionPass, ""
+		}
+		settings = fetched
+	}
+	return evaluateOpenAIFastPolicyWithSettings(settings, account, model, tier)
+}
+
+func evaluateOpenAIFastPolicyWithSettings(settings *OpenAIFastPolicySettings, account *Account, model, tier string) (action, errMsg string) {
+	tier = strings.ToLower(strings.TrimSpace(tier))
+	if tier == "" {
+		return BetaPolicyActionPass, ""
+	}
+	if tier == OpenAIFastTierFlex {
+		return BetaPolicyActionFilter, ""
+	}
+	if settings == nil {
+		return BetaPolicyActionPass, ""
+	}
+	isOAuth := account != nil && account.IsOAuth()
+	isBedrock := account != nil && account.IsBedrock()
+	for _, rule := range settings.Rules {
+		if !betaPolicyScopeMatches(rule.Scope, isOAuth, isBedrock) {
+			continue
+		}
+		ruleTier := strings.ToLower(strings.TrimSpace(rule.ServiceTier))
+		if ruleTier != "" && ruleTier != OpenAIFastTierAny && ruleTier != tier {
+			continue
+		}
+		eff := BetaPolicyRule{
+			Action:               rule.Action,
+			ErrorMessage:         rule.ErrorMessage,
+			ModelWhitelist:       rule.ModelWhitelist,
+			FallbackAction:       rule.FallbackAction,
+			FallbackErrorMessage: rule.FallbackErrorMessage,
+		}
+		return resolveRuleAction(eff, model)
+	}
+	return BetaPolicyActionPass, ""
+}
+
+type openAIFastPolicyCtxKeyType struct{}
+
+var openAIFastPolicyCtxKey = openAIFastPolicyCtxKeyType{}
+
+func withOpenAIFastPolicyContext(ctx context.Context, settings *OpenAIFastPolicySettings) context.Context {
+	if ctx == nil || settings == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, openAIFastPolicyCtxKey, settings)
+}
+
+func openAIFastPolicySettingsFromContext(ctx context.Context) *OpenAIFastPolicySettings {
+	if ctx == nil {
+		return nil
+	}
+	if v, ok := ctx.Value(openAIFastPolicyCtxKey).(*OpenAIFastPolicySettings); ok {
+		return v
+	}
+	return nil
+}
+
+func (s *OpenAIGatewayService) applyOpenAIFastPolicyToRequestBodyMap(ctx context.Context, account *Account, model string, reqBody map[string]any) (bool, *string, error) {
+	if reqBody == nil {
+		return false, nil, nil
+	}
+	rawValue, exists := reqBody["service_tier"]
+	if !exists {
+		return false, nil, nil
+	}
+	rawTier, ok := rawValue.(string)
+	if !ok {
+		delete(reqBody, "service_tier")
+		return true, nil, nil
+	}
+	normTier := normalizedOpenAIServiceTierValue(rawTier)
+	if normTier == "" {
+		delete(reqBody, "service_tier")
+		return true, nil, nil
+	}
+	action, errMsg := s.evaluateOpenAIFastPolicy(ctx, account, model, normTier)
+	switch action {
+	case BetaPolicyActionBlock:
+		msg := errMsg
+		if msg == "" {
+			msg = "requested OpenAI service_tier is not allowed for this model"
+		}
+		return false, nil, &OpenAIFastBlockedError{Message: msg}
+	case BetaPolicyActionFilter:
+		delete(reqBody, "service_tier")
+		return true, nil, nil
+	default:
+		if rawTier != normTier {
+			reqBody["service_tier"] = normTier
+			return true, &normTier, nil
+		}
+		return false, &normTier, nil
+	}
+}
+
+func (s *OpenAIGatewayService) applyOpenAIFastPolicyToBody(ctx context.Context, account *Account, model string, body []byte) ([]byte, *string, error) {
+	if len(body) == 0 {
+		return body, nil, nil
+	}
+	rawTier := gjson.GetBytes(body, "service_tier")
+	if !rawTier.Exists() {
+		return body, nil, nil
+	}
+	if rawTier.Type != gjson.String {
+		next, err := sjson.DeleteBytes(body, "service_tier")
+		if err != nil {
+			return body, nil, fmt.Errorf("strip non-string service_tier from body: %w", err)
+		}
+		return next, nil, nil
+	}
+	normTier := normalizedOpenAIServiceTierValue(rawTier.String())
+	if normTier == "" {
+		next, err := sjson.DeleteBytes(body, "service_tier")
+		if err != nil {
+			return body, nil, fmt.Errorf("strip unknown service_tier from body: %w", err)
+		}
+		return next, nil, nil
+	}
+	action, errMsg := s.evaluateOpenAIFastPolicy(ctx, account, model, normTier)
+	switch action {
+	case BetaPolicyActionBlock:
+		msg := errMsg
+		if msg == "" {
+			msg = "requested OpenAI service_tier is not allowed for this model"
+		}
+		return body, nil, &OpenAIFastBlockedError{Message: msg}
+	case BetaPolicyActionFilter:
+		next, err := sjson.DeleteBytes(body, "service_tier")
+		if err != nil {
+			return body, nil, fmt.Errorf("strip service_tier from body: %w", err)
+		}
+		return next, nil, nil
+	default:
+		if rawTier.String() == normTier {
+			return body, &normTier, nil
+		}
+		next, err := sjson.SetBytes(body, "service_tier", normTier)
+		if err != nil {
+			return body, nil, fmt.Errorf("normalize service_tier on pass: %w", err)
+		}
+		return next, &normTier, nil
+	}
+}
+
+func writeOpenAIFastPolicyBlockedResponse(c *gin.Context, err *OpenAIFastBlockedError) {
+	if c == nil || err == nil {
+		return
+	}
+	c.JSON(http.StatusForbidden, gin.H{
+		"error": gin.H{
+			"type":    "permission_error",
+			"message": err.Message,
+		},
+	})
+}
+
+func (s *OpenAIGatewayService) applyOpenAIFastPolicyToWSResponseCreate(
+	ctx context.Context,
+	account *Account,
+	model string,
+	frame []byte,
+) ([]byte, *string, *OpenAIFastBlockedError, error) {
+	if len(frame) == 0 || !gjson.ValidBytes(frame) {
+		return frame, nil, nil, nil
+	}
+	eventType := strings.TrimSpace(gjson.GetBytes(frame, "type").String())
+	if eventType != "" && eventType != "response.create" {
+		return frame, nil, nil, nil
+	}
+	updated, tier, err := s.applyOpenAIFastPolicyToBody(ctx, account, model, frame)
+	if err == nil {
+		return updated, tier, nil, nil
+	}
+	var blocked *OpenAIFastBlockedError
+	if errors.As(err, &blocked) {
+		return frame, nil, blocked, nil
+	}
+	return frame, nil, nil, err
+}
+
+func newOpenAIFastPolicyWSEventID() string {
+	id, err := uuid.NewRandom()
+	if err != nil {
+		return "evt_openai_fast_policy"
+	}
+	return "evt_" + strings.ReplaceAll(id.String(), "-", "")
+}
+
+func buildOpenAIFastPolicyBlockedWSEvent(err *OpenAIFastBlockedError) []byte {
+	if err == nil {
+		return nil
+	}
+	eventID := newOpenAIFastPolicyWSEventID()
+	payload, marshalErr := json.Marshal(map[string]any{
+		"event_id": eventID,
+		"type":     "error",
+		"error": map[string]any{
+			"type":    "forbidden_error",
+			"code":    "policy_violation",
+			"message": err.Message,
+		},
+	})
+	if marshalErr != nil {
+		return []byte(`{"event_id":"` + eventID + `","type":"error","error":{"type":"forbidden_error","code":"policy_violation","message":"openai fast policy blocked this request"}}`)
+	}
+	return payload
 }
 
 func sanitizeEmptyBase64InputImagesInOpenAIBody(body []byte) ([]byte, bool, error) {

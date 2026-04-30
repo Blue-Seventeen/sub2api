@@ -94,6 +94,18 @@ const gatewayForwardingCacheTTL = 60 * time.Second
 const gatewayForwardingErrorTTL = 5 * time.Second
 const gatewayForwardingDBTimeout = 5 * time.Second
 
+type cachedOpenAIFastPolicySettings struct {
+	settings  *OpenAIFastPolicySettings
+	expiresAt int64 // unix nano
+}
+
+var openAIFastPolicySettingsCache atomic.Value // *cachedOpenAIFastPolicySettings
+var openAIFastPolicySettingsSF singleflight.Group
+
+const openAIFastPolicySettingsCacheTTL = 60 * time.Second
+const openAIFastPolicySettingsErrorTTL = 5 * time.Second
+const openAIFastPolicySettingsDBTimeout = 5 * time.Second
+
 // DefaultSubscriptionGroupReader validates group references used by default subscriptions.
 type DefaultSubscriptionGroupReader interface {
 	GetByID(ctx context.Context, id int64) (*Group, error)
@@ -3123,6 +3135,181 @@ func (s *SettingService) SetBetaPolicySettings(ctx context.Context, settings *Be
 }
 
 // SetStreamTimeoutSettings 设置流超时处理配置
+func cloneOpenAIFastPolicySettings(in *OpenAIFastPolicySettings) *OpenAIFastPolicySettings {
+	if in == nil {
+		return nil
+	}
+	out := &OpenAIFastPolicySettings{Rules: make([]OpenAIFastPolicyRule, len(in.Rules))}
+	for i, rule := range in.Rules {
+		out.Rules[i] = rule
+		if rule.ModelWhitelist != nil {
+			out.Rules[i].ModelWhitelist = append([]string(nil), rule.ModelWhitelist...)
+		}
+	}
+	return out
+}
+
+func cacheOpenAIFastPolicySettings(settings *OpenAIFastPolicySettings, ttl time.Duration) {
+	if settings == nil {
+		settings = DefaultOpenAIFastPolicySettings()
+	}
+	openAIFastPolicySettingsCache.Store(&cachedOpenAIFastPolicySettings{
+		settings:  cloneOpenAIFastPolicySettings(settings),
+		expiresAt: time.Now().Add(ttl).UnixNano(),
+	})
+}
+
+func (s *SettingService) GetOpenAIFastPolicySettings(ctx context.Context) (*OpenAIFastPolicySettings, error) {
+	var stale *cachedOpenAIFastPolicySettings
+	if cached, ok := openAIFastPolicySettingsCache.Load().(*cachedOpenAIFastPolicySettings); ok && cached != nil {
+		if time.Now().UnixNano() < cached.expiresAt {
+			return cloneOpenAIFastPolicySettings(cached.settings), nil
+		}
+		stale = cached
+	}
+
+	result, err, _ := openAIFastPolicySettingsSF.Do("openai_fast_policy", func() (any, error) {
+		staleInFlight := stale
+		if cached, ok := openAIFastPolicySettingsCache.Load().(*cachedOpenAIFastPolicySettings); ok && cached != nil {
+			if time.Now().UnixNano() < cached.expiresAt {
+				return cloneOpenAIFastPolicySettings(cached.settings), nil
+			}
+			staleInFlight = cached
+		}
+		useStaleOrDefault := func(reason string, cause error) *OpenAIFastPolicySettings {
+			if staleInFlight != nil && staleInFlight.settings != nil {
+				slog.Warn("failed to refresh openai fast policy settings, using stale cache",
+					"reason", reason,
+					"error", cause,
+					"key", SettingKeyOpenAIFastPolicySettings)
+				cacheOpenAIFastPolicySettings(staleInFlight.settings, openAIFastPolicySettingsErrorTTL)
+				return cloneOpenAIFastPolicySettings(staleInFlight.settings)
+			}
+			settings := DefaultOpenAIFastPolicySettings()
+			cacheOpenAIFastPolicySettings(settings, openAIFastPolicySettingsErrorTTL)
+			return settings
+		}
+		dbCtx := ctx
+		if dbCtx == nil {
+			dbCtx = context.Background()
+		}
+		dbCtx, cancel := context.WithTimeout(context.WithoutCancel(dbCtx), openAIFastPolicySettingsDBTimeout)
+		defer cancel()
+
+		value, getErr := s.settingRepo.GetValue(dbCtx, SettingKeyOpenAIFastPolicySettings)
+		if getErr != nil {
+			if errors.Is(getErr, ErrSettingNotFound) {
+				settings := DefaultOpenAIFastPolicySettings()
+				cacheOpenAIFastPolicySettings(settings, openAIFastPolicySettingsCacheTTL)
+				return settings, nil
+			}
+			slog.Warn("failed to get openai fast policy settings", "error", getErr)
+			return useStaleOrDefault("get_value_failed", getErr), nil
+		}
+		if strings.TrimSpace(value) == "" {
+			settings := DefaultOpenAIFastPolicySettings()
+			cacheOpenAIFastPolicySettings(settings, openAIFastPolicySettingsCacheTTL)
+			return settings, nil
+		}
+
+		var settings OpenAIFastPolicySettings
+		if unmarshalErr := json.Unmarshal([]byte(value), &settings); unmarshalErr != nil {
+			slog.Warn("failed to unmarshal openai fast policy settings",
+				"error", unmarshalErr,
+				"key", SettingKeyOpenAIFastPolicySettings)
+			return useStaleOrDefault("unmarshal_failed", unmarshalErr), nil
+		}
+		normalized, normalizeErr := normalizeOpenAIFastPolicySettings(&settings)
+		if normalizeErr != nil {
+			slog.Warn("failed to normalize openai fast policy settings",
+				"error", normalizeErr,
+				"key", SettingKeyOpenAIFastPolicySettings)
+			return useStaleOrDefault("normalize_failed", normalizeErr), nil
+		}
+		cacheOpenAIFastPolicySettings(normalized, openAIFastPolicySettingsCacheTTL)
+		return normalized, nil
+	})
+	if err != nil {
+		return DefaultOpenAIFastPolicySettings(), nil
+	}
+	settings, ok := result.(*OpenAIFastPolicySettings)
+	if !ok || settings == nil {
+		return DefaultOpenAIFastPolicySettings(), nil
+	}
+	return cloneOpenAIFastPolicySettings(settings), nil
+}
+
+func normalizeOpenAIFastPolicySettings(settings *OpenAIFastPolicySettings) (*OpenAIFastPolicySettings, error) {
+	if settings == nil {
+		return nil, fmt.Errorf("settings cannot be nil")
+	}
+	validActions := map[string]bool{
+		BetaPolicyActionPass: true, BetaPolicyActionFilter: true, BetaPolicyActionBlock: true,
+	}
+	validScopes := map[string]bool{
+		BetaPolicyScopeAll: true, BetaPolicyScopeOAuth: true, BetaPolicyScopeAPIKey: true, BetaPolicyScopeBedrock: true,
+	}
+	validTiers := map[string]bool{
+		OpenAIFastTierAny: true, OpenAIFastTierPriority: true,
+		OpenAIFastTierAuto: true, OpenAIFastTierDefault: true, OpenAIFastTierScale: true,
+	}
+
+	normalized := cloneOpenAIFastPolicySettings(settings)
+	if normalized.Rules == nil {
+		normalized.Rules = []OpenAIFastPolicyRule{}
+	}
+	for i := range normalized.Rules {
+		rule := &normalized.Rules[i]
+		rule.ServiceTier = strings.ToLower(strings.TrimSpace(rule.ServiceTier))
+		if rule.ServiceTier == "" {
+			rule.ServiceTier = OpenAIFastTierAny
+		}
+		if !validTiers[rule.ServiceTier] {
+			return nil, fmt.Errorf("rule[%d]: invalid service_tier %q", i, rule.ServiceTier)
+		}
+		rule.Action = strings.ToLower(strings.TrimSpace(rule.Action))
+		if !validActions[rule.Action] {
+			return nil, fmt.Errorf("rule[%d]: invalid action %q", i, rule.Action)
+		}
+		rule.Scope = strings.ToLower(strings.TrimSpace(rule.Scope))
+		if rule.Scope == "" {
+			rule.Scope = BetaPolicyScopeAll
+		}
+		if !validScopes[rule.Scope] {
+			return nil, fmt.Errorf("rule[%d]: invalid scope %q", i, rule.Scope)
+		}
+		for j, pattern := range rule.ModelWhitelist {
+			trimmed := strings.TrimSpace(pattern)
+			if trimmed == "" {
+				return nil, fmt.Errorf("rule[%d]: model_whitelist[%d] cannot be empty", i, j)
+			}
+			rule.ModelWhitelist[j] = trimmed
+		}
+		rule.FallbackAction = strings.ToLower(strings.TrimSpace(rule.FallbackAction))
+		if rule.FallbackAction != "" && !validActions[rule.FallbackAction] {
+			return nil, fmt.Errorf("rule[%d]: invalid fallback_action %q", i, rule.FallbackAction)
+		}
+	}
+	return normalized, nil
+}
+
+func (s *SettingService) SetOpenAIFastPolicySettings(ctx context.Context, settings *OpenAIFastPolicySettings) error {
+	normalized, err := normalizeOpenAIFastPolicySettings(settings)
+	if err != nil {
+		return err
+	}
+	data, err := json.Marshal(normalized)
+	if err != nil {
+		return fmt.Errorf("marshal openai fast policy settings: %w", err)
+	}
+	if err := s.settingRepo.Set(ctx, SettingKeyOpenAIFastPolicySettings, string(data)); err != nil {
+		return err
+	}
+	openAIFastPolicySettingsSF.Forget("openai_fast_policy")
+	cacheOpenAIFastPolicySettings(normalized, openAIFastPolicySettingsCacheTTL)
+	return nil
+}
+
 func (s *SettingService) SetStreamTimeoutSettings(ctx context.Context, settings *StreamTimeoutSettings) error {
 	if settings == nil {
 		return fmt.Errorf("settings cannot be nil")

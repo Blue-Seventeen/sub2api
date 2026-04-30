@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -88,7 +87,8 @@ func TestUsageRecordWorkerPool_OverflowSync(t *testing.T) {
 	block := make(chan struct{})
 	started := make(chan struct{})
 	secondDone := make(chan struct{})
-	var syncExecuted atomic.Bool
+	fallbackStarted := make(chan struct{})
+	releaseFallback := make(chan struct{})
 
 	require.Equal(t, UsageRecordSubmitModeEnqueued, pool.Submit(func(ctx context.Context) {
 		close(started)
@@ -100,11 +100,27 @@ func TestUsageRecordWorkerPool_OverflowSync(t *testing.T) {
 		close(secondDone)
 	}))
 
-	mode := pool.Submit(func(ctx context.Context) {
-		syncExecuted.Store(true)
-	})
-	require.Equal(t, UsageRecordSubmitModeSync, mode)
-	require.True(t, syncExecuted.Load())
+	modeCh := make(chan UsageRecordSubmitMode, 1)
+	go func() {
+		modeCh <- pool.Submit(func(ctx context.Context) {
+			close(fallbackStarted)
+			<-releaseFallback
+		})
+	}()
+
+	select {
+	case mode := <-modeCh:
+		require.Equal(t, UsageRecordSubmitModeFallback, mode)
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("overflow fallback should not run on submit caller goroutine")
+	}
+
+	select {
+	case <-fallbackStarted:
+	case <-time.After(time.Second):
+		t.Fatal("fallback task not executed")
+	}
+	close(releaseFallback)
 
 	close(block)
 	select {
@@ -114,7 +130,8 @@ func TestUsageRecordWorkerPool_OverflowSync(t *testing.T) {
 	}
 
 	require.Eventually(t, func() bool {
-		return pool.Stats().SyncFallbackTasks >= 1
+		stats := pool.Stats()
+		return stats.SyncFallbackTasks >= 1 && stats.AsyncFallbackTasks >= 1
 	}, time.Second, 10*time.Millisecond)
 }
 
@@ -131,7 +148,8 @@ func TestUsageRecordWorkerPool_OverflowSample(t *testing.T) {
 	block := make(chan struct{})
 	started := make(chan struct{})
 	secondDone := make(chan struct{})
-	var syncExecuted atomic.Bool
+	fallbackStarted := make(chan struct{})
+	releaseFallback := make(chan struct{})
 
 	require.Equal(t, UsageRecordSubmitModeEnqueued, pool.Submit(func(ctx context.Context) {
 		close(started)
@@ -143,14 +161,30 @@ func TestUsageRecordWorkerPool_OverflowSample(t *testing.T) {
 		close(secondDone)
 	}))
 
-	firstOverflow := pool.Submit(func(ctx context.Context) {
-		syncExecuted.Store(true)
-	})
-	require.Equal(t, UsageRecordSubmitModeSync, firstOverflow)
-	require.True(t, syncExecuted.Load())
+	modeCh := make(chan UsageRecordSubmitMode, 1)
+	go func() {
+		modeCh <- pool.Submit(func(ctx context.Context) {
+			close(fallbackStarted)
+			<-releaseFallback
+		})
+	}()
+
+	select {
+	case firstOverflow := <-modeCh:
+		require.Equal(t, UsageRecordSubmitModeFallback, firstOverflow)
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("sample fallback should not run on submit caller goroutine")
+	}
+
+	select {
+	case <-fallbackStarted:
+	case <-time.After(time.Second):
+		t.Fatal("fallback task not executed")
+	}
 
 	secondOverflow := pool.Submit(func(ctx context.Context) {})
 	require.Equal(t, UsageRecordSubmitModeDropped, secondOverflow)
+	close(releaseFallback)
 
 	close(block)
 	select {
@@ -161,7 +195,7 @@ func TestUsageRecordWorkerPool_OverflowSample(t *testing.T) {
 
 	require.Eventually(t, func() bool {
 		stats := pool.Stats()
-		return stats.SyncFallbackTasks >= 1 && stats.DroppedQueueFull >= 1
+		return stats.SyncFallbackTasks >= 1 && stats.AsyncFallbackTasks >= 1 && stats.DroppedQueueFull >= 1
 	}, time.Second, 10*time.Millisecond)
 }
 

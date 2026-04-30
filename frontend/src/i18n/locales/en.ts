@@ -4814,7 +4814,7 @@ export default {
         errorLogRetentionDays: 'Error Log Retention Days',
         minuteMetricsRetentionDays: 'Minute Metrics Retention Days',
         hourlyMetricsRetentionDays: 'Hourly Metrics Retention Days',
-        retentionDaysHint: 'Recommended 7-90 days, longer periods will consume more storage',
+        retentionDaysHint: 'Recommended 7-90 days; longer periods consume more storage. Set to 0 to wipe all history on every scheduled cleanup',
         aggregation: 'Pre-aggregation Tasks',
         enableAggregation: 'Enable Pre-aggregation',
         aggregationHint: 'Pre-aggregation improves query performance for long time windows',
@@ -4844,7 +4844,7 @@ export default {
         autoRefreshCountdown: 'Auto refresh: {seconds}s',
         validation: {
           title: 'Please fix the following issues',
-          retentionDaysRange: 'Retention days must be between 1-365 days',
+          retentionDaysRange: 'Retention days must be between 0 and 365 (0 = wipe all on every cleanup)',
           slaMinPercentRange: 'SLA minimum percentage must be between 0 and 100',
           ttftP99MaxRange: 'TTFT P99 maximum must be a number ≥ 0',
           requestErrorRateMaxRange: 'Request error rate maximum must be between 0 and 100',
@@ -5652,6 +5652,44 @@ export default {
         presetOpusOnly: 'Opus only for 1M',
         presetOpusOnlyDesc: 'Pass for Opus, filter others',
         commonPatterns: 'Common patterns'
+      },
+      openaiFastPolicy: {
+        title: 'OpenAI Fast/Flex Policy',
+        description:
+          'Configure how OpenAI service_tier is passed through, filtered, or blocked. By default no admin policy is enabled; flex low-cost mode is always downgraded to standard mode.',
+        flexForcedHint:
+          'The system never allows flex low-cost mode to reach upstream. When a request sends flex, service_tier is removed and the request is forwarded and billed as standard mode.',
+        empty:
+          'No custom rules. Flex low-cost mode is still force-filtered by the system.',
+        ruleHeader: 'Rule {index}',
+        removeRule: 'Remove rule',
+        serviceTier: 'Service tier',
+        tierAll: 'All known tiers',
+        tierPriority: 'priority / fast',
+        tierFlex: 'flex (low-cost, forced standard)',
+        tierAuto: 'auto',
+        tierDefault: 'default',
+        tierScale: 'scale',
+        action: 'Action',
+        actionPass: 'Pass through',
+        actionFilter: 'Filter to standard',
+        actionBlock: 'Block request',
+        scope: 'Scope',
+        scopeAll: 'All accounts',
+        scopeOAuth: 'OAuth only',
+        scopeAPIKey: 'API Key only',
+        scopeBedrock: 'Bedrock only',
+        errorMessage: 'Error message',
+        errorMessagePlaceholder: 'Custom error message when blocked',
+        modelWhitelist: 'Model whitelist',
+        modelWhitelistHint:
+          'Leave empty to apply to all models. Supports exact match and wildcard prefix, for example gpt-5*.',
+        modelPatternPlaceholder: 'e.g., gpt-5* or gpt-4.1',
+        addModelPattern: 'Add model pattern',
+        fallbackAction: 'Fallback action for unmatched models',
+        addRule: 'Add rule',
+        saved: 'OpenAI Fast/Flex policy settings saved',
+        saveFailed: 'Failed to save OpenAI Fast/Flex policy settings'
       },
       wechatConnect: {
         title: 'WeChat Connect',

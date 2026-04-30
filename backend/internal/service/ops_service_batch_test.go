@@ -29,6 +29,7 @@ func TestOpsServiceRecordErrorBatch_SanitizesAndBatches(t *testing.T) {
 			UpstreamStatusCode:   intPtr(-10),
 			UpstreamErrorMessage: strPtr(msg),
 			UpstreamErrorDetail:  strPtr(detail),
+			NetworkErrorType:     " request_body_timeout ",
 			UpstreamErrors: []*OpsUpstreamErrorEvent{
 				{
 					AccountID:           -2,
@@ -59,6 +60,7 @@ func TestOpsServiceRecordErrorBatch_SanitizesAndBatches(t *testing.T) {
 	require.NotNil(t, first.UpstreamErrorDetail)
 	require.NotContains(t, *first.UpstreamErrorDetail, "secret-token")
 	require.NotContains(t, first.ErrorBody, "secret")
+	require.Equal(t, "request_body_timeout", first.NetworkErrorType)
 	require.Nil(t, first.UpstreamErrors)
 	require.NotNil(t, first.UpstreamErrorsJSON)
 	require.NotContains(t, *first.UpstreamErrorsJSON, "secret")

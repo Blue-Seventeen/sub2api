@@ -200,6 +200,20 @@ type DefaultSubscriptionSetting struct {
 	ValidityDays int   `json:"validity_days"`
 }
 
+type OpenAIFastPolicyRule struct {
+	ServiceTier          string   `json:"service_tier"`
+	Action               string   `json:"action"`
+	Scope                string   `json:"scope"`
+	ErrorMessage         string   `json:"error_message,omitempty"`
+	ModelWhitelist       []string `json:"model_whitelist,omitempty"`
+	FallbackAction       string   `json:"fallback_action,omitempty"`
+	FallbackErrorMessage string   `json:"fallback_error_message,omitempty"`
+}
+
+type OpenAIFastPolicySettings struct {
+	Rules []OpenAIFastPolicyRule `json:"rules"`
+}
+
 type PublicSettings struct {
 	RegistrationEnabled              bool             `json:"registration_enabled"`
 	EmailVerifyEnabled               bool             `json:"email_verify_enabled"`

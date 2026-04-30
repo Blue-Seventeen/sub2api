@@ -258,7 +258,7 @@ import type { SubscriptionPlan, CheckoutInfoResponse, CreateOrderResult, OrderTy
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AmountInput from '@/components/payment/AmountInput.vue'
 import PaymentMethodSelector from '@/components/payment/PaymentMethodSelector.vue'
-import { METHOD_ORDER, getPaymentPopupFeatures } from '@/components/payment/providerConfig'
+import { METHOD_ORDER, getPaymentPopupFeatures, isolatePopupOpener } from '@/components/payment/providerConfig'
 import {
   PAYMENT_RECOVERY_STORAGE_KEY,
   buildCreateOrderPayload,
@@ -688,6 +688,7 @@ async function createOrder(orderAmount: number, orderType: OrderType, planId?: n
     const result = await paymentStore.createOrder(payload) as CreateOrderResult & { resume_token?: string }
     const openWindow = (url: string) => {
       const win = window.open(url, 'paymentPopup', getPaymentPopupFeatures())
+      isolatePopupOpener(win)
       if (!win || win.closed) {
         window.location.href = url
       }

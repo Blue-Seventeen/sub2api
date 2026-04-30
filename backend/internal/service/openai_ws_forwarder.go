@@ -1693,7 +1693,6 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	if s == nil || account == nil {
 		return nil, wrapOpenAIWSFallback("invalid_state", errors.New("service or account is nil"))
 	}
-
 	wsURL, err := s.buildOpenAIResponsesWSURL(account)
 	if err != nil {
 		return nil, wrapOpenAIWSFallback("build_ws_url", err)
@@ -1742,6 +1741,15 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		turnMetadata = strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader))
 	}
 	setOpenAIWSTurnMetadata(payload, turnMetadata)
+	if changed, _, policyErr := s.applyOpenAIFastPolicyToRequestBodyMap(ctx, account, mappedModel, payload); policyErr != nil {
+		var blocked *OpenAIFastBlockedError
+		if errors.As(policyErr, &blocked) {
+			writeOpenAIFastPolicyBlockedResponse(c, blocked)
+		}
+		return nil, wrapOpenAIWSFallback("openai_fast_policy", policyErr)
+	} else if changed {
+		payloadBytes = -1
+	}
 	payloadEventType := openAIWSPayloadString(payload, "type")
 	if payloadEventType == "" {
 		payloadEventType = "response.create"
@@ -2523,11 +2531,20 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			normalized = next
 		}
-		normalizedPayload, _, normalizeErr := normalizeOpenAIServiceTierInBody(normalized)
-		if normalizeErr != nil {
-			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", normalizeErr)
+		normalizedPayload, _, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, upstreamModel, normalized)
+		if policyErr != nil {
+			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", policyErr)
+		}
+		if blocked != nil {
+			if eventBytes := buildOpenAIFastPolicyBlockedWSEvent(blocked); eventBytes != nil {
+				writeCtx, cancelWrite := context.WithTimeout(ctx, s.openAIWSWriteTimeout())
+				_ = clientConn.Write(writeCtx, coderws.MessageText, eventBytes)
+				cancelWrite()
+			}
+			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, blocked.Message, blocked)
 		}
 		normalized = normalizedPayload
+		rawForHash = normalizedPayload
 
 		return openAIWSClientPayload{
 			payloadRaw:         normalized,

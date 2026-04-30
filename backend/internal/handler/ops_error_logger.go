@@ -904,6 +904,8 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			}
 		}
 
+		applyRequestBodyReadErrorOpsFields(c, entry)
+
 		if apiKey != nil {
 			entry.APIKeyID = &apiKey.ID
 			if apiKey.User != nil {
