@@ -7,6 +7,7 @@ type ToolContinuationSignals struct {
 	HasFunctionCallOutput              bool
 	HasFunctionCallOutputMissingCallID bool
 	HasToolCallContext                 bool
+	HasToolCallContextForAllCallIDs    bool
 	HasItemReference                   bool
 	HasItemReferenceForAllCallIDs      bool
 	FunctionCallOutputCallIDs          []string
@@ -65,6 +66,7 @@ func AnalyzeToolContinuationSignals(reqBody map[string]any) ToolContinuationSign
 	}
 
 	var callIDs map[string]struct{}
+	var toolContextIDs map[string]struct{}
 	var referenceIDs map[string]struct{}
 
 	for _, item := range input {
@@ -76,8 +78,13 @@ func AnalyzeToolContinuationSignals(reqBody map[string]any) ToolContinuationSign
 		switch itemType {
 		case "tool_call", "function_call":
 			callID, _ := itemMap["call_id"].(string)
-			if strings.TrimSpace(callID) != "" {
+			callID = strings.TrimSpace(callID)
+			if callID != "" {
 				signals.HasToolCallContext = true
+				if toolContextIDs == nil {
+					toolContextIDs = make(map[string]struct{})
+				}
+				toolContextIDs[callID] = struct{}{}
 			}
 		case "function_call_output":
 			signals.HasFunctionCallOutput = true
@@ -110,6 +117,7 @@ func AnalyzeToolContinuationSignals(reqBody map[string]any) ToolContinuationSign
 	}
 	signals.FunctionCallOutputCallIDs = make([]string, 0, len(callIDs))
 	allReferenced := len(referenceIDs) > 0
+	allHasToolContext := len(toolContextIDs) > 0
 	for callID := range callIDs {
 		signals.FunctionCallOutputCallIDs = append(signals.FunctionCallOutputCallIDs, callID)
 		if allReferenced {
@@ -117,8 +125,14 @@ func AnalyzeToolContinuationSignals(reqBody map[string]any) ToolContinuationSign
 				allReferenced = false
 			}
 		}
+		if allHasToolContext {
+			if _, ok := toolContextIDs[callID]; !ok {
+				allHasToolContext = false
+			}
+		}
 	}
 	signals.HasItemReferenceForAllCallIDs = allReferenced
+	signals.HasToolCallContextForAllCallIDs = allHasToolContext
 	return signals
 }
 

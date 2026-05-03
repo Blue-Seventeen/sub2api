@@ -63,6 +63,11 @@ const (
 	claudeMimicDebugInfoKey = "claude_mimic_debug_info"
 )
 
+const (
+	cacheTTLTarget5m = "5m"
+	cacheTTLTarget1h = "1h"
+)
+
 // ForceCacheBillingContextKey 强制缓存计费上下文键
 // 用于粘性会话切换时，将 input_tokens 转为 cache_read_input_tokens 计费
 type forceCacheBillingKeyType struct{}
@@ -720,7 +725,11 @@ func (s *GatewayService) BindStickySession(ctx context.Context, groupID *int64, 
 	if sessionHash == "" || accountID <= 0 || s.cache == nil {
 		return nil
 	}
-	return s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, accountID, stickySessionTTL)
+	resolvedGroupID := derefGroupID(groupID)
+	if existingID, err := s.cache.GetSessionAccountID(ctx, resolvedGroupID, sessionHash); err == nil && existingID > 0 && existingID != accountID {
+		return nil
+	}
+	return s.cache.SetSessionAccountID(ctx, resolvedGroupID, sessionHash, accountID, stickySessionTTL)
 }
 
 // GetCachedSessionAccountID retrieves the account ID bound to a sticky session.
@@ -1729,9 +1738,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 							result.ReleaseFunc() // 释放槽位，继续尝试下一个账号
 							continue
 						}
-						if sessionHash != "" && s.cache != nil {
-							_ = s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, item.account.ID, stickySessionTTL)
-						}
+						_ = s.BindStickySession(ctx, groupID, sessionHash, item.account.ID)
 						if s.debugModelRoutingEnabled() {
 							logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] routed select: group_id=%v model=%s session=%s account=%d", derefGroupID(groupID), requestedModel, shortSessionHash(sessionHash), item.account.ID)
 						}
@@ -1773,14 +1780,17 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 				if clearSticky {
 					_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
 				}
-				if !clearSticky && s.isAccountInGroup(account, groupID) &&
+				// accountByID is built from the group-filtered account list. Do not
+				// re-check AccountGroups here: scheduler snapshot metadata can be
+				// slimmed and would otherwise make a valid sticky account look out of group.
+				if !clearSticky &&
 					s.isAccountAllowedForPlatform(account, platform, useMixed) &&
 					(requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) &&
 					s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) &&
 					s.isAccountSchedulableForQuota(account) &&
 					s.isAccountSchedulableForWindowCost(ctx, account, true) &&
-
-					s.isAccountSchedulableForRPM(ctx, account, true) { // 粘性会话窗口费用+RPM 检查
+					s.isAccountSchedulableForRPM(ctx, account, true) &&
+					s.isAccountSchedulableForSelection(account) { // 粘性会话窗口费用+RPM 检查
 					result, err := s.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
 					if err == nil && result.Acquired {
 						// 会话数量限制检查
@@ -1902,9 +1912,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 				if !s.checkAndRegisterSession(ctx, selected.account, sessionHash) {
 					result.ReleaseFunc() // 释放槽位，继续尝试下一个账号
 				} else {
-					if sessionHash != "" && s.cache != nil {
-						_ = s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, selected.account.ID, stickySessionTTL)
-					}
+					_ = s.BindStickySession(ctx, groupID, sessionHash, selected.account.ID)
 					return s.newSelectionResult(ctx, selected.account, true, result.ReleaseFunc, nil)
 				}
 			}
@@ -1950,9 +1958,7 @@ func (s *GatewayService) tryAcquireByLegacyOrder(ctx context.Context, candidates
 				result.ReleaseFunc() // 释放槽位，继续尝试下一个账号
 				continue
 			}
-			if sessionHash != "" && s.cache != nil {
-				_ = s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, acc.ID, stickySessionTTL)
-			}
+			_ = s.BindStickySession(ctx, groupID, sessionHash, acc.ID)
 			selection, err := s.newSelectionResult(ctx, acc, true, result.ReleaseFunc, nil)
 			if err != nil {
 				return nil, false, err
@@ -3006,10 +3012,8 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 		}
 
 		if selected != nil {
-			if sessionHash != "" && s.cache != nil {
-				if err := s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, selected.ID, stickySessionTTL); err != nil {
-					logger.LegacyPrintf("service.gateway", "set session account failed: session=%s account_id=%d err=%v", sessionHash, selected.ID, err)
-				}
+			if err := s.BindStickySession(ctx, groupID, sessionHash, selected.ID); err != nil {
+				logger.LegacyPrintf("service.gateway", "set session account failed: session=%s account_id=%d err=%v", sessionHash, selected.ID, err)
 			}
 			if s.debugModelRoutingEnabled() {
 				logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] legacy routed select: group_id=%v model=%s session=%s account=%d", derefGroupID(groupID), requestedModel, shortSessionHash(sessionHash), selected.ID)
@@ -3128,10 +3132,8 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 	}
 
 	// 4. 建立粘性绑定
-	if sessionHash != "" && s.cache != nil {
-		if err := s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, selected.ID, stickySessionTTL); err != nil {
-			logger.LegacyPrintf("service.gateway", "set session account failed: session=%s account_id=%d err=%v", sessionHash, selected.ID, err)
-		}
+	if err := s.BindStickySession(ctx, groupID, sessionHash, selected.ID); err != nil {
+		logger.LegacyPrintf("service.gateway", "set session account failed: session=%s account_id=%d err=%v", sessionHash, selected.ID, err)
 	}
 
 	return selected, nil
@@ -3266,10 +3268,8 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 		}
 
 		if selected != nil {
-			if sessionHash != "" && s.cache != nil {
-				if err := s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, selected.ID, stickySessionTTL); err != nil {
-					logger.LegacyPrintf("service.gateway", "set session account failed: session=%s account_id=%d err=%v", sessionHash, selected.ID, err)
-				}
+			if err := s.BindStickySession(ctx, groupID, sessionHash, selected.ID); err != nil {
+				logger.LegacyPrintf("service.gateway", "set session account failed: session=%s account_id=%d err=%v", sessionHash, selected.ID, err)
 			}
 			if s.debugModelRoutingEnabled() {
 				logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] legacy mixed routed select: group_id=%v model=%s session=%s account=%d", derefGroupID(groupID), requestedModel, shortSessionHash(sessionHash), selected.ID)
@@ -3389,10 +3389,8 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 	}
 
 	// 4. 建立粘性绑定
-	if sessionHash != "" && s.cache != nil {
-		if err := s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, selected.ID, stickySessionTTL); err != nil {
-			logger.LegacyPrintf("service.gateway", "set session account failed: session=%s account_id=%d err=%v", sessionHash, selected.ID, err)
-		}
+	if err := s.BindStickySession(ctx, groupID, sessionHash, selected.ID); err != nil {
+		logger.LegacyPrintf("service.gateway", "set session account failed: session=%s account_id=%d err=%v", sessionHash, selected.ID, err)
 	}
 
 	return selected, nil
@@ -4118,6 +4116,87 @@ func enforceCacheControlLimit(body []byte) []byte {
 	return body
 }
 
+// injectAnthropicCacheControlTTL1h 将已有 ephemeral cache_control 块的 ttl 强制写为 1h。
+// 仅修改已经存在的 cache_control，不新增缓存断点。
+func injectAnthropicCacheControlTTL1h(body []byte) []byte {
+	return forceEphemeralCacheControlTTL(body, cacheTTLTarget1h)
+}
+
+func forceEphemeralCacheControlTTL(body []byte, ttl string) []byte {
+	if len(body) == 0 || ttl == "" {
+		return body
+	}
+	out := body
+	var paths []string
+	addPath := func(path string, value gjson.Result) {
+		cc := value.Get("cache_control")
+		if !cc.Exists() || cc.Get("type").String() != "ephemeral" {
+			return
+		}
+		if cc.Get("ttl").String() == ttl {
+			return
+		}
+		paths = append(paths, path+".cache_control.ttl")
+	}
+
+	if topCC := gjson.GetBytes(body, "cache_control"); topCC.Exists() && topCC.Get("type").String() == "ephemeral" && topCC.Get("ttl").String() != ttl {
+		paths = append(paths, "cache_control.ttl")
+	}
+
+	system := gjson.GetBytes(body, "system")
+	if system.IsArray() {
+		idx := -1
+		system.ForEach(func(_, block gjson.Result) bool {
+			idx++
+			addPath(fmt.Sprintf("system.%d", idx), block)
+			return true
+		})
+	}
+
+	messages := gjson.GetBytes(body, "messages")
+	if messages.IsArray() {
+		msgIdx := -1
+		messages.ForEach(func(_, msg gjson.Result) bool {
+			msgIdx++
+			content := msg.Get("content")
+			if !content.IsArray() {
+				return true
+			}
+			contentIdx := -1
+			content.ForEach(func(_, block gjson.Result) bool {
+				contentIdx++
+				addPath(fmt.Sprintf("messages.%d.content.%d", msgIdx, contentIdx), block)
+				return true
+			})
+			return true
+		})
+	}
+
+	tools := gjson.GetBytes(body, "tools")
+	if tools.IsArray() {
+		idx := -1
+		tools.ForEach(func(_, tool gjson.Result) bool {
+			idx++
+			addPath(fmt.Sprintf("tools.%d", idx), tool)
+			return true
+		})
+	}
+
+	for _, path := range paths {
+		if next, err := sjson.SetBytes(out, path, ttl); err == nil {
+			out = next
+		}
+	}
+	return out
+}
+
+func (s *GatewayService) shouldInjectAnthropicCacheTTL1h(ctx context.Context, account *Account) bool {
+	if account == nil || !account.IsAnthropicOAuthOrSetupToken() || s == nil || s.settingService == nil {
+		return false
+	}
+	return s.settingService.IsAnthropicCacheTTL1hInjectionEnabled(ctx)
+}
+
 // Forward 转发请求到Claude API
 func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, parsed *ParsedRequest) (*ForwardResult, error) {
 	startTime := time.Now()
@@ -4284,6 +4363,10 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		body = s.replaceModelInBody(body, mappedModel)
 		reqModel = mappedModel
 		logger.LegacyPrintf("service.gateway", "Model mapping applied: %s -> %s (account: %s, source=%s)", originalModel, mappedModel, account.Name, mappingSource)
+	}
+
+	if s.shouldInjectAnthropicCacheTTL1h(ctx, account) {
+		body = injectAnthropicCacheControlTTL1h(body)
 	}
 
 	// 获取凭证
@@ -7124,9 +7207,9 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			}
 		}
 
-		// Cache TTL Override: 重写 SSE 事件中的 cache_creation 分类
-		if account.IsCacheTTLOverrideEnabled() {
-			overrideTarget := account.GetCacheTTLOverrideTarget()
+		// Cache TTL Override: 重写 SSE 事件中的 cache_creation 分类。
+		// 账号级设置优先；全局 1h 请求注入开启时，默认把 usage 计费归回 5m。
+		if overrideTarget, ok := s.resolveCacheTTLUsageOverrideTarget(ctx, account); ok {
 			if eventType == "message_start" {
 				if msg, ok := event["message"].(map[string]any); ok {
 					if u, ok := msg["usage"].(map[string]any); ok {
@@ -7539,6 +7622,19 @@ func rewriteCacheCreationJSON(usageObj map[string]any, target string) bool {
 	return true
 }
 
+func (s *GatewayService) resolveCacheTTLUsageOverrideTarget(ctx context.Context, account *Account) (string, bool) {
+	if account == nil {
+		return "", false
+	}
+	if account.IsCacheTTLOverrideEnabled() {
+		return account.GetCacheTTLOverrideTarget(), true
+	}
+	if account.IsAnthropicOAuthOrSetupToken() && s != nil && s.settingService != nil && s.settingService.IsAnthropicCacheTTL1hInjectionEnabled(ctx) {
+		return cacheTTLTarget5m, true
+	}
+	return "", false
+}
+
 func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, originalModel, mappedModel string) (*ClaudeUsage, error) {
 	// 更新5h窗口状态
 	s.rateLimitService.UpdateSessionWindow(ctx, account, resp.Header)
@@ -7575,9 +7671,9 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 		}
 	}
 
-	// Cache TTL Override: 重写 non-streaming 响应中的 cache_creation 分类
-	if account.IsCacheTTLOverrideEnabled() {
-		overrideTarget := account.GetCacheTTLOverrideTarget()
+	// Cache TTL Override: 重写 non-streaming 响应中的 cache_creation 分类。
+	// 账号级设置优先；全局 1h 请求注入开启时，默认把 usage 计费归回 5m。
+	if overrideTarget, ok := s.resolveCacheTTLUsageOverrideTarget(ctx, account); ok {
 		if applyCacheTTLOverride(&response.Usage, overrideTarget) {
 			// 同步更新 body JSON 中的嵌套 cache_creation 对象
 			if newBody, err := sjson.SetBytes(body, "usage.cache_creation.ephemeral_5m_input_tokens", response.Usage.CacheCreation5mTokens); err == nil {
@@ -8205,10 +8301,11 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		result.Usage.InputTokens = 0
 	}
 
-	// Cache TTL Override: 确保计费时 token 分类与账号设置一致
+	// Cache TTL Override: 确保计费时 token 分类与账号设置一致。
+	// 账号级设置优先；全局 1h 请求注入开启时，默认把 usage 计费归回 5m。
 	cacheTTLOverridden := false
-	if account.IsCacheTTLOverrideEnabled() {
-		applyCacheTTLOverride(&result.Usage, account.GetCacheTTLOverrideTarget())
+	if overrideTarget, ok := s.resolveCacheTTLUsageOverrideTarget(ctx, account); ok {
+		applyCacheTTLOverride(&result.Usage, overrideTarget)
 		cacheTTLOverridden = (result.Usage.CacheCreation5mTokens + result.Usage.CacheCreation1hTokens) > 0
 	}
 

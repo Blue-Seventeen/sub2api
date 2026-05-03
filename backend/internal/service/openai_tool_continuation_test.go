@@ -62,6 +62,31 @@ func TestHasToolCallContext(t *testing.T) {
 	}))
 }
 
+func TestAnalyzeToolContinuationSignalsMatchesToolContextCallIDs(t *testing.T) {
+	req := map[string]any{
+		"input": []any{
+			map[string]any{"type": "function_call", "call_id": "call_1"},
+			map[string]any{"type": "function_call_output", "call_id": "call_1"},
+			map[string]any{"type": "function_call_output", "call_id": "call_2"},
+		},
+	}
+
+	signals := AnalyzeToolContinuationSignals(req)
+	require.True(t, signals.HasFunctionCallOutput)
+	require.True(t, signals.HasToolCallContext)
+	require.False(t, signals.HasToolCallContextForAllCallIDs)
+	require.ElementsMatch(t, []string{"call_1", "call_2"}, signals.FunctionCallOutputCallIDs)
+
+	req["input"] = []any{
+		map[string]any{"type": "function_call", "call_id": "call_1"},
+		map[string]any{"type": "tool_call", "call_id": "call_2"},
+		map[string]any{"type": "function_call_output", "call_id": "call_1"},
+		map[string]any{"type": "function_call_output", "call_id": "call_2"},
+	}
+	signals = AnalyzeToolContinuationSignals(req)
+	require.True(t, signals.HasToolCallContextForAllCallIDs)
+}
+
 func TestFunctionCallOutputCallIDs(t *testing.T) {
 	// 仅提取非空 call_id，去重后返回。
 	require.Empty(t, FunctionCallOutputCallIDs(nil))

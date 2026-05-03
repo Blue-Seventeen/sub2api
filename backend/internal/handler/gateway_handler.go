@@ -472,6 +472,15 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				}
 			}
 
+			// Bind or refresh sticky session after a successful forward. If the
+			// original sticky account was skipped, keep that binding instead of
+			// overwriting it with a temporary fallback account.
+			if sessionKey != "" && (sessionBoundAccountID == 0 || sessionBoundAccountID == account.ID) {
+				if err := h.gatewayService.BindStickySession(c.Request.Context(), apiKey.GroupID, sessionKey, account.ID); err != nil {
+					reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+				}
+			}
+
 			// 捕获请求信息（用于异步记录，避免在 goroutine 中访问 gin.Context）
 			userAgent := c.GetHeader("User-Agent")
 			clientIP := ip.GetClientIP(c)

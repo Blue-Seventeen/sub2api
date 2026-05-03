@@ -18,7 +18,7 @@
 | 项目 | 当前约定 |
 |---|---|
 | 当前主线 | `dev` |
-| 当前 upstream 基线 | 已同步到 `v0.1.120` |
+| 当前 upstream 基线 | 已同步到 `v0.1.121` |
 | 早期 fork 保护基线 | `2b72deb8fd45dc3a526bda2299b16df8d471107c` |
 | 部署策略 | `dev` 是真实可部署主线；`sub2api-custom-localtest` 仅用于本地测试 |
 | 架构原则 | 保留 Sub2API 的 Account / Group / Channel / 调度 / sticky / failover / billing，渐进吸收协议优先兼容内核 |
@@ -42,6 +42,7 @@
 | 设置增强 | 站点 Logo、自定义菜单、外链新页面打开、邀请码注册 HTML 提示 | 属于运营配置能力 | `setting_service.go`, `SettingsView.vue`, `AppSidebar.vue` |
 | 多机部署 | 定时备份本机开关 | 多机共库时由每台服务器本地文件决定是否执行定时备份，默认关闭 | `backup_service.go`, `backup_service_schedule_local_test.go` |
 | OpenAI Fast/Flex Policy | `service_tier` 策略、默认空规则/pass、低价 tier 自动标准化、最终有效 tier 计费 | 吸收 upstream 能力但保持本 fork 不允许低价模式的运营约束 | `setting_service.go`, `openai_gateway_service.go`, `openai_fast_policy_test.go`, `SettingsView.vue` |
+| Anthropic 缓存 TTL 注入 | 管理端可选开启 Anthropic OAuth/SetupToken 请求已有 ephemeral cache_control 强制 1h，默认关闭，usage 默认按 5m 回写 | 吸收 upstream 成本优化能力，同时避免默认改变现有请求与计费语义 | `setting_service.go`, `gateway_service.go`, `gateway_body_order_test.go`, `SettingsView.vue` |
 | 请求体读失败观测 | 对 `unexpected EOF`、`context canceled`、`connection reset`、timeout、未知读失败分桶记录 | 不改变客户端错误文本，同时让 ops 能定位入口链路问题 | `request_body_read_error.go`, `ops_error_logger.go`, `ops_repo.go`, `OpsErrorDetailModal.vue` |
 | Vertex Service Account | Gemini / Anthropic 通过 Vertex service account 认证，支持代理 token exchange 与模型预检 fallback | 扩展企业账号接入能力，保留现有 API key / proxy / fallback 行为 | `vertex_service_account.go`, `gemini_messages_compat_service.go`, `CreateAccountModal.vue`, `EditAccountModal.vue` |
 | 热路径性能保护 | usage logging 队列、upstream HTTP client cache、API key rate-limit reset、usage 导出 COUNT 优化 | 降低高峰请求尾延迟和大表查询压力 | `usage_record_worker_pool.go`, `http_upstream.go`, `billing_cache_service.go`, `UsageView.vue` |
@@ -386,16 +387,87 @@ npm run typecheck
 npm run test:run -- accountsLocale providerConfig
 ```
 
-## 9. localtest 环境说明
+## 9. v0.1.121 同步新增保护点
+
+### 9.1 Anthropic Cache TTL 1h Injection
+
+- 新增 `/admin/settings` 网关转发开关 `enable_anthropic_cache_ttl_1h_injection`，默认 `false`，不改变升级后的现有请求行为。
+- 开启后仅作用于 Anthropic OAuth / SetupToken 账号，并且只改写请求体中已经存在的 `ephemeral` cache_control，不新增缓存断点。
+- 账号级 cache TTL 计费覆盖优先于全局开关；没有账号级覆盖时，全局 1h 注入产生的 response usage 默认回写到 5m 计费，避免账单被错误放大到 1h。
+- 网关转发设置继续使用进程内 60s 缓存与更新失效机制，不在每个请求上直接读设置表。
+
+重点文件：
+
+- `backend/internal/service/gateway_service.go`
+- `backend/internal/service/setting_service.go`
+- `backend/internal/service/gateway_body_order_test.go`
+- `backend/internal/handler/admin/setting_handler.go`
+- `backend/internal/handler/dto/settings.go`
+- `frontend/src/views/admin/SettingsView.vue`
+- `frontend/src/views/admin/__tests__/SettingsView.spec.ts`
+
+### 9.2 Sticky Session Scheduling
+
+- scheduler snapshot 的 slim metadata 必须保留账号分组成员关系，不能因为裁剪嵌套 group 导致 sticky session 误判账号不在分组。
+- sticky 命中后仍需保留平台、模型、quota、窗口成本、RPM、schedulable 状态检查。
+- 当 sticky 原账号暂时不可用并走 fallback 账号成功时，不应覆盖原 sticky 绑定，避免短暂故障把会话永久漂移到 fallback 账号。
+
+重点文件：
+
+- `backend/internal/repository/scheduler_cache.go`
+- `backend/internal/repository/scheduler_cache_unit_test.go`
+- `backend/internal/repository/scheduler_cache_integration_test.go`
+- `backend/internal/service/gateway_service.go`
+- `backend/internal/handler/gateway_handler.go`
+
+### 9.3 OpenAI Responses WS Previous Response Inference
+
+- store=false WebSocket 多轮工具续链中，`function_call_output` 缺少 `previous_response_id` 时可以回填上一轮响应 ID。
+- 如果当前 payload 已包含完整 tool call / function call 上下文，不能强行推断 previous response，避免覆盖客户端自包含 replay 语义。
+- 只有 `item_reference` 的场景仍需要推断上一轮响应锚点，否则上游无法解析被引用的 function_call。
+
+重点文件：
+
+- `backend/internal/service/openai_ws_forwarder.go`
+- `backend/internal/service/openai_ws_forwarder_ingress_test.go`
+- `backend/internal/service/openai_ws_forwarder_ingress_session_test.go`
+
+### 9.4 表格分页大小策略
+
+- 本 fork 保留“系统表格默认值优先”的策略，不吸收 upstream 恢复 `localStorage` 分页大小持久化的改动。
+- 旧浏览器本地 `table-page-size` 不得覆盖管理员配置的 `table_default_page_size`，避免每台客户端残留状态破坏统一表格展示。
+- 页面仍通过 `normalizeTablePageSize` 归一分页大小，非法值不能突破系统允许范围。
+
+重点文件：
+
+- `frontend/src/components/common/Pagination.vue`
+- `frontend/src/composables/usePersistedPageSize.ts`
+- `frontend/src/composables/useTableLoader.ts`
+
+### 9.5 同步范围裁剪说明
+
+- 本次没有直接 merge `v0.1.121` tag；当前 fork 与 upstream tag 历史非线性，直接 merge 会重新引入 Affiliate 等本地明确排除能力。
+- 未吸收 upstream `.gitignore` 中忽略 `AGENTS.md` 的改动，继续保留本 fork 对本地协作文档的跟踪能力。
+- upstream tag `v0.1.121` 中 `backend/cmd/server/VERSION` 仍为 `0.1.120`，本 fork 同步到相同文件内容，不额外强行改为 `0.1.121`。
+
+### 9.6 验证重点
+
+- Anthropic TTL 注入默认关闭；开启后只作用于 Anthropic OAuth / SetupToken，且只修改已有 ephemeral cache_control。
+- sticky session fallback 成功后不能污染原绑定；scheduler snapshot slim/full metadata 都应保留分组成员关系。
+- OpenAI Responses WS 的 `item_reference` 续链、完整 tool context replay、缺失 `call_id` 三类场景都应维持各自语义。
+- 表格分页大小必须以管理员配置默认值为准，旧 localStorage 值不能覆盖系统默认配置。
+- Affiliate 仍不得重新进入路由、菜单、migration、service、repository。
+
+## 10. localtest 环境说明
 
 - `sub2api-custom-localtest` 是测试环境，可覆盖、重建容器、清理数据。
 - `sub2api-custom-src/dev` 是真实可部署主线，不能提交临时打包目录、迁移中间文件、benchmark 临时输出。
 - localtest 的 `deploy/.env`、`deploy/data`、`deploy/redis_data`、`deploy/postgres_data` 默认不应被 dev 覆盖。
 - PostgreSQL 本地测试环境优先使用 named volume，避免 Windows bind mount 导致权限问题。
 
-## 10. 上游同步后的最小验收清单
+## 11. 上游同步后的最小验收清单
 
-### 10.1 后端测试
+### 11.1 后端测试
 
 至少执行：
 
@@ -408,7 +480,7 @@ go test ./internal/server/middleware -run "TestAPIKeyAuth|TestApiKeyAuthWithSubs
 
 如同步触及 usage / gateway / promotion / backup，还应补跑对应专项测试。
 
-### 10.2 前端测试
+### 11.2 前端测试
 
 至少执行：
 
@@ -426,7 +498,7 @@ pnpm run build
 - requested model / upstream model / endpoint 分布图是否正常
 - CSV 导出字段是否完整
 
-### 10.3 人工链路验收
+### 11.3 人工链路验收
 
 - Claude Code -> Sub2API -> Kimi
 - Claude Code -> Sub2API -> GLM
