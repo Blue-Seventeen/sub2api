@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"sync/atomic"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -26,53 +25,6 @@ type openAIWSPolicyEnforcingFrameConn struct {
 	inner   openaiwsv2.FrameConn
 	filter  func(msgType coderws.MessageType, payload []byte) ([]byte, *OpenAIFastBlockedError, error)
 	onBlock func(blocked *OpenAIFastBlockedError)
-}
-
-type openAIWSServiceTierQueue struct {
-	mu     sync.Mutex
-	values []*string
-}
-
-func (q *openAIWSServiceTierQueue) push(tier *string) {
-	if q == nil {
-		return
-	}
-	var cloned *string
-	if tier != nil {
-		value := *tier
-		cloned = &value
-	}
-	q.mu.Lock()
-	q.values = append(q.values, cloned)
-	q.mu.Unlock()
-}
-
-func (q *openAIWSServiceTierQueue) pop() *string {
-	if q == nil {
-		return nil
-	}
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	if len(q.values) == 0 {
-		return nil
-	}
-	value := q.values[0]
-	copy(q.values, q.values[1:])
-	q.values[len(q.values)-1] = nil
-	q.values = q.values[:len(q.values)-1]
-	return value
-}
-
-func (q *openAIWSServiceTierQueue) peek() *string {
-	if q == nil {
-		return nil
-	}
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	if len(q.values) == 0 {
-		return nil
-	}
-	return q.values[0]
 }
 
 var _ openaiwsv2.FrameConn = (*openAIWSPolicyEnforcingFrameConn)(nil)
@@ -143,6 +95,73 @@ func openAIWSPassthroughPolicyModelFromSessionFrame(account *Account, payload []
 func openAIWSPassthroughIsResponseCreateFrame(payload []byte) bool {
 	eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
 	return eventType == "" || eventType == "response.create"
+}
+
+type openAIWSPassthroughUsageMeta struct {
+	serviceTier     atomic.Pointer[string]
+	reasoningEffort atomic.Pointer[string]
+
+	// Only the client-to-upstream filter goroutine writes this field.
+	sessionRequestModel string
+}
+
+func newOpenAIWSPassthroughUsageMeta(initialRequestModel string, firstFrame []byte) *openAIWSPassthroughUsageMeta {
+	meta := &openAIWSPassthroughUsageMeta{
+		sessionRequestModel: strings.TrimSpace(initialRequestModel),
+	}
+	if meta.sessionRequestModel == "" {
+		meta.sessionRequestModel = openAIWSPassthroughRequestModelForFrame(firstFrame)
+	}
+	return meta
+}
+
+func (m *openAIWSPassthroughUsageMeta) initFromFirstFrame(policyOutput []byte) {
+	if m == nil {
+		return
+	}
+	m.serviceTier.Store(extractOpenAIServiceTierFromBody(policyOutput))
+	m.reasoningEffort.Store(extractOpenAIReasoningEffortFromBody(policyOutput, m.sessionRequestModel))
+}
+
+func (m *openAIWSPassthroughUsageMeta) updateSessionRequestModel(payload []byte) {
+	if m == nil {
+		return
+	}
+	if model := openAIWSPassthroughRequestModelFromSessionFrame(payload); model != "" {
+		m.sessionRequestModel = model
+	}
+}
+
+func (m *openAIWSPassthroughUsageMeta) requestModelForFrame(payload []byte) string {
+	if m == nil {
+		return openAIWSPassthroughRequestModelForFrame(payload)
+	}
+	if model := openAIWSPassthroughRequestModelForFrame(payload); model != "" {
+		return model
+	}
+	return m.sessionRequestModel
+}
+
+func (m *openAIWSPassthroughUsageMeta) updateFromResponseCreate(policyOutput []byte, requestModelForFrame string) {
+	if m == nil {
+		return
+	}
+	m.serviceTier.Store(extractOpenAIServiceTierFromBody(policyOutput))
+	m.reasoningEffort.Store(extractOpenAIReasoningEffortFromBody(policyOutput, requestModelForFrame))
+}
+
+func openAIWSPassthroughRequestModelForFrame(payload []byte) string {
+	if len(payload) == 0 || strings.TrimSpace(gjson.GetBytes(payload, "type").String()) != "response.create" {
+		return ""
+	}
+	return strings.TrimSpace(gjson.GetBytes(payload, "model").String())
+}
+
+func openAIWSPassthroughRequestModelFromSessionFrame(payload []byte) string {
+	if len(payload) == 0 || strings.TrimSpace(gjson.GetBytes(payload, "type").String()) != "session.update" {
+		return ""
+	}
+	return strings.TrimSpace(gjson.GetBytes(payload, "session.model").String())
 }
 
 const openaiWSV2PassthroughModeFields = "ws_mode=passthrough ws_router=v2"
@@ -219,10 +238,12 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, blocked.Message, blocked)
 	}
 	firstClientMessage = updatedFirst
-	serviceTierQueue := &openAIWSServiceTierQueue{}
-	if openAIWSPassthroughIsResponseCreateFrame(firstClientMessage) {
-		serviceTierQueue.push(extractOpenAIServiceTierFromBody(firstClientMessage))
+	initialRequestModel := ""
+	if hooks != nil {
+		initialRequestModel = hooks.InitialRequestModel
 	}
+	usageMeta := newOpenAIWSPassthroughUsageMeta(initialRequestModel, firstClientMessage)
+	usageMeta.initFromFirstFrame(firstClientMessage)
 	requestPreviousResponseID := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "previous_response_id").String())
 	logOpenAIWSV2Passthrough(
 		"relay_start account_id=%d model=%s previous_response_id=%s first_message_type=%s first_message_bytes=%d",
@@ -232,6 +253,41 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		openaiwsv2RelayMessageTypeName(coderws.MessageText),
 		len(firstClientMessage),
 	)
+
+	// Apply OpenAI Fast Policy on the first response.create frame. Subsequent
+	// frames are filtered via a wrapping FrameConn below so every client→
+	// upstream frame goes through the same policy evaluator/normalize/scope as
+	// HTTP entrypoints.
+	//
+	// We capture the session-level model from the first frame here so the
+	// per-frame filter (below) can fall back to it when a follow-up frame
+	// omits "model" — Realtime clients are allowed to send response.create
+	// without re-stating the model, in which case the upstream uses the model
+	// negotiated at session.update time. Without this fallback, an empty
+	// model would miss the default ["gpt-5.5","gpt-5.5*"] whitelist and be
+	// silently passed through, defeating the policy on every frame after
+	// the first.
+	// coder/websocket@v1.8.14 Conn.Write is synchronous: it acquires
+	// writeFrameMu, writes the entire frame, and Flushes the underlying
+	// bufio writer before returning (write.go:42 → write.go:307-311).
+	// The subsequent close handshake re-acquires the same writeFrameMu
+	// to send the close frame, so the error event is guaranteed to
+	// reach the kernel send buffer before any close frame is queued.
+	// No explicit flush hop is required here.
+	// 在 policy filter 之后再提取 service_tier / reasoning_effort 用于
+	// usage 上报：filter
+	// 命中时 service_tier 已经从 firstClientMessage 中删除，billing 应当
+	// 反映上游实际处理的 tier（nil = default），而不是用户最初请求的
+	// "priority"。HTTP 入口（line ~2728 extractOpenAIServiceTier(reqBody)）
+	// 与 WS ingress（openai_ws_forwarder.go:2991 取自 payload）的语义一致。
+	//
+	// 多轮 passthrough：OpenAI Realtime / Responses WS 协议允许客户端在
+	// 同一连接的不同 response.create 帧上发送不同 service_tier（参考
+	// codex-rs/core/src/client.rs build_responses_request 每次重新填值）。
+	// 因此使用 atomic.Pointer[string] 在 filter（runClientToUpstream
+	// goroutine）和 OnTurnComplete / final result（runUpstreamToClient
+	// goroutine）之间同步当前 turn 的 usage metadata。
+	usageMeta.initFromFirstFrame(firstClientMessage)
 
 	wsURL, err := s.buildOpenAIResponsesWSURL(account)
 	if err != nil {
@@ -303,14 +359,35 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			if updated := openAIWSPassthroughPolicyModelFromSessionFrame(account, payload); updated != "" {
 				capturedSessionModel = updated
 			}
+			usageMeta.updateSessionRequestModel(payload)
+			requestModelForThisFrame := usageMeta.requestModelForFrame(payload)
+			// Per-frame model first; if the client omits "model" on a
+			// follow-up frame (legal in Realtime), fall back to the
+			// session-level model captured from the first frame so the
+			// model whitelist still resolves. An empty model would miss
+			// any whitelist and silently fall back to pass.
 			model := openAIWSPassthroughPolicyModelForFrame(account, payload)
 			if model == "" {
 				model = capturedSessionModel
 			}
-			out, tier, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, model, payload)
+			out, _, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, model, payload)
+			// 多轮 passthrough usage：仅在成功（non-block / non-err）
+			// 的 response.create 帧上更新 usageMeta，使用
+			// filter 处理后的 payload，与首帧 policy-after-extract 语义
+			// 保持一致（参见上方 extractOpenAIServiceTierFromBody 注释）。
+			//   - 非 response.create 帧（response.cancel /
+			//     conversation.item.create / session.update 等）不携带
+			//     per-response metadata，不应覆盖前一轮值。
+			//   - blocked != nil：该帧不会发送上游，usage metadata 应保持
+			//     上一轮值。
+			//   - policyErr != nil：异常路径，保持上一轮值。
+			//   - 不带 service_tier 的 response.create 会让
+			//     extractOpenAIServiceTierFromBody 返回 nil；这里有意
+			//     覆盖（Store(nil)），因为 OpenAI 上游对该帧实际不传
+			//     service_tier 时按 default 处理，billing 应如实反映。
 			if policyErr == nil && blocked == nil &&
-				openAIWSPassthroughIsResponseCreateFrame(payload) {
-				serviceTierQueue.push(tier)
+				strings.TrimSpace(gjson.GetBytes(payload, "type").String()) == "response.create" {
+				usageMeta.updateFromResponseCreate(out, requestModelForThisFrame)
 			}
 			return out, blocked, policyErr
 		},
@@ -342,7 +419,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 						CacheReadInputTokens:     turn.Usage.CacheReadInputTokens,
 					},
 					Model:           turn.RequestModel,
-					ServiceTier:     serviceTierQueue.pop(),
+					ServiceTier:     usageMeta.serviceTier.Load(),
+					ReasoningEffort: usageMeta.reasoningEffort.Load(),
 					Stream:          true,
 					OpenAIWSMode:    true,
 					ResponseHeaders: cloneHeader(handshakeHeaders),
@@ -390,7 +468,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			CacheReadInputTokens:     relayResult.Usage.CacheReadInputTokens,
 		},
 		Model:           relayResult.RequestModel,
-		ServiceTier:     serviceTierQueue.peek(),
+		ServiceTier:     usageMeta.serviceTier.Load(),
+		ReasoningEffort: usageMeta.reasoningEffort.Load(),
 		Stream:          true,
 		OpenAIWSMode:    true,
 		ResponseHeaders: cloneHeader(handshakeHeaders),

@@ -510,6 +510,22 @@ Protect files:
 - `backend/internal/service/admin_service.go`
 - `backend/internal/service/newapi_style_gateway_service.go`
 
+### 9.11 Upstream v0.1.123 selective absorption
+- 本次同步选择性吸收 upstream `v0.1.122..v0.1.123` 中的 OpenAI 兼容与稳定性修复：compact 批量编辑字段、APIKey 账号 raw Chat Completions fallback、Responses 探测、图片请求稳定性、流式 usage drain、零 usage 日志记录、WS passthrough `reasoning_effort` / User-Agent usage metadata、未知模型不再静默 fallback 到默认模型。
+- Chat Completions 冲突处理规则：继续保留本 fork 的 New-API style 分流；关闭 New-API 开关的原生 OpenAI fallback 调用必须传空 fallback model，避免重新引入 upstream 已修复的未知模型默认兜底。
+- raw Chat Completions usage billing 必须按最终上游计费模型记录，不能被原始请求模型覆盖；零 usage OpenAI 响应仍应写 usage log，便于审计异常上游行为。
+- OpenAI WS passthrough usage metadata 继续使用 policy-mutated payload 提取 `service_tier` 和 `reasoning_effort`，保证 Fast/Flex policy 过滤后计费与实际上游处理一致。
+- upstream affiliate / referral 相关 commit、migration、路由、菜单和前端页面继续跳过；本 fork 使用现有 Promotion / rebate 系统，不允许在同步中重新引入 affiliate 账本体系。
+- upstream tag `v0.1.123` 内 `backend/cmd/server/VERSION` 实际为 `0.1.122`，本 fork 同步该文件内容，不额外强行改成 `0.1.123`。
+- 同步前暂存的 `/admin/groups` 创建分组平台模糊搜索 UI 已恢复，后续 upstream sync 不应覆盖该交互。
+Protect files:
+- `backend/internal/handler/openai_chat_completions.go`
+- `backend/internal/service/openai_gateway_chat_completions.go`
+- `backend/internal/service/openai_gateway_chat_completions_raw.go`
+- `backend/internal/service/openai_ws_v2_passthrough_adapter.go`
+- `frontend/src/components/account/BulkEditAccountModal.vue`
+- `frontend/src/views/admin/GroupsView.vue`
+
 ## 10. localtest 环境说明
 
 - `sub2api-custom-localtest` 是测试环境，可覆盖、重建容器、清理数据。

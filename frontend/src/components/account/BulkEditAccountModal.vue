@@ -700,6 +700,191 @@
         </div>
       </div>
 
+      <!-- OpenAI OAuth Codex CLI only -->
+      <div v-if="allOpenAIOAuth" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div class="mb-3 flex items-center justify-between">
+          <label
+            id="bulk-edit-openai-codex-cli-only-label"
+            class="input-label mb-0"
+            for="bulk-edit-openai-codex-cli-only-enabled"
+          >
+            {{ t('admin.accounts.openai.codexCLIOnly') }}
+          </label>
+          <input
+            v-model="enableCodexCLIOnly"
+            id="bulk-edit-openai-codex-cli-only-enabled"
+            type="checkbox"
+            aria-controls="bulk-edit-openai-codex-cli-only"
+            class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+          />
+        </div>
+        <div
+          id="bulk-edit-openai-codex-cli-only"
+          :class="!enableCodexCLIOnly && 'pointer-events-none opacity-50'"
+        >
+          <p class="mb-3 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.accounts.openai.codexCLIOnlyDesc') }}
+          </p>
+          <button
+            id="bulk-edit-openai-codex-cli-only-toggle"
+            type="button"
+            :class="[
+              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+              codexCLIOnlyEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+            ]"
+            @click="codexCLIOnlyEnabled = !codexCLIOnlyEnabled"
+          >
+            <span
+              :class="[
+                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                codexCLIOnlyEnabled ? 'translate-x-5' : 'translate-x-0'
+              ]"
+            />
+          </button>
+        </div>
+      </div>
+
+      <!-- OpenAI API Key WS mode -->
+      <div v-if="allOpenAIAPIKey" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div class="mb-3 flex items-center justify-between">
+          <label
+            id="bulk-edit-openai-apikey-ws-mode-label"
+            class="input-label mb-0"
+            for="bulk-edit-openai-apikey-ws-mode-enabled"
+          >
+            {{ t('admin.accounts.openai.wsMode') }}
+          </label>
+          <input
+            v-model="enableOpenAIAPIKeyWSMode"
+            id="bulk-edit-openai-apikey-ws-mode-enabled"
+            type="checkbox"
+            aria-controls="bulk-edit-openai-apikey-ws-mode"
+            class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+          />
+        </div>
+        <div
+          id="bulk-edit-openai-apikey-ws-mode"
+          :class="!enableOpenAIAPIKeyWSMode && 'pointer-events-none opacity-50'"
+        >
+          <p class="mb-3 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.accounts.openai.wsModeDesc') }}
+          </p>
+          <p class="mb-3 text-xs text-gray-500 dark:text-gray-400">
+            {{ t(openAIAPIKeyWSModeConcurrencyHintKey) }}
+          </p>
+          <Select
+            v-model="openaiAPIKeyResponsesWebSocketV2Mode"
+            data-testid="bulk-edit-openai-apikey-ws-mode-select"
+            :options="openAIWSModeOptions"
+            aria-labelledby="bulk-edit-openai-apikey-ws-mode-label"
+          />
+        </div>
+      </div>
+
+      <!-- OpenAI Compact mode -->
+      <div v-if="allOpenAIPassthroughCapable" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div class="mb-3 flex items-center justify-between">
+          <div class="flex-1 pr-4">
+            <label
+              id="bulk-edit-openai-compact-mode-label"
+              class="input-label mb-0"
+              for="bulk-edit-openai-compact-mode-enabled"
+            >
+              {{ t('admin.accounts.openai.compactMode') }}
+            </label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.compactModeDesc') }}
+            </p>
+          </div>
+          <input
+            v-model="enableOpenAICompactMode"
+            id="bulk-edit-openai-compact-mode-enabled"
+            type="checkbox"
+            aria-controls="bulk-edit-openai-compact-mode"
+            class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+          />
+        </div>
+        <div
+          id="bulk-edit-openai-compact-mode"
+          :class="!enableOpenAICompactMode && 'pointer-events-none opacity-50'"
+        >
+          <Select
+            v-model="openAICompactMode"
+            data-testid="bulk-edit-openai-compact-mode-select"
+            :options="openAICompactModeOptions"
+            aria-labelledby="bulk-edit-openai-compact-mode-label"
+          />
+        </div>
+      </div>
+
+      <!-- OpenAI Compact model mapping -->
+      <div v-if="allOpenAIPassthroughCapable" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div class="mb-3 flex items-center justify-between">
+          <div class="flex-1 pr-4">
+            <label
+              id="bulk-edit-openai-compact-model-mapping-label"
+              class="input-label mb-0"
+              for="bulk-edit-openai-compact-model-mapping-enabled"
+            >
+              {{ t('admin.accounts.openai.compactModelMapping') }}
+            </label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.compactModelMappingDesc') }}
+            </p>
+          </div>
+          <input
+            v-model="enableOpenAICompactModelMapping"
+            id="bulk-edit-openai-compact-model-mapping-enabled"
+            type="checkbox"
+            aria-controls="bulk-edit-openai-compact-model-mapping"
+            class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+          />
+        </div>
+        <div
+          id="bulk-edit-openai-compact-model-mapping"
+          :class="!enableOpenAICompactModelMapping && 'pointer-events-none opacity-50'"
+        >
+          <div v-if="openAICompactModelMappings.length > 0" class="mb-3 space-y-2">
+            <div
+              v-for="(mapping, index) in openAICompactModelMappings"
+              :key="index"
+              class="flex items-center gap-2"
+            >
+              <input
+                v-model="mapping.from"
+                type="text"
+                class="input flex-1"
+                :placeholder="t('admin.accounts.fromModel')"
+                data-testid="bulk-edit-openai-compact-model-mapping-input"
+              />
+              <span class="text-gray-400">→</span>
+              <input
+                v-model="mapping.to"
+                type="text"
+                class="input flex-1"
+                :placeholder="t('admin.accounts.toModel')"
+                data-testid="bulk-edit-openai-compact-model-mapping-input"
+              />
+              <button
+                type="button"
+                class="rounded-lg p-2 text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
+                @click="removeOpenAICompactModelMapping(index)"
+              >
+                <Icon name="trash" size="sm" />
+              </button>
+            </div>
+          </div>
+          <button
+            type="button"
+            class="mb-3 w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300"
+            data-testid="bulk-edit-openai-compact-model-mapping-add"
+            @click="addOpenAICompactModelMapping"
+          >
+            + {{ t('admin.accounts.addMapping') }}
+          </button>
+        </div>
+      </div>
+
       <!-- RPM Limit (仅全部为 Anthropic OAuth/SetupToken 时显示) -->
       <div v-if="allAnthropicOAuthOrSetupToken" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
@@ -910,7 +1095,7 @@ import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
-import type { Proxy as ProxyConfig, AdminGroup, AccountPlatform, AccountType } from '@/types'
+import type { Proxy as ProxyConfig, AdminGroup, AccountPlatform, AccountType, OpenAICompactMode } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
@@ -982,6 +1167,15 @@ const allOpenAIOAuth = computed(() => {
   )
 })
 
+const allOpenAIAPIKey = computed(() => {
+  return (
+    targetSelectedPlatforms.value.length === 1 &&
+    targetSelectedPlatforms.value[0] === 'openai' &&
+    targetSelectedTypes.value.length > 0 &&
+    targetSelectedTypes.value.every(t => t === 'apikey')
+  )
+})
+
 // 是否全部为 Anthropic OAuth/SetupToken（RPM 配置仅在此条件下显示）
 const allAnthropicOAuthOrSetupToken = computed(() => {
   return (
@@ -1027,6 +1221,10 @@ const enableStatus = ref(false)
 const enableGroups = ref(false)
 const enableOpenAIPassthrough = ref(false)
 const enableOpenAIWSMode = ref(false)
+const enableOpenAIAPIKeyWSMode = ref(false)
+const enableCodexCLIOnly = ref(false)
+const enableOpenAICompactMode = ref(false)
+const enableOpenAICompactModelMapping = ref(false)
 const enableRpmLimit = ref(false)
 
 // State - field values
@@ -1050,6 +1248,10 @@ const status = ref<'active' | 'inactive'>('active')
 const groupIds = ref<number[]>([])
 const openaiPassthroughEnabled = ref(false)
 const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
+const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
+const codexCLIOnlyEnabled = ref(false)
+const openAICompactMode = ref<OpenAICompactMode>('auto')
+const openAICompactModelMappings = ref<ModelMapping[]>([])
 const rpmLimitEnabled = ref(false)
 const bulkBaseRpm = ref<number | null>(null)
 const bulkRpmStrategy = ref<'tiered' | 'sticky_exempt'>('tiered')
@@ -1088,8 +1290,16 @@ const openAIWSModeOptions = computed(() => [
   { value: OPENAI_WS_MODE_CTX_POOL, label: t('admin.accounts.openai.wsModeCtxPool') },
   { value: OPENAI_WS_MODE_PASSTHROUGH, label: t('admin.accounts.openai.wsModePassthrough') }
 ])
+const openAICompactModeOptions = computed(() => [
+  { value: 'auto', label: t('admin.accounts.openai.compactModeAuto') },
+  { value: 'force_on', label: t('admin.accounts.openai.compactModeForceOn') },
+  { value: 'force_off', label: t('admin.accounts.openai.compactModeForceOff') }
+])
 const openAIWSModeConcurrencyHintKey = computed(() =>
   resolveOpenAIWSModeConcurrencyHintKey(openaiOAuthResponsesWebSocketV2Mode.value)
+)
+const openAIAPIKeyWSModeConcurrencyHintKey = computed(() =>
+  resolveOpenAIWSModeConcurrencyHintKey(openaiAPIKeyResponsesWebSocketV2Mode.value)
 )
 
 // Model mapping helpers
@@ -1099,6 +1309,14 @@ const addModelMapping = () => {
 
 const removeModelMapping = (index: number) => {
   modelMappings.value.splice(index, 1)
+}
+
+const addOpenAICompactModelMapping = () => {
+  openAICompactModelMappings.value.push({ from: '', to: '' })
+}
+
+const removeOpenAICompactModelMapping = (index: number) => {
+  openAICompactModelMappings.value.splice(index, 1)
 }
 
 const addPresetMapping = (from: string, to: string) => {
@@ -1167,6 +1385,10 @@ const buildModelMappingObject = (): Record<string, string> | null => {
     allowedModels.value,
     modelMappings.value
   )
+}
+
+const buildOpenAICompactModelMapping = (): Record<string, string> | null => {
+  return buildModelMappingPayload('mapping', [], openAICompactModelMappings.value)
 }
 
 const buildUpdatePayload = (): Record<string, unknown> | null => {
@@ -1270,16 +1492,35 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     credentialsChanged = true
   }
 
-  if (credentialsChanged) {
-    updates.credentials = credentials
-  }
-
   if (enableOpenAIWSMode.value) {
     const extra = ensureExtra()
     extra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
     extra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(
       openaiOAuthResponsesWebSocketV2Mode.value
     )
+  }
+
+  if (enableOpenAIAPIKeyWSMode.value) {
+    const extra = ensureExtra()
+    extra.openai_apikey_responses_websockets_v2_mode = openaiAPIKeyResponsesWebSocketV2Mode.value
+    extra.openai_apikey_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(
+      openaiAPIKeyResponsesWebSocketV2Mode.value
+    )
+  }
+
+  if (enableCodexCLIOnly.value) {
+    const extra = ensureExtra()
+    extra.codex_cli_only = codexCLIOnlyEnabled.value
+  }
+
+  if (enableOpenAICompactMode.value) {
+    const extra = ensureExtra()
+    extra.openai_compact_mode = openAICompactMode.value
+  }
+
+  if (enableOpenAICompactModelMapping.value) {
+    credentials.compact_model_mapping = buildOpenAICompactModelMapping() ?? {}
+    credentialsChanged = true
   }
 
   // RPM limit settings (写入 extra 字段)
@@ -1307,6 +1548,10 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     const umqExtra = ensureExtra()
     umqExtra.user_msg_queue_mode = userMsgQueueMode.value  // '' = 清除账号级覆盖
     umqExtra.user_msg_queue_enabled = false  // 清理旧字段（JSONB merge）
+  }
+
+  if (credentialsChanged) {
+    updates.credentials = credentials
   }
 
   return Object.keys(updates).length > 0 ? updates : null
@@ -1372,6 +1617,10 @@ const handleSubmit = async () => {
     enableStatus.value ||
     enableGroups.value ||
     enableOpenAIWSMode.value ||
+    enableOpenAIAPIKeyWSMode.value ||
+    enableCodexCLIOnly.value ||
+    enableOpenAICompactMode.value ||
+    enableOpenAICompactModelMapping.value ||
     enableRpmLimit.value ||
     userMsgQueueMode.value !== null
 
@@ -1470,6 +1719,10 @@ watch(
       enableGroups.value = false
       enableOpenAIPassthrough.value = false
       enableOpenAIWSMode.value = false
+      enableOpenAIAPIKeyWSMode.value = false
+      enableCodexCLIOnly.value = false
+      enableOpenAICompactMode.value = false
+      enableOpenAICompactModelMapping.value = false
       enableRpmLimit.value = false
 
       // Reset all values
@@ -1489,6 +1742,10 @@ watch(
       status.value = 'active'
       groupIds.value = []
       openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
+      openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
+      codexCLIOnlyEnabled.value = false
+      openAICompactMode.value = 'auto'
+      openAICompactModelMappings.value = []
       rpmLimitEnabled.value = false
       bulkBaseRpm.value = null
       bulkRpmStrategy.value = 'tiered'

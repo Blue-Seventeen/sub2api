@@ -398,12 +398,82 @@
           <label class="input-label">{{
             t("admin.groups.form.platform")
           }}</label>
-          <Select
-            v-model="createForm.platform"
-            :options="platformOptions"
-            data-tour="group-form-platform"
-            @change="createForm.copy_accounts_from_group_ids = []"
-          />
+          <div class="mt-2 space-y-3">
+            <div class="relative">
+              <Icon
+                name="search"
+                size="sm"
+                class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
+              />
+              <input
+                v-model="createPlatformSearchQuery"
+                type="text"
+                class="input pl-10"
+                placeholder="搜索平台，如 Anthropic / GLM / DeepSeek / Qwen"
+              />
+            </div>
+
+            <div
+              class="rounded-xl bg-gray-100 p-2 dark:bg-dark-700"
+              data-tour="group-form-platform"
+            >
+              <div
+                ref="createPlatformScrollRef"
+                class="platform-scroll-strip flex gap-2 overflow-x-auto pb-1"
+                @wheel.prevent="handleCreatePlatformWheel"
+              >
+                <button
+                  v-for="option in filteredCreatePlatformOptions"
+                  :key="option.value"
+                  type="button"
+                  @click="selectCreatePlatform(option.value)"
+                  :class="[
+                    'group min-w-[156px] shrink-0 rounded-xl border px-3 py-3 text-left transition-all',
+                    createForm.platform === option.value
+                      ? option.activeClass
+                      : 'border-transparent bg-transparent hover:bg-white/80 hover:shadow-sm dark:hover:bg-dark-600/80',
+                  ]"
+                >
+                  <div class="flex items-center gap-3">
+                    <div
+                      :class="[
+                        'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors',
+                        createForm.platform === option.value
+                          ? option.iconActiveClass
+                          : 'bg-white/80 text-gray-500 dark:bg-dark-600 dark:text-gray-400',
+                      ]"
+                    >
+                      <PlatformIcon :platform="option.value" size="md" />
+                    </div>
+                    <div class="min-w-0">
+                      <div
+                        :class="[
+                          'truncate text-sm font-semibold',
+                          createForm.platform === option.value
+                            ? option.textActiveClass
+                            : 'text-gray-700 dark:text-gray-200',
+                        ]"
+                      >
+                        {{ option.label }}
+                      </div>
+                      <div
+                        class="truncate text-xs text-gray-500 dark:text-gray-400"
+                      >
+                        {{ option.subtitle }}
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              </div>
+
+              <p
+                v-if="filteredCreatePlatformOptions.length === 0"
+                class="px-2 py-3 text-sm text-gray-500 dark:text-gray-400"
+              >
+                没有匹配的平台，请换个关键词试试
+              </p>
+            </div>
+          </div>
           <p class="input-hint">{{ t("admin.groups.platformHint") }}</p>
         </div>
         <!-- 从分组复制账号 -->
@@ -2912,7 +2982,9 @@ const exclusiveOptions = computed(() => [
   { value: "false", label: t("admin.groups.nonExclusive") },
 ]);
 
-const platformOptions = computed(() => [
+type PlatformSelectOption = { value: GroupPlatform; label: string };
+
+const platformOptions = computed<PlatformSelectOption[]>(() => [
   { value: "anthropic", label: "Anthropic" },
   { value: "openai", label: "OpenAI" },
   { value: "gemini", label: "Gemini" },
@@ -2931,6 +3003,173 @@ const platformOptions = computed(() => [
   { value: "kling", label: "Kling" },
   { value: "midjourney", label: "Midjourney" },
 ]);
+
+interface GroupPlatformSearchOption extends PlatformSelectOption {
+  subtitle: string;
+  searchTerms: string[];
+  activeClass: string;
+  iconActiveClass: string;
+  textActiveClass: string;
+}
+
+const createPlatformSearchMeta: Record<
+  GroupPlatform,
+  Omit<GroupPlatformSearchOption, keyof PlatformSelectOption>
+> = {
+  anthropic: {
+    subtitle: "Claude / Messages",
+    searchTerms: ["anthropic", "claude", "messages", "sonnet", "opus", "haiku"],
+    activeClass:
+      "border-orange-200 bg-white shadow-sm dark:border-orange-900/50 dark:bg-dark-600",
+    iconActiveClass:
+      "bg-orange-50 text-orange-600 dark:bg-orange-900/30 dark:text-orange-300",
+    textActiveClass: "text-orange-600 dark:text-orange-300",
+  },
+  openai: {
+    subtitle: "GPT / Responses",
+    searchTerms: ["openai", "gpt", "responses", "chatgpt", "o1", "o3"],
+    activeClass:
+      "border-emerald-200 bg-white shadow-sm dark:border-emerald-900/50 dark:bg-dark-600",
+    iconActiveClass:
+      "bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300",
+    textActiveClass: "text-emerald-600 dark:text-emerald-300",
+  },
+  gemini: {
+    subtitle: "Google / v1beta",
+    searchTerms: ["gemini", "google", "v1beta", "flash", "pro"],
+    activeClass:
+      "border-blue-200 bg-white shadow-sm dark:border-blue-900/50 dark:bg-dark-600",
+    iconActiveClass:
+      "bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300",
+    textActiveClass: "text-blue-600 dark:text-blue-300",
+  },
+  antigravity: {
+    subtitle: "Mixed scheduling",
+    searchTerms: ["antigravity", "mixed", "cloud", "claude", "gemini"],
+    activeClass:
+      "border-purple-200 bg-white shadow-sm dark:border-purple-900/50 dark:bg-dark-600",
+    iconActiveClass:
+      "bg-purple-50 text-purple-600 dark:bg-purple-900/30 dark:text-purple-300",
+    textActiveClass: "text-purple-600 dark:text-purple-300",
+  },
+  zhipu: {
+    subtitle: "Zhipu / GLM 系列",
+    searchTerms: ["zhipu", "glm", "智谱", "bigmodel", "glm-4"],
+    activeClass:
+      "border-emerald-200 bg-white shadow-sm dark:border-emerald-900/50 dark:bg-dark-600",
+    iconActiveClass:
+      "bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300",
+    textActiveClass: "text-emerald-600 dark:text-emerald-300",
+  },
+  deepseek: {
+    subtitle: "DeepSeek 系列",
+    searchTerms: ["deepseek", "ds", "深度求索", "deepseek-chat", "deepseek-reasoner"],
+    activeClass:
+      "border-cyan-200 bg-white shadow-sm dark:border-cyan-900/50 dark:bg-dark-600",
+    iconActiveClass:
+      "bg-cyan-50 text-cyan-600 dark:bg-cyan-900/30 dark:text-cyan-300",
+    textActiveClass: "text-cyan-600 dark:text-cyan-300",
+  },
+  volcengine: {
+    subtitle: "VolcEngine / Doubao",
+    searchTerms: ["volcengine", "doubao", "ark", "火山", "豆包"],
+    activeClass:
+      "border-rose-200 bg-white shadow-sm dark:border-rose-900/50 dark:bg-dark-600",
+    iconActiveClass:
+      "bg-rose-50 text-rose-600 dark:bg-rose-900/30 dark:text-rose-300",
+    textActiveClass: "text-rose-600 dark:text-rose-300",
+  },
+  ali: {
+    subtitle: "DashScope / Qwen",
+    searchTerms: ["ali", "alibaba", "qwen", "dashscope", "阿里", "通义"],
+    activeClass:
+      "border-amber-200 bg-white shadow-sm dark:border-amber-900/50 dark:bg-dark-600",
+    iconActiveClass:
+      "bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-300",
+    textActiveClass: "text-amber-600 dark:text-amber-300",
+  },
+  moonshot: {
+    subtitle: "Moonshot / Kimi",
+    searchTerms: ["moonshot", "kimi", "月之暗面", "moonshot-v1"],
+    activeClass:
+      "border-fuchsia-200 bg-white shadow-sm dark:border-fuchsia-900/50 dark:bg-dark-600",
+    iconActiveClass:
+      "bg-fuchsia-50 text-fuchsia-600 dark:bg-fuchsia-900/30 dark:text-fuchsia-300",
+    textActiveClass: "text-fuchsia-600 dark:text-fuchsia-300",
+  },
+  perplexity: {
+    subtitle: "Sonar / New-API",
+    searchTerms: ["perplexity", "sonar", "pplx"],
+    activeClass:
+      "border-sky-200 bg-white shadow-sm dark:border-sky-900/50 dark:bg-dark-600",
+    iconActiveClass:
+      "bg-sky-50 text-sky-600 dark:bg-sky-900/30 dark:text-sky-300",
+    textActiveClass: "text-sky-600 dark:text-sky-300",
+  },
+  mistral: {
+    subtitle: "Mistral AI / New-API",
+    searchTerms: ["mistral", "mixtral", "codestral", "mistral-large"],
+    activeClass:
+      "border-violet-200 bg-white shadow-sm dark:border-violet-900/50 dark:bg-dark-600",
+    iconActiveClass:
+      "bg-violet-50 text-violet-600 dark:bg-violet-900/30 dark:text-violet-300",
+    textActiveClass: "text-violet-600 dark:text-violet-300",
+  },
+  siliconflow: {
+    subtitle: "SiliconCloud / New-API",
+    searchTerms: ["siliconflow", "silicon", "硅基流动"],
+    activeClass:
+      "border-teal-200 bg-white shadow-sm dark:border-teal-900/50 dark:bg-dark-600",
+    iconActiveClass:
+      "bg-teal-50 text-teal-600 dark:bg-teal-900/30 dark:text-teal-300",
+    textActiveClass: "text-teal-600 dark:text-teal-300",
+  },
+  xai: {
+    subtitle: "Grok / New-API",
+    searchTerms: ["xai", "x ai", "grok"],
+    activeClass:
+      "border-neutral-300 bg-white shadow-sm dark:border-neutral-700 dark:bg-dark-600",
+    iconActiveClass:
+      "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200",
+    textActiveClass: "text-neutral-700 dark:text-neutral-200",
+  },
+  openrouter: {
+    subtitle: "Multi-provider / New-API",
+    searchTerms: ["openrouter", "router", "multi-provider"],
+    activeClass:
+      "border-indigo-200 bg-white shadow-sm dark:border-indigo-900/50 dark:bg-dark-600",
+    iconActiveClass:
+      "bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-300",
+    textActiveClass: "text-indigo-600 dark:text-indigo-300",
+  },
+  suno: {
+    subtitle: "Music task / New-API",
+    searchTerms: ["suno", "music", "song", "audio", "音乐"],
+    activeClass:
+      "border-yellow-200 bg-white shadow-sm dark:border-yellow-900/50 dark:bg-dark-600",
+    iconActiveClass:
+      "bg-yellow-50 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-300",
+    textActiveClass: "text-yellow-600 dark:text-yellow-300",
+  },
+  kling: {
+    subtitle: "Video task / New-API",
+    searchTerms: ["kling", "video", "kuaishou", "可灵", "视频"],
+    activeClass:
+      "border-red-200 bg-white shadow-sm dark:border-red-900/50 dark:bg-dark-600",
+    iconActiveClass:
+      "bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-300",
+    textActiveClass: "text-red-600 dark:text-red-300",
+  },
+  midjourney: {
+    subtitle: "Image task / New-API",
+    searchTerms: ["midjourney", "mj", "image", "图片", "绘图"],
+    activeClass:
+      "border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-dark-600",
+    iconActiveClass:
+      "bg-slate-50 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
+    textActiveClass: "text-slate-600 dark:text-slate-300",
+  },
+};
 
 const platformFilterOptions = computed(() => [
   { value: "", label: t("admin.groups.allPlatforms") },
@@ -3156,6 +3395,55 @@ const createForm = reactive({
   rpm_limit: 0 as number,
   newapi_style_interface_enabled: false,
 });
+
+const createPlatformSearchQuery = ref("");
+const createPlatformScrollRef = ref<HTMLElement | null>(null);
+
+const createPlatformSearchOptions = computed<GroupPlatformSearchOption[]>(() =>
+  platformOptions.value.map((option) => ({
+    ...option,
+    ...createPlatformSearchMeta[option.value],
+  })),
+);
+
+const filteredCreatePlatformOptions = computed(() => {
+  const query = createPlatformSearchQuery.value.trim().toLowerCase();
+  if (!query) {
+    return createPlatformSearchOptions.value;
+  }
+
+  return createPlatformSearchOptions.value.filter((option) =>
+    [
+      option.value,
+      option.label,
+      option.subtitle,
+      ...option.searchTerms,
+    ].some((term) => term.toLowerCase().includes(query)),
+  );
+});
+
+const selectCreatePlatform = (platform: GroupPlatform) => {
+  if (createForm.platform === platform) {
+    return;
+  }
+  createForm.platform = platform;
+  createForm.copy_accounts_from_group_ids = [];
+};
+
+const handleCreatePlatformWheel = (event: WheelEvent) => {
+  const container = createPlatformScrollRef.value;
+  if (!container) {
+    return;
+  }
+  const delta =
+    Math.abs(event.deltaY) > Math.abs(event.deltaX)
+      ? event.deltaY
+      : event.deltaX;
+  if (delta === 0) {
+    return;
+  }
+  container.scrollBy({ left: delta, behavior: "auto" });
+};
 
 // 简单账号类型（用于模型路由选择）
 interface SimpleAccount {
@@ -3588,6 +3876,7 @@ const handleSort = (key: string, order: 'asc' | 'desc') => {
 
 const closeCreateModal = () => {
   showCreateModal.value = false;
+  createPlatformSearchQuery.value = "";
   createModelRoutingRules.value.forEach((rule) => {
     accountSearchRunner.clearKey(getCreateRuleSearchKey(rule));
   });
@@ -3994,3 +4283,14 @@ onUnmounted(() => {
   clearAllAccountSearchState();
 });
 </script>
+
+<style scoped>
+.platform-scroll-strip {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.platform-scroll-strip::-webkit-scrollbar {
+  display: none;
+}
+</style>
