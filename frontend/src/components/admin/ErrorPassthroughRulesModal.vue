@@ -494,7 +494,15 @@ const platformOptions = [
   { value: 'deepseek', label: 'DeepSeek' },
   { value: 'volcengine', label: '火山方舟/豆包' },
   { value: 'ali', label: 'Qwen/阿里' },
-  { value: 'moonshot', label: 'Kimi/月之暗面' }
+  { value: 'moonshot', label: 'Kimi/月之暗面' },
+  { value: 'perplexity', label: 'Perplexity' },
+  { value: 'mistral', label: 'Mistral' },
+  { value: 'siliconflow', label: 'SiliconFlow' },
+  { value: 'xai', label: 'xAI' },
+  { value: 'openrouter', label: 'OpenRouter' },
+  { value: 'suno', label: 'Suno' },
+  { value: 'kling', label: 'Kling' },
+  { value: 'midjourney', label: 'Midjourney' }
 ]
 
 // Load rules when dialog opens

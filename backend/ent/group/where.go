@@ -190,6 +190,11 @@ func DefaultMappedModel(v string) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldDefaultMappedModel, v))
 }
 
+// NewapiStyleInterfaceEnabled applies equality check predicate on the "newapi_style_interface_enabled" field. It's identical to NewapiStyleInterfaceEnabledEQ.
+func NewapiStyleInterfaceEnabled(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldNewapiStyleInterfaceEnabled, v))
+}
+
 // RpmLimit applies equality check predicate on the "rpm_limit" field. It's identical to RpmLimitEQ.
 func RpmLimit(v int) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldRpmLimit, v))
@@ -1323,6 +1328,16 @@ func DefaultMappedModelEqualFold(v string) predicate.Group {
 // DefaultMappedModelContainsFold applies the ContainsFold predicate on the "default_mapped_model" field.
 func DefaultMappedModelContainsFold(v string) predicate.Group {
 	return predicate.Group(sql.FieldContainsFold(FieldDefaultMappedModel, v))
+}
+
+// NewapiStyleInterfaceEnabledEQ applies the EQ predicate on the "newapi_style_interface_enabled" field.
+func NewapiStyleInterfaceEnabledEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldNewapiStyleInterfaceEnabled, v))
+}
+
+// NewapiStyleInterfaceEnabledNEQ applies the NEQ predicate on the "newapi_style_interface_enabled" field.
+func NewapiStyleInterfaceEnabledNEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldNewapiStyleInterfaceEnabled, v))
 }
 
 // RpmLimitEQ applies the EQ predicate on the "rpm_limit" field.

@@ -411,6 +411,20 @@ func (_c *GroupCreate) SetNillableDefaultMappedModel(v *string) *GroupCreate {
 	return _c
 }
 
+// SetNewapiStyleInterfaceEnabled sets the "newapi_style_interface_enabled" field.
+func (_c *GroupCreate) SetNewapiStyleInterfaceEnabled(v bool) *GroupCreate {
+	_c.mutation.SetNewapiStyleInterfaceEnabled(v)
+	return _c
+}
+
+// SetNillableNewapiStyleInterfaceEnabled sets the "newapi_style_interface_enabled" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableNewapiStyleInterfaceEnabled(v *bool) *GroupCreate {
+	if v != nil {
+		_c.SetNewapiStyleInterfaceEnabled(*v)
+	}
+	return _c
+}
+
 // SetMessagesDispatchModelConfig sets the "messages_dispatch_model_config" field.
 func (_c *GroupCreate) SetMessagesDispatchModelConfig(v domain.OpenAIMessagesDispatchModelConfig) *GroupCreate {
 	_c.mutation.SetMessagesDispatchModelConfig(v)
@@ -640,6 +654,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultDefaultMappedModel
 		_c.mutation.SetDefaultMappedModel(v)
 	}
+	if _, ok := _c.mutation.NewapiStyleInterfaceEnabled(); !ok {
+		v := group.DefaultNewapiStyleInterfaceEnabled
+		_c.mutation.SetNewapiStyleInterfaceEnabled(v)
+	}
 	if _, ok := _c.mutation.MessagesDispatchModelConfig(); !ok {
 		v := group.DefaultMessagesDispatchModelConfig
 		_c.mutation.SetMessagesDispatchModelConfig(v)
@@ -731,6 +749,9 @@ func (_c *GroupCreate) check() error {
 		if err := group.DefaultMappedModelValidator(v); err != nil {
 			return &ValidationError{Name: "default_mapped_model", err: fmt.Errorf(`ent: validator failed for field "Group.default_mapped_model": %w`, err)}
 		}
+	}
+	if _, ok := _c.mutation.NewapiStyleInterfaceEnabled(); !ok {
+		return &ValidationError{Name: "newapi_style_interface_enabled", err: errors.New(`ent: missing required field "Group.newapi_style_interface_enabled"`)}
 	}
 	if _, ok := _c.mutation.MessagesDispatchModelConfig(); !ok {
 		return &ValidationError{Name: "messages_dispatch_model_config", err: errors.New(`ent: missing required field "Group.messages_dispatch_model_config"`)}
@@ -880,6 +901,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.DefaultMappedModel(); ok {
 		_spec.SetField(group.FieldDefaultMappedModel, field.TypeString, value)
 		_node.DefaultMappedModel = value
+	}
+	if value, ok := _c.mutation.NewapiStyleInterfaceEnabled(); ok {
+		_spec.SetField(group.FieldNewapiStyleInterfaceEnabled, field.TypeBool, value)
+		_node.NewapiStyleInterfaceEnabled = value
 	}
 	if value, ok := _c.mutation.MessagesDispatchModelConfig(); ok {
 		_spec.SetField(group.FieldMessagesDispatchModelConfig, field.TypeJSON, value)
@@ -1513,6 +1538,18 @@ func (u *GroupUpsert) UpdateDefaultMappedModel() *GroupUpsert {
 	return u
 }
 
+// SetNewapiStyleInterfaceEnabled sets the "newapi_style_interface_enabled" field.
+func (u *GroupUpsert) SetNewapiStyleInterfaceEnabled(v bool) *GroupUpsert {
+	u.Set(group.FieldNewapiStyleInterfaceEnabled, v)
+	return u
+}
+
+// UpdateNewapiStyleInterfaceEnabled sets the "newapi_style_interface_enabled" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateNewapiStyleInterfaceEnabled() *GroupUpsert {
+	u.SetExcluded(group.FieldNewapiStyleInterfaceEnabled)
+	return u
+}
+
 // SetMessagesDispatchModelConfig sets the "messages_dispatch_model_config" field.
 func (u *GroupUpsert) SetMessagesDispatchModelConfig(v domain.OpenAIMessagesDispatchModelConfig) *GroupUpsert {
 	u.Set(group.FieldMessagesDispatchModelConfig, v)
@@ -2131,6 +2168,20 @@ func (u *GroupUpsertOne) SetDefaultMappedModel(v string) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateDefaultMappedModel() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateDefaultMappedModel()
+	})
+}
+
+// SetNewapiStyleInterfaceEnabled sets the "newapi_style_interface_enabled" field.
+func (u *GroupUpsertOne) SetNewapiStyleInterfaceEnabled(v bool) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetNewapiStyleInterfaceEnabled(v)
+	})
+}
+
+// UpdateNewapiStyleInterfaceEnabled sets the "newapi_style_interface_enabled" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateNewapiStyleInterfaceEnabled() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateNewapiStyleInterfaceEnabled()
 	})
 }
 
@@ -2923,6 +2974,20 @@ func (u *GroupUpsertBulk) SetDefaultMappedModel(v string) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateDefaultMappedModel() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateDefaultMappedModel()
+	})
+}
+
+// SetNewapiStyleInterfaceEnabled sets the "newapi_style_interface_enabled" field.
+func (u *GroupUpsertBulk) SetNewapiStyleInterfaceEnabled(v bool) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetNewapiStyleInterfaceEnabled(v)
+	})
+}
+
+// UpdateNewapiStyleInterfaceEnabled sets the "newapi_style_interface_enabled" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateNewapiStyleInterfaceEnabled() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateNewapiStyleInterfaceEnabled()
 	})
 }
 

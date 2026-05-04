@@ -182,7 +182,30 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		forwardStart := time.Now()
-		result, err := h.gatewayService.ForwardImages(c.Request.Context(), c, account, body, parsed, channelMapping.MappedModel)
+		var result *service.OpenAIForwardResult
+		var upstreamEndpoint string
+		if h.newAPIStyleService != nil && h.newAPIStyleService.SupportsForGroup(account, apiKey.Group, service.NewAPIStyleRouteImages) {
+			result, upstreamEndpoint, err = h.newAPIStyleService.ForwardOpenAI(
+				c.Request.Context(),
+				c,
+				account,
+				service.NewAPIStyleForwardOptions{
+					Route:        service.NewAPIStyleRouteImages,
+					Group:        apiKey.Group,
+					RequestBody:  body,
+					Stream:       parsed.Stream,
+					Model:        parsed.Model,
+					ImageSize:    parsed.Size,
+					Method:       http.MethodPost,
+					InboundPath:  c.Request.URL.Path,
+					QueryString:  c.Request.URL.RawQuery,
+					ContentType:  c.GetHeader("Content-Type"),
+					HeaderSource: c.Request.Header,
+				},
+			)
+		} else {
+			result, err = h.gatewayService.ForwardImages(c.Request.Context(), c, account, body, parsed, channelMapping.MappedModel)
+		}
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
@@ -264,6 +287,9 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		if parsed.Multipart {
 			requestPayloadHash = service.HashUsageRequestPayload([]byte(parsed.StickySessionSeed()))
 		}
+		if upstreamEndpoint == "" {
+			upstreamEndpoint = GetUpstreamEndpoint(c, account.Platform)
+		}
 		compat := compatibilityLogFields(c)
 
 		h.submitUsageRecordTask(func(ctx context.Context) {
@@ -274,7 +300,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 				Account:            account,
 				Subscription:       subscription,
 				InboundEndpoint:    GetInboundEndpoint(c),
-				UpstreamEndpoint:   GetUpstreamEndpoint(c, account.Platform),
+				UpstreamEndpoint:   upstreamEndpoint,
 				UserAgent:          userAgent,
 				IPAddress:          clientIP,
 				RequestPayloadHash: requestPayloadHash,

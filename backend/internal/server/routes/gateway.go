@@ -45,9 +45,11 @@ func RegisterGatewayRoutes(
 			switch getGroupPlatform(c) {
 			case service.PlatformOpenAI:
 				h.OpenAIGateway.Messages(c)
-			case service.PlatformZhipu, service.PlatformDeepSeek, service.PlatformVolcEngine, service.PlatformAli, service.PlatformMoonshot:
-				h.CompatibleGateway.Messages(c)
 			default:
+				if service.IsCompatiblePlatform(getGroupPlatform(c)) {
+					h.CompatibleGateway.Messages(c)
+					return
+				}
 				h.Gateway.Messages(c)
 			}
 		})
@@ -63,7 +65,10 @@ func RegisterGatewayRoutes(
 					},
 				})
 				return
-			case service.PlatformZhipu, service.PlatformDeepSeek, service.PlatformVolcEngine, service.PlatformAli, service.PlatformMoonshot:
+			default:
+				if !service.IsCompatiblePlatform(getGroupPlatform(c)) {
+					break
+				}
 				h.CompatibleGateway.CountTokens(c)
 				return
 			}
@@ -82,9 +87,11 @@ func RegisterGatewayRoutes(
 			switch getGroupPlatform(c) {
 			case service.PlatformOpenAI:
 				h.OpenAIGateway.Responses(c)
-			case service.PlatformZhipu, service.PlatformDeepSeek, service.PlatformVolcEngine, service.PlatformAli, service.PlatformMoonshot:
-				h.CompatibleGateway.Responses(c)
 			default:
+				if service.IsCompatiblePlatform(getGroupPlatform(c)) {
+					h.CompatibleGateway.Responses(c)
+					return
+				}
 				h.Gateway.Responses(c)
 			}
 		})
@@ -92,9 +99,11 @@ func RegisterGatewayRoutes(
 			switch getGroupPlatform(c) {
 			case service.PlatformOpenAI:
 				h.OpenAIGateway.Responses(c)
-			case service.PlatformZhipu, service.PlatformDeepSeek, service.PlatformVolcEngine, service.PlatformAli, service.PlatformMoonshot:
-				h.CompatibleGateway.Responses(c)
 			default:
+				if service.IsCompatiblePlatform(getGroupPlatform(c)) {
+					h.CompatibleGateway.Responses(c)
+					return
+				}
 				h.Gateway.Responses(c)
 			}
 		})
@@ -104,36 +113,39 @@ func RegisterGatewayRoutes(
 			switch getGroupPlatform(c) {
 			case service.PlatformOpenAI:
 				h.OpenAIGateway.ChatCompletions(c)
-			case service.PlatformZhipu, service.PlatformDeepSeek, service.PlatformVolcEngine, service.PlatformAli, service.PlatformMoonshot:
-				h.CompatibleGateway.ChatCompletions(c)
 			default:
+				if service.IsCompatiblePlatform(getGroupPlatform(c)) {
+					h.CompatibleGateway.ChatCompletions(c)
+					return
+				}
 				h.Gateway.ChatCompletions(c)
 			}
 		})
 		gateway.POST("/images/generations", func(c *gin.Context) {
-			if getGroupPlatform(c) != service.PlatformOpenAI {
-				c.JSON(http.StatusNotFound, gin.H{
-					"error": gin.H{
-						"type":    "not_found_error",
-						"message": "Images API is not supported for this platform",
-					},
-				})
+			if getGroupPlatform(c) == service.PlatformOpenAI {
+				h.OpenAIGateway.Images(c)
 				return
 			}
-			h.OpenAIGateway.Images(c)
+			writeImagesUnsupported(c)
 		})
 		gateway.POST("/images/edits", func(c *gin.Context) {
-			if getGroupPlatform(c) != service.PlatformOpenAI {
-				c.JSON(http.StatusNotFound, gin.H{
-					"error": gin.H{
-						"type":    "not_found_error",
-						"message": "Images API is not supported for this platform",
-					},
-				})
+			if getGroupPlatform(c) == service.PlatformOpenAI {
+				h.OpenAIGateway.Images(c)
 				return
 			}
-			h.OpenAIGateway.Images(c)
+			writeImagesUnsupported(c)
 		})
+		gateway.POST("/audio/*subpath", h.NewAPIStyleGateway.Audio)
+		gateway.POST("/embeddings", h.NewAPIStyleGateway.Embeddings)
+		gateway.POST("/rerank", h.NewAPIStyleGateway.Rerank)
+		gateway.GET("/videos", h.NewAPIStyleGateway.Videos)
+		gateway.POST("/videos", h.NewAPIStyleGateway.Videos)
+		gateway.GET("/videos/*subpath", h.NewAPIStyleGateway.Videos)
+		gateway.POST("/videos/*subpath", h.NewAPIStyleGateway.Videos)
+		gateway.GET("/video/generations", h.NewAPIStyleGateway.VideoGenerations)
+		gateway.POST("/video/generations", h.NewAPIStyleGateway.VideoGenerations)
+		gateway.GET("/video/generations/*subpath", h.NewAPIStyleGateway.VideoGenerations)
+		gateway.POST("/video/generations/*subpath", h.NewAPIStyleGateway.VideoGenerations)
 	}
 
 	// Gemini 原生 API 兼容层（Gemini SDK/CLI 直连）
@@ -156,9 +168,11 @@ func RegisterGatewayRoutes(
 		switch getGroupPlatform(c) {
 		case service.PlatformOpenAI:
 			h.OpenAIGateway.Responses(c)
-		case service.PlatformZhipu, service.PlatformDeepSeek, service.PlatformVolcEngine, service.PlatformAli, service.PlatformMoonshot:
-			h.CompatibleGateway.Responses(c)
 		default:
+			if service.IsCompatiblePlatform(getGroupPlatform(c)) {
+				h.CompatibleGateway.Responses(c)
+				return
+			}
 			h.Gateway.Responses(c)
 		}
 	}
@@ -177,36 +191,43 @@ func RegisterGatewayRoutes(
 		switch getGroupPlatform(c) {
 		case service.PlatformOpenAI:
 			h.OpenAIGateway.ChatCompletions(c)
-		case service.PlatformZhipu, service.PlatformDeepSeek, service.PlatformVolcEngine, service.PlatformAli, service.PlatformMoonshot:
-			h.CompatibleGateway.ChatCompletions(c)
 		default:
+			if service.IsCompatiblePlatform(getGroupPlatform(c)) {
+				h.CompatibleGateway.ChatCompletions(c)
+				return
+			}
 			h.Gateway.ChatCompletions(c)
 		}
 	})
 	r.POST("/images/generations", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, func(c *gin.Context) {
-		if getGroupPlatform(c) != service.PlatformOpenAI {
-			c.JSON(http.StatusNotFound, gin.H{
-				"error": gin.H{
-					"type":    "not_found_error",
-					"message": "Images API is not supported for this platform",
-				},
-			})
+		if getGroupPlatform(c) == service.PlatformOpenAI {
+			h.OpenAIGateway.Images(c)
 			return
 		}
-		h.OpenAIGateway.Images(c)
+		writeImagesUnsupported(c)
 	})
 	r.POST("/images/edits", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, func(c *gin.Context) {
-		if getGroupPlatform(c) != service.PlatformOpenAI {
-			c.JSON(http.StatusNotFound, gin.H{
-				"error": gin.H{
-					"type":    "not_found_error",
-					"message": "Images API is not supported for this platform",
-				},
-			})
+		if getGroupPlatform(c) == service.PlatformOpenAI {
+			h.OpenAIGateway.Images(c)
 			return
 		}
-		h.OpenAIGateway.Images(c)
+		writeImagesUnsupported(c)
 	})
+	newAPIOnly := []gin.HandlerFunc{bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic}
+	r.POST("/audio/*subpath", append(newAPIOnly, h.NewAPIStyleGateway.Audio)...)
+	r.POST("/embeddings", append(newAPIOnly, h.NewAPIStyleGateway.Embeddings)...)
+	r.POST("/rerank", append(newAPIOnly, h.NewAPIStyleGateway.Rerank)...)
+	r.GET("/videos", append(newAPIOnly, h.NewAPIStyleGateway.Videos)...)
+	r.POST("/videos", append(newAPIOnly, h.NewAPIStyleGateway.Videos)...)
+	r.GET("/videos/*subpath", append(newAPIOnly, h.NewAPIStyleGateway.Videos)...)
+	r.POST("/videos/*subpath", append(newAPIOnly, h.NewAPIStyleGateway.Videos)...)
+	r.GET("/video/generations", append(newAPIOnly, h.NewAPIStyleGateway.VideoGenerations)...)
+	r.POST("/video/generations", append(newAPIOnly, h.NewAPIStyleGateway.VideoGenerations)...)
+	r.GET("/video/generations/*subpath", append(newAPIOnly, h.NewAPIStyleGateway.VideoGenerations)...)
+	r.POST("/video/generations/*subpath", append(newAPIOnly, h.NewAPIStyleGateway.VideoGenerations)...)
+	r.Any("/suno/*subpath", append(newAPIOnly, h.NewAPIStyleGateway.Suno)...)
+	r.Any("/kling/*subpath", append(newAPIOnly, h.NewAPIStyleGateway.Kling)...)
+	r.Any("/mj/*subpath", append(newAPIOnly, h.NewAPIStyleGateway.Midjourney)...)
 
 	// Antigravity 模型列表
 	r.GET("/antigravity/models", gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, h.Gateway.AntigravityModels)
@@ -250,4 +271,13 @@ func getGroupPlatform(c *gin.Context) string {
 		return ""
 	}
 	return apiKey.Group.Platform
+}
+
+func writeImagesUnsupported(c *gin.Context) {
+	c.JSON(http.StatusNotFound, gin.H{
+		"error": gin.H{
+			"type":    "not_found_error",
+			"message": "Images API is not supported for this platform",
+		},
+	})
 }

@@ -39,6 +39,26 @@
   <svg v-else-if="platform === 'moonshot'" :class="sizeClass" viewBox="0 0 24 24" fill="currentColor">
     <path d="M12 2a10 10 0 109.95 11H13V2.05A8 8 0 0112 2z" />
   </svg>
+  <!-- Perplexity -->
+  <svg v-else-if="platform === 'perplexity'" :class="sizeClass" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M4 4h16v7h-4v9h-4l-4-4v4H4V4zm4 4v5h4V8H8zm8 0v5h-4l4 4V8z" />
+  </svg>
+  <!-- Mistral -->
+  <svg v-else-if="platform === 'mistral'" :class="sizeClass" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M3 5h4v4h2v2h2V9h2V5h4v4h4v10h-4v-6h-2v2h-2v2h-2v-2H9v-2H7v6H3V5z" />
+  </svg>
+  <!-- SiliconFlow -->
+  <svg v-else-if="platform === 'siliconflow'" :class="sizeClass" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M12 2l8 4.5v9L12 20l-8-4.5v-9L12 2zm0 4.2L7.5 8.7v5.1l4.5 2.5 4.5-2.5V8.7L12 6.2zM9 10h6v4H9v-4z" />
+  </svg>
+  <!-- xAI -->
+  <svg v-else-if="platform === 'xai'" :class="sizeClass" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M4 4h4.5l3.5 5 3.5-5H20l-5.7 8L20 20h-4.5L12 15l-3.5 5H4l5.7-8L4 4z" />
+  </svg>
+  <!-- OpenRouter -->
+  <svg v-else-if="platform === 'openrouter'" :class="sizeClass" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M4 7h10l3-3 3 3-3 3-3-3H4V7zm16 10H10l-3 3-3-3 3-3 3 3h10v0zM4 11h16v2H4v-2z" />
+  </svg>
   <!-- Fallback: generic platform icon -->
   <svg v-else :class="sizeClass" fill="currentColor" viewBox="0 0 24 24">
     <path

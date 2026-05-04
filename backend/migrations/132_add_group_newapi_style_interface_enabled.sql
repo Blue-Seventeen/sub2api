@@ -1,0 +1,2 @@
+ALTER TABLE groups
+    ADD COLUMN IF NOT EXISTS newapi_style_interface_enabled BOOLEAN NOT NULL DEFAULT FALSE;

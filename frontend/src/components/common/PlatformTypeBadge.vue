@@ -82,6 +82,14 @@ const platformLabel = computed(() => {
   if (props.platform === 'volcengine') return '火山方舟/豆包'
   if (props.platform === 'ali') return 'Qwen/阿里'
   if (props.platform === 'moonshot') return 'Kimi/月之暗面'
+  if (props.platform === 'perplexity') return 'Perplexity'
+  if (props.platform === 'mistral') return 'Mistral'
+  if (props.platform === 'siliconflow') return 'SiliconFlow'
+  if (props.platform === 'xai') return 'xAI'
+  if (props.platform === 'openrouter') return 'OpenRouter'
+  if (props.platform === 'suno') return 'Suno'
+  if (props.platform === 'kling') return 'Kling'
+  if (props.platform === 'midjourney') return 'Midjourney'
   return props.platform
 })
 

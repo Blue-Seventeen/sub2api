@@ -450,7 +450,7 @@ export interface PaginationConfig {
 
 // ==================== API Key & Group Types ====================
 
-export type GroupPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'zhipu' | 'deepseek' | 'volcengine' | 'ali' | 'moonshot'
+export type GroupPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'zhipu' | 'deepseek' | 'volcengine' | 'ali' | 'moonshot' | 'perplexity' | 'mistral' | 'siliconflow' | 'xai' | 'openrouter' | 'suno' | 'kling' | 'midjourney'
 
 export type SubscriptionType = 'standard' | 'subscription'
 
@@ -468,6 +468,7 @@ export interface Group {
   platform: GroupPlatform
   rate_multiplier: number
   rpm_limit?: number // Group-level RPM cap (0 = unlimited); overrides user-level rpm_limit when set
+  newapi_style_interface_enabled?: boolean
   is_exclusive: boolean
   status: 'active' | 'inactive'
   subscription_type: SubscriptionType
@@ -624,7 +625,7 @@ export interface UpdateGroupRequest {
 
 // ==================== Account & Proxy Types ====================
 
-export type AccountPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'zhipu' | 'deepseek' | 'volcengine' | 'ali' | 'moonshot'
+export type AccountPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'zhipu' | 'deepseek' | 'volcengine' | 'ali' | 'moonshot' | 'perplexity' | 'mistral' | 'siliconflow' | 'xai' | 'openrouter' | 'suno' | 'kling' | 'midjourney'
 export type AccountType = 'oauth' | 'setup-token' | 'apikey' | 'upstream' | 'bedrock' | 'service_account'
 export type OAuthAddMethod = 'oauth' | 'setup-token'
 export type ProxyProtocol = 'http' | 'https' | 'socks5' | 'socks5h'
@@ -1122,6 +1123,10 @@ export interface UsageLog {
   // 图片生成字段
   image_count: number
   image_size: string | null
+  request_count: number
+  task_count: number
+  usage_estimated: boolean
+  billable_unit_type?: string | null
 
   // User-Agent
   user_agent: string | null

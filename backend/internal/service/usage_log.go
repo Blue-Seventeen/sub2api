@@ -178,6 +178,11 @@ type UsageLog struct {
 	ImageSize  *string
 	MediaType  *string
 
+	RequestCount     int
+	TaskCount        int
+	UsageEstimated   bool
+	BillableUnitType *string
+
 	CreatedAt time.Time
 
 	User         *User

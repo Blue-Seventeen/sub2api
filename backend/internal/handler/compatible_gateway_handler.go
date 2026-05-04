@@ -308,7 +308,42 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 		accountReleaseFunc = wrapReleaseOnDone(c.Request.Context(), accountReleaseFunc)
 
 		writerSizeBefore := c.Writer.Size()
-		result, upstreamEndpoint, err := h.compatibleService.Forward(c.Request.Context(), c, account, route, body)
+		var result *service.ForwardResult
+		var upstreamEndpoint string
+		if h.base.newAPIStyleService != nil && account.UseNewAPIStyleInterfaceForGroup(apiKey.Group) {
+			var newAPIRoute service.NewAPIStyleRoute
+			switch route {
+			case service.CompatibleRouteMessages:
+				newAPIRoute = service.NewAPIStyleRouteMessages
+			case service.CompatibleRouteChatCompletions:
+				newAPIRoute = service.NewAPIStyleRouteChatCompletions
+			case service.CompatibleRouteResponses:
+				newAPIRoute = service.NewAPIStyleRouteResponses
+			}
+			if h.base.newAPIStyleService.SupportsForGroup(account, apiKey.Group, newAPIRoute) {
+				result, upstreamEndpoint, err = h.base.newAPIStyleService.Forward(
+					c.Request.Context(),
+					c,
+					account,
+					service.NewAPIStyleForwardOptions{
+						Route:        newAPIRoute,
+						Group:        apiKey.Group,
+						RequestBody:  body,
+						Stream:       parsed.Stream,
+						Model:        parsed.Model,
+						Method:       http.MethodPost,
+						InboundPath:  c.Request.URL.Path,
+						QueryString:  c.Request.URL.RawQuery,
+						ContentType:  c.GetHeader("Content-Type"),
+						HeaderSource: c.Request.Header,
+					},
+				)
+			} else {
+				result, upstreamEndpoint, err = h.compatibleService.Forward(c.Request.Context(), c, account, route, body)
+			}
+		} else {
+			result, upstreamEndpoint, err = h.compatibleService.Forward(c.Request.Context(), c, account, route, body)
+		}
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
 		}

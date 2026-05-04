@@ -290,6 +290,14 @@ const platformColorClass = computed(() => {
     case 'volcengine': return 'text-rose-700 dark:text-rose-400'
     case 'ali': return 'text-amber-700 dark:text-amber-400'
     case 'moonshot': return 'text-fuchsia-700 dark:text-fuchsia-400'
+    case 'perplexity': return 'text-sky-700 dark:text-sky-400'
+    case 'mistral': return 'text-violet-700 dark:text-violet-400'
+    case 'siliconflow': return 'text-teal-700 dark:text-teal-400'
+    case 'xai': return 'text-neutral-700 dark:text-neutral-300'
+    case 'openrouter': return 'text-indigo-700 dark:text-indigo-400'
+    case 'suno': return 'text-yellow-700 dark:text-yellow-300'
+    case 'kling': return 'text-red-700 dark:text-red-400'
+    case 'midjourney': return 'text-slate-700 dark:text-slate-300'
     default: return 'text-blue-700 dark:text-blue-400'
   }
 })

@@ -2460,6 +2460,40 @@
         />
       </div>
 
+      <div
+        v-if="supportsNewAPIStyleInterface"
+        class="rounded-lg border border-gray-200 p-4 dark:border-dark-600"
+      >
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <label class="input-label mb-0">启动 New-API 风格接口</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ requiresNewAPIStyleInterface
+                ? '该平台仅支持 New-API 风格接口，创建后会强制启用。'
+                : '默认关闭以保留现有 sub2api 链路；仅在确认需要 New-API 风格 adapter 时开启。'
+              }}
+            </p>
+          </div>
+          <button
+            type="button"
+            :disabled="requiresNewAPIStyleInterface"
+            @click="newAPIStyleInterfaceEnabled = requiresNewAPIStyleInterface ? true : !newAPIStyleInterfaceEnabled"
+            :class="[
+              'relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+              requiresNewAPIStyleInterface ? 'cursor-not-allowed opacity-75' : 'cursor-pointer',
+              newAPIStyleInterfaceEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+            ]"
+          >
+            <span
+              :class="[
+                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                newAPIStyleInterfaceEnabled ? 'translate-x-5' : 'translate-x-0'
+              ]"
+            />
+          </button>
+        </div>
+      </div>
+
       <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <div>
           <label class="input-label">{{ t('admin.accounts.concurrency') }}</label>
@@ -3198,9 +3232,33 @@ const apiKeyHint = computed(() => {
   return t('admin.accounts.apiKeyHint')
 })
 
-const compatiblePlatforms: AccountPlatform[] = ['zhipu', 'deepseek', 'volcengine', 'ali', 'moonshot']
+const compatiblePlatforms: AccountPlatform[] = [
+  'zhipu',
+  'deepseek',
+  'volcengine',
+  'ali',
+  'moonshot',
+  'perplexity',
+  'mistral',
+  'siliconflow',
+  'xai',
+  'openrouter',
+  'suno',
+  'kling',
+  'midjourney'
+]
+const newAPIOnlyPlatforms: AccountPlatform[] = ['perplexity', 'mistral', 'siliconflow', 'xai', 'openrouter', 'suno', 'kling', 'midjourney']
+const newAPIStyleSupportedPlatforms: AccountPlatform[] = [
+  'anthropic',
+  'openai',
+  'gemini',
+  'antigravity',
+  ...compatiblePlatforms
+]
 
 const isCompatibleProviderPlatform = computed(() => compatiblePlatforms.includes(form.platform))
+const requiresNewAPIStyleInterface = computed(() => newAPIOnlyPlatforms.includes(form.platform))
+const supportsNewAPIStyleInterface = computed(() => newAPIStyleSupportedPlatforms.includes(form.platform))
 
 const getPlatformDefaultBaseURL = (platform: AccountPlatform) => {
   switch (platform) {
@@ -3218,6 +3276,21 @@ const getPlatformDefaultBaseURL = (platform: AccountPlatform) => {
       return 'https://dashscope.aliyuncs.com'
     case 'moonshot':
       return 'https://api.moonshot.cn'
+    case 'perplexity':
+      return 'https://api.perplexity.ai'
+    case 'mistral':
+      return 'https://api.mistral.ai'
+    case 'siliconflow':
+      return 'https://api.siliconflow.cn'
+    case 'xai':
+      return 'https://api.x.ai'
+    case 'openrouter':
+      return 'https://openrouter.ai/api'
+    case 'kling':
+      return 'https://api.klingai.com'
+    case 'suno':
+    case 'midjourney':
+      return ''
     default:
       return 'https://api.anthropic.com'
   }
@@ -3233,6 +3306,8 @@ const apiKeyPlaceholder = computed(() => {
       return 'AIza...'
     case 'zhipu':
       return 'xxxxxxxx.xxxxxxxx'
+    case 'openrouter':
+      return 'sk-or-...'
     default:
       return 'sk-...'
   }
@@ -3332,6 +3407,78 @@ const platformOptions = computed<PlatformSearchOption[]>(() => [
     activeClass: 'border-fuchsia-200 bg-white shadow-sm dark:border-fuchsia-900/50 dark:bg-dark-600',
     iconActiveClass: 'bg-fuchsia-50 text-fuchsia-600 dark:bg-fuchsia-900/30 dark:text-fuchsia-300',
     textActiveClass: 'text-fuchsia-600 dark:text-fuchsia-300'
+  },
+  {
+    value: 'perplexity',
+    label: 'Perplexity',
+    subtitle: 'Sonar / New-API',
+    searchTerms: ['perplexity', 'sonar', 'pplx'],
+    activeClass: 'border-sky-200 bg-white shadow-sm dark:border-sky-900/50 dark:bg-dark-600',
+    iconActiveClass: 'bg-sky-50 text-sky-600 dark:bg-sky-900/30 dark:text-sky-300',
+    textActiveClass: 'text-sky-600 dark:text-sky-300'
+  },
+  {
+    value: 'mistral',
+    label: 'Mistral',
+    subtitle: 'Mistral AI / New-API',
+    searchTerms: ['mistral', 'mixtral', 'codestral'],
+    activeClass: 'border-violet-200 bg-white shadow-sm dark:border-violet-900/50 dark:bg-dark-600',
+    iconActiveClass: 'bg-violet-50 text-violet-600 dark:bg-violet-900/30 dark:text-violet-300',
+    textActiveClass: 'text-violet-600 dark:text-violet-300'
+  },
+  {
+    value: 'siliconflow',
+    label: 'SiliconFlow',
+    subtitle: 'SiliconCloud / New-API',
+    searchTerms: ['siliconflow', 'silicon', '硅基流动'],
+    activeClass: 'border-teal-200 bg-white shadow-sm dark:border-teal-900/50 dark:bg-dark-600',
+    iconActiveClass: 'bg-teal-50 text-teal-600 dark:bg-teal-900/30 dark:text-teal-300',
+    textActiveClass: 'text-teal-600 dark:text-teal-300'
+  },
+  {
+    value: 'xai',
+    label: 'xAI',
+    subtitle: 'Grok / New-API',
+    searchTerms: ['xai', 'grok'],
+    activeClass: 'border-neutral-300 bg-white shadow-sm dark:border-neutral-700 dark:bg-dark-600',
+    iconActiveClass: 'bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200',
+    textActiveClass: 'text-neutral-700 dark:text-neutral-200'
+  },
+  {
+    value: 'openrouter',
+    label: 'OpenRouter',
+    subtitle: 'Multi-provider / New-API',
+    searchTerms: ['openrouter', 'router'],
+    activeClass: 'border-indigo-200 bg-white shadow-sm dark:border-indigo-900/50 dark:bg-dark-600',
+    iconActiveClass: 'bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-300',
+    textActiveClass: 'text-indigo-600 dark:text-indigo-300'
+  },
+  {
+    value: 'suno',
+    label: 'Suno',
+    subtitle: 'Music task / New-API',
+    searchTerms: ['suno', 'music', 'song'],
+    activeClass: 'border-yellow-200 bg-white shadow-sm dark:border-yellow-900/50 dark:bg-dark-600',
+    iconActiveClass: 'bg-yellow-50 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-300',
+    textActiveClass: 'text-yellow-600 dark:text-yellow-300'
+  },
+  {
+    value: 'kling',
+    label: 'Kling',
+    subtitle: 'Video task / New-API',
+    searchTerms: ['kling', 'video', 'kuaishou'],
+    activeClass: 'border-red-200 bg-white shadow-sm dark:border-red-900/50 dark:bg-dark-600',
+    iconActiveClass: 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-300',
+    textActiveClass: 'text-red-600 dark:text-red-300'
+  },
+  {
+    value: 'midjourney',
+    label: 'Midjourney',
+    subtitle: 'Image task / New-API',
+    searchTerms: ['midjourney', 'mj', 'image'],
+    activeClass: 'border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-dark-600',
+    iconActiveClass: 'bg-slate-50 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
+    textActiveClass: 'text-slate-600 dark:text-slate-300'
   }
 ])
 
@@ -3410,6 +3557,7 @@ const accountCategory = ref<'oauth-based' | 'apikey' | 'bedrock' | 'service_acco
 const addMethod = ref<AddMethod>('oauth') // For oauth-based: 'oauth' or 'setup-token'
 const apiKeyBaseUrl = ref('https://api.anthropic.com')
 const apiKeyValue = ref('')
+const newAPIStyleInterfaceEnabled = ref(false)
 const editQuotaLimit = ref<number | null>(null)
 const editQuotaDailyLimit = ref<number | null>(null)
 const editQuotaWeeklyLimit = ref<number | null>(null)
@@ -3769,6 +3917,13 @@ const buildCreateExtra = (base?: Record<string, unknown>) => {
   } else {
     delete extra.auto_select_proxy
   }
+  if (requiresNewAPIStyleInterface.value) {
+    extra.newapi_style_interface_enabled = true
+  } else if (supportsNewAPIStyleInterface.value && newAPIStyleInterfaceEnabled.value) {
+    extra.newapi_style_interface_enabled = true
+  } else {
+    delete extra.newapi_style_interface_enabled
+  }
   return Object.keys(extra).length > 0 ? extra : undefined
 }
 
@@ -3874,6 +4029,7 @@ watch(
   (newPlatform) => {
     // Reset base URL based on platform
     apiKeyBaseUrl.value = getPlatformDefaultBaseURL(newPlatform)
+    newAPIStyleInterfaceEnabled.value = newAPIOnlyPlatforms.includes(newPlatform)
     // Clear model-related settings
     allowedModels.value = []
     modelMappings.value = []
@@ -4288,6 +4444,7 @@ const resetForm = () => {
   addMethod.value = 'oauth'
   apiKeyBaseUrl.value = 'https://api.anthropic.com'
   apiKeyValue.value = ''
+  newAPIStyleInterfaceEnabled.value = false
   editQuotaLimit.value = null
   editQuotaDailyLimit.value = null
   editQuotaWeeklyLimit.value = null

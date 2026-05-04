@@ -524,6 +524,7 @@ var ProviderSet = wire.NewSet(
 	ProvideAccountRefreshService,
 	NewGatewayService,
 	NewOpenAIGatewayService,
+	NewNewAPIStyleGatewayService,
 	ProvideCompatibleGatewayService,
 	NewOAuthService,
 	NewOpenAIOAuthService,

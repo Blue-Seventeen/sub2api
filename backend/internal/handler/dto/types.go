@@ -118,6 +118,8 @@ type Group struct {
 	// RPMLimit 分组级每分钟请求数上限（0 = 不限制），设置后覆盖用户级 rpm_limit。
 	RPMLimit int `json:"rpm_limit"`
 
+	NewAPIStyleInterfaceEnabled bool `json:"newapi_style_interface_enabled"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -409,6 +411,11 @@ type UsageLog struct {
 	ImageCount int     `json:"image_count"`
 	ImageSize  *string `json:"image_size"`
 	MediaType  *string `json:"media_type"`
+
+	RequestCount     int     `json:"request_count"`
+	TaskCount        int     `json:"task_count"`
+	UsageEstimated   bool    `json:"usage_estimated"`
+	BillableUnitType *string `json:"billable_unit_type,omitempty"`
 
 	// User-Agent
 	UserAgent *string `json:"user_agent"`

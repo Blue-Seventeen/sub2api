@@ -44,12 +44,22 @@ type CompatibleProviderPreset struct {
 	PatchResponsesBody    func(body []byte, account *Account, upstreamModel string) ([]byte, error)
 }
 
+const AccountExtraNewAPIStyleInterfaceEnabled = "newapi_style_interface_enabled"
+
 var compatiblePlatformOrder = []string{
 	PlatformZhipu,
 	PlatformDeepSeek,
 	PlatformVolcEngine,
 	PlatformAli,
 	PlatformMoonshot,
+	PlatformPerplexity,
+	PlatformMistral,
+	PlatformSiliconFlow,
+	PlatformXAI,
+	PlatformOpenRouter,
+	PlatformSuno,
+	PlatformKling,
+	PlatformMidjourney,
 }
 
 func CompatiblePlatforms() []string {
@@ -60,11 +70,66 @@ func CompatiblePlatforms() []string {
 
 func IsCompatiblePlatform(platform string) bool {
 	switch strings.TrimSpace(platform) {
-	case PlatformZhipu, PlatformDeepSeek, PlatformVolcEngine, PlatformAli, PlatformMoonshot:
+	case PlatformZhipu, PlatformDeepSeek, PlatformVolcEngine, PlatformAli, PlatformMoonshot,
+		PlatformPerplexity, PlatformMistral, PlatformSiliconFlow, PlatformXAI, PlatformOpenRouter,
+		PlatformSuno, PlatformKling, PlatformMidjourney:
 		return true
 	default:
 		return false
 	}
+}
+
+func PlatformRequiresNewAPIStyleInterface(platform string) bool {
+	switch strings.TrimSpace(platform) {
+	case PlatformPerplexity, PlatformMistral, PlatformSiliconFlow, PlatformXAI, PlatformOpenRouter,
+		PlatformSuno, PlatformKling, PlatformMidjourney:
+		return true
+	default:
+		return false
+	}
+}
+
+func PlatformSupportsNewAPIStyleInterface(platform string) bool {
+	switch strings.TrimSpace(platform) {
+	case PlatformAnthropic, PlatformOpenAI, PlatformGemini, PlatformAntigravity:
+		return true
+	default:
+		return IsCompatiblePlatform(platform)
+	}
+}
+
+func NormalizeNewAPIStyleInterfaceExtra(platform string, extra map[string]any) map[string]any {
+	var out map[string]any
+	if len(extra) > 0 {
+		out = make(map[string]any, len(extra)+1)
+		for key, value := range extra {
+			out[key] = value
+		}
+	}
+
+	if PlatformRequiresNewAPIStyleInterface(platform) {
+		if out == nil {
+			out = make(map[string]any, 1)
+		}
+		out[AccountExtraNewAPIStyleInterfaceEnabled] = true
+		return out
+	}
+
+	if !PlatformSupportsNewAPIStyleInterface(platform) {
+		if out != nil {
+			delete(out, AccountExtraNewAPIStyleInterfaceEnabled)
+		}
+		return out
+	}
+
+	if (&Account{Extra: out}).GetExtraBool(AccountExtraNewAPIStyleInterfaceEnabled) {
+		out[AccountExtraNewAPIStyleInterfaceEnabled] = true
+		return out
+	}
+	if out != nil {
+		delete(out, AccountExtraNewAPIStyleInterfaceEnabled)
+	}
+	return out
 }
 
 func compatiblePlatformDisplayName(platform string) string {
@@ -79,6 +144,22 @@ func compatiblePlatformDisplayName(platform string) string {
 		return "Qwen/阿里"
 	case PlatformMoonshot:
 		return "Kimi/月之暗面"
+	case PlatformPerplexity:
+		return "Perplexity"
+	case PlatformMistral:
+		return "Mistral"
+	case PlatformSiliconFlow:
+		return "SiliconFlow"
+	case PlatformXAI:
+		return "xAI"
+	case PlatformOpenRouter:
+		return "OpenRouter"
+	case PlatformSuno:
+		return "Suno"
+	case PlatformKling:
+		return "Kling"
+	case PlatformMidjourney:
+		return "Midjourney"
 	default:
 		return platform
 	}
@@ -96,6 +177,22 @@ func CompatibleProviderPresetForPlatform(platform string) (CompatibleProviderPre
 		return aliCompatibleProviderPreset(), true
 	case PlatformMoonshot:
 		return moonshotCompatibleProviderPreset(), true
+	case PlatformPerplexity:
+		return perplexityCompatibleProviderPreset(), true
+	case PlatformMistral:
+		return mistralCompatibleProviderPreset(), true
+	case PlatformSiliconFlow:
+		return siliconFlowCompatibleProviderPreset(), true
+	case PlatformXAI:
+		return xaiCompatibleProviderPreset(), true
+	case PlatformOpenRouter:
+		return openRouterCompatibleProviderPreset(), true
+	case PlatformSuno:
+		return sunoCompatibleProviderPreset(), true
+	case PlatformKling:
+		return klingCompatibleProviderPreset(), true
+	case PlatformMidjourney:
+		return midjourneyCompatibleProviderPreset(), true
 	default:
 		return CompatibleProviderPreset{}, false
 	}
@@ -156,6 +253,11 @@ func getCompatiblePreset(account *Account) (CompatibleProviderPreset, error) {
 	if account == nil {
 		return CompatibleProviderPreset{}, fmt.Errorf("account is nil")
 	}
+	if account.UseNewAPIStyleInterface() {
+		if preset, ok := newAPIStyleCompatibleProviderPresetForPlatform(account.Platform); ok {
+			return preset, nil
+		}
+	}
 	preset, ok := CompatibleProviderPresetForPlatform(account.Platform)
 	if !ok {
 		return CompatibleProviderPreset{}, fmt.Errorf("unsupported compatible platform: %s", account.Platform)
@@ -168,6 +270,37 @@ func (a *Account) IsCompatiblePlatform() bool {
 		return false
 	}
 	return IsCompatiblePlatform(a.Platform)
+}
+
+func (a *Account) UseNewAPIStyleInterface() bool {
+	return UseNewAPIStyleInterface(a, nil)
+}
+
+func (a *Account) UseNewAPIStyleInterfaceForGroup(group *Group) bool {
+	return UseNewAPIStyleInterface(a, group)
+}
+
+func UseNewAPIStyleInterface(account *Account, group *Group) bool {
+	if account == nil || !PlatformSupportsNewAPIStyleInterface(account.Platform) {
+		return false
+	}
+	if PlatformRequiresNewAPIStyleInterface(account.Platform) {
+		return true
+	}
+	if groupEnablesNewAPIStyleInterface(group, account.Platform) {
+		return true
+	}
+	return account.GetExtraBool(AccountExtraNewAPIStyleInterfaceEnabled)
+}
+
+func groupEnablesNewAPIStyleInterface(group *Group, platform string) bool {
+	if !IsGroupContextValid(group) || !group.NewAPIStyleInterfaceEnabled {
+		return false
+	}
+	if strings.TrimSpace(group.Platform) == "" || strings.TrimSpace(platform) == "" {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(group.Platform), strings.TrimSpace(platform))
 }
 
 func (a *Account) GetCompatibleBaseURL() string {

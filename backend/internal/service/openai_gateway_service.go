@@ -235,6 +235,10 @@ type OpenAIForwardResult struct {
 	FirstTokenMs    *int
 	ImageCount      int
 	ImageSize       string
+	RequestCount    int
+	TaskCount       int
+	UsageEstimated  bool
+	BillableUnitType string
 }
 
 type OpenAIWSRetryMetricsSnapshot struct {
@@ -5035,7 +5039,8 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	// 跳过所有 token 均为零的用量记录——上游未返回 usage 时不应写入数据库
 	if result.Usage.InputTokens == 0 && result.Usage.OutputTokens == 0 &&
 		result.Usage.CacheCreationInputTokens == 0 && result.Usage.CacheReadInputTokens == 0 &&
-		result.Usage.ImageOutputTokens == 0 && result.ImageCount == 0 {
+		result.Usage.ImageOutputTokens == 0 && result.ImageCount == 0 &&
+		result.RequestCount == 0 && result.TaskCount == 0 {
 		return nil
 	}
 
@@ -5140,6 +5145,10 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		ImageOutputTokens:   result.Usage.ImageOutputTokens,
 		ImageCount:          result.ImageCount,
 		ImageSize:           optionalTrimmedStringPtr(result.ImageSize),
+		RequestCount:        result.RequestCount,
+		TaskCount:           result.TaskCount,
+		UsageEstimated:      result.UsageEstimated,
+		BillableUnitType:    optionalTrimmedStringPtr(result.BillableUnitType),
 	}
 	if cost != nil {
 		usageLog.InputCost = cost.InputCost
@@ -5166,6 +5175,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	// 设置计费模式
 	if cost != nil && cost.BillingMode != "" {
 		billingMode := cost.BillingMode
+		usageLog.BillingMode = &billingMode
+	} else if result.TaskCount > 0 || result.RequestCount > 0 {
+		billingMode := string(BillingModePerRequest)
 		usageLog.BillingMode = &billingMode
 	} else if result.ImageCount > 0 {
 		billingMode := string(BillingModeImage)
@@ -5238,6 +5250,37 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 	tokens UsageTokens,
 	serviceTier string,
 ) (*CostBreakdown, error) {
+	if result != nil {
+		unitCount := result.RequestCount
+		if result.TaskCount > 0 {
+			unitCount = result.TaskCount
+		}
+		if unitCount > 0 {
+			if resolved := s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey); resolved != nil {
+				gid := apiKey.Group.ID
+				return s.billingService.CalculateCostUnified(CostInput{
+					Ctx:            ctx,
+					Model:          billingModel,
+					GroupID:        &gid,
+					RequestCount:   unitCount,
+					SizeTier:       strings.TrimSpace(result.BillableUnitType),
+					RateMultiplier: multiplier,
+					ServiceTier:    serviceTier,
+					Resolver:       s.resolver,
+					Resolved:       resolved,
+				})
+			}
+			logger.LegacyPrintf(
+				"service.openai_gateway",
+				"new-api billable unit has no channel pricing: model=%s request_count=%d task_count=%d unit_type=%s",
+				billingModel,
+				result.RequestCount,
+				result.TaskCount,
+				result.BillableUnitType,
+			)
+			return &CostBreakdown{ActualCost: 0, BillingMode: string(BillingModePerRequest)}, nil
+		}
+	}
 	if result != nil && result.ImageCount > 0 {
 		return s.calculateOpenAIImageCost(ctx, billingModel, apiKey, result, multiplier), nil
 	}

@@ -154,6 +154,11 @@ func (s *AccountAutoOpsService) GetModelOptions() map[string][]AccountAutoOpsMod
 		PlatformAli:         make([]AccountAutoOpsModelOption, 0, len(CompatibleDefaultModels(PlatformAli))),
 		PlatformMoonshot:    make([]AccountAutoOpsModelOption, 0, len(CompatibleDefaultModels(PlatformMoonshot))),
 	}
+	for _, platform := range CompatiblePlatforms() {
+		if _, exists := options[platform]; !exists {
+			options[platform] = make([]AccountAutoOpsModelOption, 0, len(CompatibleDefaultModels(platform)))
+		}
+	}
 
 	for _, model := range claude.DefaultModels {
 		options[PlatformAnthropic] = append(options[PlatformAnthropic], AccountAutoOpsModelOption{ID: model.ID, DisplayName: model.DisplayName})
@@ -179,7 +184,7 @@ func (s *AccountAutoOpsService) GetModelOptions() map[string][]AccountAutoOpsMod
 		}
 		options[PlatformAntigravity] = append(options[PlatformAntigravity], AccountAutoOpsModelOption{ID: model.ID, DisplayName: displayName})
 	}
-	for _, platform := range []string{PlatformZhipu, PlatformDeepSeek, PlatformVolcEngine, PlatformAli, PlatformMoonshot} {
+	for _, platform := range CompatiblePlatforms() {
 		for _, model := range CompatibleDefaultModels(platform) {
 			displayName := model.DisplayName
 			if strings.TrimSpace(displayName) == "" {

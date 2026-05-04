@@ -465,7 +465,15 @@ const platforms = [
   { value: 'deepseek', label: 'DeepSeek' },
   { value: 'volcengine', label: '火山方舟/豆包' },
   { value: 'ali', label: 'Qwen/阿里' },
-  { value: 'moonshot', label: 'Kimi/月之暗面' }
+  { value: 'moonshot', label: 'Kimi/月之暗面' },
+  { value: 'perplexity', label: 'Perplexity' },
+  { value: 'mistral', label: 'Mistral' },
+  { value: 'siliconflow', label: 'SiliconFlow' },
+  { value: 'xai', label: 'xAI' },
+  { value: 'openrouter', label: 'OpenRouter' },
+  { value: 'suno', label: 'Suno' },
+  { value: 'kling', label: 'Kling' },
+  { value: 'midjourney', label: 'Midjourney' }
 ]
 const subjectOptions = computed<Array<SelectOption & { value: AccountAutoOpsSubject }>>(() => [
   { value: 'account_name', label: t('admin.accounts.autoOpsDialog.subject.account_name') },
@@ -510,7 +518,15 @@ const targetPlatformOptions = computed<SelectOption[]>(() => [
   { value: 'deepseek', label: t('admin.accounts.platforms.deepseek') },
   { value: 'volcengine', label: t('admin.accounts.platforms.volcengine') },
   { value: 'ali', label: t('admin.accounts.platforms.ali') },
-  { value: 'moonshot', label: t('admin.accounts.platforms.moonshot') }
+  { value: 'moonshot', label: t('admin.accounts.platforms.moonshot') },
+  { value: 'perplexity', label: t('admin.accounts.platforms.perplexity') },
+  { value: 'mistral', label: t('admin.accounts.platforms.mistral') },
+  { value: 'siliconflow', label: t('admin.accounts.platforms.siliconflow') },
+  { value: 'xai', label: t('admin.accounts.platforms.xai') },
+  { value: 'openrouter', label: t('admin.accounts.platforms.openrouter') },
+  { value: 'suno', label: t('admin.accounts.platforms.suno') },
+  { value: 'kling', label: t('admin.accounts.platforms.kling') },
+  { value: 'midjourney', label: t('admin.accounts.platforms.midjourney') }
 ])
 const targetAuthTypeOptions = computed<SelectOption[]>(() => [
   { value: 'oauth', label: t('admin.accounts.oauthType') },

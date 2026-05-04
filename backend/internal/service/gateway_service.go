@@ -508,6 +508,11 @@ type ForwardResult struct {
 	// 图片生成计费字段（图片生成模型使用）
 	ImageCount int    // 生成的图片数量
 	ImageSize  string // 图片尺寸 "1K", "2K", "4K"
+
+	RequestCount     int
+	TaskCount        int
+	UsageEstimated   bool
+	BillableUnitType string
 }
 
 // UpstreamFailoverError indicates an upstream error that should trigger account failover.
@@ -8245,17 +8250,23 @@ type recordUsageCoreInput struct {
 	ChannelUsageFields
 }
 
-func applyCompatibleUsageFallback(result *ForwardResult, account *Account, parsed *ParsedRequest) {
+func applyCompatibleUsageFallback(result *ForwardResult, account *Account, group *Group, parsed *ParsedRequest) {
 	if result == nil || account == nil || parsed == nil {
 		return
 	}
-	if account.Platform != PlatformMoonshot {
+	if !account.IsCompatiblePlatform() {
 		return
+	}
+	newAPIStyle := account.UseNewAPIStyleInterfaceForGroup(group)
+	if !newAPIStyle {
+		if account.Platform != PlatformMoonshot {
+			return
+		}
+		if result.Usage.OutputTokens <= 0 && result.Usage.CacheReadInputTokens <= 0 && result.Usage.CacheCreationInputTokens <= 0 {
+			return
+		}
 	}
 	if result.Usage.InputTokens > 0 {
-		return
-	}
-	if result.Usage.OutputTokens <= 0 && result.Usage.CacheReadInputTokens <= 0 && result.Usage.CacheCreationInputTokens <= 0 {
 		return
 	}
 
@@ -8270,13 +8281,37 @@ func applyCompatibleUsageFallback(result *ForwardResult, account *Account, parse
 
 	logger.LegacyPrintf(
 		"service.gateway",
-		"compatible usage fallback applied: platform=%s model=%s estimated_input_tokens=%d output_tokens=%d stream=%t",
+		"compatible usage fallback applied: platform=%s model=%s estimated_input_tokens=%d output_tokens=%d cache_read_tokens=%d cache_creation_tokens=%d stream=%t",
 		account.Platform,
 		result.Model,
 		estimated,
 		result.Usage.OutputTokens,
+		result.Usage.CacheReadInputTokens,
+		result.Usage.CacheCreationInputTokens,
 		result.Stream,
 	)
+}
+
+func shouldWarnCompatibleZeroCost(account *Account, group *Group, result *ForwardResult, cost *CostBreakdown) bool {
+	if account == nil || result == nil || cost == nil || (!account.IsCompatiblePlatform() && !account.UseNewAPIStyleInterfaceForGroup(group)) {
+		return false
+	}
+	if cost.TotalCost != 0 || cost.ActualCost != 0 || cost.RealActualCost != 0 {
+		return false
+	}
+	if result.ImageCount > 0 {
+		return true
+	}
+	if result.RequestCount > 0 || result.TaskCount > 0 {
+		return true
+	}
+	return result.Usage.InputTokens > 0 ||
+		result.Usage.OutputTokens > 0 ||
+		result.Usage.CacheReadInputTokens > 0 ||
+		result.Usage.CacheCreationInputTokens > 0 ||
+		result.Usage.CacheCreation5mTokens > 0 ||
+		result.Usage.CacheCreation1hTokens > 0 ||
+		result.Usage.ImageOutputTokens > 0
 }
 
 // recordUsageCore 是 RecordUsage 和 RecordUsageWithLongContext 的统一实现。
@@ -8290,7 +8325,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	account := input.Account
 	subscription := input.Subscription
 
-	applyCompatibleUsageFallback(result, account, input.ParsedRequest)
+	applyCompatibleUsageFallback(result, account, apiKey.Group, input.ParsedRequest)
 
 	// 强制缓存计费：将 input_tokens 转为 cache_read_input_tokens
 	// 用于粘性会话切换时的特殊计费处理
@@ -8340,6 +8375,20 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	cost := s.calculateRecordUsageCost(ctx, result, apiKey, billingModel, multiplier, opts)
 	if cost != nil {
 		cost.RealActualCost = realCostFromBase(cost.TotalCost, baseMultiplier, user)
+	}
+	if shouldWarnCompatibleZeroCost(account, apiKey.Group, result, cost) {
+		logger.LegacyPrintf(
+			"service.gateway",
+			"compatible/new-api usage calculated zero cost: platform=%s model=%s upstream_model=%s input_tokens=%d output_tokens=%d image_count=%d request_count=%d task_count=%d; check channel pricing",
+			account.Platform,
+			result.Model,
+			result.UpstreamModel,
+			result.Usage.InputTokens,
+			result.Usage.OutputTokens,
+			result.ImageCount,
+			result.RequestCount,
+			result.TaskCount,
+		)
 	}
 
 	// 判断计费方式：订阅模式 vs 余额模式
@@ -8408,6 +8457,10 @@ func (s *GatewayService) calculateRecordUsageCost(
 	multiplier float64,
 	opts *recordUsageOpts,
 ) *CostBreakdown {
+	if unitCount := resultBillableRequestCount(result); unitCount > 0 {
+		return s.calculateRequestUnitCost(ctx, result, apiKey, billingModel, multiplier, unitCount)
+	}
+
 	// 图片生成计费
 	if result.ImageCount > 0 {
 		return s.calculateImageCost(ctx, result, apiKey, billingModel, multiplier)
@@ -8415,6 +8468,59 @@ func (s *GatewayService) calculateRecordUsageCost(
 
 	// Token 计费
 	return s.calculateTokenCost(ctx, result, apiKey, billingModel, multiplier, opts)
+}
+
+func resultBillableRequestCount(result *ForwardResult) int {
+	if result == nil {
+		return 0
+	}
+	if result.TaskCount > 0 {
+		return result.TaskCount
+	}
+	if result.RequestCount > 0 {
+		return result.RequestCount
+	}
+	return 0
+}
+
+func (s *GatewayService) calculateRequestUnitCost(
+	ctx context.Context,
+	result *ForwardResult,
+	apiKey *APIKey,
+	billingModel string,
+	multiplier float64,
+	count int,
+) *CostBreakdown {
+	if count <= 0 {
+		return &CostBreakdown{ActualCost: 0, BillingMode: string(BillingModePerRequest)}
+	}
+	if resolved := s.resolveChannelPricing(ctx, billingModel, apiKey); resolved != nil {
+		gid := apiKey.Group.ID
+		cost, err := s.billingService.CalculateCostUnified(CostInput{
+			Ctx:            ctx,
+			Model:          billingModel,
+			GroupID:        &gid,
+			RequestCount:   count,
+			SizeTier:       strings.TrimSpace(result.BillableUnitType),
+			RateMultiplier: multiplier,
+			Resolver:       s.resolver,
+			Resolved:       resolved,
+		})
+		if err != nil {
+			logger.LegacyPrintf("service.gateway", "Calculate request/task unit cost failed: %v", err)
+			return &CostBreakdown{ActualCost: 0, BillingMode: string(BillingModePerRequest)}
+		}
+		return cost
+	}
+	logger.LegacyPrintf(
+		"service.gateway",
+		"new-api billable unit has no channel pricing: model=%s request_count=%d task_count=%d unit_type=%s",
+		billingModel,
+		result.RequestCount,
+		result.TaskCount,
+		result.BillableUnitType,
+	)
+	return &CostBreakdown{ActualCost: 0, BillingMode: string(BillingModePerRequest)}
 }
 
 // resolveChannelPricing 检查指定模型是否存在渠道级别定价。
@@ -8577,6 +8683,10 @@ func (s *GatewayService) buildRecordUsageLog(
 		FirstTokenMs:          result.FirstTokenMs,
 		ImageCount:            result.ImageCount,
 		ImageSize:             optionalTrimmedStringPtr(result.ImageSize),
+		RequestCount:          result.RequestCount,
+		TaskCount:             result.TaskCount,
+		UsageEstimated:        result.UsageEstimated,
+		BillableUnitType:      optionalTrimmedStringPtr(result.BillableUnitType),
 		CacheTTLOverridden:    cacheTTLOverridden,
 		ChannelID:             optionalInt64Ptr(input.ChannelID),
 		ModelMappingChain:     optionalTrimmedStringPtr(input.ModelMappingChain),
@@ -8606,6 +8716,8 @@ func resolveBillingMode(result *ForwardResult, cost *CostBreakdown) *string {
 	switch {
 	case cost != nil && cost.BillingMode != "":
 		mode = cost.BillingMode
+	case resultBillableRequestCount(result) > 0:
+		mode = string(BillingModePerRequest)
 	case result.ImageCount > 0:
 		mode = string(BillingModeImage)
 	default:

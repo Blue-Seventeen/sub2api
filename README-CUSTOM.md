@@ -458,6 +458,58 @@ npm run test:run -- accountsLocale providerConfig
 - 表格分页大小必须以管理员配置默认值为准，旧 localStorage 值不能覆盖系统默认配置。
 - Affiliate 仍不得重新进入路由、菜单、migration、service、repository。
 
+### 9.7 New-API 风格接口增量开关与新平台 adapter
+
+- 账号行为开关统一存放在 `extra.newapi_style_interface_enabled`，不进入 `credentials`，避免被当作密钥或敏感配置处理。
+- `/admin/accounts` 创建和编辑账号均展示“启动 New-API 风格接口”开关；Anthropic、OpenAI、Gemini、Antigravity 以及 GLM、DeepSeek、Ali、Moonshot、VolcEngine 默认关闭，继续走已验证的 sub2api 原链路。
+- 新增 New-API-only 平台 `perplexity`、`mistral`、`siliconflow`、`xai`、`openrouter`、`suno`、`kling`、`midjourney` 默认并强制启用该开关，因为它们没有旧链路。
+- 后端已统一落地 `UseNewAPIStyleInterface(account, group)` 作为行为开关入口；OpenAI、Anthropic/Gemini/Antigravity 原生 handler、compatible gateway 和 New-API-only endpoint 均在选中账号后按有效开关分流。
+- Anthropic、OpenAI、Gemini、Antigravity 默认仍保持原生链路；只有账号级或分组级有效开关开启后，`messages`、`responses`、`chat/completions`、`images` 等已接入端点才进入 New-API 风格转发。
+- compatible usage fallback 已扩展到所有 compatible 平台；成功请求若上游缺失 usage，会按请求/响应做本地 token 估算，避免新接入平台再次出现 0 token / 0 cost 静默计费问题。
+- 若 compatible 平台已有可计费用量但渠道定价未命中导致成本为 0，后端会写 Warn 日志提示补齐定价，允许记录 usage log 但不伪装成正常收费。
+
+重点文件：
+- `backend/internal/service/compatible_platforms.go`
+- `backend/internal/service/compatible_platform_newapi_generic.go`
+- `backend/internal/service/newapi_style_gateway_service.go`
+- `backend/internal/handler/newapi_style_gateway_handler.go`
+- `backend/internal/service/gateway_service.go`
+- `backend/internal/server/routes/gateway.go`
+- `frontend/src/components/account/CreateAccountModal.vue`
+- `frontend/src/components/account/EditAccountModal.vue`
+
+### 9.8 New-API 风格路由二阶段落地保护
+
+- `UseNewAPIStyleInterface(account, group)` 是唯一分流判断入口；账号级 `extra.newapi_style_interface_enabled`、分组级 `newapi_style_interface_enabled` 和 New-API-only 平台强制规则都必须通过该 helper 生效。
+- 对已有平台未开启有效开关时，Anthropic / OpenAI / Gemini / Antigravity / GLM / DeepSeek / Ali / Moonshot / VolcEngine 继续走现有 native/custom/compatible 链路。
+- 已挂载 New-API-only 入口：`/v1/audio/*`、`/v1/embeddings`、`/v1/rerank`、`/v1/videos*`、`/v1/video/generations*`、`/suno/*`、`/kling/*`、`/mj/*`；这些入口只允许已启用 New-API 风格且 adapter 支持的账号承接。
+- New-API 风格转发必须继续复用 sub2api 的 API key、group、account 调度、concurrency、failover、ops、usage worker 和 billing 链路，不允许新增旁路直连。
+- 计费防 0 已新增 `request_count`、`task_count`、`usage_estimated`、`billable_unit_type` 字段和 migration；New-API 成功响应必须至少落 token、image、request 或 task 之一，缺失 upstream usage 时要估算或按 request/task 计量。
+- 当前任务型接口先落地同步转发和 task 计费 guardrail；`suno`、`kling`、`midjourney` 可创建为 New-API-only 账号并分别承接 `/suno/*`、`/kling/*`、`/mj/*`。如果后续实现 New-API 异步任务表、轮询 worker、预扣费、失败退款/冲正，必须单独新增 migration、repository、service、worker 测试，并继续记录在本文件。
+- 验证基线：`go test ./internal/handler ./internal/service ./internal/repository ./internal/server ./internal/pkg/httputil -count=1` 必须通过；涉及前端账号开关时还需跑 `npm run build` 或等价 typecheck/build。
+
+### 9.9 Group 级 New-API 风格开关
+
+- `/admin/groups` 增加分组级 `newapi_style_interface_enabled`，默认 `false`。
+- 分组开关为 `true` 时，该分组通过通用网关选中的账号优先使用 New-API style adapter，避免逐账号批量开启。
+- 分组开关为 `false` 时，不覆盖账号级 `extra.newapi_style_interface_enabled`，以保证既有账号级启用行为不被破坏。
+- New-API-only 平台仍由平台规则强制启用；Antigravity 专属 `/antigravity/v1/*`、`/antigravity/v1beta/*` 路由保持原义，不由该开关重定向。
+- 保护文件：`backend/ent/schema/group.go`、`backend/migrations/132_add_group_newapi_style_interface_enabled.sql`、`backend/internal/service/compatible_platforms.go`、`backend/internal/service/newapi_style_gateway_service.go`、`frontend/src/views/admin/GroupsView.vue`。
+
+### 9.10 New-API reference channel catalog guardrail
+- The New-API reference project has exactly 37 `relay/channel` directories. This fork records all 37 in `backend/internal/service/newapi_channel_catalog.go` with one of `enabled_preset`, `existing_custom`, `dedicated_required`, `task_worker_required`, or `candidate_unverified`.
+- Runtime enablement is intentionally narrower than the catalog. `enabled_preset` and `existing_custom` entries are the only safe categories to rely on today; signed providers, OAuth/project-scoped providers, media/task providers, and unverified OpenAI-like providers must not be advertised as fully supported until dedicated adapters, usage extraction, billing tests, and task workers exist.
+- Create/update account writes normalize `extra.newapi_style_interface_enabled`: New-API-only platforms are persisted as enabled, unsupported platforms drop stale keys, and existing native/custom platforms keep only explicit true. Bulk account updates that touch this key normalize per account instead of blindly merging one JSON value across mixed platforms.
+- New-API style upstream request errors and HTTP error responses must append `OpsUpstreamErrorEvent` entries as well as setting the summary ops error, so failover and ops detail views do not lose per-attempt context.
+- Group-level New-API style enablement must be included in zero-cost compatible billing warnings; account-level checks alone are insufficient after `/admin/groups` gained the switch.
+- Current catalog statuses: enabled preset = `ali`, `deepseek`, `mistral`, `moonshot`, `openrouter`, `perplexity`, `siliconflow`, `volcengine`, `xai`, `zhipu`; existing custom = `aws`, `claude`, `codex`, `gemini`, `openai`, `vertex`; task worker required = `jimeng`, `minimax`, `replicate`, `suno`, `kling`, `midjourney`, `task`; dedicated required = `baidu`, `baidu_v2`, `cloudflare`, `coze`, `dify`, `palm`, `tencent`, `xunfei`, `zhipu_4v`; candidate unverified = `ai360`, `cohere`, `jina`, `lingyiwanwu`, `mokaai`, `ollama`, `submodel`, `xinference`.
+Protect files:
+- `backend/internal/service/newapi_channel_catalog.go`
+- `backend/internal/service/newapi_channel_catalog_test.go`
+- `backend/internal/service/compatible_platforms.go`
+- `backend/internal/service/admin_service.go`
+- `backend/internal/service/newapi_style_gateway_service.go`
+
 ## 10. localtest 环境说明
 
 - `sub2api-custom-localtest` 是测试环境，可覆盖、重建容器、清理数据。

@@ -719,7 +719,7 @@ const form = reactive({
 let abortController: AbortController | null = null
 
 // ── Platform config ──
-const platformOrder: GroupPlatform[] = ['anthropic', 'openai', 'gemini', 'antigravity', 'zhipu', 'deepseek', 'volcengine', 'ali', 'moonshot']
+const platformOrder: GroupPlatform[] = ['anthropic', 'openai', 'gemini', 'antigravity', 'zhipu', 'deepseek', 'volcengine', 'ali', 'moonshot', 'perplexity', 'mistral', 'siliconflow', 'xai', 'openrouter', 'suno', 'kling', 'midjourney']
 
 
 // ── Helpers ──

@@ -30,6 +30,14 @@ const (
 	PlatformVolcEngine  = domain.PlatformVolcEngine
 	PlatformAli         = domain.PlatformAli
 	PlatformMoonshot    = domain.PlatformMoonshot
+	PlatformPerplexity  = domain.PlatformPerplexity
+	PlatformMistral     = domain.PlatformMistral
+	PlatformSiliconFlow = domain.PlatformSiliconFlow
+	PlatformXAI         = domain.PlatformXAI
+	PlatformOpenRouter  = domain.PlatformOpenRouter
+	PlatformSuno        = domain.PlatformSuno
+	PlatformKling       = domain.PlatformKling
+	PlatformMidjourney  = domain.PlatformMidjourney
 )
 
 func groupRequireOAuthOnlyApplies(platform string) bool {

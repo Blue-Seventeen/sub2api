@@ -1061,6 +1061,40 @@
         <ProxySelector v-model="form.proxy_id" :proxies="proxies" :show-auto-best-option="true" :auto-best-value="AUTO_PROXY_BEST_SENTINEL" />
       </div>
 
+      <div
+        v-if="supportsNewAPIStyleInterface"
+        class="rounded-lg border border-gray-200 p-4 dark:border-dark-600"
+      >
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <label class="input-label mb-0">启动 New-API 风格接口</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ requiresNewAPIStyleInterface
+                ? '该平台仅支持 New-API 风格接口，保存时会强制启用。'
+                : '默认关闭以保留现有 sub2api 链路；仅在确认需要 New-API 风格 adapter 时开启。'
+              }}
+            </p>
+          </div>
+          <button
+            type="button"
+            :disabled="requiresNewAPIStyleInterface"
+            @click="newAPIStyleInterfaceEnabled = requiresNewAPIStyleInterface ? true : !newAPIStyleInterfaceEnabled"
+            :class="[
+              'relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+              requiresNewAPIStyleInterface ? 'cursor-not-allowed opacity-75' : 'cursor-pointer',
+              newAPIStyleInterfaceEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+            ]"
+          >
+            <span
+              :class="[
+                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                newAPIStyleInterfaceEnabled ? 'translate-x-5' : 'translate-x-0'
+              ]"
+            />
+          </button>
+        </div>
+      </div>
+
       <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <div>
           <label class="input-label">{{ t('admin.accounts.concurrency') }}</label>
@@ -1984,6 +2018,26 @@ const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 
+const newAPIOnlyPlatforms: AccountPlatform[] = ['perplexity', 'mistral', 'siliconflow', 'xai', 'openrouter', 'suno', 'kling', 'midjourney']
+const newAPIStyleSupportedPlatforms: AccountPlatform[] = [
+  'anthropic',
+  'openai',
+  'gemini',
+  'antigravity',
+  'zhipu',
+  'deepseek',
+  'volcengine',
+  'ali',
+  'moonshot',
+  ...newAPIOnlyPlatforms
+]
+
+const platformRequiresNewAPIStyleInterface = (platform?: AccountPlatform | null) =>
+  !!platform && newAPIOnlyPlatforms.includes(platform)
+
+const platformSupportsNewAPIStyleInterface = (platform?: AccountPlatform | null) =>
+  !!platform && newAPIStyleSupportedPlatforms.includes(platform)
+
 const getPlatformDefaultBaseURL = (platform?: AccountPlatform | null) => {
   switch (platform) {
     case 'openai':
@@ -2002,6 +2056,21 @@ const getPlatformDefaultBaseURL = (platform?: AccountPlatform | null) => {
       return 'https://dashscope.aliyuncs.com'
     case 'moonshot':
       return 'https://api.moonshot.cn'
+    case 'perplexity':
+      return 'https://api.perplexity.ai'
+    case 'mistral':
+      return 'https://api.mistral.ai'
+    case 'siliconflow':
+      return 'https://api.siliconflow.cn'
+    case 'xai':
+      return 'https://api.x.ai'
+    case 'openrouter':
+      return 'https://openrouter.ai/api'
+    case 'kling':
+      return 'https://api.klingai.com'
+    case 'suno':
+    case 'midjourney':
+      return ''
     default:
       return 'https://api.anthropic.com'
   }
@@ -2017,6 +2086,8 @@ const getPlatformApiKeyPlaceholder = (platform?: AccountPlatform | null) => {
       return 'sk-ant-...'
     case 'zhipu':
       return 'xxxxxxxx.xxxxxxxx'
+    case 'openrouter':
+      return 'sk-or-...'
     default:
       return 'sk-...'
   }
@@ -2032,6 +2103,8 @@ const baseUrlHint = computed(() => {
 
 const platformBaseUrlPlaceholder = computed(() => getPlatformDefaultBaseURL(props.account?.platform))
 const platformApiKeyPlaceholder = computed(() => getPlatformApiKeyPlaceholder(props.account?.platform))
+const requiresNewAPIStyleInterface = computed(() => platformRequiresNewAPIStyleInterface(props.account?.platform))
+const supportsNewAPIStyleInterface = computed(() => platformSupportsNewAPIStyleInterface(props.account?.platform))
 
 const antigravityPresetMappings = computed(() => getPresetMappingsByPlatform('antigravity'))
 const bedrockPresets = computed(() => getPresetMappingsByPlatform('bedrock'))
@@ -2053,6 +2126,7 @@ interface TempUnschedRuleForm {
 const submitting = ref(false)
 const editBaseUrl = ref(getPlatformDefaultBaseURL('anthropic'))
 const editApiKey = ref('')
+const newAPIStyleInterfaceEnabled = ref(false)
 // Bedrock credentials
 const editBedrockAccessKeyId = ref('')
 const editBedrockSecretAccessKey = ref('')
@@ -2378,6 +2452,9 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   const extra = newAccount.extra as Record<string, unknown> | undefined
   mixedScheduling.value = extra?.mixed_scheduling === true
   allowOverages.value = extra?.allow_overages === true
+  newAPIStyleInterfaceEnabled.value = platformRequiresNewAPIStyleInterface(newAccount.platform)
+    ? true
+    : extra?.newapi_style_interface_enabled === true
 
   // Load OpenAI passthrough toggle (OpenAI OAuth/API Key)
   openaiPassthroughEnabled.value = false
@@ -3552,6 +3629,13 @@ const handleSubmit = async () => {
         newExtra.auto_select_proxy = true
       } else {
         delete newExtra.auto_select_proxy
+      }
+      if (requiresNewAPIStyleInterface.value) {
+        newExtra.newapi_style_interface_enabled = true
+      } else if (supportsNewAPIStyleInterface.value && newAPIStyleInterfaceEnabled.value) {
+        newExtra.newapi_style_interface_enabled = true
+      } else {
+        delete newExtra.newapi_style_interface_enabled
       }
       updatePayload.extra = newExtra
     }

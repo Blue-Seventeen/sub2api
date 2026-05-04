@@ -219,7 +219,29 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		if channelMapping.Mapped {
 			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
 		}
-		result, err := h.gatewayService.ForwardAsResponses(c.Request.Context(), c, account, forwardBody, parsedReq)
+		var result *service.ForwardResult
+		var upstreamEndpoint string
+		if h.newAPIStyleService != nil && h.newAPIStyleService.SupportsForGroup(account, apiKey.Group, service.NewAPIStyleRouteResponses) {
+			result, upstreamEndpoint, err = h.newAPIStyleService.Forward(
+				c.Request.Context(),
+				c,
+				account,
+				service.NewAPIStyleForwardOptions{
+					Route:        service.NewAPIStyleRouteResponses,
+					Group:        apiKey.Group,
+					RequestBody:  forwardBody,
+					Stream:       reqStream,
+					Model:        reqModel,
+					Method:       http.MethodPost,
+					InboundPath:  c.Request.URL.Path,
+					QueryString:  c.Request.URL.RawQuery,
+					ContentType:  c.GetHeader("Content-Type"),
+					HeaderSource: c.Request.Header,
+				},
+			)
+		} else {
+			result, err = h.gatewayService.ForwardAsResponses(c.Request.Context(), c, account, forwardBody, parsedReq)
+		}
 
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
@@ -257,7 +279,9 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		clientIP := ip.GetClientIP(c)
 		requestPayloadHash := service.HashUsageRequestPayload(body)
 		inboundEndpoint := GetInboundEndpoint(c)
-		upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
+		if upstreamEndpoint == "" {
+			upstreamEndpoint = GetUpstreamEndpoint(c, account.Platform)
+		}
 		compat := compatibilityLogFields(c)
 
 		h.submitUsageRecordTask(func(ctx context.Context) {

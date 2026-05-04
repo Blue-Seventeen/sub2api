@@ -41,6 +41,14 @@ const (
 	PlatformVolcEngine  = "volcengine"
 	PlatformAli         = "ali"
 	PlatformMoonshot    = "moonshot"
+	PlatformPerplexity  = "perplexity"
+	PlatformMistral     = "mistral"
+	PlatformSiliconFlow = "siliconflow"
+	PlatformXAI         = "xai"
+	PlatformOpenRouter  = "openrouter"
+	PlatformSuno        = "suno"
+	PlatformKling       = "kling"
+	PlatformMidjourney  = "midjourney"
 )
 
 // AllPlatforms 返回所有支持的平台列表
@@ -55,6 +63,14 @@ func AllPlatforms() []string {
 		PlatformVolcEngine,
 		PlatformAli,
 		PlatformMoonshot,
+		PlatformPerplexity,
+		PlatformMistral,
+		PlatformSiliconFlow,
+		PlatformXAI,
+		PlatformOpenRouter,
+		PlatformSuno,
+		PlatformKling,
+		PlatformMidjourney,
 	}
 }
 

@@ -523,6 +523,42 @@
           <p class="input-hint">{{ t("admin.groups.form.rpmLimitHint") }}</p>
         </div>
         <div
+          class="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-dark-600 dark:bg-dark-700/40"
+        >
+          <div class="flex items-center justify-between gap-4">
+            <div>
+              <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                启动 New-API 风格接口
+              </label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                开启后，该分组下通用网关选中的账号优先走 New-API 风格 adapter；关闭时保留账号级开关和原链路。
+              </p>
+            </div>
+            <button
+              type="button"
+              @click="
+                createForm.newapi_style_interface_enabled =
+                  !createForm.newapi_style_interface_enabled
+              "
+              :class="[
+                'relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors',
+                createForm.newapi_style_interface_enabled
+                  ? 'bg-primary-500'
+                  : 'bg-gray-300 dark:bg-dark-600',
+              ]"
+            >
+              <span
+                :class="[
+                  'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+                  createForm.newapi_style_interface_enabled
+                    ? 'translate-x-6'
+                    : 'translate-x-1',
+                ]"
+              />
+            </button>
+          </div>
+        </div>
+        <div
           v-if="createForm.subscription_type !== 'subscription'"
           data-tour="group-form-exclusive"
         >
@@ -1654,6 +1690,42 @@
             :placeholder="t('admin.groups.form.rpmLimitPlaceholder')"
           />
           <p class="input-hint">{{ t("admin.groups.form.rpmLimitHint") }}</p>
+        </div>
+        <div
+          class="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-dark-600 dark:bg-dark-700/40"
+        >
+          <div class="flex items-center justify-between gap-4">
+            <div>
+              <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                启动 New-API 风格接口
+              </label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                开启后，该分组下通用网关选中的账号优先走 New-API 风格 adapter；关闭时保留账号级开关和原链路。
+              </p>
+            </div>
+            <button
+              type="button"
+              @click="
+                editForm.newapi_style_interface_enabled =
+                  !editForm.newapi_style_interface_enabled
+              "
+              :class="[
+                'relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors',
+                editForm.newapi_style_interface_enabled
+                  ? 'bg-primary-500'
+                  : 'bg-gray-300 dark:bg-dark-600',
+              ]"
+            >
+              <span
+                :class="[
+                  'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+                  editForm.newapi_style_interface_enabled
+                    ? 'translate-x-6'
+                    : 'translate-x-1',
+                ]"
+              />
+            </button>
+          </div>
         </div>
         <div v-if="editForm.subscription_type !== 'subscription'">
           <div class="mb-1.5 flex items-center gap-1">
@@ -2850,6 +2922,14 @@ const platformOptions = computed(() => [
   { value: "volcengine", label: "火山方舟/豆包" },
   { value: "ali", label: "Qwen/阿里" },
   { value: "moonshot", label: "Kimi/月之暗面" },
+  { value: "perplexity", label: "Perplexity" },
+  { value: "mistral", label: "Mistral" },
+  { value: "siliconflow", label: "SiliconFlow" },
+  { value: "xai", label: "xAI" },
+  { value: "openrouter", label: "OpenRouter" },
+  { value: "suno", label: "Suno" },
+  { value: "kling", label: "Kling" },
+  { value: "midjourney", label: "Midjourney" },
 ]);
 
 const platformFilterOptions = computed(() => [
@@ -2863,6 +2943,14 @@ const platformFilterOptions = computed(() => [
   { value: "volcengine", label: "火山方舟/豆包" },
   { value: "ali", label: "Qwen/阿里" },
   { value: "moonshot", label: "Kimi/月之暗面" },
+  { value: "perplexity", label: "Perplexity" },
+  { value: "mistral", label: "Mistral" },
+  { value: "siliconflow", label: "SiliconFlow" },
+  { value: "xai", label: "xAI" },
+  { value: "openrouter", label: "OpenRouter" },
+  { value: "suno", label: "Suno" },
+  { value: "kling", label: "Kling" },
+  { value: "midjourney", label: "Midjourney" },
 ]);
 
 const editStatusOptions = computed(() => [
@@ -3066,6 +3154,7 @@ const createForm = reactive({
   copy_accounts_from_group_ids: [] as number[],
   // 分组级 RPM 限制（每用户每分钟最大请求数；0 = 不限制）
   rpm_limit: 0 as number,
+  newapi_style_interface_enabled: false,
 });
 
 // 简单账号类型（用于模型路由选择）
@@ -3349,6 +3438,7 @@ const editForm = reactive({
   copy_accounts_from_group_ids: [] as number[],
   // 分组级 RPM 限制（每用户每分钟最大请求数；0 = 不限制）
   rpm_limit: 0 as number,
+  newapi_style_interface_enabled: false,
 });
 
 // 根据分组类型返回不同的删除确认消息
@@ -3523,6 +3613,8 @@ const closeCreateModal = () => {
   createForm.supported_model_scopes = ["claude", "gemini_text", "gemini_image"];
   createForm.mcp_xml_inject = true;
   createForm.copy_accounts_from_group_ids = [];
+  createForm.rpm_limit = 0;
+  createForm.newapi_style_interface_enabled = false;
   createModelRoutingRules.value = [];
 };
 
@@ -3644,6 +3736,8 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.copy_accounts_from_group_ids = []; // 复制账号字段每次编辑时重置为空
   editForm.rpm_limit = group.rpm_limit ?? 0;
   // 加载模型路由规则（异步加载账号名称）
+  editForm.newapi_style_interface_enabled =
+    group.newapi_style_interface_enabled ?? false;
   editModelRoutingRules.value = await convertApiFormatToRoutingRules(
     group.model_routing,
   );

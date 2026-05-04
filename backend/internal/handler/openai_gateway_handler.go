@@ -27,6 +27,7 @@ import (
 // OpenAIGatewayHandler handles OpenAI API gateway requests
 type OpenAIGatewayHandler struct {
 	gatewayService          *service.OpenAIGatewayService
+	newAPIStyleService      *service.NewAPIStyleGatewayService
 	billingCacheService     *service.BillingCacheService
 	apiKeyService           *service.APIKeyService
 	usageRecordWorkerPool   *service.UsageRecordWorkerPool
@@ -56,6 +57,7 @@ func resolveOpenAIMessagesDispatchMappedModel(apiKey *service.APIKey, requestedM
 // NewOpenAIGatewayHandler creates a new OpenAIGatewayHandler
 func NewOpenAIGatewayHandler(
 	gatewayService *service.OpenAIGatewayService,
+	newAPIStyleService *service.NewAPIStyleGatewayService,
 	concurrencyService *service.ConcurrencyService,
 	billingCacheService *service.BillingCacheService,
 	apiKeyService *service.APIKeyService,
@@ -73,6 +75,7 @@ func NewOpenAIGatewayHandler(
 	}
 	return &OpenAIGatewayHandler{
 		gatewayService:          gatewayService,
+		newAPIStyleService:      newAPIStyleService,
 		billingCacheService:     billingCacheService,
 		apiKeyService:           apiKeyService,
 		usageRecordWorkerPool:   usageRecordWorkerPool,
@@ -313,7 +316,29 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		if channelMapping.Mapped {
 			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
 		}
-		result, err := h.gatewayService.Forward(c.Request.Context(), c, account, forwardBody)
+		var result *service.OpenAIForwardResult
+		var upstreamEndpoint string
+		if h.newAPIStyleService != nil && h.newAPIStyleService.SupportsForGroup(account, apiKey.Group, service.NewAPIStyleRouteResponses) {
+			result, upstreamEndpoint, err = h.newAPIStyleService.ForwardOpenAI(
+				c.Request.Context(),
+				c,
+				account,
+				service.NewAPIStyleForwardOptions{
+					Route:        service.NewAPIStyleRouteResponses,
+					Group:        apiKey.Group,
+					RequestBody:  forwardBody,
+					Stream:       reqStream,
+					Model:        reqModel,
+					Method:       http.MethodPost,
+					InboundPath:  c.Request.URL.Path,
+					QueryString:  c.Request.URL.RawQuery,
+					ContentType:  c.GetHeader("Content-Type"),
+					HeaderSource: c.Request.Header,
+				},
+			)
+		} else {
+			result, err = h.gatewayService.Forward(c.Request.Context(), c, account, forwardBody)
+		}
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
@@ -394,6 +419,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		clientIP := ip.GetClientIP(c)
 		requestPayloadHash := service.HashUsageRequestPayload(body)
 		compat := compatibilityLogFields(c)
+		if upstreamEndpoint == "" {
+			upstreamEndpoint = GetUpstreamEndpoint(c, account.Platform)
+		}
 
 		// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 		h.submitUsageRecordTask(func(ctx context.Context) {
@@ -404,7 +432,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				Account:            account,
 				Subscription:       subscription,
 				InboundEndpoint:    GetInboundEndpoint(c),
-				UpstreamEndpoint:   GetUpstreamEndpoint(c, account.Platform),
+				UpstreamEndpoint:   upstreamEndpoint,
 				UserAgent:          userAgent,
 				IPAddress:          clientIP,
 				RequestPayloadHash: requestPayloadHash,
@@ -726,7 +754,29 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		if channelMappingMsg.Mapped {
 			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMappingMsg.MappedModel)
 		}
-		result, err := h.gatewayService.ForwardAsAnthropic(c.Request.Context(), c, account, forwardBody, promptCacheKey, defaultMappedModel)
+		var result *service.OpenAIForwardResult
+		var upstreamEndpoint string
+		if h.newAPIStyleService != nil && h.newAPIStyleService.SupportsForGroup(account, apiKey.Group, service.NewAPIStyleRouteMessages) {
+			result, upstreamEndpoint, err = h.newAPIStyleService.ForwardOpenAI(
+				c.Request.Context(),
+				c,
+				account,
+				service.NewAPIStyleForwardOptions{
+					Route:        service.NewAPIStyleRouteMessages,
+					Group:        apiKey.Group,
+					RequestBody:  forwardBody,
+					Stream:       reqStream,
+					Model:        reqModel,
+					Method:       http.MethodPost,
+					InboundPath:  c.Request.URL.Path,
+					QueryString:  c.Request.URL.RawQuery,
+					ContentType:  c.GetHeader("Content-Type"),
+					HeaderSource: c.Request.Header,
+				},
+			)
+		} else {
+			result, err = h.gatewayService.ForwardAsAnthropic(c.Request.Context(), c, account, forwardBody, promptCacheKey, defaultMappedModel)
+		}
 
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		if accountReleaseFunc != nil {
@@ -814,6 +864,9 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		clientIP := ip.GetClientIP(c)
 		requestPayloadHash := service.HashUsageRequestPayload(body)
 		compat := compatibilityLogFields(c)
+		if upstreamEndpoint == "" {
+			upstreamEndpoint = GetUpstreamEndpoint(c, account.Platform)
+		}
 
 		h.submitUsageRecordTask(func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
@@ -823,7 +876,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 				Account:            account,
 				Subscription:       subscription,
 				InboundEndpoint:    GetInboundEndpoint(c),
-				UpstreamEndpoint:   GetUpstreamEndpoint(c, account.Platform),
+				UpstreamEndpoint:   upstreamEndpoint,
 				UserAgent:          userAgent,
 				IPAddress:          clientIP,
 				RequestPayloadHash: requestPayloadHash,

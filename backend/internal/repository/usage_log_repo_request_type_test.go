@@ -504,6 +504,10 @@ func buildUsageLogScanValues(opts usageLogScanRowOptions) []any {
 		sql.NullString{}, // ip_address
 		0,                // image_count
 		sql.NullString{}, // image_size
+		0,                // request_count
+		0,                // task_count
+		false,            // usage_estimated
+		sql.NullString{}, // billable_unit_type
 		nullString(opts.ServiceTier),
 		sql.NullString{},  // reasoning_effort
 		sql.NullString{},  // inbound_endpoint

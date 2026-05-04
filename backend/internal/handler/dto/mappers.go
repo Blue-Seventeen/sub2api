@@ -190,6 +190,7 @@ func groupFromServiceBase(g *service.Group) Group {
 		RequireOAuthOnly:                g.RequireOAuthOnly,
 		RequirePrivacySet:               g.RequirePrivacySet,
 		RPMLimit:                        g.RPMLimit,
+		NewAPIStyleInterfaceEnabled:     g.NewAPIStyleInterfaceEnabled,
 		CreatedAt:                       g.CreatedAt,
 		UpdatedAt:                       g.UpdatedAt,
 	}
@@ -607,6 +608,10 @@ func usageLogFromServiceUser(l *service.UsageLog) UsageLog {
 		ImageCount:            l.ImageCount,
 		ImageSize:             l.ImageSize,
 		MediaType:             l.MediaType,
+		RequestCount:          l.RequestCount,
+		TaskCount:             l.TaskCount,
+		UsageEstimated:        l.UsageEstimated,
+		BillableUnitType:      l.BillableUnitType,
 		UserAgent:             l.UserAgent,
 		CacheTTLOverridden:    l.CacheTTLOverridden,
 		BillingMode:           l.BillingMode,

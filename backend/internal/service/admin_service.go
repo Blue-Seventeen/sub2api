@@ -212,7 +212,8 @@ type CreateGroupInput struct {
 	RequirePrivacySet           bool
 	MessagesDispatchModelConfig OpenAIMessagesDispatchModelConfig
 	// RPMLimit 分组 RPM 上限（0 = 不限制）
-	RPMLimit int
+	RPMLimit                    int
+	NewAPIStyleInterfaceEnabled bool
 	// 从指定分组复制账号（创建分组后在同一事务内绑定）
 	CopyAccountsFromGroupIDs []int64
 }
@@ -248,6 +249,7 @@ type UpdateGroupInput struct {
 	RequireOAuthOnly            *bool
 	RequirePrivacySet           *bool
 	MessagesDispatchModelConfig *OpenAIMessagesDispatchModelConfig
+	NewAPIStyleInterfaceEnabled *bool
 	// RPMLimit 分组 RPM 上限（0 = 不限制），nil 表示未提供不改动。
 	RPMLimit *int
 	// 从指定分组复制账号（同步操作：先清空当前分组的账号绑定，再绑定源分组的账号）
@@ -1499,6 +1501,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		DefaultMappedModel:              input.DefaultMappedModel,
 		MessagesDispatchModelConfig:     normalizeOpenAIMessagesDispatchModelConfig(input.MessagesDispatchModelConfig),
 		RPMLimit:                        input.RPMLimit,
+		NewAPIStyleInterfaceEnabled:     input.NewAPIStyleInterfaceEnabled,
 	}
 	sanitizeGroupMessagesDispatchFields(group)
 	if err := s.groupRepo.Create(ctx, group); err != nil {
@@ -1738,6 +1741,9 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	}
 	if input.RPMLimit != nil {
 		group.RPMLimit = *input.RPMLimit
+	}
+	if input.NewAPIStyleInterfaceEnabled != nil {
+		group.NewAPIStyleInterfaceEnabled = *input.NewAPIStyleInterfaceEnabled
 	}
 	sanitizeGroupMessagesDispatchFields(group)
 
@@ -2180,7 +2186,7 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 		Platform:    input.Platform,
 		Type:        input.Type,
 		Credentials: input.Credentials,
-		Extra:       input.Extra,
+		Extra:       NormalizeNewAPIStyleInterfaceExtra(input.Platform, input.Extra),
 		ProxyID:     input.ProxyID,
 		Concurrency: input.Concurrency,
 		Priority:    input.Priority,
@@ -2282,7 +2288,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 				input.Extra[key] = v
 			}
 		}
-		account.Extra = input.Extra
+		account.Extra = NormalizeNewAPIStyleInterfaceExtra(account.Platform, input.Extra)
 		if account.Platform == PlatformAntigravity && wasOveragesEnabled && !account.IsOveragesEnabled() {
 			delete(account.Extra, "antigravity_credits_overages") // 清理旧版 overages 运行态
 			// 清除 AICredits 限流 key
@@ -2408,10 +2414,12 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	}
 
 	needMixedChannelCheck := input.GroupIDs != nil && !input.SkipMixedChannelCheck
+	extraNeedsPerAccountNormalization := newAPIStyleExtraNeedsPerAccountNormalization(input.Extra)
 
 	// 预加载账号平台信息（混合渠道检查需要）。
 	platformByID := map[int64]string{}
-	if needMixedChannelCheck {
+	accountsByID := map[int64]*Account{}
+	if needMixedChannelCheck || extraNeedsPerAccountNormalization {
 		accounts, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
@@ -2419,6 +2427,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		for _, account := range accounts {
 			if account != nil {
 				platformByID[account.ID] = account.Platform
+				accountsByID[account.ID] = account
 			}
 		}
 	}
@@ -2443,9 +2452,13 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	}
 
 	// Prepare bulk updates for columns and JSONB fields.
+	bulkExtra := input.Extra
+	if extraNeedsPerAccountNormalization {
+		bulkExtra = nil
+	}
 	repoUpdates := AccountBulkUpdate{
 		Credentials: input.Credentials,
-		Extra:       input.Extra,
+		Extra:       bulkExtra,
 	}
 	if input.Name != "" {
 		repoUpdates.Name = &input.Name
@@ -2490,6 +2503,45 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	for _, accountID := range input.AccountIDs {
 		entry := BulkUpdateAccountResult{AccountID: accountID}
 
+		if extraNeedsPerAccountNormalization {
+			account := accountsByID[accountID]
+			if account == nil {
+				loaded, loadErr := s.accountRepo.GetByID(ctx, accountID)
+				if loadErr != nil {
+					entry.Success = false
+					entry.Error = loadErr.Error()
+					result.Failed++
+					result.FailedIDs = append(result.FailedIDs, accountID)
+					result.Results = append(result.Results, entry)
+					continue
+				}
+				account = loaded
+			}
+			mergedExtra := cloneCredentials(account.Extra)
+			for key, value := range input.Extra {
+				mergedExtra[key] = value
+			}
+			account.Extra = NormalizeNewAPIStyleInterfaceExtra(account.Platform, mergedExtra)
+			if err := ValidateQuotaResetConfig(account.Extra); err != nil {
+				entry.Success = false
+				entry.Error = err.Error()
+				result.Failed++
+				result.FailedIDs = append(result.FailedIDs, accountID)
+				result.Results = append(result.Results, entry)
+				continue
+			}
+			ComputeQuotaResetAt(account.Extra)
+			if err := s.accountRepo.Update(ctx, account); err != nil {
+				entry.Success = false
+				entry.Error = err.Error()
+				result.Failed++
+				result.FailedIDs = append(result.FailedIDs, accountID)
+				result.Results = append(result.Results, entry)
+				continue
+			}
+			s.invalidateCompatibleEndpointModeCache(accountID)
+		}
+
 		if input.GroupIDs != nil {
 			if err := s.accountRepo.BindGroups(ctx, accountID, *input.GroupIDs); err != nil {
 				entry.Success = false
@@ -2508,6 +2560,14 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	}
 
 	return result, nil
+}
+
+func newAPIStyleExtraNeedsPerAccountNormalization(extra map[string]any) bool {
+	if extra == nil {
+		return false
+	}
+	_, ok := extra[AccountExtraNewAPIStyleInterfaceEnabled]
+	return ok
 }
 
 func (s *adminServiceImpl) resolveBulkUpdateTargetIDs(ctx context.Context, filters *BulkUpdateAccountFilters) ([]int64, error) {

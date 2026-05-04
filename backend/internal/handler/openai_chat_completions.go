@@ -196,7 +196,29 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		if channelMapping.Mapped {
 			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
 		}
-		result, err := h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, promptCacheKey, defaultMappedModel)
+		var result *service.OpenAIForwardResult
+		var upstreamEndpoint string
+		if h.newAPIStyleService != nil && h.newAPIStyleService.SupportsForGroup(account, apiKey.Group, service.NewAPIStyleRouteChatCompletions) {
+			result, upstreamEndpoint, err = h.newAPIStyleService.ForwardOpenAI(
+				c.Request.Context(),
+				c,
+				account,
+				service.NewAPIStyleForwardOptions{
+					Route:        service.NewAPIStyleRouteChatCompletions,
+					Group:        apiKey.Group,
+					RequestBody:  forwardBody,
+					Stream:       reqStream,
+					Model:        reqModel,
+					Method:       http.MethodPost,
+					InboundPath:  c.Request.URL.Path,
+					QueryString:  c.Request.URL.RawQuery,
+					ContentType:  c.GetHeader("Content-Type"),
+					HeaderSource: c.Request.Header,
+				},
+			)
+		} else {
+			result, err = h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, promptCacheKey, defaultMappedModel)
+		}
 
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		if accountReleaseFunc != nil {
@@ -268,6 +290,9 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
 		compat := compatibilityLogFields(c)
+		if upstreamEndpoint == "" {
+			upstreamEndpoint = GetUpstreamEndpoint(c, account.Platform)
+		}
 
 		h.submitUsageRecordTask(func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
@@ -277,7 +302,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 				Account:            account,
 				Subscription:       subscription,
 				InboundEndpoint:    GetInboundEndpoint(c),
-				UpstreamEndpoint:   GetUpstreamEndpoint(c, account.Platform),
+				UpstreamEndpoint:   upstreamEndpoint,
 				UserAgent:          userAgent,
 				IPAddress:          clientIP,
 				ClientProfile:      compat.ClientProfile,

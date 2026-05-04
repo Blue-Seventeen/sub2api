@@ -239,7 +239,7 @@ func ProviderCapabilityForPlatform(platform string) ProviderCapability {
 				CompatibilityRouteCompatibleChatFallback,
 			},
 		}
-	case PlatformDeepSeek, PlatformVolcEngine:
+	case PlatformDeepSeek, PlatformVolcEngine, PlatformPerplexity, PlatformMistral, PlatformSiliconFlow, PlatformXAI, PlatformOpenRouter:
 		return ProviderCapability{
 			Platform:          strings.ToLower(strings.TrimSpace(platform)),
 			SupportsChat:      true,

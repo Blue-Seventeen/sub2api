@@ -27,6 +27,14 @@ const (
 	PlatformVolcEngine  = "volcengine"
 	PlatformAli         = "ali"
 	PlatformMoonshot    = "moonshot"
+	PlatformPerplexity  = "perplexity"
+	PlatformMistral     = "mistral"
+	PlatformSiliconFlow = "siliconflow"
+	PlatformXAI         = "xai"
+	PlatformOpenRouter  = "openrouter"
+	PlatformSuno        = "suno"
+	PlatformKling       = "kling"
+	PlatformMidjourney  = "midjourney"
 )
 
 // Account type constants

@@ -201,6 +201,20 @@ const perplexityModels = [
   'llama-3-sonar-small-32k-chat', 'llama-3-sonar-large-32k-chat'
 ]
 
+// SiliconFlow
+const siliconflowModels = [
+  'deepseek-ai/DeepSeek-V2-Chat',
+  'Qwen/Qwen2-72B-Instruct',
+  'THUDM/glm-4-9b-chat'
+]
+
+// OpenRouter
+const openrouterModels = [
+  'openai/gpt-4o-mini',
+  'anthropic/claude-sonnet-4.5',
+  'google/gemini-2.5-flash'
+]
+
 // 所有模型（去重）
 const allModelsList: string[] = [
   ...openaiModels,
@@ -220,7 +234,9 @@ const allModelsList: string[] = [
   ...baiduModels,
   ...sparkModels,
   ...hunyuanModels,
-  ...perplexityModels
+  ...perplexityModels,
+  ...siliconflowModels,
+  ...openrouterModels
 ]
 
 // 转换为下拉选项格式
@@ -371,6 +387,8 @@ export function getModelsByPlatform(platform: string): string[] {
     case 'spark': return sparkModels
     case 'hunyuan': return hunyuanModels
     case 'perplexity': return perplexityModels
+    case 'siliconflow': return siliconflowModels
+    case 'openrouter': return openrouterModels
     default: return claudeModels
   }
 }

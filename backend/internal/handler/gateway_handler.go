@@ -36,6 +36,7 @@ var gatewayCompatibilityMetricsLogCounter atomic.Uint64
 // GatewayHandler handles API gateway requests
 type GatewayHandler struct {
 	gatewayService            *service.GatewayService
+	newAPIStyleService        *service.NewAPIStyleGatewayService
 	geminiCompatService       *service.GeminiMessagesCompatService
 	antigravityGatewayService *service.AntigravityGatewayService
 	userService               *service.UserService
@@ -55,6 +56,7 @@ type GatewayHandler struct {
 // NewGatewayHandler creates a new GatewayHandler
 func NewGatewayHandler(
 	gatewayService *service.GatewayService,
+	newAPIStyleService *service.NewAPIStyleGatewayService,
 	geminiCompatService *service.GeminiMessagesCompatService,
 	antigravityGatewayService *service.AntigravityGatewayService,
 	userService *service.UserService,
@@ -89,6 +91,7 @@ func NewGatewayHandler(
 
 	return &GatewayHandler{
 		gatewayService:            gatewayService,
+		newAPIStyleService:        newAPIStyleService,
 		geminiCompatService:       geminiCompatService,
 		antigravityGatewayService: antigravityGatewayService,
 		userService:               userService,
@@ -414,7 +417,25 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
 			writerSizeBeforeForward := c.Writer.Size()
-			if account.Platform == service.PlatformAntigravity {
+			if h.newAPIStyleService != nil && h.newAPIStyleService.SupportsForGroup(account, apiKey.Group, service.NewAPIStyleRouteMessages) {
+				result, _, err = h.newAPIStyleService.Forward(
+					requestCtx,
+					c,
+					account,
+					service.NewAPIStyleForwardOptions{
+						Route:        service.NewAPIStyleRouteMessages,
+						Group:        apiKey.Group,
+						RequestBody:  body,
+						Stream:       reqStream,
+						Model:        reqModel,
+						Method:       http.MethodPost,
+						InboundPath:  c.Request.URL.Path,
+						QueryString:  c.Request.URL.RawQuery,
+						ContentType:  c.GetHeader("Content-Type"),
+						HeaderSource: c.Request.Header,
+					},
+				)
+			} else if account.Platform == service.PlatformAntigravity {
 				result, err = h.antigravityGatewayService.ForwardGemini(requestCtx, c, account, reqModel, "generateContent", reqStream, body, hasBoundSession)
 			} else {
 				result, err = h.geminiCompatService.Forward(requestCtx, c, account, body)
@@ -724,7 +745,25 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
 			writerSizeBeforeForward := c.Writer.Size()
-			if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
+			if h.newAPIStyleService != nil && h.newAPIStyleService.SupportsForGroup(account, currentAPIKey.Group, service.NewAPIStyleRouteMessages) {
+				result, _, err = h.newAPIStyleService.Forward(
+					requestCtx,
+					c,
+					account,
+					service.NewAPIStyleForwardOptions{
+						Route:        service.NewAPIStyleRouteMessages,
+						Group:        currentAPIKey.Group,
+						RequestBody:  body,
+						Stream:       reqStream,
+						Model:        reqModel,
+						Method:       http.MethodPost,
+						InboundPath:  c.Request.URL.Path,
+						QueryString:  c.Request.URL.RawQuery,
+						ContentType:  c.GetHeader("Content-Type"),
+						HeaderSource: c.Request.Header,
+					},
+				)
+			} else if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
 				result, err = h.antigravityGatewayService.Forward(requestCtx, c, account, body, hasBoundSession)
 			} else {
 				result, err = h.gatewayService.Forward(requestCtx, c, account, parsedReq)
