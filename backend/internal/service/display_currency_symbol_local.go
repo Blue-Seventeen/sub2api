@@ -120,10 +120,10 @@ func (s *SettingService) prepareDisplayCurrencySymbolLocalConfig(localOnly bool,
 		cleanup()
 		return nil, nil, fmt.Errorf("write display currency symbol local config temp file: %w", err)
 	}
-	if err := tmpFile.Chmod(0o600); err != nil {
+	if err := chmodLocalConfigTempFile(tmpFile, 0o600, "display currency symbol local config"); err != nil {
 		_ = tmpFile.Close()
 		cleanup()
-		return nil, nil, fmt.Errorf("chmod display currency symbol local config temp file: %w", err)
+		return nil, nil, err
 	}
 	if err := tmpFile.Close(); err != nil {
 		cleanup()

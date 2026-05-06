@@ -424,10 +424,10 @@ func (s *BackupService) prepareLocalScheduleEnabled(enabled bool) (func() error,
 		cleanup()
 		return nil, nil, fmt.Errorf("write local schedule config temp file: %w", err)
 	}
-	if err := tmpFile.Chmod(0o600); err != nil {
+	if err := chmodLocalConfigTempFile(tmpFile, 0o600, "local schedule config"); err != nil {
 		_ = tmpFile.Close()
 		cleanup()
-		return nil, nil, fmt.Errorf("chmod local schedule config temp file: %w", err)
+		return nil, nil, err
 	}
 	if err := tmpFile.Close(); err != nil {
 		cleanup()
