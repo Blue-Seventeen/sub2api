@@ -5374,7 +5374,7 @@ export default {
         displayCurrencySymbol: '货币符号',
         displayCurrencySymbolHint: '仅影响前端金额展示，不改变余额、计费、支付、退款等后端数值逻辑',
         displayCurrencySymbolPlaceholder: '$ / ¥ / RMB',
-        displayCurrencySymbolLocalOnly: '仅用于本机',
+        displayCurrencySymbolLocalOnly: '货币符号仅用于本机',
         displayCurrencySymbolLocalOnlyHint: '开启后保存到当前服务实例本机配置文件，不写入 PostgreSQL；关闭后保存到数据库并在共库节点共享',
         tablePreferencesTitle: '通用表格设置',
         tablePreferencesDescription: '设置后台与用户侧表格组件的默认分页行为',

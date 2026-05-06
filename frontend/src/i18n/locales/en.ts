@@ -5216,7 +5216,7 @@ export default {
         displayCurrencySymbolHint:
           'Display only. Backend balances, billing, payments, and refunds keep their original numeric values.',
         displayCurrencySymbolPlaceholder: '$ / ¥ / RMB',
-        displayCurrencySymbolLocalOnly: 'Local Only',
+        displayCurrencySymbolLocalOnly: 'Currency Symbol Local Only',
         displayCurrencySymbolLocalOnlyHint:
           'When enabled, saves to this service instance local config file without updating PostgreSQL. Disable it to share the symbol through the database.',
         tablePreferencesTitle: 'Global Table Preferences',
