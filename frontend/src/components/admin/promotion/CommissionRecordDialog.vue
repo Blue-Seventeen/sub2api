@@ -26,7 +26,7 @@
       <section class="grid gap-3 md:grid-cols-3">
         <div class="rounded-2xl border border-white/10 bg-white/5 p-4 text-center">
           <div class="text-xs uppercase tracking-[0.24em] text-slate-500">真实消费</div>
-          <div class="mt-2 text-xl font-semibold text-slate-100">${{ money(record.base_amount) }}</div>
+          <div class="mt-2 text-xl font-semibold text-slate-100">{{ money(record.base_amount) }}</div>
         </div>
         <div class="rounded-2xl border border-white/10 bg-white/5 p-4 text-center">
           <div class="text-xs uppercase tracking-[0.24em] text-slate-500">返利比例</div>
@@ -75,6 +75,7 @@
 import { ref, watch } from 'vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import type { PromotionCommissionItem } from '@/api/promotion'
+import { formatCurrencyAmount } from '@/utils/format'
 
 const props = defineProps<{
   show: boolean
@@ -110,7 +111,7 @@ function handleSubmit() {
 }
 
 function money(value?: number) {
-  return Number(value || 0).toFixed(2)
+  return formatCurrencyAmount(value || 0)
 }
 
 function rate(value?: number) {

@@ -16,12 +16,12 @@
           <div class="grid gap-3 sm:grid-cols-2 xl:min-w-[420px]">
             <div class="promo-panel-soft">
               <div class="text-xs uppercase tracking-[0.24em] text-slate-500">系统累计已结算</div>
-              <div class="mt-2 text-2xl font-semibold text-emerald-300">${{ money(dashboard?.total_settled_amount) }}</div>
+              <div class="mt-2 text-2xl font-semibold text-emerald-300">{{ money(dashboard?.total_settled_amount) }}</div>
               <div class="mt-2 text-xs text-slate-400">已发放到真实余额的推广收益总额。</div>
             </div>
             <div class="promo-panel-soft">
               <div class="text-xs uppercase tracking-[0.24em] text-slate-500">今日待结算</div>
-              <div class="mt-2 text-2xl font-semibold text-cyan-300">${{ money(dashboard?.today_pending_amount) }}</div>
+              <div class="mt-2 text-2xl font-semibold text-cyan-300">{{ money(dashboard?.today_pending_amount) }}</div>
               <div class="mt-2 text-xs text-slate-400">将随日结任务进入用户真实余额。</div>
             </div>
           </div>
@@ -71,6 +71,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { adminPromotionAPI, type PromotionAdminDashboard } from '@/api/admin/promotion'
 import { useAppStore } from '@/stores'
+import { formatCurrencyAmount } from '@/utils/format'
 
 type TabKey = 'relations' | 'commissions' | 'config' | 'scripts'
 
@@ -93,7 +94,7 @@ const tabs: Array<{ key: TabKey; label: string; icon: 'users' | 'dollar' | 'cog'
 const dashboardCards = computed(() => [
   {
     label: '待结算金额',
-    value: `$${money(dashboard.value?.pending_amount)}`,
+    value: money(dashboard.value?.pending_amount),
     note: '尚未执行日结的推广收益总额',
     icon: 'clock' as const,
     valueClass: 'text-amber-300',
@@ -140,6 +141,6 @@ async function fetchDashboard() {
 }
 
 function money(value?: number) {
-  return Number(value || 0).toFixed(2)
+  return formatCurrencyAmount(value || 0)
 }
 </script>

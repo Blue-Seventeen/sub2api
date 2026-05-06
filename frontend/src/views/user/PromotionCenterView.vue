@@ -17,14 +17,14 @@
             <div class="promo-panel-soft">
               <div class="text-xs uppercase tracking-[0.24em] text-slate-500">今日收益</div>
               <div class="mt-2 text-2xl font-semibold text-emerald-300">
-                ${{ money(overview?.today_earnings) }}
+                {{ money(overview?.today_earnings) }}
               </div>
               <div class="mt-2 text-xs text-slate-400">系统按业务日汇总，不是即时到账。</div>
             </div>
             <div class="promo-panel-soft">
               <div class="text-xs uppercase tracking-[0.24em] text-slate-500">累计收益</div>
               <div class="mt-2 text-2xl font-semibold text-cyan-300">
-                ${{ money(overview?.total_reward_amount) }}
+                {{ money(overview?.total_reward_amount) }}
               </div>
               <div class="mt-2 text-xs text-slate-400">包含待发放与已发放的累计推广收益。</div>
             </div>
@@ -60,6 +60,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { promotionAPI, type PromotionOverview } from '@/api/promotion'
 import { useAppStore } from '@/stores'
+import { formatCurrencyAmount } from '@/utils/format'
 
 type TabKey = 'overview' | 'invite' | 'team' | 'earnings'
 
@@ -97,6 +98,6 @@ async function fetchOverview() {
 }
 
 function money(value?: number) {
-  return Number(value || 0).toFixed(2)
+  return formatCurrencyAmount(value || 0)
 }
 </script>

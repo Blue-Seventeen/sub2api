@@ -101,8 +101,8 @@
                   {{ t('userSubscriptions.daily') }}
                 </span>
                 <span class="text-sm text-gray-500 dark:text-dark-400">
-                  ${{ (subscription.daily_usage_usd || 0).toFixed(2) }} / ${{
-                    subscription.group.daily_limit_usd.toFixed(2)
+                  {{ formatCurrencyAmount(subscription.daily_usage_usd || 0) }} / {{
+                    formatCurrencyAmount(subscription.group.daily_limit_usd)
                   }}
                 </span>
               </div>
@@ -142,8 +142,8 @@
                   {{ t('userSubscriptions.weekly') }}
                 </span>
                 <span class="text-sm text-gray-500 dark:text-dark-400">
-                  ${{ (subscription.weekly_usage_usd || 0).toFixed(2) }} / ${{
-                    subscription.group.weekly_limit_usd.toFixed(2)
+                  {{ formatCurrencyAmount(subscription.weekly_usage_usd || 0) }} / {{
+                    formatCurrencyAmount(subscription.group.weekly_limit_usd)
                   }}
                 </span>
               </div>
@@ -183,8 +183,8 @@
                   {{ t('userSubscriptions.monthly') }}
                 </span>
                 <span class="text-sm text-gray-500 dark:text-dark-400">
-                  ${{ (subscription.monthly_usage_usd || 0).toFixed(2) }} / ${{
-                    subscription.group.monthly_limit_usd.toFixed(2)
+                  {{ formatCurrencyAmount(subscription.monthly_usage_usd || 0) }} / {{
+                    formatCurrencyAmount(subscription.group.monthly_limit_usd)
                   }}
                 </span>
               </div>
@@ -254,7 +254,7 @@ import subscriptionsAPI from '@/api/subscriptions'
 import type { UserSubscription } from '@/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
-import { formatDateOnly } from '@/utils/format'
+import { formatCurrencyAmount, formatDateOnly } from '@/utils/format'
 import { platformBorderClass, platformBadgeClass, platformButtonClass, platformDotClass, platformLabel } from '@/utils/platformColors'
 
 const platformAccentDotClass = (p: string) => platformDotClass(p)

@@ -4,6 +4,54 @@
  */
 
 import { i18n, getLocale } from '@/i18n'
+import { ref } from 'vue'
+
+export const DEFAULT_DISPLAY_CURRENCY_SYMBOL = '$'
+export const DISPLAY_CURRENCY_SYMBOL_MAX_LENGTH = 8
+
+const activeDisplayCurrencySymbol = ref(DEFAULT_DISPLAY_CURRENCY_SYMBOL)
+
+export function truncateDisplayCurrencySymbol(value: unknown): string {
+  const raw = typeof value === 'string' ? value : ''
+  return Array.from(raw).slice(0, DISPLAY_CURRENCY_SYMBOL_MAX_LENGTH).join('')
+}
+
+export function normalizeDisplayCurrencySymbol(value: unknown): string {
+  const raw = typeof value === 'string' ? value.trim() : ''
+  if (!raw) return DEFAULT_DISPLAY_CURRENCY_SYMBOL
+
+  const chars = Array.from(raw)
+  if (chars.length > DISPLAY_CURRENCY_SYMBOL_MAX_LENGTH) return DEFAULT_DISPLAY_CURRENCY_SYMBOL
+  if (/[\u0000-\u001F\u007F]/u.test(raw)) return DEFAULT_DISPLAY_CURRENCY_SYMBOL
+
+  return raw
+}
+
+export function setDisplayCurrencySymbol(value: unknown): void {
+  activeDisplayCurrencySymbol.value = normalizeDisplayCurrencySymbol(value)
+}
+
+export function getDisplayCurrencySymbol(): string {
+  return activeDisplayCurrencySymbol.value
+}
+
+export function formatCurrencyAmount(
+  amount: number | null | undefined,
+  fractionDigits: number = 2,
+  symbol: string = activeDisplayCurrencySymbol.value
+): string {
+  const numeric = Number(amount ?? 0)
+  const safeNumber = Number.isFinite(numeric) ? numeric : 0
+  return `${normalizeDisplayCurrencySymbol(symbol)}${safeNumber.toFixed(fractionDigits)}`
+}
+
+export function formatCostAmount(amount: number | null | undefined, fractionDigits: number = 4): string {
+  return formatCurrencyAmount(amount, fractionDigits)
+}
+
+export function formatCompactCurrencyAmount(amount: number | null | undefined): string {
+  return `${activeDisplayCurrencySymbol.value}${formatCompactNumber(Number(amount ?? 0))}`
+}
 
 /**
  * 格式化相对时间
@@ -59,19 +107,10 @@ export function formatNumber(num: number | null | undefined): string {
  * @returns 格式化后的字符串，如 "$1.25"
  */
 export function formatCurrency(amount: number | null | undefined, currency: string = 'USD'): string {
-  if (amount === null || amount === undefined) return '$0.00'
-
-  const locale = getLocale()
-
-  // For very small amounts, show more decimals
-  const fractionDigits = amount > 0 && amount < 0.01 ? 6 : 2
-
-  return new Intl.NumberFormat(locale, {
-    style: 'currency',
-    currency: currency,
-    minimumFractionDigits: fractionDigits,
-    maximumFractionDigits: fractionDigits
-  }).format(amount)
+  void currency
+  const numeric = Number(amount ?? 0)
+  const fractionDigits = numeric > 0 && numeric < 0.01 ? 6 : 2
+  return formatCurrencyAmount(numeric, fractionDigits)
 }
 
 /**

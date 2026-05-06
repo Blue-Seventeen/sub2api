@@ -154,7 +154,7 @@
                   "
                 >
                   <span v-if="row.daily_limit_usd"
-                    >${{ row.daily_limit_usd }}/{{
+                    >{{ formatCurrencyAmount(row.daily_limit_usd) }}/{{
                       t("admin.groups.limitDay")
                     }}</span
                   >
@@ -167,7 +167,7 @@
                     >·</span
                   >
                   <span v-if="row.weekly_limit_usd"
-                    >${{ row.weekly_limit_usd }}/{{
+                    >{{ formatCurrencyAmount(row.weekly_limit_usd) }}/{{
                       t("admin.groups.limitWeek")
                     }}</span
                   >
@@ -177,7 +177,7 @@
                     >·</span
                   >
                   <span v-if="row.monthly_limit_usd"
-                    >${{ row.monthly_limit_usd }}/{{
+                    >{{ formatCurrencyAmount(row.monthly_limit_usd) }}/{{
                       t("admin.groups.limitMonth")
                     }}</span
                   >
@@ -271,8 +271,8 @@
                   t("admin.groups.usageToday")
                 }}</span>
                 <span class="ml-1 font-medium text-gray-700 dark:text-gray-300"
-                  >${{
-                    formatCost(usageMap.get(row.id)?.real_today_cost ?? usageMap.get(row.id)?.today_cost ?? 0)
+                  >{{
+                    formatDisplayCost(usageMap.get(row.id)?.real_today_cost ?? usageMap.get(row.id)?.today_cost ?? 0)
                   }}</span
                 >
               </div>
@@ -281,8 +281,8 @@
                   t("admin.groups.usageTotal")
                 }}</span>
                 <span class="ml-1 font-medium text-gray-700 dark:text-gray-300"
-                  >${{
-                    formatCost(usageMap.get(row.id)?.real_total_cost ?? usageMap.get(row.id)?.total_cost ?? 0)
+                  >{{
+                    formatDisplayCost(usageMap.get(row.id)?.real_total_cost ?? usageMap.get(row.id)?.total_cost ?? 0)
                   }}</span
                 >
               </div>
@@ -784,7 +784,7 @@
           </p>
           <div class="grid grid-cols-3 gap-3">
             <div>
-              <label class="input-label">1K ($)</label>
+              <label class="input-label">1K ({{ getDisplayCurrencySymbol() }})</label>
               <input
                 v-model.number="createForm.image_price_1k"
                 type="number"
@@ -795,7 +795,7 @@
               />
             </div>
             <div>
-              <label class="input-label">2K ($)</label>
+              <label class="input-label">2K ({{ getDisplayCurrencySymbol() }})</label>
               <input
                 v-model.number="createForm.image_price_2k"
                 type="number"
@@ -806,7 +806,7 @@
               />
             </div>
             <div>
-              <label class="input-label">4K ($)</label>
+              <label class="input-label">4K ({{ getDisplayCurrencySymbol() }})</label>
               <input
                 v-model.number="createForm.image_price_4k"
                 type="number"
@@ -1955,7 +1955,7 @@
           </p>
           <div class="grid grid-cols-3 gap-3">
             <div>
-              <label class="input-label">1K ($)</label>
+              <label class="input-label">1K ({{ getDisplayCurrencySymbol() }})</label>
               <input
                 v-model.number="editForm.image_price_1k"
                 type="number"
@@ -1966,7 +1966,7 @@
               />
             </div>
             <div>
-              <label class="input-label">2K ($)</label>
+              <label class="input-label">2K ({{ getDisplayCurrencySymbol() }})</label>
               <input
                 v-model.number="editForm.image_price_2k"
                 type="number"
@@ -1977,7 +1977,7 @@
               />
             </div>
             <div>
-              <label class="input-label">4K ($)</label>
+              <label class="input-label">4K ({{ getDisplayCurrencySymbol() }})</label>
               <input
                 v-model.number="editForm.image_price_4k"
                 type="number"
@@ -2920,6 +2920,7 @@ import { VueDraggable } from "vue-draggable-plus";
 import { createStableObjectKeyResolver } from "@/utils/stableObjectKey";
 import { useKeyedDebouncedSearch } from "@/composables/useKeyedDebouncedSearch";
 import { getPersistedPageSize } from "@/composables/usePersistedPageSize";
+import { formatCurrencyAmount, getDisplayCurrencySymbol } from "@/utils/format";
 import {
   createDefaultMessagesDispatchFormState,
   messagesDispatchConfigToFormState,
@@ -3794,6 +3795,8 @@ const formatCost = (cost: number): string => {
   if (cost >= 100) return cost.toFixed(1);
   return cost.toFixed(2);
 };
+
+const formatDisplayCost = (cost: number): string => `${getDisplayCurrencySymbol()}${formatCost(cost)}`;
 
 const loadUsageSummary = async () => {
   usageLoading.value = true;

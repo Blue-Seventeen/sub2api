@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -79,6 +80,32 @@ const backendModeCacheTTL = 60 * time.Second
 const backendModeErrorTTL = 5 * time.Second
 const backendModeDBTimeout = 5 * time.Second
 
+const defaultDisplayCurrencySymbol = "$"
+
+func normalizeDisplayCurrencySymbol(value string) (string, error) {
+	symbol := strings.TrimSpace(value)
+	if symbol == "" {
+		return defaultDisplayCurrencySymbol, nil
+	}
+	if len([]rune(symbol)) > 8 {
+		return "", infraerrors.BadRequest("INVALID_DISPLAY_CURRENCY_SYMBOL", "display currency symbol must be at most 8 characters")
+	}
+	for _, r := range symbol {
+		if unicode.IsControl(r) {
+			return "", infraerrors.BadRequest("INVALID_DISPLAY_CURRENCY_SYMBOL", "display currency symbol cannot contain control characters")
+		}
+	}
+	return symbol, nil
+}
+
+func safeDisplayCurrencySymbol(value string) string {
+	symbol, err := normalizeDisplayCurrencySymbol(value)
+	if err != nil {
+		return defaultDisplayCurrencySymbol
+	}
+	return symbol
+}
+
 // cachedGatewayForwardingSettings 缓存网关转发行为设置（进程内缓存，60s TTL）
 type cachedGatewayForwardingSettings struct {
 	fingerprintUnification       bool
@@ -125,6 +152,8 @@ type SettingService struct {
 	onUpdate                func() // Callback when settings are updated (for cache invalidation)
 	version                 string // Application version
 	webSearchManagerBuilder WebSearchManagerBuilder
+
+	displayCurrencySymbolLocalConfigPath string
 }
 
 type ProviderDefaultGrantSettings struct {
@@ -377,8 +406,9 @@ func (s *SettingService) effectiveWeChatConnectOAuthConfig(settings map[string]s
 // NewSettingService 创建系统设置服务实例
 func NewSettingService(settingRepo SettingRepository, cfg *config.Config) *SettingService {
 	return &SettingService{
-		settingRepo: settingRepo,
-		cfg:         cfg,
+		settingRepo:                          settingRepo,
+		cfg:                                  cfg,
+		displayCurrencySymbolLocalConfigPath: defaultDisplayCurrencySymbolLocalConfigPath(),
 	}
 }
 
@@ -429,6 +459,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SettingKeySiteLogo,
 		SettingKeySiteSubtitle,
 		SettingKeyAPIBaseURL,
+		SettingKeyDisplayCurrencySymbol,
 		SettingKeyContactInfo,
 		SettingKeyDocURL,
 		SettingKeyHomeContent,
@@ -511,6 +542,12 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		balanceLowNotifyThreshold = v
 	}
 
+	sharedDisplayCurrencySymbol, displayCurrencySymbolSharedConfigured := settings[SettingKeyDisplayCurrencySymbol]
+	displayCurrencySymbol, _ := s.effectiveDisplayCurrencySymbol(
+		sharedDisplayCurrencySymbol,
+		displayCurrencySymbolSharedConfigured,
+	)
+
 	return &PublicSettings{
 		RegistrationEnabled:              settings[SettingKeyRegistrationEnabled] == "true",
 		EmailVerifyEnabled:               emailVerifyEnabled,
@@ -527,6 +564,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SiteLogo:                         settings[SettingKeySiteLogo],
 		SiteSubtitle:                     s.getStringOrDefault(settings, SettingKeySiteSubtitle, "Subscription to API Conversion Platform"),
 		APIBaseURL:                       settings[SettingKeyAPIBaseURL],
+		DisplayCurrencySymbol:            displayCurrencySymbol,
 		ContactInfo:                      settings[SettingKeyContactInfo],
 		DocURL:                           settings[SettingKeyDocURL],
 		HomeContent:                      settings[SettingKeyHomeContent],
@@ -671,6 +709,7 @@ type PublicSettingsInjectionPayload struct {
 	SiteLogo                         string          `json:"site_logo"`
 	SiteSubtitle                     string          `json:"site_subtitle"`
 	APIBaseURL                       string          `json:"api_base_url"`
+	DisplayCurrencySymbol            string          `json:"display_currency_symbol"`
 	ContactInfo                      string          `json:"contact_info"`
 	DocURL                           string          `json:"doc_url"`
 	HomeContent                      string          `json:"home_content"`
@@ -727,6 +766,7 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		SiteLogo:                         settings.SiteLogo,
 		SiteSubtitle:                     settings.SiteSubtitle,
 		APIBaseURL:                       settings.APIBaseURL,
+		DisplayCurrencySymbol:            settings.DisplayCurrencySymbol,
 		ContactInfo:                      settings.ContactInfo,
 		DocURL:                           settings.DocURL,
 		HomeContent:                      settings.HomeContent,
@@ -964,16 +1004,29 @@ func oidcCompatibilityWriteDefault(base config.OIDCConnectConfig, configured boo
 
 // UpdateSettings 更新系统设置
 func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSettings) error {
-	updates, err := s.buildSystemSettingsUpdates(ctx, settings)
+	updates, commitLocalDisplayCurrencySymbol, cleanupLocalDisplayCurrencySymbol, err := s.buildSystemSettingsUpdates(ctx, settings)
 	if err != nil {
 		return err
 	}
+	if cleanupLocalDisplayCurrencySymbol != nil {
+		defer cleanupLocalDisplayCurrencySymbol()
+	}
+
+	rollbackLocalDisplayCurrencySymbol := func() {}
+	if commitLocalDisplayCurrencySymbol != nil {
+		rollbackLocalDisplayCurrencySymbol = s.snapshotDisplayCurrencySymbolLocalConfig()
+		if err := commitLocalDisplayCurrencySymbol(); err != nil {
+			return err
+		}
+	}
 
 	err = s.settingRepo.SetMultiple(ctx, updates)
-	if err == nil {
-		s.refreshCachedSettings(settings)
+	if err != nil {
+		rollbackLocalDisplayCurrencySymbol()
+		return err
 	}
-	return err
+	s.refreshCachedSettings(settings)
+	return nil
 }
 
 func (s *SettingService) OIDCSecurityWriteDefaults(ctx context.Context) (bool, bool, error) {
@@ -1000,9 +1053,12 @@ func (s *SettingService) OIDCSecurityWriteDefaults(ctx context.Context) (bool, b
 
 // UpdateSettingsWithAuthSourceDefaults persists system settings and auth-source defaults in a single write.
 func (s *SettingService) UpdateSettingsWithAuthSourceDefaults(ctx context.Context, settings *SystemSettings, authDefaults *AuthSourceDefaultSettings) error {
-	updates, err := s.buildSystemSettingsUpdates(ctx, settings)
+	updates, commitLocalDisplayCurrencySymbol, cleanupLocalDisplayCurrencySymbol, err := s.buildSystemSettingsUpdates(ctx, settings)
 	if err != nil {
 		return err
+	}
+	if cleanupLocalDisplayCurrencySymbol != nil {
+		defer cleanupLocalDisplayCurrencySymbol()
 	}
 
 	authSourceUpdates, err := s.buildAuthSourceDefaultUpdates(ctx, authDefaults)
@@ -1013,20 +1069,30 @@ func (s *SettingService) UpdateSettingsWithAuthSourceDefaults(ctx context.Contex
 		updates[key] = value
 	}
 
-	err = s.settingRepo.SetMultiple(ctx, updates)
-	if err == nil {
-		s.refreshCachedSettings(settings)
+	rollbackLocalDisplayCurrencySymbol := func() {}
+	if commitLocalDisplayCurrencySymbol != nil {
+		rollbackLocalDisplayCurrencySymbol = s.snapshotDisplayCurrencySymbolLocalConfig()
+		if err := commitLocalDisplayCurrencySymbol(); err != nil {
+			return err
+		}
 	}
-	return err
+
+	err = s.settingRepo.SetMultiple(ctx, updates)
+	if err != nil {
+		rollbackLocalDisplayCurrencySymbol()
+		return err
+	}
+	s.refreshCachedSettings(settings)
+	return nil
 }
 
-func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, settings *SystemSettings) (map[string]string, error) {
+func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, settings *SystemSettings) (map[string]string, func() error, func(), error) {
 	if err := s.validateDefaultSubscriptionGroups(ctx, settings.DefaultSubscriptions); err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	normalizedWhitelist, err := NormalizeRegistrationEmailSuffixWhitelist(settings.RegistrationEmailSuffixWhitelist)
 	if err != nil {
-		return nil, infraerrors.BadRequest("INVALID_REGISTRATION_EMAIL_SUFFIX_WHITELIST", err.Error())
+		return nil, nil, nil, infraerrors.BadRequest("INVALID_REGISTRATION_EMAIL_SUFFIX_WHITELIST", err.Error())
 	}
 	if normalizedWhitelist == nil {
 		normalizedWhitelist = []string{}
@@ -1034,11 +1100,11 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	settings.RegistrationEmailSuffixWhitelist = normalizedWhitelist
 	alipaySource, err := normalizeVisibleMethodSettingSource("alipay", settings.PaymentVisibleMethodAlipaySource, settings.PaymentVisibleMethodAlipayEnabled)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	wxpaySource, err := normalizeVisibleMethodSettingSource("wxpay", settings.PaymentVisibleMethodWxpaySource, settings.PaymentVisibleMethodWxpayEnabled)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	settings.PaymentVisibleMethodAlipaySource = alipaySource
 	settings.PaymentVisibleMethodWxpaySource = wxpaySource
@@ -1070,7 +1136,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyEmailVerifyEnabled] = strconv.FormatBool(settings.EmailVerifyEnabled)
 	registrationEmailSuffixWhitelistJSON, err := json.Marshal(settings.RegistrationEmailSuffixWhitelist)
 	if err != nil {
-		return nil, fmt.Errorf("marshal registration email suffix whitelist: %w", err)
+		return nil, nil, nil, fmt.Errorf("marshal registration email suffix whitelist: %w", err)
 	}
 	updates[SettingKeyRegistrationEmailSuffixWhitelist] = string(registrationEmailSuffixWhitelistJSON)
 	updates[SettingKeyPromoCodeEnabled] = strconv.FormatBool(settings.PromoCodeEnabled)
@@ -1163,6 +1229,18 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeySiteLogo] = settings.SiteLogo
 	updates[SettingKeySiteSubtitle] = settings.SiteSubtitle
 	updates[SettingKeyAPIBaseURL] = settings.APIBaseURL
+	displayCurrencySymbol, err := normalizeDisplayCurrencySymbol(settings.DisplayCurrencySymbol)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	settings.DisplayCurrencySymbol = displayCurrencySymbol
+	commitLocalDisplayCurrencySymbol, cleanupLocalDisplayCurrencySymbol, err := s.prepareDisplayCurrencySymbolLocalConfig(settings.DisplayCurrencySymbolLocalOnly, displayCurrencySymbol)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if !settings.DisplayCurrencySymbolLocalOnly {
+		updates[SettingKeyDisplayCurrencySymbol] = displayCurrencySymbol
+	}
 	updates[SettingKeyContactInfo] = settings.ContactInfo
 	updates[SettingKeyDocURL] = settings.DocURL
 	updates[SettingKeyHomeContent] = settings.HomeContent
@@ -1176,7 +1254,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyTableDefaultPageSize] = strconv.Itoa(tableDefaultPageSize)
 	tablePageSizeOptionsJSON, err := json.Marshal(tablePageSizeOptions)
 	if err != nil {
-		return nil, fmt.Errorf("marshal table page size options: %w", err)
+		return nil, nil, nil, fmt.Errorf("marshal table page size options: %w", err)
 	}
 	updates[SettingKeyTablePageSizeOptions] = string(tablePageSizeOptionsJSON)
 	updates[SettingKeyCustomMenuItems] = settings.CustomMenuItems
@@ -1188,7 +1266,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyDefaultUserRPMLimit] = strconv.Itoa(settings.DefaultUserRPMLimit)
 	defaultSubsJSON, err := json.Marshal(settings.DefaultSubscriptions)
 	if err != nil {
-		return nil, fmt.Errorf("marshal default subscriptions: %w", err)
+		return nil, nil, nil, fmt.Errorf("marshal default subscriptions: %w", err)
 	}
 	updates[SettingKeyDefaultSubscriptions] = string(defaultSubsJSON)
 
@@ -1248,7 +1326,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyAccountQuotaNotifyEnabled] = strconv.FormatBool(settings.AccountQuotaNotifyEnabled)
 	updates[SettingKeyAccountQuotaNotifyEmails] = MarshalNotifyEmails(settings.AccountQuotaNotifyEmails)
 
-	return updates, nil
+	return updates, commitLocalDisplayCurrencySymbol, cleanupLocalDisplayCurrencySymbol, nil
 }
 
 func (s *SettingService) buildAuthSourceDefaultUpdates(ctx context.Context, settings *AuthSourceDefaultSettings) (map[string]string, error) {
@@ -1719,6 +1797,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyInvitationCodeMissingPromptHTML:          "",
 		SettingKeySiteName:                                 "Sub2API",
 		SettingKeySiteLogo:                                 "",
+		SettingKeyDisplayCurrencySymbol:                    defaultDisplayCurrencySymbol,
 		SettingKeyPurchaseSubscriptionEnabled:              "false",
 		SettingKeyPurchaseSubscriptionURL:                  "",
 		SettingKeyTableDefaultPageSize:                     "20",
@@ -1833,6 +1912,11 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 // parseSettings 解析设置到结构体
 func (s *SettingService) parseSettings(settings map[string]string) *SystemSettings {
 	emailVerifyEnabled := settings[SettingKeyEmailVerifyEnabled] == "true"
+	sharedDisplayCurrencySymbol, displayCurrencySymbolSharedConfigured := settings[SettingKeyDisplayCurrencySymbol]
+	displayCurrencySymbol, displayCurrencySymbolLocalOnly := s.effectiveDisplayCurrencySymbol(
+		sharedDisplayCurrencySymbol,
+		displayCurrencySymbolSharedConfigured,
+	)
 	result := &SystemSettings{
 		RegistrationEnabled:              settings[SettingKeyRegistrationEnabled] == "true",
 		EmailVerifyEnabled:               emailVerifyEnabled,
@@ -1856,6 +1940,8 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		SiteLogo:                         settings[SettingKeySiteLogo],
 		SiteSubtitle:                     s.getStringOrDefault(settings, SettingKeySiteSubtitle, "Subscription to API Conversion Platform"),
 		APIBaseURL:                       settings[SettingKeyAPIBaseURL],
+		DisplayCurrencySymbol:            displayCurrencySymbol,
+		DisplayCurrencySymbolLocalOnly:   displayCurrencySymbolLocalOnly,
 		ContactInfo:                      settings[SettingKeyContactInfo],
 		DocURL:                           settings[SettingKeyDocURL],
 		HomeContent:                      settings[SettingKeyHomeContent],

@@ -90,20 +90,22 @@ type SystemSettings struct {
 	OIDCConnectUserInfoIDPath         string
 	OIDCConnectUserInfoUsernamePath   string
 
-	SiteName                    string
-	SiteLogo                    string
-	SiteSubtitle                string
-	APIBaseURL                  string
-	ContactInfo                 string
-	DocURL                      string
-	HomeContent                 string
-	HideCcsImportButton         bool
-	PurchaseSubscriptionEnabled bool
-	PurchaseSubscriptionURL     string
-	TableDefaultPageSize        int
-	TablePageSizeOptions        []int
-	CustomMenuItems             string // JSON array of custom menu items
-	CustomEndpoints             string // JSON array of custom endpoints
+	SiteName                       string
+	SiteLogo                       string
+	SiteSubtitle                   string
+	APIBaseURL                     string
+	DisplayCurrencySymbol          string
+	DisplayCurrencySymbolLocalOnly bool
+	ContactInfo                    string
+	DocURL                         string
+	HomeContent                    string
+	HideCcsImportButton            bool
+	PurchaseSubscriptionEnabled    bool
+	PurchaseSubscriptionURL        string
+	TableDefaultPageSize           int
+	TablePageSizeOptions           []int
+	CustomMenuItems                string // JSON array of custom menu items
+	CustomEndpoints                string // JSON array of custom endpoints
 
 	DefaultConcurrency   int
 	DefaultBalance       float64
@@ -193,6 +195,7 @@ type PublicSettings struct {
 	SiteLogo                         string
 	SiteSubtitle                     string
 	APIBaseURL                       string
+	DisplayCurrencySymbol            string
 	ContactInfo                      string
 	DocURL                           string
 	HomeContent                      string

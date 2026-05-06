@@ -174,6 +174,8 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		SiteLogo:                               settings.SiteLogo,
 		SiteSubtitle:                           settings.SiteSubtitle,
 		APIBaseURL:                             settings.APIBaseURL,
+		DisplayCurrencySymbol:                  settings.DisplayCurrencySymbol,
+		DisplayCurrencySymbolLocalOnly:         settings.DisplayCurrencySymbolLocalOnly,
 		ContactInfo:                            settings.ContactInfo,
 		DocURL:                                 settings.DocURL,
 		HomeContent:                            settings.HomeContent,
@@ -350,20 +352,22 @@ type UpdateSettingsRequest struct {
 	OIDCConnectUserInfoUsernamePath string `json:"oidc_connect_userinfo_username_path"`
 
 	// OEM设置
-	SiteName                    string                `json:"site_name"`
-	SiteLogo                    string                `json:"site_logo"`
-	SiteSubtitle                string                `json:"site_subtitle"`
-	APIBaseURL                  string                `json:"api_base_url"`
-	ContactInfo                 string                `json:"contact_info"`
-	DocURL                      string                `json:"doc_url"`
-	HomeContent                 string                `json:"home_content"`
-	HideCcsImportButton         bool                  `json:"hide_ccs_import_button"`
-	PurchaseSubscriptionEnabled *bool                 `json:"purchase_subscription_enabled"`
-	PurchaseSubscriptionURL     *string               `json:"purchase_subscription_url"`
-	TableDefaultPageSize        int                   `json:"table_default_page_size"`
-	TablePageSizeOptions        []int                 `json:"table_page_size_options"`
-	CustomMenuItems             *[]dto.CustomMenuItem `json:"custom_menu_items"`
-	CustomEndpoints             *[]dto.CustomEndpoint `json:"custom_endpoints"`
+	SiteName                       string                `json:"site_name"`
+	SiteLogo                       string                `json:"site_logo"`
+	SiteSubtitle                   string                `json:"site_subtitle"`
+	APIBaseURL                     string                `json:"api_base_url"`
+	DisplayCurrencySymbol          *string               `json:"display_currency_symbol"`
+	DisplayCurrencySymbolLocalOnly *bool                 `json:"display_currency_symbol_local_only"`
+	ContactInfo                    string                `json:"contact_info"`
+	DocURL                         string                `json:"doc_url"`
+	HomeContent                    string                `json:"home_content"`
+	HideCcsImportButton            bool                  `json:"hide_ccs_import_button"`
+	PurchaseSubscriptionEnabled    *bool                 `json:"purchase_subscription_enabled"`
+	PurchaseSubscriptionURL        *string               `json:"purchase_subscription_url"`
+	TableDefaultPageSize           int                   `json:"table_default_page_size"`
+	TablePageSizeOptions           []int                 `json:"table_page_size_options"`
+	CustomMenuItems                *[]dto.CustomMenuItem `json:"custom_menu_items"`
+	CustomEndpoints                *[]dto.CustomEndpoint `json:"custom_endpoints"`
 
 	// 默认配置
 	DefaultConcurrency                       int                               `json:"default_concurrency"`
@@ -1072,6 +1076,15 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		}
 	}
 
+	displayCurrencySymbolLocalOnly := previousSettings.DisplayCurrencySymbolLocalOnly
+	if req.DisplayCurrencySymbolLocalOnly != nil {
+		displayCurrencySymbolLocalOnly = *req.DisplayCurrencySymbolLocalOnly
+	}
+	displayCurrencySymbol := previousSettings.DisplayCurrencySymbol
+	if req.DisplayCurrencySymbol != nil {
+		displayCurrencySymbol = *req.DisplayCurrencySymbol
+	}
+
 	settings := &service.SystemSettings{
 		RegistrationEnabled:              req.RegistrationEnabled,
 		EmailVerifyEnabled:               req.EmailVerifyEnabled,
@@ -1138,6 +1151,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		SiteLogo:                         req.SiteLogo,
 		SiteSubtitle:                     req.SiteSubtitle,
 		APIBaseURL:                       req.APIBaseURL,
+		DisplayCurrencySymbol:            displayCurrencySymbol,
+		DisplayCurrencySymbolLocalOnly:   displayCurrencySymbolLocalOnly,
 		ContactInfo:                      req.ContactInfo,
 		DocURL:                           req.DocURL,
 		HomeContent:                      req.HomeContent,
@@ -1459,6 +1474,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		SiteLogo:                               updatedSettings.SiteLogo,
 		SiteSubtitle:                           updatedSettings.SiteSubtitle,
 		APIBaseURL:                             updatedSettings.APIBaseURL,
+		DisplayCurrencySymbol:                  updatedSettings.DisplayCurrencySymbol,
+		DisplayCurrencySymbolLocalOnly:         updatedSettings.DisplayCurrencySymbolLocalOnly,
 		ContactInfo:                            updatedSettings.ContactInfo,
 		DocURL:                                 updatedSettings.DocURL,
 		HomeContent:                            updatedSettings.HomeContent,
@@ -1761,6 +1778,12 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	if before.APIBaseURL != after.APIBaseURL {
 		changed = append(changed, "api_base_url")
+	}
+	if before.DisplayCurrencySymbol != after.DisplayCurrencySymbol {
+		changed = append(changed, "display_currency_symbol")
+	}
+	if before.DisplayCurrencySymbolLocalOnly != after.DisplayCurrencySymbolLocalOnly {
+		changed = append(changed, "display_currency_symbol_local_only")
 	}
 	if before.ContactInfo != after.ContactInfo {
 		changed = append(changed, "contact_info")

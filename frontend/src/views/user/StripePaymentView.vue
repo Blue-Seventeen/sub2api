@@ -17,7 +17,7 @@
         <div v-if="order" class="card overflow-hidden">
           <div class="bg-gradient-to-br from-[#635bff] to-[#4f46e5] px-6 py-6 text-center">
             <p class="text-sm font-medium text-indigo-200">{{ t('payment.actualPay') }}</p>
-            <p class="mt-1 text-3xl font-bold text-white">&#165;{{ order.pay_amount.toFixed(2) }}</p>
+            <p class="mt-1 text-3xl font-bold text-white">{{ formatCurrencyAmount(order.pay_amount) }}</p>
           </div>
         </div>
 
@@ -105,6 +105,7 @@ import type { PaymentOrder } from '@/types/payment'
 import type { Stripe, StripeElements } from '@stripe/stripe-js'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { formatCurrencyAmount } from '@/utils/format'
 
 const { t } = useI18n()
 const route = useRoute()

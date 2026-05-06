@@ -4065,7 +4065,7 @@ export default {
       generatedSuccessfully: '生成成功',
       codesCreated: '已创建 {count} 个兑换码',
       codeType: '类型',
-      amount: '金额 ($)',
+      amount: '金额',
       value: '面值',
       count: '数量',
       generate: '生成',
@@ -4228,7 +4228,7 @@ export default {
       code: '优惠码',
       autoGenerate: '留空自动生成',
       codePlaceholder: '输入优惠码或留空',
-      bonusAmount: '赠送金额 ($)',
+      bonusAmount: '赠送金额',
       maxUses: '最大使用次数',
       zeroUnlimited: '0 = 无限制',
       expiresAt: '过期时间',
@@ -5371,6 +5371,11 @@ export default {
         apiBaseUrl: 'API 端点地址',
         apiBaseUrlHint: '用于"使用密钥"和"导入到 CC Switch"功能，留空则使用当前站点地址',
         apiBaseUrlPlaceholder: 'https://api.example.com',
+        displayCurrencySymbol: '货币符号',
+        displayCurrencySymbolHint: '仅影响前端金额展示，不改变余额、计费、支付、退款等后端数值逻辑',
+        displayCurrencySymbolPlaceholder: '$ / ¥ / RMB',
+        displayCurrencySymbolLocalOnly: '仅用于本机',
+        displayCurrencySymbolLocalOnlyHint: '开启后保存到当前服务实例本机配置文件，不写入 PostgreSQL；关闭后保存到数据库并在共库节点共享',
         tablePreferencesTitle: '通用表格设置',
         tablePreferencesDescription: '设置后台与用户侧表格组件的默认分页行为',
         tableDefaultPageSize: '默认每页条数',
@@ -6266,7 +6271,7 @@ export default {
       groupMultiplier: {
         title: '💰 3. 费率倍数',
         description:
-          '<div style="line-height: 1.7;"><p style="margin-bottom: 12px;">设置该分组的计费倍率，控制用户的实际扣费。</p><div style="padding: 8px 12px; background: #fef3c7; border-left: 3px solid #f59e0b; border-radius: 4px; font-size: 13px; margin-bottom: 12px;"><b>⚙️ 计费规则：</b><ul style="margin: 8px 0 0 16px;"><li><b>1.0</b> - 原价计费（成本价）</li><li><b>1.5</b> - 用户消耗 $1，扣除 $1.5</li><li><b>2.0</b> - 用户消耗 $1，扣除 $2</li><li><b>0.8</b> - 补贴模式（亏本运营）</li></ul></div><p style="font-size: 13px; color: #6b7280;">建议测试分组设置为 1.0</p></div>',
+          '<div style="line-height: 1.7;"><p style="margin-bottom: 12px;">设置该分组的计费倍率，控制用户的实际扣费。</p><div style="padding: 8px 12px; background: #fef3c7; border-left: 3px solid #f59e0b; border-radius: 4px; font-size: 13px; margin-bottom: 12px;"><b>⚙️ 计费规则：</b><ul style="margin: 8px 0 0 16px;"><li><b>1.0</b> - 原价计费（成本价）</li><li><b>1.5</b> - 用户消耗 1 个计费单位，扣除 1.5 个单位</li><li><b>2.0</b> - 用户消耗 1 个计费单位，扣除 2 个单位</li><li><b>0.8</b> - 补贴模式（亏本运营）</li></ul></div><p style="font-size: 13px; color: #6b7280;">建议测试分组设置为 1.0</p></div>',
         nextBtn: '下一步'
       },
       groupExclusive: {
@@ -6617,7 +6622,7 @@ export default {
       deductBalanceHint: '从用户余额中扣回充值金额',
       userBalance: '用户余额',
       orderAmount: '订单金额',
-      insufficientBalance: '余额不足，将扣至 $0',
+      insufficientBalance: '余额不足，将扣至余额为 0',
       noDeduction: '将不扣除用户余额',
       forceRefund: '强制退款（忽略余额检查）',
       orderCancelled: '订单已取消',

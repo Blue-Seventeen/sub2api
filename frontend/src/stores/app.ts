@@ -8,6 +8,7 @@ import { ref, computed } from 'vue'
 import type { Toast, ToastType, PublicSettings } from '@/types'
 import { i18n } from '@/i18n'
 import { sanitizeUrl } from '@/utils/url'
+import { normalizeDisplayCurrencySymbol, setDisplayCurrencySymbol } from '@/utils/format'
 import {
   checkUpdates as checkUpdatesAPI,
   type VersionInfo,
@@ -32,6 +33,7 @@ export const useAppStore = defineStore('app', () => {
   const contactInfo = ref<string>('')
   const apiBaseUrl = ref<string>('')
   const docUrl = ref<string>('')
+  const displayCurrencySymbol = ref<string>('$')
   const cachedPublicSettings = ref<PublicSettings | null>(null)
 
   // Version cache state
@@ -291,6 +293,7 @@ export const useAppStore = defineStore('app', () => {
   function applySettings(config: PublicSettings): void {
     const normalizedConfig: PublicSettings = {
       ...config,
+      display_currency_symbol: normalizeDisplayCurrencySymbol(config.display_currency_symbol),
       site_logo: sanitizeUrl(config.site_logo || '', {
         allowRelative: true,
         allowDataUrl: true
@@ -306,6 +309,8 @@ export const useAppStore = defineStore('app', () => {
     contactInfo.value = normalizedConfig.contact_info || ''
     apiBaseUrl.value = normalizedConfig.api_base_url || ''
     docUrl.value = normalizedConfig.doc_url || ''
+    displayCurrencySymbol.value = normalizedConfig.display_currency_symbol
+    setDisplayCurrencySymbol(normalizedConfig.display_currency_symbol)
     publicSettingsLoaded.value = true
   }
 
@@ -340,6 +345,7 @@ export const useAppStore = defineStore('app', () => {
         site_logo: siteLogo.value,
         site_subtitle: '',
         api_base_url: apiBaseUrl.value,
+        display_currency_symbol: displayCurrencySymbol.value,
         contact_info: contactInfo.value,
         doc_url: docUrl.value,
         home_content: '',
@@ -423,6 +429,7 @@ export const useAppStore = defineStore('app', () => {
     contactInfo,
     apiBaseUrl,
     docUrl,
+    displayCurrencySymbol,
     cachedPublicSettings,
 
     // Version state

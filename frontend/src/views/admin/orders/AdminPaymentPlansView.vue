@@ -29,8 +29,8 @@
         </template>
         <template #cell-price="{ value, row }">
           <div class="text-sm">
-            <span class="font-medium text-gray-900 dark:text-white">${{ (value ?? 0).toFixed(2) }}</span>
-            <span v-if="row.original_price" class="ml-1 text-xs text-gray-400 line-through">${{ row.original_price.toFixed(2) }}</span>
+            <span class="font-medium text-gray-900 dark:text-white">{{ formatCurrencyAmount(value ?? 0) }}</span>
+            <span v-if="row.original_price" class="ml-1 text-xs text-gray-400 line-through">{{ formatCurrencyAmount(row.original_price) }}</span>
           </div>
         </template>
         <template #cell-validity_days="{ value, row }">
@@ -90,6 +90,7 @@ import Icon from '@/components/icons/Icon.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import PlanEditDialog from './PlanEditDialog.vue'
 import { platformTextClass } from '@/utils/platformColors'
+import { formatCurrencyAmount } from '@/utils/format'
 
 const { t } = useI18n()
 const appStore = useAppStore()

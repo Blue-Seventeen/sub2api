@@ -23,10 +23,10 @@
             {{ formatTokens(user.total_tokens) }}
           </td>
           <td class="py-1 text-right text-green-600 dark:text-green-400">
-            ${{ formatCost(user.real_actual_cost ?? user.actual_cost) }}
+            {{ formatDisplayCost(user.real_actual_cost ?? user.actual_cost) }}
           </td>
           <td class="py-1 pr-1 text-right text-gray-400 dark:text-gray-500">
-            ${{ formatCost(user.cost) }}
+            {{ formatDisplayCost(user.cost) }}
           </td>
         </tr>
       </tbody>
@@ -38,6 +38,7 @@
 import { useI18n } from 'vue-i18n'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import type { UserBreakdownItem } from '@/types'
+import { getDisplayCurrencySymbol } from '@/utils/format'
 
 const { t } = useI18n()
 
@@ -59,4 +60,6 @@ const formatCost = (value: number): string => {
   if (value >= 0.01) return value.toFixed(3)
   return value.toFixed(4)
 }
+
+const formatDisplayCost = (value: number): string => `${getDisplayCurrencySymbol()}${formatCost(value)}`
 </script>

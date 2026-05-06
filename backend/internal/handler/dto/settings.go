@@ -93,20 +93,22 @@ type SystemSettings struct {
 	OIDCConnectUserInfoIDPath         string `json:"oidc_connect_userinfo_id_path"`
 	OIDCConnectUserInfoUsernamePath   string `json:"oidc_connect_userinfo_username_path"`
 
-	SiteName                    string           `json:"site_name"`
-	SiteLogo                    string           `json:"site_logo"`
-	SiteSubtitle                string           `json:"site_subtitle"`
-	APIBaseURL                  string           `json:"api_base_url"`
-	ContactInfo                 string           `json:"contact_info"`
-	DocURL                      string           `json:"doc_url"`
-	HomeContent                 string           `json:"home_content"`
-	HideCcsImportButton         bool             `json:"hide_ccs_import_button"`
-	PurchaseSubscriptionEnabled bool             `json:"purchase_subscription_enabled"`
-	PurchaseSubscriptionURL     string           `json:"purchase_subscription_url"`
-	TableDefaultPageSize        int              `json:"table_default_page_size"`
-	TablePageSizeOptions        []int            `json:"table_page_size_options"`
-	CustomMenuItems             []CustomMenuItem `json:"custom_menu_items"`
-	CustomEndpoints             []CustomEndpoint `json:"custom_endpoints"`
+	SiteName                       string           `json:"site_name"`
+	SiteLogo                       string           `json:"site_logo"`
+	SiteSubtitle                   string           `json:"site_subtitle"`
+	APIBaseURL                     string           `json:"api_base_url"`
+	DisplayCurrencySymbol          string           `json:"display_currency_symbol"`
+	DisplayCurrencySymbolLocalOnly bool             `json:"display_currency_symbol_local_only"`
+	ContactInfo                    string           `json:"contact_info"`
+	DocURL                         string           `json:"doc_url"`
+	HomeContent                    string           `json:"home_content"`
+	HideCcsImportButton            bool             `json:"hide_ccs_import_button"`
+	PurchaseSubscriptionEnabled    bool             `json:"purchase_subscription_enabled"`
+	PurchaseSubscriptionURL        string           `json:"purchase_subscription_url"`
+	TableDefaultPageSize           int              `json:"table_default_page_size"`
+	TablePageSizeOptions           []int            `json:"table_page_size_options"`
+	CustomMenuItems                []CustomMenuItem `json:"custom_menu_items"`
+	CustomEndpoints                []CustomEndpoint `json:"custom_endpoints"`
 
 	DefaultConcurrency   int                          `json:"default_concurrency"`
 	DefaultBalance       float64                      `json:"default_balance"`
@@ -231,6 +233,7 @@ type PublicSettings struct {
 	SiteLogo                         string           `json:"site_logo"`
 	SiteSubtitle                     string           `json:"site_subtitle"`
 	APIBaseURL                       string           `json:"api_base_url"`
+	DisplayCurrencySymbol            string           `json:"display_currency_symbol"`
 	ContactInfo                      string           `json:"contact_info"`
 	DocURL                           string           `json:"doc_url"`
 	HomeContent                      string           `json:"home_content"`

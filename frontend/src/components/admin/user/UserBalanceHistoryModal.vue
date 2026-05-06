@@ -28,9 +28,9 @@
           <div class="flex-shrink-0 text-right">
             <p class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.users.displayBalanceLabel') }}</p>
             <p class="text-xl font-bold text-gray-900 dark:text-white">
-              ${{ formatMoney(getDisplayBalance(user)) }}
+              {{ formatMoney(getDisplayBalance(user)) }}
             </p>
-            <p class="text-xs text-gray-400 dark:text-dark-500">{{ t('admin.users.realBalanceLabel') }}: ${{ formatMoney(getRealBalance(user)) }} · {{ t('admin.users.balanceOperationsUseReal') }}</p>
+            <p class="text-xs text-gray-400 dark:text-dark-500">{{ t('admin.users.realBalanceLabel') }}: {{ formatMoney(getRealBalance(user)) }} · {{ t('admin.users.balanceOperationsUseReal') }}</p>
           </div>
         </div>
         <!-- Row 2: notes + total recharged -->
@@ -40,7 +40,7 @@
             <template v-else>&nbsp;</template>
           </p>
           <p class="ml-4 flex-shrink-0 text-xs text-gray-500 dark:text-dark-400">
-            {{ t('admin.users.totalRecharged') }}: <span class="font-semibold text-emerald-600 dark:text-emerald-400">${{ totalRecharged.toFixed(2) }}</span>
+            {{ t('admin.users.totalRecharged') }}: <span class="font-semibold text-emerald-600 dark:text-emerald-400">{{ formatMoney(totalRecharged) }}</span>
           </p>
         </div>
       </div>
@@ -173,7 +173,7 @@
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI, type BalanceHistoryItem } from '@/api/admin'
-import { formatDateTime } from '@/utils/format'
+import { formatCurrencyAmount, formatDateTime } from '@/utils/format'
 import type { AdminUser } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
@@ -198,7 +198,7 @@ const totalPages = computed(() => Math.ceil(total.value / pageSize) || 1)
 const getRealBalance = (user: AdminUser) => user.real_balance ?? user.balance ?? 0
 // 管理员“显示余额”优先复用兼容旧字段 balance；display_balance 仅作为增量兼容回退字段。
 const getDisplayBalance = (user: AdminUser) => user.balance ?? user.display_balance ?? getRealBalance(user)
-const formatMoney = (value: number) => value.toFixed(2)
+const formatMoney = (value: number) => formatCurrencyAmount(value)
 
 // Type filter options
 const typeOptions = computed(() => [
@@ -318,8 +318,8 @@ const getItemTitle = (item: BalanceHistoryItem) => {
 // Format display value
 const formatValue = (item: BalanceHistoryItem) => {
   if (isBalanceType(item.type)) {
-    const sign = item.value >= 0 ? '+' : ''
-    return `${sign}$${item.value.toFixed(2)}`
+    const sign = item.value >= 0 ? '+' : '-'
+    return `${sign}${formatCurrencyAmount(Math.abs(item.value))}`
   }
   if (isSubscriptionType(item.type)) {
     const days = item.validity_days || Math.round(item.value)
@@ -331,4 +331,3 @@ const formatValue = (item: BalanceHistoryItem) => {
   return `${sign}${item.value}`
 }
 </script>
-

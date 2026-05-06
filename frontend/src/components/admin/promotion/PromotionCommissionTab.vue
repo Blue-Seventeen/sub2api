@@ -88,7 +88,7 @@
                 <div class="truncate whitespace-nowrap" :title="sourceDescription(item)">{{ sourceDescription(item) }}</div>
               </td>
               <td class="px-1.5 py-4 text-right text-base font-semibold whitespace-nowrap" :class="item.amount >= 0 ? 'text-emerald-300' : 'text-red-300'">
-                ${{ money(item.amount) }}
+                {{ money(item.amount) }}
               </td>
               <td class="px-4 py-4 text-center">
                 <span class="inline-flex max-w-full items-center rounded-full px-3 py-1 text-xs font-medium whitespace-nowrap" :class="statusClass(item.status)">
@@ -156,6 +156,7 @@ import { adminPromotionAPI } from '@/api/admin/promotion'
 import { getAdminPromotionPageSize, setAdminPromotionPageSize } from '@/composables/useAdminPromotionPreferences'
 import type { PromotionCommissionItem } from '@/api/promotion'
 import { useAppStore } from '@/stores'
+import { formatCurrencyAmount } from '@/utils/format'
 
 const emit = defineEmits<{
   (e: 'dashboard-refresh'): void
@@ -381,13 +382,13 @@ function sourceDescription(item: PromotionCommissionItem) {
   }
   if (item.commission_type === 'commission') {
     const rebate = item.rate_snapshot != null ? `${Number(item.rate_snapshot).toFixed(4).replace(/\.?0+$/, '')}%` : '--'
-    return item.note || `邀请用户 ${item.source_user_masked || '-'} 消费返利（真实消费 $${money(item.base_amount)} × 返利比例 ${rebate}）`
+    return item.note || `邀请用户 ${item.source_user_masked || '-'} 消费返利（真实消费 ${money(item.base_amount)} × 返利比例 ${rebate}）`
   }
   return item.note || '系统生成的佣金记录'
 }
 
 function money(value?: number) {
-  return Number(value || 0).toFixed(2)
+  return formatCurrencyAmount(value || 0)
 }
 
 function formatDateTime(value?: string) {

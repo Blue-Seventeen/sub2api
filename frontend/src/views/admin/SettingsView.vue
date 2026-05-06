@@ -3583,6 +3583,38 @@
                 </p>
               </div>
 
+              <!-- Display Currency Symbol -->
+              <div>
+                <label
+                  class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                >
+                  {{ t("admin.settings.site.displayCurrencySymbol") }}
+                </label>
+                <input
+                  v-model="form.display_currency_symbol"
+                  type="text"
+                  class="input font-mono text-sm"
+                  :placeholder="
+                    t('admin.settings.site.displayCurrencySymbolPlaceholder')
+                  "
+                  @input="handleDisplayCurrencySymbolInput"
+                />
+                <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                  {{ t("admin.settings.site.displayCurrencySymbolHint") }}
+                </p>
+                <div class="mt-3 flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 px-4 py-3 dark:border-dark-700 dark:bg-dark-800/60">
+                  <div>
+                    <label class="text-sm font-medium text-gray-900 dark:text-white">
+                      {{ t("admin.settings.site.displayCurrencySymbolLocalOnly") }}
+                    </label>
+                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.site.displayCurrencySymbolLocalOnlyHint") }}
+                    </p>
+                  </div>
+                  <Toggle v-model="form.display_currency_symbol_local_only" />
+                </div>
+              </div>
+
               <!-- Global Table Preferences -->
               <div class="border-t border-gray-100 pt-4 dark:border-dark-700">
                 <h3 class="text-sm font-medium text-gray-900 dark:text-white">
@@ -4900,7 +4932,7 @@
                 <div class="relative">
                   <span
                     class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-                    >$</span
+                    >{{ getDisplayCurrencySymbol() }}</span
                   >
                   <input
                     v-model.number="form.balance_low_notify_threshold"
@@ -5118,6 +5150,10 @@ import ImageUpload from "@/components/common/ImageUpload.vue";
 import BackupSettings from "@/views/admin/BackupView.vue";
 import { useClipboard } from "@/composables/useClipboard";
 import { extractApiErrorMessage, extractI18nErrorMessage } from "@/utils/apiError";
+import {
+  getDisplayCurrencySymbol,
+  truncateDisplayCurrencySymbol,
+} from "@/utils/format";
 import { useAppStore } from "@/stores";
 import { useAdminSettingsStore } from "@/stores/adminSettings";
 import { normalizeVisibleMethod } from "@/components/payment/paymentFlow";
@@ -5294,6 +5330,8 @@ const form = reactive<SettingsForm>({
   site_logo: "",
   site_subtitle: "Subscription to API Conversion Platform",
   api_base_url: "",
+  display_currency_symbol: "$",
+  display_currency_symbol_local_only: true,
   contact_info: "",
   doc_url: "",
   home_content: "",
@@ -5437,6 +5475,17 @@ const form = reactive<SettingsForm>({
   // Available Channels feature switch
   available_channels_enabled: false,
 });
+
+function handleDisplayCurrencySymbolInput(event: Event) {
+  const input = event.target as HTMLInputElement | null;
+  if (!input) return;
+
+  const truncated = truncateDisplayCurrencySymbol(input.value);
+  if (input.value !== truncated) {
+    input.value = truncated;
+  }
+  form.display_currency_symbol = truncated;
+}
 
 const authSourceDefaults = reactive<AuthSourceDefaultsState>(
   buildAuthSourceDefaultsState({}),
@@ -6230,6 +6279,8 @@ async function saveSettings() {
       site_logo: form.site_logo,
       site_subtitle: form.site_subtitle,
       api_base_url: form.api_base_url,
+      display_currency_symbol: form.display_currency_symbol,
+      display_currency_symbol_local_only: form.display_currency_symbol_local_only,
       contact_info: form.contact_info,
       doc_url: form.doc_url,
       home_content: form.home_content,

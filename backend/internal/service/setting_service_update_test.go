@@ -224,6 +224,41 @@ func TestSettingService_UpdateSettings_TablePreferences(t *testing.T) {
 	require.Equal(t, "[20,100]", repo.updates[SettingKeyTablePageSizeOptions])
 }
 
+func TestSettingService_UpdateSettings_DisplayCurrencySymbol(t *testing.T) {
+	repo := &settingUpdateRepoStub{}
+	svc := NewSettingService(repo, &config.Config{})
+
+	err := svc.UpdateSettings(context.Background(), &SystemSettings{
+		DisplayCurrencySymbol: " RMB ",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "RMB", repo.updates[SettingKeyDisplayCurrencySymbol])
+
+	err = svc.UpdateSettings(context.Background(), &SystemSettings{
+		DisplayCurrencySymbol: "",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "$", repo.updates[SettingKeyDisplayCurrencySymbol])
+}
+
+func TestSettingService_UpdateSettings_RejectsInvalidDisplayCurrencySymbol(t *testing.T) {
+	repo := &settingUpdateRepoStub{}
+	svc := NewSettingService(repo, &config.Config{})
+
+	err := svc.UpdateSettings(context.Background(), &SystemSettings{
+		DisplayCurrencySymbol: "bad\nsymbol",
+	})
+	require.Error(t, err)
+	require.Equal(t, "INVALID_DISPLAY_CURRENCY_SYMBOL", infraerrors.Reason(err))
+	require.Nil(t, repo.updates)
+
+	err = svc.UpdateSettings(context.Background(), &SystemSettings{
+		DisplayCurrencySymbol: "123456789",
+	})
+	require.Error(t, err)
+	require.Equal(t, "INVALID_DISPLAY_CURRENCY_SYMBOL", infraerrors.Reason(err))
+}
+
 func TestSettingService_UpdateSettings_PaymentVisibleMethodsAndAdvancedScheduler(t *testing.T) {
 	repo := &settingUpdateRepoStub{}
 	svc := NewSettingService(repo, &config.Config{})

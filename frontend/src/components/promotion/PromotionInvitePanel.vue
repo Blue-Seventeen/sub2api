@@ -42,8 +42,8 @@
         <div class="mt-5 grid gap-3 sm:grid-cols-3">
           <div class="rounded-2xl border border-emerald-400/20 bg-emerald-500/10 p-4">
             <div class="text-xs uppercase tracking-[0.24em] text-emerald-300/80">激活奖励</div>
-            <div class="mt-2 text-2xl font-semibold text-emerald-300">${{ money(overview?.activation_bonus_amount) }}</div>
-            <div class="mt-2 text-xs text-slate-400">被邀请用户累计真实消费严格大于 ${{ money(overview?.activation_threshold_amount) }} 时触发。</div>
+            <div class="mt-2 text-2xl font-semibold text-emerald-300">{{ money(overview?.activation_bonus_amount) }}</div>
+            <div class="mt-2 text-xs text-slate-400">被邀请用户累计真实消费严格大于 {{ money(overview?.activation_threshold_amount) }} 时触发。</div>
           </div>
           <div class="rounded-2xl border border-cyan-400/20 bg-cyan-500/10 p-4">
             <div class="text-xs uppercase tracking-[0.24em] text-cyan-300/80">一级返利</div>
@@ -208,6 +208,7 @@ import Icon from '@/components/icons/Icon.vue'
 import { promotionAPI, type PromotionOverview, type PromotionScript } from '@/api/promotion'
 import { useAppStore } from '@/stores'
 import { renderElementToPngBlobById } from '@/utils/renderHtmlToPng'
+import { formatCurrencyAmount } from '@/utils/format'
 
 const props = defineProps<{
   overview: PromotionOverview | null
@@ -432,7 +433,7 @@ function normalizeScriptPreview(text?: string) {
 }
 
 function money(value?: number) {
-  return Number(value || 0).toFixed(2)
+  return formatCurrencyAmount(value || 0)
 }
 
 function rate(value?: number) {

@@ -313,8 +313,8 @@
                     </span>
                   </div>
                   <div class="mt-3 grid gap-1 text-xs leading-6 text-slate-500 sm:grid-cols-2">
-                    <div>今日贡献：${{ money(item.today_contribution) }}</div>
-                    <div>累计贡献：${{ money(item.total_contribution) }}</div>
+                    <div>今日贡献：{{ money(item.today_contribution) }}</div>
+                    <div>累计贡献：{{ money(item.total_contribution) }}</div>
                   </div>
                 </div>
                 <button
@@ -350,6 +350,7 @@ import SetParentDialog from './SetParentDialog.vue'
 import { adminPromotionAPI, type PromotionAdminDownlineItem, type PromotionRelationChain, type PromotionRelationItem } from '@/api/admin/promotion'
 import { getAdminPromotionPageSize, setAdminPromotionPageSize } from '@/composables/useAdminPromotionPreferences'
 import { useAppStore } from '@/stores'
+import { formatCurrencyAmount } from '@/utils/format'
 
 const appStore = useAppStore()
 const keyword = ref('')
@@ -582,7 +583,7 @@ function handlePageSizeChange(size: number) {
 }
 
 function money(value?: number) {
-  return Number(value || 0).toFixed(2)
+  return formatCurrencyAmount(value || 0)
 }
 
 function rate(value?: number) {

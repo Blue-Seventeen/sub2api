@@ -18,7 +18,7 @@
 | 项目 | 当前约定 |
 |---|---|
 | 当前主线 | `dev` |
-| 当前 upstream 基线 | 已同步到 `v0.1.121` |
+| 当前 upstream 基线 | 已同步到 `v0.1.123`，`backend/cmd/server/VERSION` 已对齐 `0.1.123` |
 | 早期 fork 保护基线 | `2b72deb8fd45dc3a526bda2299b16df8d471107c` |
 | 部署策略 | `dev` 是真实可部署主线；`sub2api-custom-localtest` 仅用于本地测试 |
 | 架构原则 | 保留 Sub2API 的 Account / Group / Channel / 调度 / sticky / failover / billing，渐进吸收协议优先兼容内核 |
@@ -40,6 +40,7 @@
 | 自动运维 | 账号自动刷新、测试、恢复、删除、规则筛选 | 维护账号池稳定性 | `account_auto_ops*`, `proxy_auto_probe*` |
 | 代理池 | 代理检测、成功队列、账号选择最优代理 | 提升上游请求成功率 | `proxy_*`, `account_proxy*`, `frontend` 代理管理页 |
 | 设置增强 | 站点 Logo、自定义菜单、外链新页面打开、邀请码注册 HTML 提示 | 属于运营配置能力 | `setting_service.go`, `SettingsView.vue`, `AppSidebar.vue` |
+| 分组平台搜索 | `/admin/groups` 创建分组平台选择增加与账号表单一致的模糊搜索 | 纯前端交互增强，不改变分组保存、调度、计费或平台语义 | `frontend/src/views/admin/GroupsView.vue` |
 | 多机部署 | 定时备份本机开关 | 多机共库时由每台服务器本地文件决定是否执行定时备份，默认关闭 | `backup_service.go`, `backup_service_schedule_local_test.go` |
 | OpenAI Fast/Flex Policy | `service_tier` 策略、默认空规则/pass、低价 tier 自动标准化、最终有效 tier 计费 | 吸收 upstream 能力但保持本 fork 不允许低价模式的运营约束 | `setting_service.go`, `openai_gateway_service.go`, `openai_fast_policy_test.go`, `SettingsView.vue` |
 | Anthropic 缓存 TTL 注入 | 管理端可选开启 Anthropic OAuth/SetupToken 请求已有 ephemeral cache_control 强制 1h，默认关闭，usage 默认按 5m 回写 | 吸收 upstream 成本优化能力，同时避免默认改变现有请求与计费语义 | `setting_service.go`, `gateway_service.go`, `gateway_body_order_test.go`, `SettingsView.vue` |
@@ -516,7 +517,7 @@ Protect files:
 - raw Chat Completions usage billing 必须按最终上游计费模型记录，不能被原始请求模型覆盖；零 usage OpenAI 响应仍应写 usage log，便于审计异常上游行为。
 - OpenAI WS passthrough usage metadata 继续使用 policy-mutated payload 提取 `service_tier` 和 `reasoning_effort`，保证 Fast/Flex policy 过滤后计费与实际上游处理一致。
 - upstream affiliate / referral 相关 commit、migration、路由、菜单和前端页面继续跳过；本 fork 使用现有 Promotion / rebate 系统，不允许在同步中重新引入 affiliate 账本体系。
-- upstream tag `v0.1.123` 内 `backend/cmd/server/VERSION` 实际为 `0.1.122`，本 fork 同步该文件内容，不额外强行改成 `0.1.123`。
+- 上游 main 的 `backend/cmd/server/VERSION` 已确认为 `0.1.123`；本 fork 在 `5b71157f` 中将本地 `VERSION` 对齐为 `0.1.123`。后续同步冲突时必须同时核对 upstream tag 与 main 的 `VERSION`，不得把旧的 `0.1.122` 重新写回当前 dev。
 - 同步前暂存的 `/admin/groups` 创建分组平台模糊搜索 UI 已恢复，后续 upstream sync 不应覆盖该交互。
 Protect files:
 - `backend/internal/handler/openai_chat_completions.go`
@@ -525,6 +526,14 @@ Protect files:
 - `backend/internal/service/openai_ws_v2_passthrough_adapter.go`
 - `frontend/src/components/account/BulkEditAccountModal.vue`
 - `frontend/src/views/admin/GroupsView.vue`
+
+### 9.12 v0.1.123 版本对齐与分组平台搜索
+
+- `backend/cmd/server/VERSION` 当前应保持 `0.1.123`；Docker 构建产物启动日志应显示 `Sub2API 0.1.123`，这是 v0.1.123 同步完成的可观测标记。
+- `/admin/groups` 创建分组模块的平台选择保留搜索输入，使用 `createPlatformSearchQuery` / `filteredCreatePlatformOptions` 对平台名称、平台标识、描述和模型提示做模糊过滤，交互需与 `/admin/accounts` 添加账号的平台搜索保持一致。
+- 该搜索是 UI-only 优化，不改变 `platform` 字段保存值、不改变 New-API 风格开关、不改变分组倍率/限额/模型路由、不影响后端调度和计费。
+- 后续 upstream sync 若触碰 `frontend/src/views/admin/GroupsView.vue`，必须确认创建分组与编辑分组仍能正常选择平台，且搜索为空时仍展示完整平台列表。
+- 当前 dev 源码已通过 `git archive` 形式分别发布到主节点和子节点 quick-deploy 脚本流程；部署脚本不属于源码功能，但后续验证版本时应以容器健康状态、`/health` 和启动版本日志三者共同确认。
 
 ## 10. localtest 环境说明
 
@@ -606,3 +615,25 @@ git push gitcode main dev
 ```
 
 注意：`upstream` 仅用于同步官方项目，不允许把本 fork 的定制提交 push 到 `upstream`。
+
+## 13. 自定义全局货币符号显示
+
+- `/admin/settings` 的 API 端点地址下新增 `display_currency_symbol` 展示设置，默认值为 `$`，管理员可配置为 `¥`、`RMB` 等最多 8 个 Unicode 字符的可见符号。
+- `货币符号` 下方新增 `仅用于本机` 开关，默认开启；开启时写入本机 `display_currency_symbol.local.json`，关闭时写入 PostgreSQL settings 并在共库节点共享。
+- 本机文件路径优先级为 `DATA_DIR/display_currency_symbol.local.json`、`/app/data/display_currency_symbol.local.json`、当前目录 `display_currency_symbol.local.json`；文件结构固定为 `{ "local_only": true, "symbol": "¥" }`。
+- 升级兼容：如果本机文件不存在但数据库已有 `display_currency_symbol`，首次读取会用数据库值初始化当前节点本机符号并尽量落盘，避免升级后展示符号突变。
+- 该能力只影响前端可见金额展示，不改变余额、充值、退款、订阅、计费、用量、导出 CSV 和 API 返回的任何数值字段，也不做汇率换算。
+- 后端不新增数据库 migration；public settings 和 SSR 注入只暴露当前节点有效 `display_currency_symbol`，不暴露本机/共享开关状态。
+- 前端金额展示必须统一使用 `formatCurrencyAmount`、`formatCostAmount`、`formatCompactCurrencyAmount`、`formatCurrency` 或 `formatScaled`，避免重新写死 `$` 或 `¥`。
+- upstream sync 若触碰设置页、public settings、本机配置文件、金额展示组件、支付/推广/用量页面或 `frontend/src/utils/format.ts`，必须确认本展示符号不会被覆盖回硬编码美元符号或被错误改成全局数据库强制共享。
+
+Protect files:
+- `backend/internal/service/display_currency_symbol_local.go`
+- `backend/internal/service/setting_service.go`
+- `backend/internal/service/settings_view.go`
+- `backend/internal/handler/admin/setting_handler.go`
+- `backend/internal/handler/setting_handler.go`
+- `frontend/src/stores/app.ts`
+- `frontend/src/utils/format.ts`
+- `frontend/src/utils/pricing.ts`
+- `frontend/src/views/admin/SettingsView.vue`

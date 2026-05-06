@@ -8,7 +8,7 @@
     </CapacityBadge>
 
     <!-- 5h窗口费用限制 -->
-    <CapacityBadge v-if="showWindowCost" :color-class="windowCostClass" :tooltip="windowCostTooltip" :current="'$' + formatCost(currentWindowCost)" :max="'$' + formatCost(account.window_cost_limit)">
+    <CapacityBadge v-if="showWindowCost" :color-class="windowCostClass" :tooltip="windowCostTooltip" :current="formatCost(currentWindowCost)" :max="formatCost(account.window_cost_limit)">
       <svg class="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
       </svg>
@@ -41,6 +41,7 @@ import { useI18n } from 'vue-i18n'
 import type { Account } from '@/types'
 import CapacityBadge from '@/components/account/CapacityBadge.vue'
 import QuotaBadge from '@/components/account/QuotaBadge.vue'
+import { formatCurrencyAmount } from '@/utils/format'
 
 const props = defineProps<{
   account: Account
@@ -171,8 +172,7 @@ const rpmTooltip = computed(() => {
 
 // 格式化费用显示
 const formatCost = (value: number | null | undefined) => {
-  if (value === null || value === undefined) return '0'
-  return value.toFixed(2)
+  return formatCurrencyAmount(value ?? 0)
 }
 
 // ====== 配额 ======

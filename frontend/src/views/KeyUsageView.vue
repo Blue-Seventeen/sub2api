@@ -366,6 +366,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { formatCurrencyAmount } from '@/utils/format'
 
 const { t, locale } = useI18n()
 const appStore = useAppStore()
@@ -735,7 +736,7 @@ const modelStats = computed<any[]>(() => resultData.value?.model_stats || [])
 
 function usd(value: number | null | undefined): string {
   if (value == null || value < 0) return '-'
-  return '$' + Number(value).toFixed(2)
+  return formatCurrencyAmount(value)
 }
 
 function fmtNum(val: number | null | undefined): string {

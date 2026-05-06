@@ -28,10 +28,10 @@
 
           <div class="text-left md:text-right">
             <div class="mb-1 text-sm text-slate-400">总收益</div>
-            <div class="text-2xl font-bold text-emerald-400">${{ money(overview.total_reward_amount) }}</div>
+            <div class="text-2xl font-bold text-emerald-400">{{ money(overview.total_reward_amount) }}</div>
             <div class="mt-1 text-xs text-slate-500">
-              待发放 <span class="text-slate-300">${{ money(overview.pending_amount) }}</span> |
-              已发放 <span class="text-emerald-400">${{ money(overview.settled_amount) }}</span>
+              待发放 <span class="text-slate-300">{{ money(overview.pending_amount) }}</span> |
+              已发放 <span class="text-emerald-400">{{ money(overview.settled_amount) }}</span>
             </div>
           </div>
         </div>
@@ -161,7 +161,7 @@
               </div>
             </div>
             <div class="text-right">
-              <div class="text-lg font-semibold text-emerald-300">${{ money(item.total_earnings) }}</div>
+              <div class="text-lg font-semibold text-emerald-300">{{ money(item.total_earnings) }}</div>
               <div class="mt-1 text-xs text-slate-500">累计佣金</div>
             </div>
           </article>
@@ -175,6 +175,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Icon from '@/components/icons/Icon.vue'
 import type { PromotionOverview } from '@/api/promotion'
+import { formatCurrencyAmount } from '@/utils/format'
 
 const props = defineProps<{
   overview: PromotionOverview | null
@@ -223,7 +224,7 @@ const activationRate = computed(() => {
 const statCards = computed(() => [
   {
     label: '今日收益',
-    value: `$${money(props.overview?.today_earnings)}`,
+    value: money(props.overview?.today_earnings),
     note: '今日新增的待发放收益总和',
     icon: 'dollar' as const,
     valueClass: 'text-emerald-300',
@@ -247,7 +248,7 @@ const statCards = computed(() => [
   },
   {
     label: '总返利收益',
-    value: `$${money(props.overview?.commission_amount)}`,
+    value: money(props.overview?.commission_amount),
     note: '不含激活奖励，只统计佣金返利',
     icon: 'chartBar' as const,
     valueClass: 'text-purple-300',
@@ -281,7 +282,7 @@ onBeforeUnmount(() => {
 })
 
 function money(value?: number) {
-  return Number(value || 0).toFixed(2)
+  return formatCurrencyAmount(value || 0)
 }
 
 function rate(value?: number) {

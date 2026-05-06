@@ -111,8 +111,8 @@
                   {{ item.activated ? '已激活' : '未激活' }}
                 </span>
               </td>
-              <td class="px-4 py-4 text-right text-base font-semibold whitespace-nowrap text-cyan-300">${{ money(item.today_contribution) }}</td>
-              <td class="px-4 py-4 text-right text-base font-semibold whitespace-nowrap text-emerald-300">${{ money(item.total_contribution) }}</td>
+              <td class="px-4 py-4 text-right text-base font-semibold whitespace-nowrap text-cyan-300">{{ money(item.today_contribution) }}</td>
+              <td class="px-4 py-4 text-right text-base font-semibold whitespace-nowrap text-emerald-300">{{ money(item.total_contribution) }}</td>
               <td class="px-4 py-4 text-right text-xs leading-6 text-slate-400">
                 <div class="truncate whitespace-nowrap" :title="formatDate(item.joined_at)">{{ formatDate(item.joined_at) }}</div>
               </td>
@@ -157,6 +157,7 @@ import {
   type PromotionTeamSortBy,
   type PromotionTeamSortOrder
 } from '@/composables/usePromotionTeamPreferences'
+import { formatCurrencyAmount } from '@/utils/format'
 
 const appStore = useAppStore()
 const props = defineProps<{
@@ -296,7 +297,7 @@ function handlePageSizeChange(size: number) {
 }
 
 function money(value?: number) {
-  return Number(value || 0).toFixed(2)
+  return formatCurrencyAmount(value || 0)
 }
 
 function resolveLevelNo(levelName?: string) {
