@@ -291,9 +291,14 @@ func ProvideOpsCleanupService(
 	redisClient *redis.Client,
 	cfg *config.Config,
 	channelMonitorSvc *ChannelMonitorService,
+	settingRepo SettingRepository,
+	opsService *OpsService,
 ) *OpsCleanupService {
-	svc := NewOpsCleanupService(opsRepo, db, redisClient, cfg, channelMonitorSvc)
+	svc := NewOpsCleanupService(opsRepo, db, redisClient, cfg, channelMonitorSvc, settingRepo)
 	svc.Start()
+	if opsService != nil {
+		opsService.SetCleanupReloader(svc)
+	}
 	return svc
 }
 

@@ -453,6 +453,21 @@ func (s *OpenAIGatewayService) checkChannelPricingRestriction(ctx context.Contex
 	return s.channelService.IsModelRestricted(ctx, *groupID, billingModel)
 }
 
+func (s *OpenAIGatewayService) isCodexImageGenerationBridgeEnabled(ctx context.Context, account *Account, apiKey *APIKey) bool {
+	if override := account.CodexImageGenerationBridgeOverride(); override != nil {
+		return *override
+	}
+	if s != nil && s.channelService != nil && apiKey != nil && apiKey.GroupID != nil {
+		ch, err := s.channelService.GetChannelForGroup(ctx, *apiKey.GroupID)
+		if err != nil {
+			slog.Warn("failed to resolve codex image generation bridge channel override", "group_id", *apiKey.GroupID, "error", err)
+		} else if override := ch.CodexImageGenerationBridgeOverride(PlatformOpenAI); override != nil {
+			return *override
+		}
+	}
+	return s != nil && s.cfg != nil && s.cfg.Gateway.CodexImageGenerationBridgeEnabled
+}
+
 func (s *OpenAIGatewayService) isUpstreamModelRestrictedByChannel(ctx context.Context, groupID int64, account *Account, requestedModel string, requireCompact bool) bool {
 	if s.channelService == nil {
 		return false
@@ -871,18 +886,26 @@ func (s *OpenAIGatewayService) detectCodexClientRestriction(c *gin.Context, acco
 }
 
 func getAPIKeyIDFromContext(c *gin.Context) int64 {
-	if c == nil {
-		return 0
-	}
-	v, exists := c.Get("api_key")
-	if !exists {
-		return 0
-	}
-	apiKey, ok := v.(*APIKey)
-	if !ok || apiKey == nil {
+	apiKey := getAPIKeyFromContext(c)
+	if apiKey == nil {
 		return 0
 	}
 	return apiKey.ID
+}
+
+func getAPIKeyFromContext(c *gin.Context) *APIKey {
+	if c == nil {
+		return nil
+	}
+	v, exists := c.Get("api_key")
+	if !exists {
+		return nil
+	}
+	apiKey, ok := v.(*APIKey)
+	if !ok || apiKey == nil {
+		return nil
+	}
+	return apiKey
 }
 
 // isolateOpenAISessionID 将 apiKeyID 混入 session 标识符，
@@ -1958,7 +1981,11 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	startTime := time.Now()
 
 	restrictionResult := s.detectCodexClientRestriction(c, account)
-	apiKeyID := getAPIKeyIDFromContext(c)
+	requestAPIKey := getAPIKeyFromContext(c)
+	apiKeyID := int64(0)
+	if requestAPIKey != nil {
+		apiKeyID = requestAPIKey.ID
+	}
 	logCodexCLIOnlyDetection(ctx, c, account, apiKeyID, restrictionResult, body)
 	if restrictionResult.Enabled && !restrictionResult.Matched {
 		c.JSON(http.StatusForbidden, gin.H{
@@ -2101,7 +2128,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		markPatchSet("instructions", "You are a helpful coding assistant.")
 	}
 
-	if isCodexCLI && ensureOpenAIResponsesImageGenerationTool(reqBody) {
+	codexImageGenerationBridgeEnabled := isCodexCLI && s.isCodexImageGenerationBridgeEnabled(ctx, account, requestAPIKey)
+	if codexImageGenerationBridgeEnabled && ensureOpenAIResponsesImageGenerationTool(reqBody) {
 		bodyModified = true
 		disablePatch()
 		logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Injected /responses image_generation tool for Codex client")
@@ -2112,7 +2140,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		disablePatch()
 		logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Normalized /responses image_generation tool payload")
 	}
-	if isCodexCLI && applyCodexImageGenerationBridgeInstructions(reqBody) {
+	if codexImageGenerationBridgeEnabled && applyCodexImageGenerationBridgeInstructions(reqBody) {
 		bodyModified = true
 		disablePatch()
 		logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Added Codex image_generation bridge instructions")

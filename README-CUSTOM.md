@@ -18,7 +18,7 @@
 | 项目 | 当前约定 |
 |---|---|
 | 当前主线 | `dev` |
-| 当前 upstream 基线 | 已同步到 `v0.1.123`，`backend/cmd/server/VERSION` 已对齐 `0.1.123` |
+| 当前 upstream 基线 | 已同步到 `v0.1.124`，`backend/cmd/server/VERSION` 已对齐 `0.1.124` |
 | 早期 fork 保护基线 | `2b72deb8fd45dc3a526bda2299b16df8d471107c` |
 | 部署策略 | `dev` 是真实可部署主线；`sub2api-custom-localtest` 仅用于本地测试 |
 | 架构原则 | 保留 Sub2API 的 Account / Group / Channel / 调度 / sticky / failover / billing，渐进吸收协议优先兼容内核 |
@@ -529,11 +529,21 @@ Protect files:
 
 ### 9.12 v0.1.123 版本对齐与分组平台搜索
 
-- `backend/cmd/server/VERSION` 当前应保持 `0.1.123`；Docker 构建产物启动日志应显示 `Sub2API 0.1.123`，这是 v0.1.123 同步完成的可观测标记。
+- v0.1.123 同步时 `backend/cmd/server/VERSION` 曾对齐 `0.1.123`；后续版本同步以最新 upstream main 的 `VERSION` 为准。
 - `/admin/groups` 创建分组模块的平台选择保留搜索输入，使用 `createPlatformSearchQuery` / `filteredCreatePlatformOptions` 对平台名称、平台标识、描述和模型提示做模糊过滤，交互需与 `/admin/accounts` 添加账号的平台搜索保持一致。
 - 该搜索是 UI-only 优化，不改变 `platform` 字段保存值、不改变 New-API 风格开关、不改变分组倍率/限额/模型路由、不影响后端调度和计费。
 - 后续 upstream sync 若触碰 `frontend/src/views/admin/GroupsView.vue`，必须确认创建分组与编辑分组仍能正常选择平台，且搜索为空时仍展示完整平台列表。
 - 当前 dev 源码已通过 `git archive` 形式分别发布到主节点和子节点 quick-deploy 脚本流程；部署脚本不属于源码功能，但后续验证版本时应以容器健康状态、`/health` 和启动版本日志三者共同确认。
+
+### 9.13 Upstream v0.1.124 selective absorption
+
+- `backend/cmd/server/VERSION` 当前应保持 `0.1.124`；本次使用 upstream `main` 的 `f3577bc6` 对齐版本号，因为 tag `v0.1.124` 自身仍停留在 `VERSION=0.1.123`。
+- 已吸收 OpenAI / Codex 低风险兼容补丁：WS `function_call_output` 请求不再错误删除 `previous_response_id`，避免工具结果回传被上游视为断链。
+- 已吸收 Codex image generation bridge 的默认关闭策略：`gateway.codex_image_generation_bridge_enabled` 默认 `false`，只有全局配置、Channel feature override 或 OpenAI 账号 `extra.codex_image_generation_bridge` 显式开启时，才会为 Codex `/v1/responses` 自动注入 `image_generation` 工具和桥接指令；显式携带 image_generation 的请求仍保留原有归一化链路。
+- 已吸收 ops cleanup 设置生效修复：`OpsCleanupService` 会从 `ops_advanced_settings.data_retention` 读取启用状态、cron 和保留天数，管理员更新高级设置后会热重载清理 cron；仍复用当前 fork 的 ops 表、Channel Monitor 维护、Redis/DB leader lock 和 heartbeat，不替换现有运维统计体系。
+- 已吸收通用前端选择器的低风险搜索增强：`Select` 和 `GroupSelector` 支持 `searchable="auto"`，选项较多时自动展示搜索输入；这是 UI-only 优化，不改变保存字段、调度、计费或权限。
+- 继续跳过 upstream Affiliate / redeem rebate / markdown page、GitHub/Google email OAuth、risk-control content moderation、大范围 OpenAI image generation controls 和 OpenAI messages compatibility 重构等高影响改动；这些改动会触碰本 fork 已有 Promotion、认证、页面、网关策略或安全审计语义，后续如需吸收必须单独评估。
+- 保护文件：`backend/internal/service/openai_gateway_service.go`、`backend/internal/service/openai_ws_forwarder.go`、`backend/internal/service/ops_cleanup_service.go`、`backend/internal/service/ops_settings.go`、`backend/internal/service/codex_image_generation_bridge.go`、`frontend/src/components/common/Select.vue`、`frontend/src/components/common/GroupSelector.vue`。
 
 ## 10. localtest 环境说明
 
