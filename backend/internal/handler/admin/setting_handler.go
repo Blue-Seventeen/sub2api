@@ -25,6 +25,11 @@ var semverPattern = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
 // menuItemIDPattern validates custom menu item IDs: alphanumeric, hyphens, underscores only.
 var menuItemIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
+// markdownMenuSlugPattern mirrors the page handler slug contract for md:<slug> menu entries.
+var markdownMenuSlugPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
+
+const maxMarkdownMenuSlugLen = 64
+
 // generateMenuItemID generates a short random hex ID for a custom menu item.
 func generateMenuItemID() (string, error) {
 	b := make([]byte, 8)
@@ -48,6 +53,21 @@ func firstNonEmpty(values ...string) string {
 		if trimmed := strings.TrimSpace(value); trimmed != "" {
 			return trimmed
 		}
+	}
+	return ""
+}
+
+func validateCustomMenuItemURL(raw string) string {
+	urlValue := strings.TrimSpace(raw)
+	if strings.HasPrefix(strings.ToLower(urlValue), "md:") {
+		slug := strings.TrimSpace(urlValue[3:])
+		if slug == "" || len(slug) > maxMarkdownMenuSlugLen || !markdownMenuSlugPattern.MatchString(slug) {
+			return "Custom menu markdown slug must be 1-64 characters, start with a letter or number, and contain only letters, numbers, hyphens, or underscores"
+		}
+		return ""
+	}
+	if err := config.ValidateAbsoluteHTTPURL(urlValue); err != nil {
+		return "Custom menu item URL must be an absolute http(s) URL or md:<slug>"
 	}
 	return ""
 }
@@ -1046,8 +1066,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 				response.BadRequest(c, "Custom menu item URL is too long (max 2048 characters)")
 				return
 			}
-			if err := config.ValidateAbsoluteHTTPURL(strings.TrimSpace(item.URL)); err != nil {
-				response.BadRequest(c, "Custom menu item URL must be an absolute http(s) URL")
+			if msg := validateCustomMenuItemURL(item.URL); msg != "" {
+				response.BadRequest(c, msg)
 				return
 			}
 			if item.Visibility != "user" && item.Visibility != "admin" {

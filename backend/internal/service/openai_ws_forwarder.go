@@ -223,6 +223,7 @@ type OpenAIWSIngressHooks struct {
 	// 的 reasoning effort 后缀推导，禁止用于上游请求或计费模型。
 	InitialRequestModel string
 	BeforeTurn          func(turn int) error
+	BeforeTurnPayload   func(turn int, payload []byte) error
 	AfterTurn           func(turn int, result *OpenAIForwardResult, turnErr error)
 }
 
@@ -3166,6 +3167,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 		}
 		skipBeforeTurn = false
+		if hooks != nil && hooks.BeforeTurnPayload != nil {
+			if err := hooks.BeforeTurnPayload(turn, currentPayload); err != nil {
+				return err
+			}
+		}
 		currentPreviousResponseID := openAIWSPayloadStringFromRaw(currentPayload, "previous_response_id")
 		expectedPrev := strings.TrimSpace(lastTurnResponseID)
 		toolSignals := ToolContinuationSignals{

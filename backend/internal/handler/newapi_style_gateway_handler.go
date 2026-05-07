@@ -98,6 +98,10 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 	stream := gjson.GetBytes(body, "stream").Bool()
 	setOpsRequestContext(c, model, stream, body)
 	setOpsEndpointContext(c, model, int16(service.RequestTypeFromLegacy(stream, false)))
+	if decision := h.base.checkContentModeration(c, reqLog, apiKey, subject, contentModerationProtocolForNewAPIStyleRoute(route), model, body); decision != nil && decision.Blocked {
+		h.writeError(c, contentModerationStatus(decision), contentModerationErrorCode(decision), decision.Message)
+		return
+	}
 
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	if err := h.base.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription); err != nil {
@@ -355,6 +359,19 @@ func (h *NewAPIStyleGatewayHandler) writeError(c *gin.Context, status int, errTy
 		return
 	}
 	h.base.handleStreamingAwareError(c, status, errType, message, false)
+}
+
+func contentModerationProtocolForNewAPIStyleRoute(route service.NewAPIStyleRoute) string {
+	switch route {
+	case service.NewAPIStyleRouteMessages:
+		return service.ContentModerationProtocolAnthropicMessages
+	case service.NewAPIStyleRouteResponses:
+		return service.ContentModerationProtocolOpenAIResponses
+	case service.NewAPIStyleRouteImages:
+		return service.ContentModerationProtocolOpenAIImages
+	default:
+		return service.ContentModerationProtocolOpenAIChat
+	}
 }
 
 func (h *NewAPIStyleGatewayHandler) writeRouteError(c *gin.Context, _ service.NewAPIStyleRoute, status int, errType, message string, streamStarted bool) {

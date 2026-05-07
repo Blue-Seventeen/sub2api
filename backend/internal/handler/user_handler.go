@@ -496,6 +496,8 @@ func userProfileBindingMap(identities service.UserIdentitySummarySet) map[string
 		"linuxdo": identities.LinuxDo,
 		"oidc":    identities.OIDC,
 		"wechat":  identities.WeChat,
+		"github":  identities.GitHub,
+		"google":  identities.Google,
 	}
 }
 
@@ -543,8 +545,8 @@ func inferUserProfileSources(user *service.User, identities service.UserIdentity
 }
 
 func thirdPartyIdentityProviders(identities service.UserIdentitySummarySet) []service.UserIdentitySummary {
-	out := make([]service.UserIdentitySummary, 0, 3)
-	for _, summary := range []service.UserIdentitySummary{identities.LinuxDo, identities.OIDC, identities.WeChat} {
+	out := make([]service.UserIdentitySummary, 0, 5)
+	for _, summary := range []service.UserIdentitySummary{identities.LinuxDo, identities.OIDC, identities.WeChat, identities.GitHub, identities.Google} {
 		if summary.Bound {
 			out = append(out, summary)
 		}

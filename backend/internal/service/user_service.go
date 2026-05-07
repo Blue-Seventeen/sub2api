@@ -143,6 +143,8 @@ type UserIdentitySummarySet struct {
 	LinuxDo UserIdentitySummary `json:"linuxdo"`
 	OIDC    UserIdentitySummary `json:"oidc"`
 	WeChat  UserIdentitySummary `json:"wechat"`
+	GitHub  UserIdentitySummary `json:"github"`
+	Google  UserIdentitySummary `json:"google"`
 }
 
 type StartUserIdentityBindingRequest struct {
@@ -262,6 +264,8 @@ func (s *UserService) GetProfileIdentitySummaries(ctx context.Context, userID in
 		LinuxDo: s.buildProviderIdentitySummary("linuxdo", user, records),
 		OIDC:    s.buildProviderIdentitySummary("oidc", user, records),
 		WeChat:  s.buildProviderIdentitySummary("wechat", user, records),
+		GitHub:  s.buildProviderIdentitySummary("github", user, records),
+		Google:  s.buildProviderIdentitySummary("google", user, records),
 	}
 
 	s.applyExplicitProviderAvailability(ctx, &summaries)
@@ -281,6 +285,12 @@ func (s *UserService) applyExplicitProviderAvailability(ctx context.Context, sum
 		SettingKeyWeChatConnectMPEnabled,
 		SettingKeyWeChatConnectMobileEnabled,
 		SettingKeyWeChatConnectMode,
+		SettingKeyGitHubOAuthEnabled,
+		SettingKeyGitHubOAuthClientID,
+		SettingKeyGitHubOAuthClientSecret,
+		SettingKeyGoogleOAuthEnabled,
+		SettingKeyGoogleOAuthClientID,
+		SettingKeyGoogleOAuthClientSecret,
 	})
 	if err != nil {
 		return
@@ -302,6 +312,18 @@ func (s *UserService) applyExplicitProviderAvailability(ctx context.Context, sum
 			disableIdentityBindAction(&summaries.WeChat)
 		}
 	}
+	if !emailOAuthBindAvailable(settings, SettingKeyGitHubOAuthEnabled, SettingKeyGitHubOAuthClientID, SettingKeyGitHubOAuthClientSecret) {
+		disableIdentityBindAction(&summaries.GitHub)
+	}
+	if !emailOAuthBindAvailable(settings, SettingKeyGoogleOAuthEnabled, SettingKeyGoogleOAuthClientID, SettingKeyGoogleOAuthClientSecret) {
+		disableIdentityBindAction(&summaries.Google)
+	}
+}
+
+func emailOAuthBindAvailable(settings map[string]string, enabledKey string, clientIDKey string, clientSecretKey string) bool {
+	return strings.TrimSpace(settings[enabledKey]) == "true" &&
+		strings.TrimSpace(settings[clientIDKey]) != "" &&
+		strings.TrimSpace(settings[clientSecretKey]) != ""
 }
 
 func disableIdentityBindAction(summary *UserIdentitySummary) {
@@ -694,7 +716,7 @@ func (s *UserService) canUnbindProvider(provider string, user *User, records []U
 		return true
 	}
 
-	for _, candidate := range []string{"linuxdo", "oidc", "wechat"} {
+	for _, candidate := range []string{"linuxdo", "oidc", "wechat", "github", "google"} {
 		if candidate == provider {
 			continue
 		}
@@ -770,6 +792,10 @@ func buildUserIdentityBindAuthorizeURL(provider, redirectTo string) (string, err
 		path = "/api/v1/auth/oauth/oidc/bind/start"
 	case "wechat":
 		path = "/api/v1/auth/oauth/wechat/bind/start"
+	case "github":
+		path = "/api/v1/auth/oauth/github/bind/start"
+	case "google":
+		path = "/api/v1/auth/oauth/google/bind/start"
 	default:
 		return "", ErrIdentityProviderInvalid
 	}
@@ -788,6 +814,10 @@ func normalizeUserIdentityProvider(provider string) string {
 		return "oidc"
 	case "wechat":
 		return "wechat"
+	case "github":
+		return "github"
+	case "google":
+		return "google"
 	case "email":
 		return "email"
 	default:

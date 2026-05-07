@@ -832,8 +832,8 @@ func (s *SettingService) GetCustomMenuItemsRaw(ctx context.Context) string {
 	return raw
 }
 
-func (s *SettingService) isCachedFeatureEnabled(ctx context.Context, key string, cache *atomic.Value, sf *singleflight.Group) bool {
-	if s == nil || s.settingRepo == nil {
+func isCachedFeatureSwitchEnabled(ctx context.Context, settingRepo SettingRepository, key string, cache *atomic.Value, sf *singleflight.Group) bool {
+	if settingRepo == nil {
 		return false
 	}
 	now := time.Now().UnixNano()
@@ -847,7 +847,7 @@ func (s *SettingService) isCachedFeatureEnabled(ctx context.Context, key string,
 		}
 		dbCtx, cancel := context.WithTimeout(dbCtx, featureSwitchDBTimeout)
 		defer cancel()
-		raw, err := s.settingRepo.GetValue(dbCtx, key)
+		raw, err := settingRepo.GetValue(dbCtx, key)
 		if err != nil {
 			if errors.Is(err, ErrSettingNotFound) {
 				return false, nil
@@ -864,6 +864,13 @@ func (s *SettingService) isCachedFeatureEnabled(ctx context.Context, key string,
 	}
 	cache.Store(&cachedFeatureSwitch{value: false, expiresAt: time.Now().Add(featureSwitchErrorTTL).UnixNano()})
 	return false
+}
+
+func (s *SettingService) isCachedFeatureEnabled(ctx context.Context, key string, cache *atomic.Value, sf *singleflight.Group) bool {
+	if s == nil {
+		return false
+	}
+	return isCachedFeatureSwitchEnabled(ctx, s.settingRepo, key, cache, sf)
 }
 
 func (s *SettingService) IsRiskControlEnabled(ctx context.Context) bool {

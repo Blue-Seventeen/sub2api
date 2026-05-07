@@ -7,6 +7,8 @@
     :wechat-enabled="wechatEnabled"
     :wechat-open-enabled="wechatOpenEnabled"
     :wechat-mp-enabled="wechatMpEnabled"
+    :github-enabled="githubEnabled"
+    :google-enabled="googleEnabled"
   />
 </template>
 
@@ -23,6 +25,8 @@ withDefaults(
     wechatEnabled?: boolean
     wechatOpenEnabled?: boolean
     wechatMpEnabled?: boolean
+    githubEnabled?: boolean
+    googleEnabled?: boolean
   }>(),
   {
     linuxdoEnabled: false,
@@ -30,7 +34,9 @@ withDefaults(
     oidcProviderName: 'OIDC',
     wechatEnabled: false,
     wechatOpenEnabled: undefined,
-    wechatMpEnabled: undefined
+    wechatMpEnabled: undefined,
+    githubEnabled: false,
+    googleEnabled: false
   }
 )
 </script>

@@ -852,7 +852,11 @@ function handleMenuItemClick(itemPath: string) {
 }
 
 function isExternalLinkItem(item: NavItem): item is NavItem & { externalUrl: string } {
-  return item.openInNewTab === true && typeof item.externalUrl === 'string' && item.externalUrl.length > 0
+  return item.openInNewTab === true && typeof item.externalUrl === 'string' && item.externalUrl.length > 0 && !isMarkdownMenuUrl(item.externalUrl)
+}
+
+function isMarkdownMenuUrl(url: string | undefined): boolean {
+  return typeof url === 'string' && url.trim().toLowerCase().startsWith('md:')
 }
 
 function buildExternalMenuItemUrl(item: NavItem): string {

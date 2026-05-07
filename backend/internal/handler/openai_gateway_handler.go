@@ -1374,6 +1374,19 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			currentAccountRelease = wrapReleaseOnDone(ctx, accountReleaseFunc)
 			return nil
 		},
+		BeforeTurnPayload: func(turn int, payload []byte) error {
+			if turn <= 1 {
+				return nil
+			}
+			model := strings.TrimSpace(gjson.GetBytes(payload, "model").String())
+			if model == "" {
+				model = reqModel
+			}
+			if decision := h.checkContentModeration(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, model, payload); decision != nil && decision.Blocked {
+				return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, decision.Message, nil)
+			}
+			return nil
+		},
 		AfterTurn: func(turn int, result *service.OpenAIForwardResult, turnErr error) {
 			releaseTurnSlots()
 			if turnErr != nil || result == nil {

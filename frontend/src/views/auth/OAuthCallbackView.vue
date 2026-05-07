@@ -126,6 +126,7 @@ import { useAppStore, useAuthStore } from '@/stores'
 import { apiClient } from '@/api/client'
 import {
   exchangePendingOAuthCompletion,
+  getOAuthCompletionKind,
   persistOAuthTokenContext,
   type OAuthTokenResponse
 } from '@/api/auth'
@@ -166,7 +167,12 @@ const state = computed(() => (route.query.state as string) || '')
 const error = computed(
   () => (route.query.error as string) || (route.query.error_description as string) || ''
 )
-const fullUrl = computed(() => (typeof window === 'undefined' ? '' : window.location.href))
+const fullUrl = computed(() => {
+  if (typeof window === 'undefined') return ''
+  const url = new URL(window.location.href)
+  url.hash = ''
+  return url.toString()
+})
 const providerName = computed(() => (pendingProvider.value === 'google' ? 'Google' : 'GitHub'))
 const registrationHint = computed(() =>
   invitationRequired.value
@@ -245,6 +251,14 @@ async function finalizeTokenResponse(tokenResponse: OAuthTokenResponse, redirect
   await router.replace(sanitizeRedirectPath(redirect))
 }
 
+async function finalizeBindResponse(redirect: string) {
+  if (typeof window !== 'undefined') {
+    window.sessionStorage.removeItem(EMAIL_OAUTH_PENDING_PROVIDER_KEY)
+  }
+  appStore.showSuccess(t('profile.authBindings.bindSuccess'))
+  await router.replace(sanitizeRedirectPath(redirect || '/profile'))
+}
+
 function hasOAuthTokenResponse(value: Partial<OAuthTokenResponse>): value is OAuthTokenResponse {
   return typeof value.access_token === 'string' && value.access_token.trim() !== ''
 }
@@ -274,6 +288,11 @@ async function resumePendingEmailOAuth() {
 
     if (completion.error) {
       appStore.showError(completion.error)
+      return
+    }
+
+    if (getOAuthCompletionKind(completion) === 'bind') {
+      await finalizeBindResponse(completionRedirect)
     }
   } catch (e: unknown) {
     const err = e as { message?: string; response?: { data?: { message?: string } } }
@@ -333,6 +352,7 @@ onMounted(async () => {
   if (tokenResponse) {
     isProcessing.value = true
     try {
+      window.history.replaceState(null, document.title, `${window.location.pathname}${window.location.search}`)
       await finalizeTokenResponse(tokenResponse, params.get('redirect') || '/dashboard')
     } catch (e: unknown) {
       const message = (e as { message?: string })?.message || t('auth.loginFailed')

@@ -222,6 +222,8 @@ const props = withDefaults(
     wechatEnabled?: boolean
     wechatOpenEnabled?: boolean
     wechatMpEnabled?: boolean
+    githubEnabled?: boolean
+    googleEnabled?: boolean
     embedded?: boolean
     compact?: boolean
   }>(),
@@ -232,6 +234,8 @@ const props = withDefaults(
     wechatEnabled: false,
     wechatOpenEnabled: undefined,
     wechatMpEnabled: undefined,
+    githubEnabled: false,
+    googleEnabled: false,
     embedded: false,
     compact: false,
   }
@@ -409,6 +413,12 @@ function isProviderEnabledForBinding(provider: BindableProvider): boolean {
   if (provider === 'oidc') {
     return props.oidcEnabled
   }
+  if (provider === 'github') {
+    return props.githubEnabled
+  }
+  if (provider === 'google') {
+    return props.googleEnabled
+  }
   return resolvedWeChatBinding.value.mode !== null
 }
 
@@ -454,6 +464,28 @@ const providerItems = computed(() => [
     canUnbind: Boolean(getBindingStatus('wechat') && getBindingDetails('wechat')?.can_unbind),
     details: getBindingDetails('wechat'),
   },
+  {
+    provider: 'github' as const,
+    label: t('profile.authBindings.providers.github'),
+    bound: getBindingStatus('github'),
+    canBind:
+      !getBindingStatus('github') &&
+      isProviderEnabledForBinding('github') &&
+      (getBindingDetails('github')?.can_bind ?? true),
+    canUnbind: Boolean(getBindingStatus('github') && getBindingDetails('github')?.can_unbind),
+    details: getBindingDetails('github'),
+  },
+  {
+    provider: 'google' as const,
+    label: t('profile.authBindings.providers.google'),
+    bound: getBindingStatus('google'),
+    canBind:
+      !getBindingStatus('google') &&
+      isProviderEnabledForBinding('google') &&
+      (getBindingDetails('google')?.can_bind ?? true),
+    canUnbind: Boolean(getBindingStatus('google') && getBindingDetails('google')?.can_unbind),
+    details: getBindingDetails('google'),
+  },
 ])
 
 function providerInitial(provider: UserAuthProvider): string {
@@ -465,6 +497,12 @@ function providerInitial(provider: UserAuthProvider): string {
   }
   if (provider === 'oidc') {
     return 'O'
+  }
+  if (provider === 'github') {
+    return 'G'
+  }
+  if (provider === 'google') {
+    return 'G'
   }
   return 'E'
 }
@@ -478,6 +516,12 @@ function providerIconClass(provider: UserAuthProvider): string {
   }
   if (provider === 'oidc') {
     return 'bg-sky-100 text-sky-600 dark:bg-sky-900/20 dark:text-sky-300'
+  }
+  if (provider === 'github') {
+    return 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200'
+  }
+  if (provider === 'google') {
+    return 'bg-red-100 text-red-600 dark:bg-red-900/20 dark:text-red-300'
   }
   return 'bg-primary-100 text-primary-600 dark:bg-primary-900/20 dark:text-primary-300'
 }

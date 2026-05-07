@@ -172,6 +172,10 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 
 	setOpsRequestContext(c, parsed.Model, parsed.Stream, body)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(parsed.Stream, false)))
+	if decision := h.base.checkContentModeration(c, reqLog, apiKey, subject, contentModerationProtocolForCompatibleRoute(route), parsed.Model, body); decision != nil && decision.Blocked {
+		h.writeRouteError(c, route, contentModerationStatus(decision), contentModerationErrorCode(decision), decision.Message, false)
+		return
+	}
 
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	if err := h.base.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription); err != nil {
@@ -431,6 +435,17 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 			}
 		})
 		return
+	}
+}
+
+func contentModerationProtocolForCompatibleRoute(route service.CompatibleRequestRoute) string {
+	switch route {
+	case service.CompatibleRouteMessages:
+		return service.ContentModerationProtocolAnthropicMessages
+	case service.CompatibleRouteResponses:
+		return service.ContentModerationProtocolOpenAIResponses
+	default:
+		return service.ContentModerationProtocolOpenAIChat
 	}
 }
 

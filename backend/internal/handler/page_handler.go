@@ -213,8 +213,9 @@ func (h *PageHandler) findSlugVisibility(c *gin.Context, slug string) (string, b
 	}
 	for _, item := range items {
 		itemSlug := strings.TrimSpace(item.PageSlug)
-		if itemSlug == "" && strings.HasPrefix(strings.TrimSpace(item.URL), "md:") {
-			itemSlug = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(item.URL), "md:"))
+		trimmedURL := strings.TrimSpace(item.URL)
+		if itemSlug == "" && strings.HasPrefix(strings.ToLower(trimmedURL), "md:") {
+			itemSlug = strings.TrimSpace(trimmedURL[3:])
 		}
 		if itemSlug == slug {
 			return strings.TrimSpace(item.Visibility), true
@@ -250,11 +251,7 @@ func RegisterPageRoutes(v1 *gin.RouterGroup, dataDir string, jwtAuth gin.Handler
 	pages.Use(jwtAuth)
 	{
 		pages.GET("/:slug", h.GetPageContent)
-	}
-
-	pageImages := v1.Group("/pages")
-	{
-		pageImages.GET("/:slug/images/*filename", h.ServePageImage)
+		pages.GET("/:slug/images/*filename", h.ServePageImage)
 	}
 
 	adminPages := v1.Group("/pages")

@@ -108,6 +108,7 @@ export async function unbindAuthIdentity(provider: BindableOAuthProvider): Promi
 }
 
 export type BindableOAuthProvider = Exclude<UserAuthProvider, 'email'>
+const EMAIL_OAUTH_PENDING_PROVIDER_KEY = 'email_oauth_pending_provider'
 
 interface BuildOAuthBindingStartURLOptions {
   redirectTo?: string
@@ -165,6 +166,9 @@ export async function startOAuthBinding(
     return
   }
   await prepareOAuthBindAccessTokenCookie()
+  if (provider === 'github' || provider === 'google') {
+    window.sessionStorage.setItem(EMAIL_OAUTH_PENDING_PROVIDER_KEY, provider)
+  }
   window.location.href = startURL
 }
 

@@ -1284,6 +1284,9 @@ func applySuggestedProfileToCompletionResponse(payload map[string]any, upstream 
 	if len(payload) == 0 || len(upstream) == 0 {
 		return
 	}
+	if enabled, exists := payload["profile_adoption_enabled"].(bool); exists && !enabled {
+		return
+	}
 
 	displayName := pendingSessionStringValue(upstream, "suggested_display_name")
 	avatarURL := pendingSessionStringValue(upstream, "suggested_avatar_url")

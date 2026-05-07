@@ -12,6 +12,8 @@
         :wechat-enabled="wechatOAuthEnabled"
         :wechat-open-enabled="wechatOAuthOpenEnabled"
         :wechat-mp-enabled="wechatOAuthMPEnabled"
+        :github-enabled="githubOAuthEnabled"
+        :google-enabled="googleOAuthEnabled"
       />
 
       <div
@@ -74,6 +76,8 @@ const wechatOAuthOpenEnabled = ref<boolean | undefined>(undefined)
 const wechatOAuthMPEnabled = ref<boolean | undefined>(undefined)
 const oidcOAuthEnabled = ref(false)
 const oidcOAuthProviderName = ref('OIDC')
+const githubOAuthEnabled = ref(false)
+const googleOAuthEnabled = ref(false)
 
 onMounted(async () => {
   const profileRefresh = authStore.refreshUser().catch((error) => {
@@ -98,6 +102,8 @@ onMounted(async () => {
         : undefined
       oidcOAuthEnabled.value = settings.oidc_oauth_enabled ?? false
       oidcOAuthProviderName.value = settings.oidc_oauth_provider_name || 'OIDC'
+      githubOAuthEnabled.value = settings.github_oauth_enabled ?? false
+      googleOAuthEnabled.value = settings.google_oauth_enabled ?? false
     })
     .catch((error) => {
       console.error('Failed to load settings:', error)
