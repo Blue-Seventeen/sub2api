@@ -619,15 +619,17 @@ git push gitcode main dev
 ## 13. 自定义全局货币符号显示
 
 - `/admin/settings` 的 API 端点地址下新增 `display_currency_symbol` 展示设置，默认值为 `$`，管理员可配置为 `¥`、`RMB` 等最多 8 个 Unicode 字符的可见符号。
-- `货币符号` 下方新增 `仅用于本机` 开关，默认开启；开启时写入本机 `display_currency_symbol.local.json`，关闭时写入 PostgreSQL settings 并在共库节点共享。
+- `货币符号` 下方新增 `货币符号仅用于本机` 开关，默认开启；开启时写入本机 `display_currency_symbol.local.json`，关闭时写入 PostgreSQL settings 并在共库节点共享。
 - 本机文件路径优先级为 `DATA_DIR/display_currency_symbol.local.json`、`/app/data/display_currency_symbol.local.json`、当前目录 `display_currency_symbol.local.json`；文件结构固定为 `{ "local_only": true, "symbol": "¥" }`。
 - 升级兼容：如果本机文件不存在但数据库已有 `display_currency_symbol`，首次读取会用数据库值初始化当前节点本机符号并尽量落盘，避免升级后展示符号突变。
+- 本机配置文件写入在支持 POSIX 权限的文件系统上会尽量 `chmod 0600`；若 Docker Desktop / Windows bind mount 等文件系统不支持 `chmod`，只记录 warn，不阻断保存，避免 `/admin/settings` 返回 `internal error`。
 - 该能力只影响前端可见金额展示，不改变余额、充值、退款、订阅、计费、用量、导出 CSV 和 API 返回的任何数值字段，也不做汇率换算。
 - 后端不新增数据库 migration；public settings 和 SSR 注入只暴露当前节点有效 `display_currency_symbol`，不暴露本机/共享开关状态。
 - 前端金额展示必须统一使用 `formatCurrencyAmount`、`formatCostAmount`、`formatCompactCurrencyAmount`、`formatCurrency` 或 `formatScaled`，避免重新写死 `$` 或 `¥`。
 - upstream sync 若触碰设置页、public settings、本机配置文件、金额展示组件、支付/推广/用量页面或 `frontend/src/utils/format.ts`，必须确认本展示符号不会被覆盖回硬编码美元符号或被错误改成全局数据库强制共享。
 
 Protect files:
+- `backend/internal/service/local_config_file.go`
 - `backend/internal/service/display_currency_symbol_local.go`
 - `backend/internal/service/setting_service.go`
 - `backend/internal/service/settings_view.go`
