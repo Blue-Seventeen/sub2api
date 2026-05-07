@@ -647,6 +647,15 @@ func TestAPIContracts(t *testing.T) {
 					"invitation_code_missing_prompt_html": "",
 					"totp_enabled": false,
 					"totp_encryption_key_configured": false,
+					"login_agreement_enabled": false,
+					"login_agreement_mode": "modal",
+					"login_agreement_updated_at": "2026-03-31",
+					"login_agreement_documents": [
+						{"id": "terms", "title": "????", "content_md": ""},
+						{"id": "usage-policy", "title": "????", "content_md": ""},
+						{"id": "supported-regions", "title": "????????", "content_md": ""},
+						{"id": "service-specific-terms", "title": "??????", "content_md": ""}
+					],
 					"smtp_host": "smtp.example.com",
 					"smtp_port": 587,
 					"smtp_username": "user",
@@ -847,6 +856,15 @@ func TestAPIContracts(t *testing.T) {
 					"invitation_code_missing_prompt_html": "",
 					"totp_enabled": false,
 					"totp_encryption_key_configured": false,
+					"login_agreement_enabled": false,
+					"login_agreement_mode": "modal",
+					"login_agreement_updated_at": "2026-03-31",
+					"login_agreement_documents": [
+						{"id": "terms", "title": "????", "content_md": ""},
+						{"id": "usage-policy", "title": "????", "content_md": ""},
+						{"id": "supported-regions", "title": "????????", "content_md": ""},
+						{"id": "service-specific-terms", "title": "??????", "content_md": ""}
+					],
 					"smtp_host": "",
 					"smtp_port": 587,
 					"smtp_username": "",
