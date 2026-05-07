@@ -11,26 +11,26 @@
         </p>
       </div>
 
-  <div v-if="!backendModeEnabled && (linuxdoOAuthEnabled || wechatOAuthEnabled || oidcOAuthEnabled || githubOAuthEnabled || googleOAuthEnabled)" class="space-y-4">
+      <div v-if="showOAuthLogin" class="space-y-4">
         <EmailOAuthButtons
           v-if="githubOAuthEnabled || googleOAuthEnabled"
-          :disabled="isLoading"
+          :disabled="authActionDisabled"
           :github-enabled="githubOAuthEnabled"
           :google-enabled="googleOAuthEnabled"
         />
         <LinuxDoOAuthSection
           v-if="linuxdoOAuthEnabled"
-          :disabled="isLoading"
+          :disabled="authActionDisabled"
           :show-divider="false"
         />
         <WechatOAuthSection
           v-if="wechatOAuthEnabled"
-          :disabled="isLoading"
+          :disabled="authActionDisabled"
           :show-divider="false"
         />
         <OidcOAuthSection
           v-if="oidcOAuthEnabled"
-          :disabled="isLoading"
+          :disabled="authActionDisabled"
           :provider-name="oidcOAuthProviderName"
           :show-divider="false"
         />
@@ -61,7 +61,7 @@
               required
               autofocus
               autocomplete="email"
-              :disabled="isLoading"
+              :disabled="authActionDisabled"
               class="input pl-11"
               :class="{ 'input-error': errors.email }"
               :placeholder="t('auth.emailPlaceholder')"
@@ -84,7 +84,7 @@
               :type="showPassword ? 'text' : 'password'"
               required
               autocomplete="current-password"
-              :disabled="isLoading"
+              :disabled="authActionDisabled"
               class="input pl-11 pr-11"
               :class="{ 'input-error': errors.password }"
               :placeholder="t('auth.passwordPlaceholder')"
@@ -92,6 +92,7 @@
             <button
               type="button"
               @click="showPassword = !showPassword"
+              :disabled="authActionDisabled"
               class="absolute inset-y-0 right-0 flex items-center pr-3.5 text-gray-400 transition-colors hover:text-gray-600 dark:hover:text-dark-300"
             >
               <Icon v-if="showPassword" name="eyeOff" size="md" />
@@ -124,7 +125,7 @@
         <!-- Submit Button -->
         <button
           type="submit"
-          :disabled="isLoading || (turnstileEnabled && !turnstileToken)"
+          :disabled="authActionDisabled || (turnstileEnabled && !turnstileToken)"
           class="btn btn-primary w-full"
         >
           <svg
@@ -150,6 +151,18 @@
           <Icon v-else name="login" size="md" class="mr-2" />
           {{ isLoading ? t('auth.signingIn') : t('auth.signIn') }}
         </button>
+
+        <LoginAgreementPrompt
+          v-if="loginAgreementEnabled"
+          :accepted="agreementAccepted"
+          :documents="loginAgreementDocuments"
+          :mode="loginAgreementMode"
+          :updated-at="loginAgreementUpdatedAt"
+          :visible="showAgreementModal"
+          @accept="acceptLoginAgreement"
+          @reject="rejectLoginAgreement"
+          @open="showAgreementModal = true"
+        />
       </form>
     </div>
 
@@ -187,14 +200,16 @@ import LinuxDoOAuthSection from '@/components/auth/LinuxDoOAuthSection.vue'
 import OidcOAuthSection from '@/components/auth/OidcOAuthSection.vue'
 import WechatOAuthSection from '@/components/auth/WechatOAuthSection.vue'
 import EmailOAuthButtons from '@/components/auth/EmailOAuthButtons.vue'
+import LoginAgreementPrompt from '@/components/auth/LoginAgreementPrompt.vue'
 import TotpLoginModal from '@/components/auth/TotpLoginModal.vue'
 import Icon from '@/components/icons/Icon.vue'
 import TurnstileWidget from '@/components/TurnstileWidget.vue'
 import { useAuthStore, useAppStore } from '@/stores'
 import { getPublicSettings, isTotp2FARequired, isWeChatWebOAuthEnabled } from '@/api/auth'
-import type { TotpLoginResponse } from '@/types'
+import type { LoginAgreementDocument, TotpLoginResponse } from '@/types'
 
 const { t } = useI18n()
+const LOGIN_AGREEMENT_STORAGE_KEY = 'sub2api_login_agreement_consent'
 
 // ==================== Router & Stores ====================
 
@@ -207,6 +222,7 @@ const appStore = useAppStore()
 const isLoading = ref<boolean>(false)
 const errorMessage = ref<string>('')
 const showPassword = ref<boolean>(false)
+const publicSettingsLoaded = ref<boolean>(false)
 
 // Public settings
 const turnstileEnabled = ref<boolean>(false)
@@ -219,6 +235,13 @@ const backendModeEnabled = ref<boolean>(false)
 const oidcOAuthEnabled = ref<boolean>(false)
 const oidcOAuthProviderName = ref<string>('OIDC')
 const passwordResetEnabled = ref<boolean>(false)
+const loginAgreementEnabled = ref<boolean>(false)
+const loginAgreementMode = ref<'modal' | 'checkbox' | string>('modal')
+const loginAgreementUpdatedAt = ref<string>('')
+const loginAgreementRevision = ref<string>('')
+const loginAgreementDocuments = ref<LoginAgreementDocument[]>([])
+const agreementAccepted = ref<boolean>(false)
+const showAgreementModal = ref<boolean>(false)
 
 // Turnstile
 const turnstileRef = ref<InstanceType<typeof TurnstileWidget> | null>(null)
@@ -243,6 +266,24 @@ const errors = reactive({
 
 const validationToastMessage = computed(
   () => errors.email || errors.password || errors.turnstile || ''
+)
+
+const agreementGateActive = computed(
+  () => loginAgreementEnabled.value && !agreementAccepted.value
+)
+
+const authActionDisabled = computed(
+  () => isLoading.value || !publicSettingsLoaded.value || agreementGateActive.value
+)
+
+const showOAuthLogin = computed(
+  () =>
+    !backendModeEnabled.value &&
+    (linuxdoOAuthEnabled.value ||
+      wechatOAuthEnabled.value ||
+      oidcOAuthEnabled.value ||
+      githubOAuthEnabled.value ||
+      googleOAuthEnabled.value)
 )
 
 watch(validationToastMessage, (value, previousValue) => {
@@ -275,10 +316,77 @@ onMounted(async () => {
     oidcOAuthProviderName.value = settings.oidc_oauth_provider_name || 'OIDC'
     backendModeEnabled.value = settings.backend_mode_enabled
     passwordResetEnabled.value = settings.password_reset_enabled
+    applyLoginAgreementSettings(settings)
   } catch (error) {
     console.error('Failed to load public settings:', error)
+    loginAgreementEnabled.value = false
+    agreementAccepted.value = true
+  } finally {
+    publicSettingsLoaded.value = true
   }
 })
+
+// ==================== Login Agreement ====================
+
+function applyLoginAgreementSettings(settings: {
+  login_agreement_enabled?: boolean
+  login_agreement_mode?: string
+  login_agreement_updated_at?: string
+  login_agreement_revision?: string
+  login_agreement_documents?: LoginAgreementDocument[]
+}): void {
+  const documents = Array.isArray(settings.login_agreement_documents)
+    ? settings.login_agreement_documents.filter((doc) => doc.title?.trim())
+    : []
+  loginAgreementDocuments.value = documents
+  loginAgreementEnabled.value = settings.login_agreement_enabled === true && documents.length > 0
+  loginAgreementMode.value = settings.login_agreement_mode === 'checkbox' ? 'checkbox' : 'modal'
+  loginAgreementUpdatedAt.value = settings.login_agreement_updated_at || ''
+  loginAgreementRevision.value =
+    settings.login_agreement_revision ||
+    `${loginAgreementUpdatedAt.value}:${documents.map((doc) => `${doc.id}:${doc.title}`).join('|')}`
+
+  agreementAccepted.value = !loginAgreementEnabled.value || hasAcceptedLoginAgreement(loginAgreementRevision.value)
+  showAgreementModal.value =
+    loginAgreementEnabled.value && !agreementAccepted.value && loginAgreementMode.value !== 'checkbox'
+}
+
+function hasAcceptedLoginAgreement(revision: string): boolean {
+  if (!revision) {
+    return false
+  }
+  try {
+    const raw = localStorage.getItem(LOGIN_AGREEMENT_STORAGE_KEY)
+    if (!raw) {
+      return false
+    }
+    const parsed = JSON.parse(raw) as { revision?: string }
+    return parsed.revision === revision
+  } catch {
+    return false
+  }
+}
+
+function acceptLoginAgreement(): void {
+  if (loginAgreementRevision.value) {
+    localStorage.setItem(
+      LOGIN_AGREEMENT_STORAGE_KEY,
+      JSON.stringify({
+        revision: loginAgreementRevision.value,
+        accepted_at: new Date().toISOString()
+      })
+    )
+  }
+  agreementAccepted.value = true
+  showAgreementModal.value = false
+}
+
+function rejectLoginAgreement(): void {
+  localStorage.removeItem(LOGIN_AGREEMENT_STORAGE_KEY)
+  agreementAccepted.value = false
+  showAgreementModal.value = false
+  appStore.showWarning('未同意最新条款前，无法输入账号密码或使用快捷登录。')
+}
 
 // ==================== Turnstile Handlers ====================
 
@@ -306,6 +414,14 @@ function validateForm(): boolean {
   errors.turnstile = ''
 
   let isValid = true
+
+  if (agreementGateActive.value) {
+    appStore.showWarning('请先阅读并同意最新条款后再登录。')
+    if (loginAgreementMode.value !== 'checkbox') {
+      showAgreementModal.value = true
+    }
+    return false
+  }
 
   // Email validation
   if (!formData.email.trim()) {

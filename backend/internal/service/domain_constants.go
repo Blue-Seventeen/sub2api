@@ -112,7 +112,11 @@ const (
 	SettingKeyPasswordResetEnabled             = "password_reset_enabled"              // 是否启用忘记密码功能（需要先开启邮件验证）
 	SettingKeyFrontendURL                      = "frontend_url"                        // 前端基础URL，用于生成邮件中的重置密码链接
 	SettingKeyInvitationCodeEnabled            = "invitation_code_enabled"             // 是否启用邀请码注册
-	SettingKeyInvitationCodeMissingPromptHTML  = "invitation_code_missing_prompt_html" // 未填写邀请码时展示给用户的 HTML 提示
+	SettingKeyInvitationCodeMissingPromptHTML  = "invitation_code_missing_prompt_html" // HTML prompt shown when invitation code is missing
+	SettingKeyLoginAgreementEnabled            = "login_agreement_enabled"             // Whether login/register agreement consent is required
+	SettingKeyLoginAgreementMode               = "login_agreement_mode"                // Agreement display mode: modal / checkbox
+	SettingKeyLoginAgreementUpdatedAt          = "login_agreement_updated_at"          // Agreement update date for display
+	SettingKeyLoginAgreementDocuments          = "login_agreement_documents"           // Agreement document list as JSON with Markdown content
 
 	// 邮件服务设置
 	SettingKeySMTPHost     = "smtp_host"      // SMTP服务器地址
