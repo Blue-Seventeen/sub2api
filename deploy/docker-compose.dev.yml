@@ -59,7 +59,7 @@ services:
     container_name: sub2api-postgres-dev
     restart: unless-stopped
     volumes:
-      - ./postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-sub2api}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
@@ -80,7 +80,7 @@ services:
     container_name: sub2api-redis-dev
     restart: unless-stopped
     volumes:
-      - ./redis_data:/data
+      - redis_data:/data
     command: >
         sh -c '
           redis-server
@@ -103,3 +103,7 @@ services:
 networks:
   sub2api-network:
     driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
