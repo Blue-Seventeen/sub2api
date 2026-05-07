@@ -356,6 +356,8 @@ export const useAppStore = defineStore('app', () => {
         custom_menu_items: [],
         custom_endpoints: [],
         linuxdo_oauth_enabled: false,
+        github_oauth_enabled: false,
+        google_oauth_enabled: false,
         wechat_oauth_enabled: false,
         wechat_oauth_open_enabled: false,
         wechat_oauth_mp_enabled: false,
@@ -370,6 +372,8 @@ export const useAppStore = defineStore('app', () => {
         channel_monitor_enabled: true,
         channel_monitor_default_interval_seconds: 60,
         available_channels_enabled: false,
+        risk_control_enabled: false,
+        markdown_pages_enabled: false,
       }
     }
 

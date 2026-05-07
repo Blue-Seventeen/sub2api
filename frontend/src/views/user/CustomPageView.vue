@@ -27,6 +27,33 @@
           </div>
         </div>
 
+        <div v-else-if="isMarkdownPage" class="custom-markdown-shell">
+          <div v-if="markdownLoading" class="flex h-full items-center justify-center py-12">
+            <div
+              class="h-8 w-8 animate-spin rounded-full border-2 border-primary-500 border-t-transparent"
+            ></div>
+          </div>
+          <div
+            v-else-if="markdownError"
+            class="flex h-full items-center justify-center p-10 text-center"
+          >
+            <div class="max-w-md">
+              <div
+                class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-gray-100 dark:bg-dark-700"
+              >
+                <Icon name="link" size="lg" class="text-gray-400" />
+              </div>
+              <h3 class="text-lg font-semibold text-gray-900 dark:text-white">
+                {{ t('customPage.notConfiguredTitle') }}
+              </h3>
+              <p class="mt-2 text-sm text-gray-500 dark:text-dark-400">
+                {{ markdownError }}
+              </p>
+            </div>
+          </div>
+          <article v-else class="custom-markdown-body" v-html="markdownHtml"></article>
+        </div>
+
         <div v-else-if="!isValidUrl" class="flex h-full items-center justify-center p-10 text-center">
           <div class="max-w-md">
             <div
@@ -104,6 +131,9 @@ import { useAdminSettingsStore } from '@/stores/adminSettings'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { buildEmbeddedUrl, detectTheme } from '@/utils/embedded-url'
+import { getMarkdownPage } from '@/api/pages'
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -115,7 +145,11 @@ const loading = ref(false)
 const pageTheme = ref<'light' | 'dark'>('light')
 const openLinkRef = ref<HTMLAnchorElement | null>(null)
 const lastAutoOpenedId = ref<string | null>(null)
+const markdownLoading = ref(false)
+const markdownHtml = ref('')
+const markdownError = ref('')
 let themeObserver: MutationObserver | null = null
+let markdownLoadSeq = 0
 
 const menuItemId = computed(() => route.params.id as string)
 
@@ -132,8 +166,22 @@ const menuItem = computed(() => {
   return null
 })
 
+const markdownSlug = computed(() => {
+  const rawUrl = String(menuItem.value?.url || '').trim()
+  if (!rawUrl.toLowerCase().startsWith('md:')) return ''
+  return rawUrl.slice(3).trim()
+})
+
+const markdownPagesEnabled = computed(
+  () => appStore.cachedPublicSettings?.markdown_pages_enabled === true
+)
+
+const isMarkdownPage = computed(
+  () => markdownPagesEnabled.value && markdownSlug.value.length > 0
+)
+
 const embeddedUrl = computed(() => {
-  if (!menuItem.value) return ''
+  if (!menuItem.value || isMarkdownPage.value) return ''
   return buildEmbeddedUrl(
     menuItem.value.url,
     authStore.user?.id,
@@ -171,6 +219,48 @@ watch(
   },
   { immediate: true }
 )
+
+watch(
+  () => ({
+    slug: markdownSlug.value,
+    enabled: markdownPagesEnabled.value,
+  }),
+  () => {
+    void loadMarkdownPage()
+  },
+  { immediate: true }
+)
+
+async function loadMarkdownPage() {
+  const seq = ++markdownLoadSeq
+  if (!isMarkdownPage.value) {
+    markdownLoading.value = false
+    markdownHtml.value = ''
+    markdownError.value = ''
+    return
+  }
+
+  markdownLoading.value = true
+  markdownError.value = ''
+  try {
+    const slug = markdownSlug.value
+    const content = await getMarkdownPage(slug)
+    if (seq !== markdownLoadSeq || slug !== markdownSlug.value) return
+    const rendered = await marked.parse(content)
+    markdownHtml.value = DOMPurify.sanitize(rendered)
+  } catch (error: unknown) {
+    if (seq !== markdownLoadSeq) return
+    markdownHtml.value = ''
+    markdownError.value =
+      error instanceof Error && error.message
+        ? error.message
+        : t('customPage.notConfiguredDesc')
+  } finally {
+    if (seq === markdownLoadSeq) {
+      markdownLoading.value = false
+    }
+  }
+}
 
 onMounted(async () => {
   pageTheme.value = detectTheme()
@@ -218,6 +308,71 @@ onUnmounted(() => {
 .custom-open-fab {
   @apply absolute right-3 top-3 z-10;
   @apply shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/80 dark:supports-[backdrop-filter]:bg-dark-800/80;
+}
+
+.custom-markdown-shell {
+  @apply h-full overflow-auto rounded-2xl bg-white p-6 dark:bg-dark-900;
+}
+
+.custom-markdown-body {
+  @apply mx-auto max-w-4xl text-gray-800 dark:text-gray-100;
+}
+
+.custom-markdown-body :deep(h1) {
+  @apply mb-6 text-3xl font-bold text-gray-950 dark:text-white;
+}
+
+.custom-markdown-body :deep(h2) {
+  @apply mb-4 mt-8 text-2xl font-semibold text-gray-950 dark:text-white;
+}
+
+.custom-markdown-body :deep(h3) {
+  @apply mb-3 mt-6 text-xl font-semibold text-gray-950 dark:text-white;
+}
+
+.custom-markdown-body :deep(p) {
+  @apply my-4 leading-7;
+}
+
+.custom-markdown-body :deep(a) {
+  @apply text-primary-600 underline underline-offset-2 dark:text-primary-400;
+}
+
+.custom-markdown-body :deep(ul) {
+  @apply my-4 list-disc pl-6;
+}
+
+.custom-markdown-body :deep(ol) {
+  @apply my-4 list-decimal pl-6;
+}
+
+.custom-markdown-body :deep(blockquote) {
+  @apply my-4 border-l-4 border-gray-200 pl-4 text-gray-600 dark:border-dark-600 dark:text-gray-300;
+}
+
+.custom-markdown-body :deep(code) {
+  @apply rounded bg-gray-100 px-1.5 py-0.5 font-mono text-sm dark:bg-dark-700;
+}
+
+.custom-markdown-body :deep(pre) {
+  @apply my-4 overflow-auto rounded-xl bg-gray-950 p-4 text-gray-100;
+}
+
+.custom-markdown-body :deep(pre code) {
+  @apply bg-transparent p-0 text-gray-100;
+}
+
+.custom-markdown-body :deep(img) {
+  @apply my-5 max-w-full rounded-xl border border-gray-100 dark:border-dark-700;
+}
+
+.custom-markdown-body :deep(table) {
+  @apply my-5 w-full border-collapse text-left text-sm;
+}
+
+.custom-markdown-body :deep(th),
+.custom-markdown-body :deep(td) {
+  @apply border border-gray-200 px-3 py-2 dark:border-dark-700;
 }
 
 .custom-embed-frame {

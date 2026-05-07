@@ -19,6 +19,8 @@ var authProviderTypes = map[string]struct{}{
 	"linuxdo": {},
 	"oidc":    {},
 	"wechat":  {},
+	"github":  {},
+	"google":  {},
 }
 
 func validateAuthProviderType(value string) error {

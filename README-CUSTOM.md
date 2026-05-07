@@ -545,6 +545,40 @@ Protect files:
 - 继续跳过 upstream Affiliate / redeem rebate / markdown page、GitHub/Google email OAuth、risk-control content moderation、大范围 OpenAI image generation controls 和 OpenAI messages compatibility 重构等高影响改动；这些改动会触碰本 fork 已有 Promotion、认证、页面、网关策略或安全审计语义，后续如需吸收必须单独评估。
 - 保护文件：`backend/internal/service/openai_gateway_service.go`、`backend/internal/service/openai_ws_forwarder.go`、`backend/internal/service/ops_cleanup_service.go`、`backend/internal/service/ops_settings.go`、`backend/internal/service/codex_image_generation_bridge.go`、`frontend/src/components/common/Select.vue`、`frontend/src/components/common/GroupSelector.vue`。
 
+### 9.14 Upstream v0.1.124 high-impact features selected integration
+
+> This section supersedes the earlier v0.1.124 note that temporarily skipped these high-impact upstream features. They were later approved for guarded integration.
+
+- GitHub / Google email OAuth has been integrated as an additive login capability. It is default-off through `github_oauth_enabled=false` and `google_oauth_enabled=false`; login/register buttons are only shown when the corresponding provider is enabled and configured. OAuth secrets remain write-only in admin settings responses.
+- Risk-Control content moderation has been integrated as an additive gateway audit capability. It is default-off through `risk_control_enabled=false`, and the gateway hot path calls `IsRiskControlEnabled` before building moderation input or reading/logging request bodies for risk checks.
+- Markdown Pages has been integrated as an additive custom-menu renderer. It is default-off through `markdown_pages_enabled=false`; only custom menu URLs in `md:<slug>` form fetch `data/pages/<slug>.md`, and the frontend renders markdown only after DOMPurify sanitization. Existing external URL, iframe, and new-tab custom menu behavior is unchanged.
+- Affiliate / redeem rebate remains excluded. The fork's existing Promotion system is still the only referral/rebate system and must not be replaced by upstream Affiliate logic during future syncs.
+- These features are protected as default-off extensions: enabling them must be an explicit admin action, and disabled state must not change existing login, gateway, billing, usage, Promotion, New-API routing, payment, or custom menu behavior.
+
+Protect files:
+- `backend/internal/handler/auth_email_oauth.go`
+- `backend/internal/handler/content_moderation_helper.go`
+- `backend/internal/handler/page_handler.go`
+- `backend/internal/service/auth_email_oauth_auto.go`
+- `backend/internal/service/auth_oauth_email_flow.go`
+- `backend/internal/service/content_moderation.go`
+- `backend/internal/service/content_moderation_input.go`
+- `backend/internal/service/setting_service.go`
+- `backend/internal/server/routes/auth.go`
+- `backend/internal/server/routes/admin.go`
+- `backend/internal/server/router.go`
+- `frontend/src/components/auth/EmailOAuthButtons.vue`
+- `frontend/src/views/admin/RiskControlView.vue`
+- `frontend/src/views/admin/SettingsView.vue`
+- `frontend/src/views/auth/OAuthCallbackView.vue`
+- `frontend/src/views/user/CustomPageView.vue`
+- `frontend/src/api/pages.ts`
+- `frontend/src/api/admin/riskControl.ts`
+
+Validation baseline:
+- `go test ./internal/service ./internal/handler ./internal/server ./internal/repository ./cmd/server -count=1`
+- `pnpm run build`
+
 ## 10. localtest 环境说明
 
 - `sub2api-custom-localtest` 是测试环境，可覆盖、重建容器、清理数据。

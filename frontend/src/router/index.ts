@@ -77,6 +77,16 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/auth/oauth/callback',
+    name: 'EmailOAuthCallback',
+    component: () => import('@/views/auth/OAuthCallbackView.vue'),
+    meta: {
+      requiresAuth: false,
+      title: 'OAuth Callback',
+      titleKey: 'auth.oauthCallbackPageTitle'
+    }
+  },
+  {
     path: '/auth/linuxdo/callback',
     name: 'LinuxDoOAuthCallback',
     component: () => import('@/views/auth/LinuxDoCallbackView.vue'),
@@ -358,6 +368,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/risk-control',
+    name: 'AdminRiskControl',
+    component: () => import('@/views/admin/RiskControlView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Risk Control',
+      titleKey: 'admin.riskControl.title',
+      descriptionKey: 'admin.riskControl.description'
+    }
+  },
+  {
     path: '/admin/users',
     name: 'AdminUsers',
     component: () => import('@/views/admin/UsersView.vue'),
@@ -605,6 +627,7 @@ let routePrefetch: ReturnType<typeof useRoutePrefetch> | null = null
 const BACKEND_MODE_ALLOWED_PATHS = ['/login', '/key-usage', '/setup', '/payment/result']
 const BACKEND_MODE_CALLBACK_PATHS = [
   '/auth/callback',
+  '/auth/oauth/callback',
   '/auth/linuxdo/callback',
   '/auth/oidc/callback',
   '/auth/wechat/callback',

@@ -90,6 +90,19 @@ type SystemSettings struct {
 	OIDCConnectUserInfoIDPath         string
 	OIDCConnectUserInfoUsernamePath   string
 
+	GitHubOAuthEnabled                bool
+	GitHubOAuthClientID               string
+	GitHubOAuthClientSecret           string
+	GitHubOAuthClientSecretConfigured bool
+	GitHubOAuthRedirectURL            string
+	GitHubOAuthFrontendRedirectURL    string
+	GoogleOAuthEnabled                bool
+	GoogleOAuthClientID               string
+	GoogleOAuthClientSecret           string
+	GoogleOAuthClientSecretConfigured bool
+	GoogleOAuthRedirectURL            string
+	GoogleOAuthFrontendRedirectURL    string
+
 	SiteName                       string
 	SiteLogo                       string
 	SiteSubtitle                   string
@@ -135,6 +148,9 @@ type SystemSettings struct {
 
 	// Available Channels feature (user-facing aggregate view)
 	AvailableChannelsEnabled bool `json:"available_channels_enabled"`
+
+	RiskControlEnabled   bool
+	MarkdownPagesEnabled bool
 
 	// Claude Code version check
 	MinClaudeCodeVersion string
@@ -217,6 +233,10 @@ type PublicSettings struct {
 	PaymentEnabled           bool
 	OIDCOAuthEnabled         bool
 	OIDCOAuthProviderName    string
+	GitHubOAuthEnabled       bool
+	GoogleOAuthEnabled       bool
+	RiskControlEnabled       bool
+	MarkdownPagesEnabled     bool
 	Version                  string
 
 	BalanceLowNotifyEnabled     bool

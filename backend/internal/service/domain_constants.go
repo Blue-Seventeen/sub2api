@@ -178,13 +178,23 @@ const (
 	SettingKeyOIDCConnectUserInfoEmailPath    = "oidc_connect_userinfo_email_path"
 	SettingKeyOIDCConnectUserInfoIDPath       = "oidc_connect_userinfo_id_path"
 	SettingKeyOIDCConnectUserInfoUsernamePath = "oidc_connect_userinfo_username_path"
+	SettingKeyGitHubOAuthEnabled              = "github_oauth_enabled"
+	SettingKeyGitHubOAuthClientID             = "github_oauth_client_id"
+	SettingKeyGitHubOAuthClientSecret         = "github_oauth_client_secret"
+	SettingKeyGitHubOAuthRedirectURL          = "github_oauth_redirect_url"
+	SettingKeyGitHubOAuthFrontendRedirectURL  = "github_oauth_frontend_redirect_url"
+	SettingKeyGoogleOAuthEnabled              = "google_oauth_enabled"
+	SettingKeyGoogleOAuthClientID             = "google_oauth_client_id"
+	SettingKeyGoogleOAuthClientSecret         = "google_oauth_client_secret"
+	SettingKeyGoogleOAuthRedirectURL          = "google_oauth_redirect_url"
+	SettingKeyGoogleOAuthFrontendRedirectURL  = "google_oauth_frontend_redirect_url"
 
 	// OEM设置
 	SettingKeySiteName                    = "site_name"                     // 网站名称
 	SettingKeySiteLogo                    = "site_logo"                     // 网站Logo (base64)
 	SettingKeySiteSubtitle                = "site_subtitle"                 // 网站副标题
 	SettingKeyAPIBaseURL                  = "api_base_url"                  // API端点地址（用于客户端配置和导入）
-	SettingKeyDisplayCurrencySymbol      = "display_currency_symbol"       // 前端金额展示货币符号
+	SettingKeyDisplayCurrencySymbol       = "display_currency_symbol"       // 前端金额展示货币符号
 	SettingKeyContactInfo                 = "contact_info"                  // 客服联系方式
 	SettingKeyDocURL                      = "doc_url"                       // 文档链接
 	SettingKeyHomeContent                 = "home_content"                  // 首页内容（支持 Markdown/HTML，或 URL 作为 iframe src）
@@ -223,6 +233,16 @@ const (
 	SettingKeyAuthSourceDefaultWeChatSubscriptions     = "auth_source_default_wechat_subscriptions"
 	SettingKeyAuthSourceDefaultWeChatGrantOnSignup     = "auth_source_default_wechat_grant_on_signup"
 	SettingKeyAuthSourceDefaultWeChatGrantOnFirstBind  = "auth_source_default_wechat_grant_on_first_bind"
+	SettingKeyAuthSourceDefaultGitHubBalance           = "auth_source_default_github_balance"
+	SettingKeyAuthSourceDefaultGitHubConcurrency       = "auth_source_default_github_concurrency"
+	SettingKeyAuthSourceDefaultGitHubSubscriptions     = "auth_source_default_github_subscriptions"
+	SettingKeyAuthSourceDefaultGitHubGrantOnSignup     = "auth_source_default_github_grant_on_signup"
+	SettingKeyAuthSourceDefaultGitHubGrantOnFirstBind  = "auth_source_default_github_grant_on_first_bind"
+	SettingKeyAuthSourceDefaultGoogleBalance           = "auth_source_default_google_balance"
+	SettingKeyAuthSourceDefaultGoogleConcurrency       = "auth_source_default_google_concurrency"
+	SettingKeyAuthSourceDefaultGoogleSubscriptions     = "auth_source_default_google_subscriptions"
+	SettingKeyAuthSourceDefaultGoogleGrantOnSignup     = "auth_source_default_google_grant_on_signup"
+	SettingKeyAuthSourceDefaultGoogleGrantOnFirstBind  = "auth_source_default_google_grant_on_first_bind"
 	SettingKeyForceEmailOnThirdPartySignup             = "force_email_on_third_party_signup"
 
 	// 管理员 API Key
@@ -286,6 +306,11 @@ const (
 	// user-facing aggregate view. When false: user endpoint returns an empty list and the
 	// sidebar entry is hidden. Defaults to false (opt-in feature).
 	SettingKeyAvailableChannelsEnabled = "available_channels_enabled"
+
+	// Optional upstream features imported as default-off fork extensions.
+	SettingKeyMarkdownPagesEnabled    = "markdown_pages_enabled"
+	SettingKeyRiskControlEnabled      = "risk_control_enabled"
+	SettingKeyContentModerationConfig = "content_moderation_config"
 
 	// =========================
 	// Overload Cooldown (529)

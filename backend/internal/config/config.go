@@ -72,6 +72,8 @@ type Config struct {
 	LinuxDo                 LinuxDoConnectConfig          `mapstructure:"linuxdo_connect"`
 	WeChat                  WeChatConnectConfig           `mapstructure:"wechat_connect"`
 	OIDC                    OIDCConnectConfig             `mapstructure:"oidc_connect"`
+	GitHubOAuth             EmailOAuthProviderConfig      `mapstructure:"github_oauth"`
+	GoogleOAuth             EmailOAuthProviderConfig      `mapstructure:"google_oauth"`
 	Default                 DefaultConfig                 `mapstructure:"default"`
 	RateLimit               RateLimitConfig               `mapstructure:"rate_limit"`
 	Pricing                 PricingConfig                 `mapstructure:"pricing"`
@@ -238,6 +240,19 @@ type OIDCConnectConfig struct {
 	UserInfoEmailPath    string `mapstructure:"userinfo_email_path"`
 	UserInfoIDPath       string `mapstructure:"userinfo_id_path"`
 	UserInfoUsernamePath string `mapstructure:"userinfo_username_path"`
+}
+
+type EmailOAuthProviderConfig struct {
+	Enabled             bool   `mapstructure:"enabled"`
+	ClientID            string `mapstructure:"client_id"`
+	ClientSecret        string `mapstructure:"client_secret"`
+	AuthorizeURL        string `mapstructure:"authorize_url"`
+	TokenURL            string `mapstructure:"token_url"`
+	UserInfoURL         string `mapstructure:"userinfo_url"`
+	EmailsURL           string `mapstructure:"emails_url"`
+	Scopes              string `mapstructure:"scopes"`
+	RedirectURL         string `mapstructure:"redirect_url"`
+	FrontendRedirectURL string `mapstructure:"frontend_redirect_url"`
 }
 
 const (
@@ -457,6 +472,53 @@ func normalizeWeChatConnectConfig(cfg *WeChatConnectConfig) {
 	if cfg.FrontendRedirectURL == "" {
 		cfg.FrontendRedirectURL = defaultWeChatConnectFrontendRedirect
 	}
+}
+
+func normalizeEmailOAuthProviderConfig(cfg EmailOAuthProviderConfig) EmailOAuthProviderConfig {
+	cfg.ClientID = strings.TrimSpace(cfg.ClientID)
+	cfg.ClientSecret = strings.TrimSpace(cfg.ClientSecret)
+	cfg.AuthorizeURL = strings.TrimSpace(cfg.AuthorizeURL)
+	cfg.TokenURL = strings.TrimSpace(cfg.TokenURL)
+	cfg.UserInfoURL = strings.TrimSpace(cfg.UserInfoURL)
+	cfg.EmailsURL = strings.TrimSpace(cfg.EmailsURL)
+	cfg.Scopes = strings.TrimSpace(cfg.Scopes)
+	cfg.RedirectURL = strings.TrimSpace(cfg.RedirectURL)
+	cfg.FrontendRedirectURL = strings.TrimSpace(cfg.FrontendRedirectURL)
+	return cfg
+}
+
+func validateEmailOAuthProviderConfig(prefix string, cfg EmailOAuthProviderConfig) error {
+	if !cfg.Enabled {
+		return nil
+	}
+	if strings.TrimSpace(cfg.ClientID) == "" {
+		return fmt.Errorf("%s.client_id is required when enabled", prefix)
+	}
+	if strings.TrimSpace(cfg.ClientSecret) == "" {
+		return fmt.Errorf("%s.client_secret is required when enabled", prefix)
+	}
+	for name, rawURL := range map[string]string{
+		"authorize_url": cfg.AuthorizeURL,
+		"token_url":     cfg.TokenURL,
+		"userinfo_url":  cfg.UserInfoURL,
+		"redirect_url":  cfg.RedirectURL,
+	} {
+		if strings.TrimSpace(rawURL) == "" {
+			return fmt.Errorf("%s.%s is required when enabled", prefix, name)
+		}
+		if err := ValidateAbsoluteHTTPURL(rawURL); err != nil {
+			return fmt.Errorf("%s.%s invalid: %w", prefix, name, err)
+		}
+	}
+	if strings.TrimSpace(cfg.EmailsURL) != "" {
+		if err := ValidateAbsoluteHTTPURL(cfg.EmailsURL); err != nil {
+			return fmt.Errorf("%s.emails_url invalid: %w", prefix, err)
+		}
+	}
+	if err := ValidateFrontendRedirectURL(cfg.FrontendRedirectURL); err != nil {
+		return fmt.Errorf("%s.frontend_redirect_url invalid: %w", prefix, err)
+	}
+	return nil
 }
 
 // TokenRefreshConfig OAuth token自动刷新配置
@@ -1280,6 +1342,8 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	cfg.OIDC.UserInfoEmailPath = strings.TrimSpace(cfg.OIDC.UserInfoEmailPath)
 	cfg.OIDC.UserInfoIDPath = strings.TrimSpace(cfg.OIDC.UserInfoIDPath)
 	cfg.OIDC.UserInfoUsernamePath = strings.TrimSpace(cfg.OIDC.UserInfoUsernamePath)
+	cfg.GitHubOAuth = normalizeEmailOAuthProviderConfig(cfg.GitHubOAuth)
+	cfg.GoogleOAuth = normalizeEmailOAuthProviderConfig(cfg.GoogleOAuth)
 	cfg.OIDC.UsePKCEExplicit = hasExplicitConfigOrEnv("oidc_connect.use_pkce", "OIDC_CONNECT_USE_PKCE")
 	cfg.OIDC.ValidateIDTokenExplicit = hasExplicitConfigOrEnv("oidc_connect.validate_id_token", "OIDC_CONNECT_VALIDATE_ID_TOKEN")
 	cfg.Dashboard.KeyPrefix = strings.TrimSpace(cfg.Dashboard.KeyPrefix)
@@ -1501,6 +1565,28 @@ func setDefaults() {
 	viper.SetDefault("oidc_connect.userinfo_email_path", "")
 	viper.SetDefault("oidc_connect.userinfo_id_path", "")
 	viper.SetDefault("oidc_connect.userinfo_username_path", "")
+
+	viper.SetDefault("github_oauth.enabled", false)
+	viper.SetDefault("github_oauth.client_id", "")
+	viper.SetDefault("github_oauth.client_secret", "")
+	viper.SetDefault("github_oauth.authorize_url", "https://github.com/login/oauth/authorize")
+	viper.SetDefault("github_oauth.token_url", "https://github.com/login/oauth/access_token")
+	viper.SetDefault("github_oauth.userinfo_url", "https://api.github.com/user")
+	viper.SetDefault("github_oauth.emails_url", "https://api.github.com/user/emails")
+	viper.SetDefault("github_oauth.scopes", "read:user user:email")
+	viper.SetDefault("github_oauth.redirect_url", "")
+	viper.SetDefault("github_oauth.frontend_redirect_url", "/auth/oauth/callback")
+
+	viper.SetDefault("google_oauth.enabled", false)
+	viper.SetDefault("google_oauth.client_id", "")
+	viper.SetDefault("google_oauth.client_secret", "")
+	viper.SetDefault("google_oauth.authorize_url", "https://accounts.google.com/o/oauth2/v2/auth")
+	viper.SetDefault("google_oauth.token_url", "https://oauth2.googleapis.com/token")
+	viper.SetDefault("google_oauth.userinfo_url", "https://openidconnect.googleapis.com/v1/userinfo")
+	viper.SetDefault("google_oauth.emails_url", "")
+	viper.SetDefault("google_oauth.scopes", "openid email profile")
+	viper.SetDefault("google_oauth.redirect_url", "")
+	viper.SetDefault("google_oauth.frontend_redirect_url", "/auth/oauth/callback")
 
 	// Database
 	viper.SetDefault("database.host", "localhost")
@@ -2052,6 +2138,12 @@ func (c *Config) Validate() error {
 		warnIfInsecureURL("oidc_connect.jwks_url", c.OIDC.JWKSURL)
 		warnIfInsecureURL("oidc_connect.redirect_url", c.OIDC.RedirectURL)
 		warnIfInsecureURL("oidc_connect.frontend_redirect_url", c.OIDC.FrontendRedirectURL)
+	}
+	if err := validateEmailOAuthProviderConfig("github_oauth", c.GitHubOAuth); err != nil {
+		return err
+	}
+	if err := validateEmailOAuthProviderConfig("google_oauth", c.GoogleOAuth); err != nil {
+		return err
 	}
 	if c.Billing.CircuitBreaker.Enabled {
 		if c.Billing.CircuitBreaker.FailureThreshold <= 0 {
