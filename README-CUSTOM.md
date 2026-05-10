@@ -607,6 +607,22 @@ Protect files:
 - `frontend/src/i18n/locales/en.ts`
 - `frontend/src/i18n/locales/zh.ts`
 
+### 9.16 Custom menu sidebar hit area
+
+- Custom menu entries in the sidebar must keep the same full-row clickable area as built-in menu entries.
+- External custom menu entries render as `<button class="sidebar-link">` when `open_in_new_tab=true`; `.sidebar-link` must include `w-full` so the hit area does not shrink to the menu label length.
+- This is a frontend-only layout rule. It must not change custom menu visibility, URL routing, new-tab behavior, iframe/markdown rendering, gateway forwarding, billing, usage logging, failover, or any upstream relay path.
+- Regression coverage lives in `frontend/src/components/layout/__tests__/AppSidebar.spec.ts` and should assert that `.sidebar-link` keeps full-width behavior.
+
+Protect files:
+- `frontend/src/style.css`
+- `frontend/src/components/layout/AppSidebar.vue`
+- `frontend/src/components/layout/__tests__/AppSidebar.spec.ts`
+
+Validation baseline:
+- `cd frontend && npm run test:run -- AppSidebar`
+- `cd frontend && npm run build`
+
 ## 10. localtest 环境说明
 
 - `sub2api-custom-localtest` 是测试环境，可覆盖、重建容器、清理数据。

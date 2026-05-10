@@ -31,6 +31,15 @@ describe('AppSidebar header styles', () => {
   })
 })
 
+describe('AppSidebar menu hit area', () => {
+  it('keeps every sidebar link clickable across the full menu row', () => {
+    const sidebarLinkBlockMatch = styleSource.match(/\.sidebar-link\s*\{[\s\S]*?\n {2}\}/)
+
+    expect(sidebarLinkBlockMatch).not.toBeNull()
+    expect(sidebarLinkBlockMatch?.[0]).toContain('w-full')
+  })
+})
+
 describe('AppSidebar external custom menu navigation', () => {
   it('does not fall back to same-tab navigation after opening a new tab', () => {
     expect(componentSource).toContain("window.open(targetUrl, '_blank', 'noopener,noreferrer')")
