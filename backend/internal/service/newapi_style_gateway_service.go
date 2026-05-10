@@ -230,16 +230,17 @@ func (s *NewAPIStyleGatewayService) Forward(
 		}
 	}
 
+	resultModel := opts.Model
+	if resultModel == "" {
+		resultModel = ExtractNewAPIStyleModel(body, opts.ContentType)
+	}
 	result := &ForwardResult{
 		RequestID:        firstNonEmptyText(resp.Header.Get("x-request-id"), resp.Header.Get("request-id")),
-		Model:            ExtractNewAPIStyleModel(body, opts.ContentType),
+		Model:            resultModel,
 		UpstreamModel:    opts.Model,
 		Stream:           opts.Stream,
 		Duration:         time.Since(start),
 		BillableUnitType: BillableUnitTypeToken,
-	}
-	if result.Model == "" {
-		result.Model = opts.Model
 	}
 	if result.UpstreamModel == result.Model {
 		result.UpstreamModel = ""

@@ -241,6 +241,41 @@ func TestNewAPIStyleAudioPerRequestChannelPricingStillUsesRequestCount(t *testin
 	}
 }
 
+func TestNewAPIStyleAudioTokenChannelPricingWithoutUsageStaysZero(t *testing.T) {
+	groupID := int64(2)
+	inputPrice := 0.000018
+	svc := newAudioPricingGatewayService(t, groupID, PlatformZhipu, ChannelModelPricing{
+		Platform:    PlatformZhipu,
+		Models:      []string{"glm-asr-2512", "glm-tts"},
+		BillingMode: BillingModeToken,
+		InputPrice:  &inputPrice,
+	})
+
+	for _, model := range []string{"glm-asr-2512", "glm-tts"} {
+		model := model
+		t.Run(model, func(t *testing.T) {
+			cost := svc.calculateRecordUsageCost(context.Background(), &ForwardResult{
+				Model:            model,
+				RequestCount:     1,
+				BillableUnitType: BillableUnitTypeRequest,
+			}, &APIKey{GroupID: &groupID}, model, 1, &recordUsageOpts{})
+
+			if cost == nil {
+				t.Fatalf("cost is nil")
+			}
+			if cost.BillingMode != string(BillingModeToken) {
+				t.Fatalf("billing mode = %q, want token", cost.BillingMode)
+			}
+			if cost.TotalCost != 0 {
+				t.Fatalf("total cost = %.12f, want 0", cost.TotalCost)
+			}
+			if cost.ActualCost != 0 {
+				t.Fatalf("actual cost = %.12f, want 0", cost.ActualCost)
+			}
+		})
+	}
+}
+
 func newAPIStyleAudioAccount(platform string, modelMapping map[string]any) *Account {
 	credentials := map[string]any{
 		"api_key":  "account-token",
