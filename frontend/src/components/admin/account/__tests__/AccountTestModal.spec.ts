@@ -59,7 +59,7 @@ function createStreamResponse(lines: string[]) {
   } as Response
 }
 
-function mountModal(show = false) {
+function mountModal(show = false, accountOverrides: Record<string, unknown> = {}) {
   return mount(AccountTestModal, {
     props: {
       show,
@@ -68,7 +68,8 @@ function mountModal(show = false) {
         name: 'Gemini Image Test',
         platform: 'gemini',
         type: 'apikey',
-        status: 'active'
+        status: 'active',
+        ...accountOverrides
       }
     } as any,
     global: {
@@ -88,6 +89,7 @@ function mountModal(show = false) {
 
 describe('AccountTestModal', () => {
   beforeEach(() => {
+    let objectURLCounter = 0
     getAvailableModels.mockResolvedValue([
       { id: 'gemini-2.0-flash', display_name: 'Gemini 2.0 Flash' },
       { id: 'gemini-2.5-flash-image', display_name: 'Gemini 2.5 Flash Image' },
@@ -103,6 +105,14 @@ describe('AccountTestModal', () => {
       },
       configurable: true
     })
+    Object.defineProperty(URL, 'createObjectURL', {
+      value: vi.fn(() => `blob:sub2api-audio-${++objectURLCounter}`),
+      configurable: true
+    })
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      value: vi.fn(),
+      configurable: true
+    })
     global.fetch = vi.fn().mockResolvedValue(
       createStreamResponse([
         'data: {"type":"test_start","model":"gemini-2.5-flash-image"}\n',
@@ -116,7 +126,7 @@ describe('AccountTestModal', () => {
     vi.restoreAllMocks()
   })
 
-  it('gemini 图片模型测试会携带提示词并渲染图片预览', async () => {
+  it('sends prompt and renders image preview for Gemini image model tests', async () => {
     const wrapper = mountModal()
     await wrapper.setProps({ show: true })
     await flushPromises()
@@ -137,7 +147,9 @@ describe('AccountTestModal', () => {
     const [, request] = (global.fetch as any).mock.calls[0]
     expect(JSON.parse(request.body)).toEqual({
       model_id: 'gemini-3.1-flash-image',
-      prompt: 'draw a tiny orange cat astronaut'
+      prompt: 'draw a tiny orange cat astronaut',
+      mode: 'default',
+      test_type: 'auto'
     })
 
     const preview = wrapper.find('img[alt="test-image-1"]')
@@ -145,8 +157,8 @@ describe('AccountTestModal', () => {
     expect(preview.attributes('src')).toBe('data:image/png;base64,QUJD')
   })
 
-  it('?? displayName ?????????', async () => {
-    getAvailableModels.mockResolvedValueOnce([
+  it('normalizes displayName model fields', async () => {
+    getAvailableModels.mockResolvedValue([
       { id: 'claude-sonnet-4-5', displayName: 'Claude Sonnet 4.5', type: 'model' }
     ])
 
@@ -166,8 +178,7 @@ describe('AccountTestModal', () => {
     expect((wrapper.vm as any).selectedModelId).toBe('claude-sonnet-4-5')
   })
 
-
-  it('??? show=true ????????????', async () => {
+  it('loads models when initially shown', async () => {
     const wrapper = mountModal(true)
     await flushPromises()
 
@@ -175,4 +186,187 @@ describe('AccountTestModal', () => {
     expect((wrapper.vm as any).selectedModelId).toBe('gemini-3.1-flash-image')
   })
 
+  it('posts explicit test_type without compact mode', async () => {
+    getAvailableModels.mockResolvedValue([
+      { id: 'gpt-5.4', displayName: 'GPT 5.4', type: 'model' }
+    ])
+
+    const wrapper = mountModal(true, {
+      name: 'OpenAI New API',
+      platform: 'openai',
+      type: 'apikey',
+      extra: { newapi_style_interface_enabled: true }
+    })
+    await flushPromises()
+
+    ;(wrapper.vm as any).selectedModelId = 'gpt-5.4'
+    ;(wrapper.vm as any).testMode = 'compact'
+    ;(wrapper.vm as any).testType = 'embedding'
+    await (wrapper.vm as any).startTest()
+    await flushPromises()
+    await flushPromises()
+
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+    const [, request] = (global.fetch as any).mock.calls[0]
+    expect(JSON.parse(request.body)).toEqual({
+      model_id: 'gpt-5.4',
+      prompt: '',
+      mode: 'default',
+      test_type: 'embedding'
+    })
+  })
+
+  it('shows every explicit test type for any account', async () => {
+    const wrapper = mountModal(true, {
+      name: 'GLM Audio',
+      platform: 'zhipu',
+      type: 'apikey'
+    })
+    await flushPromises()
+
+    expect((wrapper.vm as any).testTypeOptions.map((option: { value: string }) => option.value)).toEqual([
+      'auto',
+      'text',
+      'image',
+      'asr',
+      'tts',
+      'video',
+      'task',
+      'embedding',
+      'rerank'
+    ])
+  })
+
+  it('posts TTS voice and saves it after a successful test', async () => {
+    getAvailableModels.mockResolvedValue([
+      { id: 'GLM-TTS', displayName: 'GLM-TTS', type: 'model' }
+    ])
+    ;(global.fetch as any).mockResolvedValueOnce(
+      createStreamResponse([
+        'data: {"type":"audio","audio_url":"data:audio/wav;base64,UklGRg==","mime_type":"audio/wav","data":{"bytes":4}}\n',
+        'data: {"type":"test_complete","success":true}\n'
+      ])
+    )
+
+    const wrapper = mountModal(true, {
+      name: 'GLM Audio',
+      platform: 'zhipu',
+      type: 'apikey'
+    })
+    await flushPromises()
+
+    ;(wrapper.vm as any).selectedModelId = 'GLM-TTS'
+    ;(wrapper.vm as any).testType = 'tts'
+    ;(wrapper.vm as any).testPrompt = 'hello'
+    ;(wrapper.vm as any).ttsVoice = 'custom-voice'
+    await (wrapper.vm as any).startTest()
+    await flushPromises()
+    await flushPromises()
+
+    const [, request] = (global.fetch as any).mock.calls[0]
+    expect(JSON.parse(request.body)).toEqual({
+      model_id: 'GLM-TTS',
+      prompt: 'hello',
+      mode: 'default',
+      test_type: 'tts',
+      test_options: { voice: 'custom-voice' }
+    })
+    const audio = wrapper.find('audio')
+    expect(audio.exists()).toBe(true)
+    expect(audio.attributes('src')).toBe('blob:sub2api-audio-1')
+    expect(URL.createObjectURL).toHaveBeenCalledWith(expect.any(Blob))
+    expect(localStorage.setItem).toHaveBeenCalledWith(
+      `sub2api:account-test:tts-voices:${Math.abs('test-token'.split('').reduce((hash, char) => ((hash << 5) - hash + char.charCodeAt(0)) | 0, 0)).toString(36)}:zhipu`,
+      JSON.stringify(['custom-voice'])
+    )
+  })
+
+  it('posts selected model_id for ASR even when selected model is not an audio model', async () => {
+    getAvailableModels.mockResolvedValue([
+      { id: 'glm-4.5', displayName: 'GLM 4.5', type: 'model' }
+    ])
+
+    const wrapper = mountModal(true, {
+      name: 'GLM Audio',
+      platform: 'zhipu',
+      type: 'apikey'
+    })
+    await flushPromises()
+
+    ;(wrapper.vm as any).selectedModelId = 'glm-4.5'
+    ;(wrapper.vm as any).testType = 'asr'
+    await (wrapper.vm as any).startTest()
+    await flushPromises()
+    await flushPromises()
+
+    const [, request] = (global.fetch as any).mock.calls[0]
+    expect(JSON.parse(request.body).model_id).toBe('glm-4.5')
+  })
+
+  it('posts selected model_id for TTS even when selected model is not an audio model', async () => {
+    getAvailableModels.mockResolvedValue([
+      { id: 'glm-4.5', displayName: 'GLM 4.5', type: 'model' }
+    ])
+
+    const wrapper = mountModal(true, {
+      name: 'GLM Audio',
+      platform: 'zhipu',
+      type: 'apikey'
+    })
+    await flushPromises()
+
+    ;(wrapper.vm as any).selectedModelId = 'glm-4.5'
+    ;(wrapper.vm as any).testType = 'tts'
+    ;(wrapper.vm as any).testPrompt = 'hello'
+    await (wrapper.vm as any).startTest()
+    await flushPromises()
+    await flushPromises()
+
+    const [, request] = (global.fetch as any).mock.calls[0]
+    expect(JSON.parse(request.body)).toMatchObject({
+      model_id: 'glm-4.5',
+      test_type: 'tts'
+    })
+  })
+
+  it('does not start ASR probes when no model is selected', async () => {
+    getAvailableModels.mockResolvedValue([])
+
+    const wrapper = mountModal(true, {
+      name: 'GLM Audio',
+      platform: 'zhipu',
+      type: 'apikey'
+    })
+    await flushPromises()
+
+    expect((wrapper.vm as any).selectedModelId).toBe('')
+    ;(wrapper.vm as any).testType = 'asr'
+    expect((wrapper.vm as any).canStartTest).toBe(false)
+    await (wrapper.vm as any).startTest()
+    await flushPromises()
+    await flushPromises()
+
+    expect(global.fetch).not.toHaveBeenCalled()
+  })
+
+  it('does not start TTS probes when no model is selected', async () => {
+    getAvailableModels.mockResolvedValue([])
+
+    const wrapper = mountModal(true, {
+      name: 'GLM Audio',
+      platform: 'zhipu',
+      type: 'apikey'
+    })
+    await flushPromises()
+
+    expect((wrapper.vm as any).selectedModelId).toBe('')
+    ;(wrapper.vm as any).testType = 'tts'
+    ;(wrapper.vm as any).testPrompt = 'hello'
+    expect((wrapper.vm as any).canStartTest).toBe(false)
+    await (wrapper.vm as any).startTest()
+    await flushPromises()
+    await flushPromises()
+
+    expect(global.fetch).not.toHaveBeenCalled()
+  })
 })

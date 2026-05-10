@@ -55,7 +55,21 @@
         />
       </div>
 
-      <div v-if="isOpenAIAccount" class="space-y-1.5">
+      <div class="space-y-1.5">
+        <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+          {{ t('admin.accounts.testTypeLabel') }}
+        </label>
+        <Select
+          v-model="testType"
+          :options="testTypeOptions"
+          :disabled="status === 'connecting'"
+        />
+        <p v-if="isExpensiveProbeType" class="text-xs text-amber-600 dark:text-amber-300">
+          {{ t('admin.accounts.testTypeCostHint') }}
+        </p>
+      </div>
+
+      <div v-if="showOpenAITestMode" class="space-y-1.5">
         <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
           {{ t('admin.accounts.openai.testMode') }}
         </label>
@@ -66,15 +80,35 @@
         />
       </div>
 
-      <div v-if="supportsImageTest" class="space-y-1.5">
+      <div v-if="showsPromptInput" class="space-y-1.5">
         <TextArea
           v-model="testPrompt"
-          :label="t('admin.accounts.imagePromptLabel')"
-          :placeholder="t('admin.accounts.imagePromptPlaceholder')"
-          :hint="t('admin.accounts.imageTestHint')"
+          :label="promptInputLabel"
+          :placeholder="promptInputPlaceholder"
+          :hint="promptInputHint"
           :disabled="status === 'connecting'"
           rows="3"
         />
+      </div>
+
+      <div v-if="testType === 'tts'" class="space-y-1.5">
+        <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+          {{ t('admin.accounts.ttsVoiceLabel') }}
+        </label>
+        <input
+          v-model="ttsVoice"
+          :list="ttsVoiceListId"
+          class="input w-full"
+          maxlength="128"
+          :placeholder="t('admin.accounts.ttsVoicePlaceholder')"
+          :disabled="status === 'connecting'"
+        />
+        <datalist :id="ttsVoiceListId">
+          <option v-for="voice in savedTTSVoices" :key="voice" :value="voice" />
+        </datalist>
+        <p class="text-xs text-gray-500 dark:text-gray-400">
+          {{ t('admin.accounts.ttsVoiceHint') }}
+        </p>
       </div>
 
       <!-- Terminal Output -->
@@ -129,6 +163,25 @@
         >
           <Icon name="link" size="sm" :stroke-width="2" />
         </button>
+      </div>
+
+      <div v-if="generatedAudios.length > 0" class="space-y-2">
+        <div class="text-xs font-medium text-gray-600 dark:text-gray-300">
+          {{ t('admin.accounts.audioPreview') }}
+        </div>
+        <div class="space-y-2">
+          <div
+            v-for="(audio, index) in generatedAudios"
+            :key="`${audio.url}-${index}`"
+            class="rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-dark-500 dark:bg-dark-700"
+          >
+            <audio :src="audio.url" controls class="w-full" />
+            <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-300">
+              <span>{{ audio.mimeType || 'audio/*' }}</span>
+              <span v-if="audio.bytes">· {{ formatBytes(audio.bytes) }}</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div v-if="generatedImages.length > 0" class="space-y-2">
@@ -186,11 +239,7 @@
         </div>
         <span class="flex items-center gap-1">
           <Icon name="chat" size="sm" :stroke-width="2" />
-          {{
-            supportsImageTest
-              ? t('admin.accounts.imageTestMode')
-              : t('admin.accounts.testPrompt')
-          }}
+          {{ t('admin.accounts.testTypeSummary', { type: selectedTestTypeLabel }) }}
         </span>
       </div>
     </div>
@@ -205,10 +254,10 @@
         </button>
         <button
           @click="startTest"
-          :disabled="status === 'connecting' || !selectedModelId"
+          :disabled="!canStartTest"
           :class="[
             'flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all',
-            status === 'connecting' || !selectedModelId
+            !canStartTest
               ? 'cursor-not-allowed bg-primary-400 text-white'
               : status === 'success'
                 ? 'bg-green-500 text-white hover:bg-green-600'
@@ -242,7 +291,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, nextTick } from 'vue'
+import { computed, ref, watch, nextTick, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
@@ -265,6 +314,13 @@ interface PreviewImage {
   mimeType?: string
 }
 
+interface PreviewAudio {
+  url: string
+  mimeType?: string
+  bytes?: number
+  objectUrl?: string
+}
+
 interface RawModelOption {
   id: string
   type?: string
@@ -273,6 +329,8 @@ interface RawModelOption {
   created_at?: string
   createdAt?: string
 }
+
+type AccountTestType = 'auto' | 'text' | 'image' | 'asr' | 'tts' | 'video' | 'task' | 'embedding' | 'rerank'
 
 const props = defineProps<{
   show: boolean
@@ -291,15 +349,24 @@ const errorMessage = ref('')
 const availableModels = ref<ClaudeModel[]>([])
 const selectedModelId = ref('')
 const testPrompt = ref('')
+const ttsVoice = ref('')
+const savedTTSVoices = ref<string[]>([])
 const loadingModels = ref(false)
 let abortController: AbortController | null = null
 const generatedImages = ref<PreviewImage[]>([])
+const generatedAudios = ref<PreviewAudio[]>([])
+const audioObjectUrls = new Set<string>()
 const testMode = ref<'default' | 'compact'>('default')
+const testType = ref<AccountTestType>('auto')
 const isOpenAIAccount = computed(() => props.account?.platform === 'openai')
+const isTaskOnlyPlatform = computed(() =>
+  props.account?.platform === 'suno' || props.account?.platform === 'kling' || props.account?.platform === 'midjourney'
+)
 const openAITestModeOptions = computed(() => [
   { value: 'default', label: t('admin.accounts.openai.testModeDefault') },
   { value: 'compact', label: t('admin.accounts.openai.testModeCompact') }
 ])
+const showOpenAITestMode = computed(() => isOpenAIAccount.value && (testType.value === 'auto' || testType.value === 'text'))
 const previewImageUrl = ref('')
 const prioritizedGeminiModels = ['gemini-3.1-flash-image', 'gemini-2.5-flash-image', 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3-flash-preview', 'gemini-3-pro-preview', 'gemini-2.0-flash']
 const supportsGeminiImageTest = computed(() => {
@@ -316,6 +383,58 @@ const supportsOpenAIImageTest = computed(() => {
 })
 
 const supportsImageTest = computed(() => supportsGeminiImageTest.value || supportsOpenAIImageTest.value)
+const ttsVoiceListId = computed(() => `tts-voice-options-${props.account?.platform || 'default'}`)
+const testTypeLabelMap = computed<Record<AccountTestType, string>>(() => ({
+  auto: t('admin.accounts.testTypes.auto'),
+  text: t('admin.accounts.testTypes.text'),
+  image: t('admin.accounts.testTypes.image'),
+  asr: t('admin.accounts.testTypes.asr'),
+  tts: t('admin.accounts.testTypes.tts'),
+  video: t('admin.accounts.testTypes.video'),
+  task: t('admin.accounts.testTypes.task'),
+  embedding: t('admin.accounts.testTypes.embedding'),
+  rerank: t('admin.accounts.testTypes.rerank')
+}))
+const testTypeOptions = computed(() => {
+  return [
+    { value: 'auto', label: testTypeLabelMap.value.auto },
+    { value: 'text', label: testTypeLabelMap.value.text },
+    { value: 'image', label: testTypeLabelMap.value.image },
+    { value: 'asr', label: testTypeLabelMap.value.asr },
+    { value: 'tts', label: testTypeLabelMap.value.tts },
+    { value: 'video', label: testTypeLabelMap.value.video },
+    { value: 'task', label: testTypeLabelMap.value.task },
+    { value: 'embedding', label: testTypeLabelMap.value.embedding },
+    { value: 'rerank', label: testTypeLabelMap.value.rerank }
+  ] satisfies Array<{ value: AccountTestType; label: string }>
+})
+const selectedTestTypeLabel = computed(() => testTypeLabelMap.value[testType.value] || testTypeLabelMap.value.auto)
+const isExpensiveProbeType = computed(() => testType.value === 'video' || testType.value === 'task')
+const showsPromptInput = computed(() =>
+  testType.value === 'image' ||
+  testType.value === 'tts' ||
+  testType.value === 'video' ||
+  testType.value === 'task' ||
+  (testType.value === 'auto' && supportsImageTest.value)
+)
+const promptInputLabel = computed(() => {
+  if (testType.value === 'tts') return t('admin.accounts.ttsPromptLabel')
+  if (testType.value === 'video') return t('admin.accounts.videoPromptLabel')
+  if (testType.value === 'task') return t('admin.accounts.taskPromptLabel')
+  return t('admin.accounts.imagePromptLabel')
+})
+const promptInputPlaceholder = computed(() => {
+  if (testType.value === 'tts') return t('admin.accounts.ttsPromptPlaceholder')
+  if (testType.value === 'video') return t('admin.accounts.videoPromptPlaceholder')
+  if (testType.value === 'task') return t('admin.accounts.taskPromptPlaceholder')
+  return t('admin.accounts.imagePromptPlaceholder')
+})
+const promptInputHint = computed(() => {
+  if (testType.value === 'tts') return t('admin.accounts.ttsTestHint')
+  if (testType.value === 'video') return t('admin.accounts.videoTestHint')
+  if (testType.value === 'task') return t('admin.accounts.taskTestHint')
+  return t('admin.accounts.imageTestHint')
+})
 
 const sortTestModels = (models: ClaudeModel[]) => {
   const priorityMap = new Map(prioritizedGeminiModels.map((id, index) => [id, index]))
@@ -346,6 +465,8 @@ watch(
     if (newVal && props.account) {
       testPrompt.value = ''
       testMode.value = 'default'
+      testType.value = defaultTestTypeForAccount()
+      loadSavedTTSVoices()
       resetState()
       await loadAvailableModels()
     } else {
@@ -355,9 +476,79 @@ watch(
 )
 
 
-watch(selectedModelId, () => {
-  if (supportsImageTest.value && !testPrompt.value.trim()) {
-    testPrompt.value = t('admin.accounts.imagePromptDefault')
+const defaultTestTypeForAccount = (): AccountTestType => {
+  if (isTaskOnlyPlatform.value) {
+    return 'task'
+  }
+  return 'auto'
+}
+
+const defaultPromptForType = (type: AccountTestType) => {
+  if (type === 'tts') return t('admin.accounts.ttsPromptDefault')
+  if (type === 'video') return t('admin.accounts.videoPromptDefault')
+  if (type === 'task') return t('admin.accounts.taskPromptDefault')
+  return t('admin.accounts.imagePromptDefault')
+}
+
+const defaultTTSVoiceForPlatform = () => props.account?.platform === 'zhipu' ? 'tongtong' : 'alloy'
+
+const localUserScope = () => {
+  const token = localStorage.getItem('auth_token') || ''
+  let hash = 0
+  for (let i = 0; i < token.length; i += 1) {
+    hash = ((hash << 5) - hash + token.charCodeAt(i)) | 0
+  }
+  return Math.abs(hash).toString(36) || 'anonymous'
+}
+
+const ttsVoiceStorageKey = () => `sub2api:account-test:tts-voices:${localUserScope()}:${props.account?.platform || 'default'}`
+
+const loadSavedTTSVoices = () => {
+  try {
+    const raw = localStorage.getItem(ttsVoiceStorageKey())
+    const parsed = raw ? JSON.parse(raw) : []
+    savedTTSVoices.value = Array.isArray(parsed)
+      ? parsed.filter((voice): voice is string => typeof voice === 'string' && voice.trim() !== '').slice(0, 12)
+      : []
+  } catch {
+    savedTTSVoices.value = []
+  }
+  ttsVoice.value = savedTTSVoices.value[0] || defaultTTSVoiceForPlatform()
+}
+
+const saveTTSVoice = (voice: string) => {
+  const normalized = voice.trim().replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 128)
+  if (!normalized) return
+  const next = [normalized, ...savedTTSVoices.value.filter((item) => item !== normalized)].slice(0, 12)
+  savedTTSVoices.value = next
+  try {
+    localStorage.setItem(ttsVoiceStorageKey(), JSON.stringify(next))
+  } catch {
+    // Ignore storage errors; testing should still work without persistence.
+  }
+}
+
+const requestModelId = () => {
+  return selectedModelId.value
+}
+
+const canStartTest = computed(() => {
+  if (status.value === 'connecting') return false
+  return Boolean(selectedModelId.value)
+})
+
+watch([selectedModelId, testType], () => {
+  if (showsPromptInput.value && !testPrompt.value.trim()) {
+    testPrompt.value = defaultPromptForType(testType.value)
+  }
+  if (testType.value === 'tts' && !ttsVoice.value.trim()) {
+    ttsVoice.value = savedTTSVoices.value[0] || defaultTTSVoiceForPlatform()
+  }
+})
+
+watch(testTypeOptions, (options) => {
+  if (!options.some((option) => option.value === testType.value)) {
+    testType.value = defaultTestTypeForAccount()
   }
 })
 
@@ -392,11 +583,13 @@ const loadAvailableModels = async () => {
 }
 
 const resetState = () => {
+  revokeAudioObjectUrls()
   status.value = 'idle'
   outputLines.value = []
   streamingContent.value = ''
   errorMessage.value = ''
   generatedImages.value = []
+  generatedAudios.value = []
   previewImageUrl.value = ''
 }
 
@@ -412,12 +605,19 @@ const abortStream = () => {
   }
 }
 
+onBeforeUnmount(() => {
+  revokeAudioObjectUrls()
+})
+
 // Load available models when modal opens or account changes while visible
 watch(
   [() => props.show, () => props.account?.id],
   async ([visible, accountID]) => {
     if (visible && props.account && accountID) {
       testPrompt.value = ''
+      testType.value = defaultTestTypeForAccount()
+      testMode.value = 'default'
+      loadSavedTTSVoices()
       resetState()
       await loadAvailableModels()
     } else if (!visible) {
@@ -440,7 +640,7 @@ const scrollToBottom = async () => {
 }
 
 const startTest = async () => {
-  if (!props.account || !selectedModelId.value) return
+  if (!props.account || !canStartTest.value) return
 
   resetState()
   status.value = 'connecting'
@@ -464,9 +664,11 @@ const startTest = async () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model_id: selectedModelId.value,
-        prompt: supportsImageTest.value ? testPrompt.value.trim() : '',
-        mode: isOpenAIAccount.value ? testMode.value : 'default'
+        model_id: requestModelId(),
+        prompt: showsPromptInput.value ? testPrompt.value.trim() : '',
+        mode: showOpenAITestMode.value ? testMode.value : 'default',
+        test_type: testType.value,
+        test_options: testType.value === 'tts' ? { voice: ttsVoice.value.trim() } : undefined
       }),
       signal: abortController.signal
     })
@@ -524,7 +726,9 @@ const handleEvent = (event: {
   success?: boolean
   error?: string
   image_url?: string
+  audio_url?: string
   mime_type?: string
+  data?: unknown
 }) => {
   switch (event.type) {
     case 'test_start':
@@ -533,8 +737,20 @@ const handleEvent = (event: {
         addLine(t('admin.accounts.usingModel', { model: event.model }), 'text-cyan-400')
       }
       addLine(
-        supportsImageTest.value
+        (testType.value === 'auto' && supportsImageTest.value) || testType.value === 'image'
             ? t('admin.accounts.sendingImageRequest')
+            : testType.value === 'asr'
+              ? t('admin.accounts.sendingASRRequest')
+              : testType.value === 'tts'
+                ? t('admin.accounts.sendingTTSRequest')
+                : testType.value === 'video'
+                  ? t('admin.accounts.sendingVideoRequest')
+                  : testType.value === 'task'
+                    ? t('admin.accounts.sendingTaskRequest')
+                    : testType.value === 'embedding'
+                      ? t('admin.accounts.sendingEmbeddingRequest')
+                      : testType.value === 'rerank'
+                        ? t('admin.accounts.sendingRerankRequest')
             : t('admin.accounts.sendingTestMessage'),
         'text-gray-400'
       )
@@ -546,6 +762,9 @@ const handleEvent = (event: {
       if (event.text) {
         streamingContent.value += event.text
         scrollToBottom()
+      }
+      if (event.data) {
+        addLine(JSON.stringify(event.data), 'text-green-300')
       }
       break
 
@@ -559,6 +778,21 @@ const handleEvent = (event: {
       }
       break
 
+    case 'audio':
+      if (event.audio_url) {
+        const eventData = event.data && typeof event.data === 'object' ? event.data as Record<string, unknown> : {}
+        const bytes = typeof eventData.bytes === 'number' ? eventData.bytes : undefined
+        const preview = createAudioPreviewURL(event.audio_url, event.mime_type)
+        generatedAudios.value.push({
+          url: preview.url,
+          mimeType: event.mime_type,
+          bytes,
+          objectUrl: preview.objectUrl
+        })
+        addLine(t('admin.accounts.audioReceived', { count: generatedAudios.value.length }), 'text-purple-300')
+      }
+      break
+
     case 'test_complete':
       // Move streaming content to output lines
       if (streamingContent.value) {
@@ -567,6 +801,9 @@ const handleEvent = (event: {
       }
       if (event.success) {
         status.value = 'success'
+        if (testType.value === 'tts') {
+          saveTTSVoice(ttsVoice.value)
+        }
       } else {
         status.value = 'error'
         errorMessage.value = event.error || 'Test failed'
@@ -587,6 +824,50 @@ const handleEvent = (event: {
 const copyOutput = () => {
   const text = outputLines.value.map((l) => l.text).join('\n')
   copyToClipboard(text, t('admin.accounts.outputCopied'))
+}
+
+function createAudioPreviewURL(audioURL: string, mimeType?: string) {
+  if (!audioURL.startsWith('data:')) {
+    return { url: audioURL }
+  }
+  try {
+    const blob = dataURLToBlob(audioURL, mimeType)
+    const objectUrl = URL.createObjectURL(blob)
+    audioObjectUrls.add(objectUrl)
+    return { url: objectUrl, objectUrl }
+  } catch {
+    return { url: audioURL }
+  }
+}
+
+function dataURLToBlob(dataURL: string, fallbackMimeType?: string) {
+  const commaIndex = dataURL.indexOf(',')
+  if (commaIndex < 0) {
+    throw new Error('Invalid audio data URL')
+  }
+  const meta = dataURL.slice(0, commaIndex)
+  const payload = dataURL.slice(commaIndex + 1)
+  const mimeType = /^data:([^;,]+)/.exec(meta)?.[1] || fallbackMimeType || 'audio/mpeg'
+  const binary = meta.includes(';base64') ? atob(payload) : decodeURIComponent(payload)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return new Blob([bytes], { type: mimeType })
+}
+
+function revokeAudioObjectUrls() {
+  for (const url of audioObjectUrls) {
+    URL.revokeObjectURL(url)
+  }
+  audioObjectUrls.clear()
+}
+
+const formatBytes = (bytes: number) => {
+  if (!Number.isFinite(bytes) || bytes <= 0) return ''
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`
 }
 </script>
 

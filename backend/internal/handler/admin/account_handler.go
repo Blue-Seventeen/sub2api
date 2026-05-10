@@ -704,9 +704,11 @@ func (h *AccountHandler) Delete(c *gin.Context) {
 
 // TestAccountRequest represents the request body for testing an account
 type TestAccountRequest struct {
-	ModelID string `json:"model_id"`
-	Prompt  string `json:"prompt"`
-	Mode    string `json:"mode"`
+	ModelID     string                     `json:"model_id"`
+	Prompt      string                     `json:"prompt"`
+	Mode        string                     `json:"mode"`
+	TestType    string                     `json:"test_type"`
+	TestOptions service.AccountTestOptions `json:"test_options"`
 }
 
 type SyncFromCRSRequest struct {
@@ -737,15 +739,24 @@ func (h *AccountHandler) Test(c *gin.Context) {
 	_ = c.ShouldBindJSON(&req)
 
 	// Use AccountTestService to test the account with SSE streaming
-	if err := h.accountTestService.TestAccountConnection(c, accountID, req.ModelID, req.Prompt, req.Mode); err != nil {
+	if err := h.accountTestService.TestAccountConnectionWithOptions(c, accountID, req.ModelID, req.Prompt, req.Mode, req.TestType, req.TestOptions); err != nil {
 		// Error already sent via SSE, just log
 		return
 	}
 
-	if h.rateLimitService != nil {
+	if h.rateLimitService != nil && shouldRecoverAfterAccountTest(req.TestType) {
 		if _, err := h.rateLimitService.RecoverAccountAfterSuccessfulTest(c.Request.Context(), accountID); err != nil {
 			_ = c.Error(err)
 		}
+	}
+}
+
+func shouldRecoverAfterAccountTest(testType string) bool {
+	switch strings.ToLower(strings.TrimSpace(testType)) {
+	case "", service.AccountTestTypeAuto, service.AccountTestTypeText:
+		return true
+	default:
+		return false
 	}
 }
 

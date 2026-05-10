@@ -45,10 +45,15 @@ type TestEvent struct {
 	Status   string `json:"status,omitempty"`
 	Code     string `json:"code,omitempty"`
 	ImageURL string `json:"image_url,omitempty"`
+	AudioURL string `json:"audio_url,omitempty"`
 	MimeType string `json:"mime_type,omitempty"`
 	Data     any    `json:"data,omitempty"`
 	Success  bool   `json:"success,omitempty"`
 	Error    string `json:"error,omitempty"`
+}
+
+type AccountTestOptions struct {
+	Voice string `json:"voice,omitempty"`
 }
 
 const (
@@ -171,13 +176,33 @@ func createTestPayload(modelID string) (map[string]any, error) {
 // All account types use full Claude Code client characteristics, only auth header differs
 // modelID is optional - if empty, defaults to claude.DefaultTestModel
 // mode is optional - "compact" routes OpenAI accounts to the /responses/compact probe path
-func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int64, modelID string, prompt string, mode string) error {
+func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int64, modelID string, prompt string, mode string, testTypeArg ...string) error {
+	testType := AccountTestTypeAuto
+	if len(testTypeArg) > 0 {
+		testType = normalizeAccountTestType(testTypeArg[0])
+	}
+	return s.testAccountConnection(c, accountID, modelID, prompt, mode, testType, AccountTestOptions{})
+}
+
+func (s *AccountTestService) TestAccountConnectionWithOptions(c *gin.Context, accountID int64, modelID string, prompt string, mode string, testType string, options AccountTestOptions) error {
+	normalizedTestType := normalizeAccountTestType(testType)
+	if normalizedTestType != AccountTestTypeAuto && strings.TrimSpace(modelID) == "" {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("model_id is required for %s account tests", normalizedTestType))
+	}
+	return s.testAccountConnection(c, accountID, modelID, prompt, mode, normalizedTestType, options)
+}
+
+func (s *AccountTestService) testAccountConnection(c *gin.Context, accountID int64, modelID string, prompt string, mode string, testType string, options AccountTestOptions) error {
 	ctx := c.Request.Context()
 
 	// Get account
 	account, err := s.accountRepo.GetByID(ctx, accountID)
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Account not found")
+	}
+
+	if testType != AccountTestTypeAuto {
+		return s.testAccountConnectionByType(c, account, modelID, prompt, normalizeAccountTestMode(mode), testType, options)
 	}
 
 	// Route to platform-specific test method
@@ -491,10 +516,10 @@ func (s *AccountTestService) testBedrockAccountConnection(c *gin.Context, ctx co
 }
 
 // testOpenAIAccountConnection tests an OpenAI account's connection
-func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account *Account, modelID string, prompt string, mode string) error {
+func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account *Account, modelID string, prompt string, mode string, forceTextArg ...bool) error {
 	ctx := c.Request.Context()
-	_ = prompt
 	mode = normalizeAccountTestMode(mode)
+	forceText := len(forceTextArg) > 0 && forceTextArg[0]
 
 	// Default to openai.DefaultTestModel for OpenAI testing
 	testModelID := modelID
@@ -511,7 +536,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	}
 
 	// Route to image generation test if an image model is selected
-	if isOpenAIImageModel(testModelID) {
+	if !forceText && isOpenAIImageModel(testModelID) {
 		imagePrompt := strings.TrimSpace(prompt)
 		if imagePrompt == "" {
 			imagePrompt = defaultOpenAIImageTestPrompt
@@ -782,8 +807,9 @@ func (s *AccountTestService) reconcileOpenAI429State(ctx context.Context, accoun
 }
 
 // testGeminiAccountConnection tests a Gemini account's connection
-func (s *AccountTestService) testGeminiAccountConnection(c *gin.Context, account *Account, modelID string, prompt string) error {
+func (s *AccountTestService) testGeminiAccountConnection(c *gin.Context, account *Account, modelID string, prompt string, forceTextArg ...bool) error {
 	ctx := c.Request.Context()
+	forceText := len(forceTextArg) > 0 && forceTextArg[0]
 
 	// Determine the model to use
 	testModelID := modelID
@@ -809,23 +835,9 @@ func (s *AccountTestService) testGeminiAccountConnection(c *gin.Context, account
 	c.Writer.Flush()
 
 	// Create test payload (Gemini format)
-	payload := createGeminiTestPayload(testModelID, prompt)
+	payload := createGeminiTestPayload(testModelID, prompt, forceText)
 
-	// Build request based on account type
-	var req *http.Request
-	var err error
-
-	switch account.Type {
-	case AccountTypeAPIKey:
-		req, err = s.buildGeminiAPIKeyRequest(ctx, account, testModelID, payload)
-	case AccountTypeOAuth:
-		req, err = s.buildGeminiOAuthRequest(ctx, account, testModelID, payload)
-	case AccountTypeServiceAccount:
-		req, err = s.buildGeminiServiceAccountRequest(ctx, account, testModelID, payload)
-	default:
-		return s.sendErrorAndEnd(c, fmt.Sprintf("Unsupported account type: %s", account.Type))
-	}
-
+	req, err := s.buildGeminiTestRequest(ctx, account, testModelID, payload)
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to build request: %s", err.Error()))
 	}
@@ -849,6 +861,56 @@ func (s *AccountTestService) testGeminiAccountConnection(c *gin.Context, account
 
 	// Process SSE stream
 	return s.processGeminiStream(c, resp.Body)
+}
+
+func (s *AccountTestService) testGeminiImageAccountConnection(c *gin.Context, account *Account, modelID string, prompt string) error {
+	ctx := c.Request.Context()
+
+	testModelID := modelID
+
+	if account.Type == AccountTypeAPIKey || account.Type == AccountTypeServiceAccount {
+		mapping := account.GetModelMapping()
+		if len(mapping) > 0 {
+			if mappedModel, exists := mapping[testModelID]; exists {
+				testModelID = mappedModel
+			}
+		}
+	}
+
+	s.prepareAccountTestStream(c)
+	payload := createGeminiImageTestPayload(prompt)
+	req, err := s.buildGeminiTestRequest(ctx, account, testModelID, payload)
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to build request: %s", err.Error()))
+	}
+
+	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
+	proxyURL := resolveAccountProxyURL(ctx, account, nil)
+	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
+	}
+
+	return s.processGeminiStream(c, resp.Body)
+}
+
+func (s *AccountTestService) buildGeminiTestRequest(ctx context.Context, account *Account, modelID string, payload []byte) (*http.Request, error) {
+	switch account.Type {
+	case AccountTypeAPIKey:
+		return s.buildGeminiAPIKeyRequest(ctx, account, modelID, payload)
+	case AccountTypeOAuth:
+		return s.buildGeminiOAuthRequest(ctx, account, modelID, payload)
+	case AccountTypeServiceAccount:
+		return s.buildGeminiServiceAccountRequest(ctx, account, modelID, payload)
+	default:
+		return nil, fmt.Errorf("Unsupported account type: %s", account.Type)
+	}
 }
 
 // routeAntigravityTest 路由 Antigravity 账号的测试请求。
@@ -1027,31 +1089,10 @@ func (s *AccountTestService) buildCodeAssistRequest(ctx context.Context, accessT
 
 // createGeminiTestPayload creates a minimal test payload for Gemini API.
 // Image models use the image-generation path so the frontend can preview the returned image.
-func createGeminiTestPayload(modelID string, prompt string) []byte {
-	if isImageGenerationModel(modelID) {
-		imagePrompt := strings.TrimSpace(prompt)
-		if imagePrompt == "" {
-			imagePrompt = defaultGeminiImageTestPrompt
-		}
-
-		payload := map[string]any{
-			"contents": []map[string]any{
-				{
-					"role": "user",
-					"parts": []map[string]any{
-						{"text": imagePrompt},
-					},
-				},
-			},
-			"generationConfig": map[string]any{
-				"responseModalities": []string{"TEXT", "IMAGE"},
-				"imageConfig": map[string]any{
-					"aspectRatio": "1:1",
-				},
-			},
-		}
-		bytes, _ := json.Marshal(payload)
-		return bytes
+func createGeminiTestPayload(modelID string, prompt string, forceTextArg ...bool) []byte {
+	forceText := len(forceTextArg) > 0 && forceTextArg[0]
+	if !forceText && isImageGenerationModel(modelID) {
+		return createGeminiImageTestPayload(prompt)
 	}
 
 	textPrompt := strings.TrimSpace(prompt)
@@ -1071,6 +1112,32 @@ func createGeminiTestPayload(modelID string, prompt string) []byte {
 		"systemInstruction": map[string]any{
 			"parts": []map[string]any{
 				{"text": "You are a helpful AI assistant."},
+			},
+		},
+	}
+	bytes, _ := json.Marshal(payload)
+	return bytes
+}
+
+func createGeminiImageTestPayload(prompt string) []byte {
+	imagePrompt := strings.TrimSpace(prompt)
+	if imagePrompt == "" {
+		imagePrompt = defaultGeminiImageTestPrompt
+	}
+
+	payload := map[string]any{
+		"contents": []map[string]any{
+			{
+				"role": "user",
+				"parts": []map[string]any{
+					{"text": imagePrompt},
+				},
+			},
+		},
+		"generationConfig": map[string]any{
+			"responseModalities": []string{"TEXT", "IMAGE"},
+			"imageConfig": map[string]any{
+				"aspectRatio": "1:1",
 			},
 		},
 	}

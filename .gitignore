@@ -114,6 +114,9 @@ backend/.installed
 backup_schedule.local.json
 backend/backup_schedule.local.json
 deploy/backup_schedule.local.json
+display_currency_symbol.local.json
+backend/display_currency_symbol.local.json
+backend/internal/handler/admin/display_currency_symbol.local.json
 
 # ===================
 # 其他

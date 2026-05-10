@@ -579,6 +579,34 @@ Validation baseline:
 - `go test ./internal/service ./internal/handler ./internal/server ./internal/repository ./cmd/server -count=1`
 - `pnpm run build`
 
+### 9.15 管理员账号测试类型选择
+
+- `/admin/accounts/:id/test` 支持管理员显式选择测试类型：`auto`、`text`、`image`、`asr`、`tts`、`video`、`task`、`embedding`、`rerank`；前端不按平台/模型名隐藏显式类型，管理员选什么就按对应 probe 发起测试，由上游返回真实能力错误。
+- `auto` 或未传 `test_type` 时继续沿用旧自动判断逻辑：OpenAI `gpt-image-*` 和 Gemini 图片模型仍走图片测试，其余平台保持原文本/平台测试行为。
+- 显式类型只影响管理员主动触发的账号测试 SSE 链路，不进入用户网关、中转、usage、billing、ops 或 failover 主链路。
+- ASR/TTS 已接入 OpenAI 与 GLM/Zhipu API Key 测试路径；ASR 使用内置 `backend/internal/service/testdata/asr_probe_zh.mp3`，预期短中文内容为“你好”；GLM/Zhipu 使用 `/api/paas/v4/audio/transcriptions` 与 `/api/paas/v4/audio/speech`，TTS 音色由管理员在测试弹窗输入。
+- 所有显式测试类型都必须由管理员选择模型；前端不得提交空 `model_id`，后端也不得为显式测试配置默认模型。若管理员选择的模型不支持当前测试类型，应按该模型真实请求上游并返回上游能力错误。
+- TTS 音色测试成功后按登录 token 本机作用域与平台保存到浏览器 localStorage，下次同账号同平台测试可直接选择；该保存仅影响管理员测试弹窗，不写数据库、不影响真实中转请求。
+- Video 使用内置 `backend/internal/service/testdata/video_probe_zh.mp4` 发起 Chat Completions 视频理解请求，测试画面与声音理解，不再走视频生成任务；Embedding 走 OpenAI API Key 测试路径；Rerank 走 SiliconFlow 测试路径；Task 走 Suno/Kling/Midjourney 测试路径。平台不支持时应透传或返回明确 SSE error，不静默 fallback 到 `auto`。
+- 不支持的平台、模型或未知 `test_type` 必须通过 SSE error 返回 unsupported，不允许盲目请求上游，也不能静默 fallback 到 `auto`。
+- Task 测试最多轮询 60 秒；如果已拿到 task id 但仍在处理中，返回“提交成功但仍在处理中”的成功事件，避免长任务被误判为账号不可用。
+- 该能力可能产生上游测试成本，但不记录用户用量、不扣费、不改变管理员以外的任何链路表现。
+
+Protect files:
+- `backend/internal/handler/admin/account_handler.go`
+- `backend/internal/service/account_test_service.go`
+- `backend/internal/service/account_test_probe_types.go`
+- `backend/internal/service/account_test_newapi_probes.go`
+- `backend/internal/service/account_test_probe_types_test.go`
+- `backend/internal/service/testdata/asr_probe_zh.mp3`
+- `backend/internal/service/testdata/video_probe_zh.mp4`
+- `frontend/src/components/admin/account/AccountTestModal.vue`
+- `frontend/src/components/admin/account/__tests__/AccountTestModal.spec.ts`
+- `frontend/src/components/account/AccountTestModal.vue`
+- `frontend/src/components/account/__tests__/AccountTestModal.spec.ts`
+- `frontend/src/i18n/locales/en.ts`
+- `frontend/src/i18n/locales/zh.ts`
+
 ## 10. localtest 环境说明
 
 - `sub2api-custom-localtest` 是测试环境，可覆盖、重建容器、清理数据。

@@ -129,6 +129,7 @@ func TestSecurityHeaders(t *testing.T) {
 		assert.Contains(t, csp, "default-src 'self'")
 		assert.Contains(t, csp, "'nonce-")
 		assert.Contains(t, csp, CloudflareInsightsDomain)
+		assert.Contains(t, csp, "media-src 'self' data: blob:")
 	})
 
 	t.Run("api_route_skips_csp_nonce_generation", func(t *testing.T) {
@@ -192,6 +193,7 @@ func TestSecurityHeaders(t *testing.T) {
 		assert.NotEmpty(t, csp)
 		// Default policy should contain these elements
 		assert.Contains(t, csp, "default-src 'self'")
+		assert.Contains(t, csp, "media-src 'self' data: blob:")
 	})
 
 	t.Run("uses_default_policy_when_whitespace_only", func(t *testing.T) {
@@ -320,6 +322,7 @@ func TestEnhanceCSPPolicy(t *testing.T) {
 		assert.Contains(t, enhanced, "script-src")
 		assert.Contains(t, enhanced, NonceTemplate)
 		assert.Contains(t, enhanced, CloudflareInsightsDomain)
+		assert.Contains(t, enhanced, "media-src 'self' data: blob:")
 	})
 
 	t.Run("preserves_existing_nonce", func(t *testing.T) {
@@ -329,6 +332,15 @@ func TestEnhanceCSPPolicy(t *testing.T) {
 		// Should not add placeholder if nonce already exists
 		assert.NotContains(t, enhanced, NonceTemplate)
 		assert.Contains(t, enhanced, "'nonce-existing'")
+	})
+
+	t.Run("adds_missing_media_sources_to_existing_media_src", func(t *testing.T) {
+		policy := "default-src 'self'; media-src 'self' data:"
+		enhanced := enhanceCSPPolicy(policy)
+
+		assert.Contains(t, enhanced, "media-src 'self' data: blob:")
+		assert.Equal(t, 1, strings.Count(enhanced, "data:"))
+		assert.Equal(t, 1, strings.Count(enhanced, "blob:"))
 	})
 }
 
