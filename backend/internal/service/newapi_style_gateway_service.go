@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strings"
@@ -41,6 +42,13 @@ const (
 	BillableUnitTypeImage   = "image"
 	BillableUnitTypeRequest = "request"
 	BillableUnitTypeTask    = "task"
+)
+
+const (
+	zhipuAudioTranscriptionsPath = "/api/paas/v4/audio/transcriptions"
+	zhipuAudioSpeechPath         = "/api/paas/v4/audio/speech"
+
+	maxNewAPIStyleMultipartModelBytes = 64 << 10
 )
 
 var ErrNewAPIStyleUnsupportedCapability = errors.New("new-api style capability unsupported")
@@ -99,8 +107,10 @@ func (s *NewAPIStyleGatewayService) SupportsForGroup(account *Account, group *Gr
 		return account.Platform == PlatformAnthropic
 	case NewAPIStyleRouteResponses:
 		return account.Platform == PlatformOpenAI || account.Platform == PlatformXAI
-	case NewAPIStyleRouteImages, NewAPIStyleRouteAudio, NewAPIStyleRouteEmbeddings, NewAPIStyleRouteVideo:
+	case NewAPIStyleRouteImages, NewAPIStyleRouteEmbeddings, NewAPIStyleRouteVideo:
 		return account.Platform == PlatformOpenAI
+	case NewAPIStyleRouteAudio:
+		return account.Platform == PlatformOpenAI || account.Platform == PlatformZhipu
 	case NewAPIStyleRouteRerank:
 		return account.Platform == PlatformSiliconFlow
 	case NewAPIStyleRouteSuno:
@@ -140,7 +150,7 @@ func (s *NewAPIStyleGatewayService) Forward(
 		opts.QueryString = c.Request.URL.RawQuery
 	}
 	if opts.Model == "" && len(opts.RequestBody) > 0 {
-		opts.Model = strings.TrimSpace(gjson.GetBytes(opts.RequestBody, "model").String())
+		opts.Model = ExtractNewAPIStyleModel(opts.RequestBody, opts.ContentType)
 	}
 	if !opts.Stream && len(opts.RequestBody) > 0 {
 		opts.Stream = gjson.GetBytes(opts.RequestBody, "stream").Bool()
@@ -153,7 +163,12 @@ func (s *NewAPIStyleGatewayService) Forward(
 	body := opts.RequestBody
 	if opts.Model != "" {
 		if mapped := account.GetMappedModel(opts.Model); mapped != "" && mapped != opts.Model {
-			body = ReplaceModelInBody(body, mapped)
+			rewrittenBody, rewrittenContentType, err := replaceNewAPIStyleModelInBody(body, opts.ContentType, mapped)
+			if err != nil {
+				return nil, upstreamEndpoint, err
+			}
+			body = rewrittenBody
+			opts.ContentType = rewrittenContentType
 			opts.Model = mapped
 		}
 	}
@@ -217,7 +232,7 @@ func (s *NewAPIStyleGatewayService) Forward(
 
 	result := &ForwardResult{
 		RequestID:        firstNonEmptyText(resp.Header.Get("x-request-id"), resp.Header.Get("request-id")),
-		Model:            strings.TrimSpace(gjson.GetBytes(body, "model").String()),
+		Model:            ExtractNewAPIStyleModel(body, opts.ContentType),
 		UpstreamModel:    opts.Model,
 		Stream:           opts.Stream,
 		Duration:         time.Since(start),
@@ -325,6 +340,9 @@ func (s *NewAPIStyleGatewayService) buildTargetURL(account *Account, opts NewAPI
 
 	path := newAPIStyleRoutePath(account.Platform, opts)
 	if path == "" {
+		if opts.Route == NewAPIStyleRouteAudio {
+			return "", "", fmt.Errorf("%w: platform=%s route=%s path=%s", ErrNewAPIStyleUnsupportedCapability, account.Platform, opts.Route, opts.InboundPath)
+		}
 		path = "/v1/" + strings.TrimPrefix(strings.TrimSpace(opts.InboundPath), "/")
 	}
 	target := joinRelayCompatibleURL(baseURL, path)
@@ -376,7 +394,9 @@ func newAPIStyleRoutePath(platform string, opts NewAPIStyleForwardOptions) strin
 			return "/v1/images/edits"
 		}
 		return "/v1/images/generations"
-	case NewAPIStyleRouteAudio, NewAPIStyleRouteEmbeddings, NewAPIStyleRouteRerank,
+	case NewAPIStyleRouteAudio:
+		return newAPIStyleAudioRoutePath(platform, inbound)
+	case NewAPIStyleRouteEmbeddings, NewAPIStyleRouteRerank,
 		NewAPIStyleRouteVideo, NewAPIStyleRouteSuno, NewAPIStyleRouteKling, NewAPIStyleRouteMidjourney:
 		return inbound
 	case NewAPIStyleRouteTask:
@@ -384,6 +404,175 @@ func newAPIStyleRoutePath(platform string, opts NewAPIStyleForwardOptions) strin
 	default:
 		return ""
 	}
+}
+
+func ExtractNewAPIStyleModel(body []byte, contentType string) string {
+	if len(body) == 0 {
+		return ""
+	}
+	if isMultipartFormData(contentType) {
+		return extractNewAPIStyleMultipartModel(body, contentType)
+	}
+	return strings.TrimSpace(gjson.GetBytes(body, "model").String())
+}
+
+func extractNewAPIStyleMultipartModel(body []byte, contentType string) string {
+	_, params, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return ""
+	}
+	boundary := strings.TrimSpace(params["boundary"])
+	if boundary == "" {
+		return ""
+	}
+
+	reader := multipart.NewReader(bytes.NewReader(body), boundary)
+	for {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			return ""
+		}
+		if err != nil {
+			return ""
+		}
+
+		formName := strings.TrimSpace(part.FormName())
+		fileName := strings.TrimSpace(part.FileName())
+		if formName != "model" || fileName != "" {
+			_ = part.Close()
+			continue
+		}
+		value, err := io.ReadAll(io.LimitReader(part, maxNewAPIStyleMultipartModelBytes))
+		_ = part.Close()
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(value))
+	}
+}
+
+func replaceNewAPIStyleModelInBody(body []byte, contentType string, model string) ([]byte, string, error) {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return body, contentType, nil
+	}
+	if isMultipartFormData(contentType) {
+		return rewriteNewAPIStyleMultipartModel(body, contentType, model)
+	}
+	return ReplaceModelInBody(body, model), contentType, nil
+}
+
+func rewriteNewAPIStyleMultipartModel(body []byte, contentType string, model string) ([]byte, string, error) {
+	_, params, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return nil, "", fmt.Errorf("parse multipart content-type: %w", err)
+	}
+	boundary := strings.TrimSpace(params["boundary"])
+	if boundary == "" {
+		return nil, "", fmt.Errorf("multipart boundary is required")
+	}
+
+	reader := multipart.NewReader(bytes.NewReader(body), boundary)
+	var buffer bytes.Buffer
+	writer := multipart.NewWriter(&buffer)
+	modelWritten := false
+
+	for {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, "", fmt.Errorf("read multipart body: %w", err)
+		}
+
+		formName := strings.TrimSpace(part.FormName())
+		partHeader := cloneMultipartHeader(part.Header)
+		target, err := writer.CreatePart(partHeader)
+		if err != nil {
+			_ = part.Close()
+			return nil, "", fmt.Errorf("create multipart part: %w", err)
+		}
+
+		if formName == "model" && part.FileName() == "" {
+			if _, err := target.Write([]byte(model)); err != nil {
+				_ = part.Close()
+				return nil, "", fmt.Errorf("rewrite multipart model: %w", err)
+			}
+			modelWritten = true
+			_ = part.Close()
+			continue
+		}
+		if _, err := io.Copy(target, part); err != nil {
+			_ = part.Close()
+			return nil, "", fmt.Errorf("copy multipart part: %w", err)
+		}
+		_ = part.Close()
+	}
+
+	if !modelWritten {
+		if err := writer.WriteField("model", model); err != nil {
+			return nil, "", fmt.Errorf("append multipart model field: %w", err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return nil, "", fmt.Errorf("finalize multipart body: %w", err)
+	}
+	return buffer.Bytes(), writer.FormDataContentType(), nil
+}
+
+func isMultipartFormData(contentType string) bool {
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return strings.Contains(strings.ToLower(contentType), "multipart/form-data")
+	}
+	return strings.EqualFold(mediaType, "multipart/form-data")
+}
+
+func newAPIStyleAudioRoutePath(platform string, inbound string) string {
+	normalized := normalizeNewAPIStyleAudioInboundPath(inbound)
+	if normalized == "" {
+		return ""
+	}
+	switch strings.TrimSpace(platform) {
+	case PlatformZhipu:
+		switch normalized {
+		case "/v1/audio/transcriptions", "/audio/transcriptions", zhipuAudioTranscriptionsPath:
+			return zhipuAudioTranscriptionsPath
+		case "/v1/audio/speech", "/audio/speech", zhipuAudioSpeechPath:
+			return zhipuAudioSpeechPath
+		default:
+			return ""
+		}
+	case PlatformOpenAI:
+		if isZhipuOfficialAudioAliasPath(normalized) {
+			return ""
+		}
+		if strings.HasPrefix(normalized, "/audio/") {
+			return "/v1" + normalized
+		}
+		if strings.HasPrefix(normalized, "/v1/audio/") {
+			return normalized
+		}
+		return ""
+	default:
+		return ""
+	}
+}
+
+func normalizeNewAPIStyleAudioInboundPath(path string) string {
+	normalized := "/" + strings.TrimLeft(strings.TrimSpace(path), "/")
+	normalized = strings.ToLower(strings.TrimRight(normalized, "/"))
+	if normalized == "" || normalized == "/" {
+		return ""
+	}
+	return normalized
+}
+
+func isZhipuOfficialAudioAliasPath(path string) bool {
+	normalized := normalizeNewAPIStyleAudioInboundPath(path)
+	return normalized == zhipuAudioTranscriptionsPath || normalized == zhipuAudioSpeechPath ||
+		strings.HasPrefix(normalized, "/api/paas/v4/audio/")
 }
 
 func (s *NewAPIStyleGatewayService) patchHeaders(req *http.Request, account *Account, opts NewAPIStyleForwardOptions) {
@@ -396,11 +585,7 @@ func (s *NewAPIStyleGatewayService) patchHeaders(req *http.Request, account *Acc
 	if ua := strings.TrimSpace(opts.HeaderSource.Get("User-Agent")); ua != "" {
 		req.Header.Set("User-Agent", ua)
 	}
-	token := firstNonEmptyText(
-		account.GetCredential("api_key"),
-		account.GetCredential("token"),
-		account.GetCredential("access_token"),
-	)
+	token := newAPIStyleAuthToken(account)
 	if token != "" {
 		if account.Platform == PlatformAnthropic {
 			req.Header.Set("x-api-key", token)
@@ -412,6 +597,20 @@ func (s *NewAPIStyleGatewayService) patchHeaders(req *http.Request, account *Acc
 	if org := strings.TrimSpace(account.GetCredential("organization")); org != "" {
 		req.Header.Set("OpenAI-Organization", org)
 	}
+}
+
+func newAPIStyleAuthToken(account *Account) string {
+	if account == nil {
+		return ""
+	}
+	if account.Platform == PlatformZhipu {
+		return getCompatibleAuthToken(account, CompatibleAuthZhipuToken)
+	}
+	return firstNonEmptyText(
+		account.GetCredential("api_key"),
+		account.GetCredential("token"),
+		account.GetCredential("access_token"),
+	)
 }
 
 func (s *NewAPIStyleGatewayService) tlsProfile(account *Account) *tlsfingerprint.Profile {

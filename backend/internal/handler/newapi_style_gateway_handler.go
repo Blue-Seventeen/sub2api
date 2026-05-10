@@ -94,7 +94,8 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 		return
 	}
 
-	model := strings.TrimSpace(gjson.GetBytes(body, "model").String())
+	model := service.ExtractNewAPIStyleModel(body, c.GetHeader("Content-Type"))
+	channelMapping, _ := h.base.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, model)
 	stream := gjson.GetBytes(body, "stream").Bool()
 	setOpsRequestContext(c, model, stream, body)
 	setOpsEndpointContext(c, model, int16(service.RequestTypeFromLegacy(stream, false)))
@@ -339,6 +340,7 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 				FallbackChain:      compat.FallbackChain,
 				UpstreamTransport:  compat.UpstreamTransport,
 				APIKeyService:      h.base.apiKeyService,
+				ChannelUsageFields: channelMapping.ToUsageFields(model, result.UpstreamModel),
 			}); err != nil {
 				logger.L().With(
 					zap.String("component", "handler.newapi_style"),

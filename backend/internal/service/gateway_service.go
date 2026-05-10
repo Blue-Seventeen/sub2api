@@ -8465,6 +8465,11 @@ func (s *GatewayService) calculateRecordUsageCost(
 	opts *recordUsageOpts,
 ) *CostBreakdown {
 	if unitCount := resultBillableRequestCount(result); unitCount > 0 {
+		if resolved := s.resolveChannelPricing(ctx, billingModel, apiKey); resolved != nil &&
+			resolved.Mode == BillingModeToken &&
+			forwardResultHasTokenUsage(result) {
+			return s.calculateTokenCost(ctx, result, apiKey, billingModel, multiplier, opts)
+		}
 		return s.calculateRequestUnitCost(ctx, result, apiKey, billingModel, multiplier, unitCount)
 	}
 
@@ -8475,6 +8480,19 @@ func (s *GatewayService) calculateRecordUsageCost(
 
 	// Token 计费
 	return s.calculateTokenCost(ctx, result, apiKey, billingModel, multiplier, opts)
+}
+
+func forwardResultHasTokenUsage(result *ForwardResult) bool {
+	if result == nil {
+		return false
+	}
+	return result.Usage.InputTokens > 0 ||
+		result.Usage.OutputTokens > 0 ||
+		result.Usage.CacheCreationInputTokens > 0 ||
+		result.Usage.CacheReadInputTokens > 0 ||
+		result.Usage.CacheCreation5mTokens > 0 ||
+		result.Usage.CacheCreation1hTokens > 0 ||
+		result.Usage.ImageOutputTokens > 0
 }
 
 func resultBillableRequestCount(result *ForwardResult) int {
@@ -8502,7 +8520,10 @@ func (s *GatewayService) calculateRequestUnitCost(
 		return &CostBreakdown{ActualCost: 0, BillingMode: string(BillingModePerRequest)}
 	}
 	if resolved := s.resolveChannelPricing(ctx, billingModel, apiKey); resolved != nil {
-		gid := apiKey.Group.ID
+		gid, ok := apiKeyBillingGroupID(apiKey)
+		if !ok {
+			return &CostBreakdown{ActualCost: 0, BillingMode: string(BillingModePerRequest)}
+		}
 		cost, err := s.billingService.CalculateCostUnified(CostInput{
 			Ctx:            ctx,
 			Model:          billingModel,
@@ -8533,10 +8554,13 @@ func (s *GatewayService) calculateRequestUnitCost(
 // resolveChannelPricing 检查指定模型是否存在渠道级别定价。
 // 返回非 nil 的 ResolvedPricing 表示有渠道定价，nil 表示走默认定价路径。
 func (s *GatewayService) resolveChannelPricing(ctx context.Context, billingModel string, apiKey *APIKey) *ResolvedPricing {
-	if s.resolver == nil || apiKey.Group == nil {
+	if s.resolver == nil {
 		return nil
 	}
-	gid := apiKey.Group.ID
+	gid, ok := apiKeyBillingGroupID(apiKey)
+	if !ok {
+		return nil
+	}
 	resolved := s.resolver.Resolve(ctx, PricingInput{Model: billingModel, GroupID: &gid})
 	if resolved.Source == PricingSourceChannel {
 		return resolved
@@ -8558,7 +8582,10 @@ func (s *GatewayService) calculateImageCost(
 			OutputTokens:      result.Usage.OutputTokens,
 			ImageOutputTokens: result.Usage.ImageOutputTokens,
 		}
-		gid := apiKey.Group.ID
+		gid, ok := apiKeyBillingGroupID(apiKey)
+		if !ok {
+			return &CostBreakdown{ActualCost: 0}
+		}
 		cost, err := s.billingService.CalculateCostUnified(CostInput{
 			Ctx:            ctx,
 			Model:          billingModel,
@@ -8611,7 +8638,10 @@ func (s *GatewayService) calculateTokenCost(
 
 	// 优先尝试渠道定价 → CalculateCostUnified
 	if resolved := s.resolveChannelPricing(ctx, billingModel, apiKey); resolved != nil {
-		gid := apiKey.Group.ID
+		gid, ok := apiKeyBillingGroupID(apiKey)
+		if !ok {
+			return &CostBreakdown{ActualCost: 0}
+		}
 		cost, err = s.billingService.CalculateCostUnified(CostInput{
 			Ctx:            ctx,
 			Model:          billingModel,
@@ -8636,6 +8666,19 @@ func (s *GatewayService) calculateTokenCost(
 		return &CostBreakdown{ActualCost: 0}
 	}
 	return cost
+}
+
+func apiKeyBillingGroupID(apiKey *APIKey) (int64, bool) {
+	if apiKey == nil {
+		return 0, false
+	}
+	if apiKey.GroupID != nil {
+		return *apiKey.GroupID, true
+	}
+	if apiKey.Group != nil {
+		return apiKey.Group.ID, true
+	}
+	return 0, false
 }
 
 // buildRecordUsageLog 构建使用日志并设置计费模式。

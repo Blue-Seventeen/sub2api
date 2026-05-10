@@ -127,6 +127,7 @@ func TestNewAPIStyleGatewaySupportsExplicitCapabilityMatrix(t *testing.T) {
 	enabledExtra := map[string]any{AccountExtraNewAPIStyleInterfaceEnabled: true}
 	openAIGroupEnabled := &Group{ID: 1, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true, NewAPIStyleInterfaceEnabled: true}
 	deepSeekGroupEnabled := &Group{ID: 2, Platform: PlatformDeepSeek, Status: StatusActive, Hydrated: true, NewAPIStyleInterfaceEnabled: true}
+	zhipuGroupEnabled := &Group{ID: 3, Platform: PlatformZhipu, Status: StatusActive, Hydrated: true, NewAPIStyleInterfaceEnabled: true}
 
 	tests := []struct {
 		name     string
@@ -164,6 +165,43 @@ func TestNewAPIStyleGatewaySupportsExplicitCapabilityMatrix(t *testing.T) {
 			account:  &Account{Platform: PlatformOpenAI, Extra: enabledExtra},
 			route:    NewAPIStyleRouteResponses,
 			expected: true,
+		},
+		{
+			name:     "openai audio can use native audio path",
+			account:  &Account{Platform: PlatformOpenAI, Extra: enabledExtra},
+			route:    NewAPIStyleRouteAudio,
+			expected: true,
+		},
+		{
+			name:     "zhipu audio can use glm official audio path when enabled",
+			account:  &Account{Platform: PlatformZhipu, Extra: enabledExtra},
+			route:    NewAPIStyleRouteAudio,
+			expected: true,
+		},
+		{
+			name:     "group switch enables zhipu audio without account extra",
+			account:  &Account{Platform: PlatformZhipu},
+			group:    zhipuGroupEnabled,
+			route:    NewAPIStyleRouteAudio,
+			expected: true,
+		},
+		{
+			name:     "zhipu audio still requires new api style switch",
+			account:  &Account{Platform: PlatformZhipu},
+			route:    NewAPIStyleRouteAudio,
+			expected: false,
+		},
+		{
+			name:     "deepseek audio is unsupported",
+			account:  &Account{Platform: PlatformDeepSeek, Extra: enabledExtra},
+			route:    NewAPIStyleRouteAudio,
+			expected: false,
+		},
+		{
+			name:     "moonshot audio is unsupported",
+			account:  &Account{Platform: PlatformMoonshot, Extra: enabledExtra},
+			route:    NewAPIStyleRouteAudio,
+			expected: false,
 		},
 		{
 			name:     "group switch enables openai responses without account extra",

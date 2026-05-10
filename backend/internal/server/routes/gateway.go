@@ -215,6 +215,7 @@ func RegisterGatewayRoutes(
 	})
 	newAPIOnly := []gin.HandlerFunc{bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic}
 	r.POST("/audio/*subpath", append(newAPIOnly, h.NewAPIStyleGateway.Audio)...)
+	r.POST("/api/paas/v4/audio/*subpath", append(newAPIOnly, h.NewAPIStyleGateway.Audio)...)
 	r.POST("/embeddings", append(newAPIOnly, h.NewAPIStyleGateway.Embeddings)...)
 	r.POST("/rerank", append(newAPIOnly, h.NewAPIStyleGateway.Rerank)...)
 	r.GET("/videos", append(newAPIOnly, h.NewAPIStyleGateway.Videos)...)
