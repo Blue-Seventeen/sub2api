@@ -571,7 +571,9 @@ func normalizeAccountTestVoice(voice string) string {
 		if r < 0x20 || r == 0x7f {
 			continue
 		}
-		builder.WriteRune(r)
+		if _, err := builder.WriteRune(r); err != nil {
+			return ""
+		}
 	}
 	normalized := strings.TrimSpace(builder.String())
 	runes := []rune(normalized)
@@ -634,7 +636,7 @@ func (s *AccountTestService) newAPIProbeHTTPRequest(ctx context.Context, account
 	}
 	token := s.newAPIProbeAuthToken(account)
 	if token == "" {
-		return nil, fmt.Errorf("No API key available")
+		return nil, fmt.Errorf("no API key available")
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	if probe.ContentType != "" {
@@ -884,9 +886,9 @@ func buildPCM16WAV(pcm []byte, sampleRate int, channels int) []byte {
 
 func buildWAVFromChunks(fmtChunk []byte, dataChunk []byte) []byte {
 	var out bytes.Buffer
-	out.WriteString("RIFF")
-	_ = binary.Write(&out, binary.LittleEndian, uint32(0))
-	out.WriteString("WAVE")
+	mustWriteProbeString(&out, "RIFF")
+	mustWriteProbeBinary(&out, uint32(0))
+	mustWriteProbeString(&out, "WAVE")
 	writeWAVChunk(&out, "fmt ", fmtChunk)
 	writeWAVChunk(&out, "data", dataChunk)
 	bytes := out.Bytes()
@@ -895,11 +897,31 @@ func buildWAVFromChunks(fmtChunk []byte, dataChunk []byte) []byte {
 }
 
 func writeWAVChunk(out *bytes.Buffer, id string, data []byte) {
-	out.WriteString(id)
-	_ = binary.Write(out, binary.LittleEndian, uint32(len(data)))
-	out.Write(data)
+	mustWriteProbeString(out, id)
+	mustWriteProbeBinary(out, uint32(len(data)))
+	mustWriteProbeBytes(out, data)
 	if len(data)%2 == 1 {
-		out.WriteByte(0)
+		if err := out.WriteByte(0); err != nil {
+			panic(err)
+		}
+	}
+}
+
+func mustWriteProbeString(out *bytes.Buffer, value string) {
+	if _, err := out.WriteString(value); err != nil {
+		panic(err)
+	}
+}
+
+func mustWriteProbeBytes(out *bytes.Buffer, value []byte) {
+	if _, err := out.Write(value); err != nil {
+		panic(err)
+	}
+}
+
+func mustWriteProbeBinary(out *bytes.Buffer, value uint32) {
+	if err := binary.Write(out, binary.LittleEndian, value); err != nil {
+		panic(err)
 	}
 }
 

@@ -97,15 +97,15 @@ func buildZeroSizedDataWAV(pcm []byte) []byte {
 	binary.LittleEndian.PutUint16(fmtChunk[14:16], 16)
 
 	var out bytes.Buffer
-	out.WriteString("RIFF")
-	_ = binary.Write(&out, binary.LittleEndian, uint32(36))
-	out.WriteString("WAVE")
-	out.WriteString("fmt ")
-	_ = binary.Write(&out, binary.LittleEndian, uint32(len(fmtChunk)))
-	out.Write(fmtChunk)
-	out.WriteString("data")
-	_ = binary.Write(&out, binary.LittleEndian, uint32(0))
-	out.Write(pcm)
+	mustWriteProbeString(&out, "RIFF")
+	mustWriteProbeBinary(&out, uint32(36))
+	mustWriteProbeString(&out, "WAVE")
+	mustWriteProbeString(&out, "fmt ")
+	mustWriteProbeBinary(&out, uint32(len(fmtChunk)))
+	mustWriteProbeBytes(&out, fmtChunk)
+	mustWriteProbeString(&out, "data")
+	mustWriteProbeBinary(&out, uint32(0))
+	mustWriteProbeBytes(&out, pcm)
 	return out.Bytes()
 }
 

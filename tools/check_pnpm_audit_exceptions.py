@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 import argparse
 import json
 import sys
@@ -145,7 +147,7 @@ def main() -> int:
     parser.add_argument("--exceptions", required=True)
     args = parser.parse_args()
 
-    with open(args.audit, "r", encoding="utf-8") as handle:
+    with open(args.audit, "r", encoding="utf-8-sig") as handle:
         audit = json.load(handle)
 
     # 读取异常清单并建立索引，便于快速匹配包名 + advisory。

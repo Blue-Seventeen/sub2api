@@ -909,7 +909,7 @@ func (s *AccountTestService) buildGeminiTestRequest(ctx context.Context, account
 	case AccountTypeServiceAccount:
 		return s.buildGeminiServiceAccountRequest(ctx, account, modelID, payload)
 	default:
-		return nil, fmt.Errorf("Unsupported account type: %s", account.Type)
+		return nil, fmt.Errorf("unsupported account type: %s", account.Type)
 	}
 }
 

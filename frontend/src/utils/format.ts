@@ -11,6 +11,13 @@ export const DISPLAY_CURRENCY_SYMBOL_MAX_LENGTH = 8
 
 const activeDisplayCurrencySymbol = ref(DEFAULT_DISPLAY_CURRENCY_SYMBOL)
 
+function hasControlCharacter(value: string): boolean {
+  return Array.from(value).some((char) => {
+    const codePoint = char.codePointAt(0) ?? 0
+    return codePoint <= 0x1f || codePoint === 0x7f
+  })
+}
+
 export function truncateDisplayCurrencySymbol(value: unknown): string {
   const raw = typeof value === 'string' ? value : ''
   return Array.from(raw).slice(0, DISPLAY_CURRENCY_SYMBOL_MAX_LENGTH).join('')
@@ -22,7 +29,7 @@ export function normalizeDisplayCurrencySymbol(value: unknown): string {
 
   const chars = Array.from(raw)
   if (chars.length > DISPLAY_CURRENCY_SYMBOL_MAX_LENGTH) return DEFAULT_DISPLAY_CURRENCY_SYMBOL
-  if (/[\u0000-\u001F\u007F]/u.test(raw)) return DEFAULT_DISPLAY_CURRENCY_SYMBOL
+  if (hasControlCharacter(raw)) return DEFAULT_DISPLAY_CURRENCY_SYMBOL
 
   return raw
 }

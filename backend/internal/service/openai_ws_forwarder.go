@@ -2482,7 +2482,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if !gjson.ValidBytes(trimmed) {
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", errors.New("invalid json"))
 		}
-		rawForHash, _, normalizeErr := normalizeOpenAIServiceTierInBody(trimmed)
+		_, _, normalizeErr := normalizeOpenAIServiceTierInBody(trimmed)
 		if normalizeErr != nil {
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", normalizeErr)
 		}
@@ -2559,11 +2559,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, blocked.Message, blocked)
 		}
 		normalized = normalizedPayload
-		rawForHash = normalizedPayload
 
 		return openAIWSClientPayload{
 			payloadRaw:         normalized,
-			rawForHash:         rawForHash,
+			rawForHash:         normalizedPayload,
 			promptCacheKey:     promptCacheKey,
 			previousResponseID: previousResponseID,
 			originalModel:      originalModel,

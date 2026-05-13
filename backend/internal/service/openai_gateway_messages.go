@@ -89,8 +89,6 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	if err != nil {
 		return nil, fmt.Errorf("marshal responses request: %w", err)
 	}
-	serviceTier := extractOpenAIServiceTierFromBody(responsesBody)
-
 	if account.Type == AccountTypeOAuth {
 		var reqBody map[string]any
 		if err := json.Unmarshal(responsesBody, &reqBody); err != nil {
@@ -153,6 +151,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 			}
 		}
 	}
+	var serviceTier *string
 	responsesBody, serviceTier, err = s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, responsesBody)
 	if err != nil {
 		var blocked *OpenAIFastBlockedError

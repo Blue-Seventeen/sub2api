@@ -370,7 +370,7 @@ func TestCompatibleGatewayServiceForward_MoonshotCustomRelayMessagesFallbackToCh
 	if result == nil {
 		t.Fatal("Forward() result is nil")
 	}
-	if result.Usage.InputTokens != 9 || result.Usage.OutputTokens != 7 {
+	if result != nil && (result.Usage.InputTokens != 9 || result.Usage.OutputTokens != 7) {
 		t.Fatalf("usage = %+v, want input=9 output=7", result.Usage)
 	}
 	body := rec.Body.String()
@@ -711,7 +711,7 @@ func TestCompatibleGatewayServiceForward_MoonshotMessagesStreamKeepsLateUsageChu
 	if upstream.urls[2] != "https://api.hack3rx.cn/v1/chat/completions" {
 		t.Fatalf("third upstream url = %q", upstream.urls[2])
 	}
-	if result.Usage.InputTokens != 9 || result.Usage.OutputTokens != 7 {
+	if result != nil && (result.Usage.InputTokens != 9 || result.Usage.OutputTokens != 7) {
 		t.Fatalf("usage = %+v, want input=9 output=7", result.Usage)
 	}
 	body := rec.Body.String()
@@ -920,7 +920,7 @@ func TestCompatibleGatewayServiceForward_ParsesChatUsagePromptCompletionForZhipu
 	if result == nil {
 		t.Fatal("Forward() result is nil")
 	}
-	if result.Usage.InputTokens != 12 || result.Usage.OutputTokens != 4 || result.Usage.CacheReadInputTokens != 2 {
+	if result != nil && (result.Usage.InputTokens != 12 || result.Usage.OutputTokens != 4 || result.Usage.CacheReadInputTokens != 2) {
 		t.Fatalf("usage = %+v, want input=12 output=4 cached=2", result.Usage)
 	}
 }
@@ -972,7 +972,7 @@ func TestCompatibleGatewayServiceForward_KeepsStreamingChatUsageAfterFinishChunk
 	if result == nil {
 		t.Fatal("Forward() result is nil")
 	}
-	if result.Usage.InputTokens != 12 || result.Usage.OutputTokens != 4 || result.Usage.CacheReadInputTokens != 2 {
+	if result != nil && (result.Usage.InputTokens != 12 || result.Usage.OutputTokens != 4 || result.Usage.CacheReadInputTokens != 2) {
 		t.Fatalf("usage = %+v, want input=12 output=4 cached=2", result.Usage)
 	}
 	if !strings.Contains(rec.Body.String(), `"content":"hel"`) {

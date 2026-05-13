@@ -170,10 +170,10 @@ func TestBuildCodexUsageProgressFromExtra_ZerosExpiredWindow(t *testing.T) {
 		if progress == nil {
 			t.Fatal("expected non-nil progress")
 		}
-		if progress.Utilization != 0 {
+		if progress != nil && progress.Utilization != 0 {
 			t.Fatalf("expected Utilization=0 for expired window, got %v", progress.Utilization)
 		}
-		if progress.RemainingSeconds != 0 {
+		if progress != nil && progress.RemainingSeconds != 0 {
 			t.Fatalf("expected RemainingSeconds=0, got %v", progress.RemainingSeconds)
 		}
 	})
@@ -188,7 +188,7 @@ func TestBuildCodexUsageProgressFromExtra_ZerosExpiredWindow(t *testing.T) {
 		if progress == nil {
 			t.Fatal("expected non-nil progress")
 		}
-		if progress.Utilization != 42.0 {
+		if progress != nil && progress.Utilization != 42.0 {
 			t.Fatalf("expected Utilization=42, got %v", progress.Utilization)
 		}
 	})
@@ -202,7 +202,7 @@ func TestBuildCodexUsageProgressFromExtra_ZerosExpiredWindow(t *testing.T) {
 		if progress == nil {
 			t.Fatal("expected non-nil progress")
 		}
-		if progress.Utilization != 0 {
+		if progress != nil && progress.Utilization != 0 {
 			t.Fatalf("expected Utilization=0 for expired 7d window, got %v", progress.Utilization)
 		}
 	})

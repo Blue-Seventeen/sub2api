@@ -92,11 +92,6 @@ func openAIWSPassthroughPolicyModelFromSessionFrame(account *Account, payload []
 	return normalizeOpenAIModelForUpstream(account, account.GetMappedModel(original))
 }
 
-func openAIWSPassthroughIsResponseCreateFrame(payload []byte) bool {
-	eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
-	return eventType == "" || eventType == "response.create"
-}
-
 type openAIWSPassthroughUsageMeta struct {
 	serviceTier     atomic.Pointer[string]
 	reasoningEffort atomic.Pointer[string]

@@ -199,7 +199,9 @@ func (s *NewAPIStyleGatewayService) Forward(
 	if resp == nil {
 		return nil, upstreamEndpoint, fmt.Errorf("new-api style upstream response is nil")
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode >= 400 {
 		respBody, _ := ReadUpstreamResponseBody(resp.Body, s.cfg, c, nil)
@@ -347,7 +349,7 @@ func (s *NewAPIStyleGatewayService) buildTargetURL(account *Account, opts NewAPI
 		path = "/v1/" + strings.TrimPrefix(strings.TrimSpace(opts.InboundPath), "/")
 	}
 	target := joinRelayCompatibleURL(baseURL, path)
-	if opts.QueryString != "" && strings.Contains(path, "?") == false {
+	if opts.QueryString != "" && !strings.Contains(path, "?") {
 		target += "?" + opts.QueryString
 	}
 	if _, err := url.ParseRequestURI(target); err != nil {

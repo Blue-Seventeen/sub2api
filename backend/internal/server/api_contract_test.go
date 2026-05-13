@@ -81,6 +81,22 @@ func TestAPIContracts(t *testing.T) {
 							"note_key": "profile.authBindings.notes.emailManagedFromProfile",
 							"note": "Primary account email is managed from the profile form."
 						},
+						"github": {
+							"provider": "github",
+							"bound": false,
+							"bound_count": 0,
+							"can_bind": true,
+							"can_unbind": false,
+							"bind_start_path": "/api/v1/auth/oauth/github/bind/start?intent=bind_current_user&redirect=%2Fsettings%2Fprofile"
+						},
+						"google": {
+							"provider": "google",
+							"bound": false,
+							"bound_count": 0,
+							"can_bind": true,
+							"can_unbind": false,
+							"bind_start_path": "/api/v1/auth/oauth/google/bind/start?intent=bind_current_user&redirect=%2Fsettings%2Fprofile"
+						},
 						"linuxdo": {
 							"provider": "linuxdo",
 							"bound": false,
@@ -119,6 +135,22 @@ func TestAPIContracts(t *testing.T) {
 							"note_key": "profile.authBindings.notes.emailManagedFromProfile",
 							"note": "Primary account email is managed from the profile form."
 						},
+						"github": {
+							"provider": "github",
+							"bound": false,
+							"bound_count": 0,
+							"can_bind": true,
+							"can_unbind": false,
+							"bind_start_path": "/api/v1/auth/oauth/github/bind/start?intent=bind_current_user&redirect=%2Fsettings%2Fprofile"
+						},
+						"google": {
+							"provider": "google",
+							"bound": false,
+							"bound_count": 0,
+							"can_bind": true,
+							"can_unbind": false,
+							"bind_start_path": "/api/v1/auth/oauth/google/bind/start?intent=bind_current_user&redirect=%2Fsettings%2Fprofile"
+						},
 						"linuxdo": {
 							"provider": "linuxdo",
 							"bound": false,
@@ -156,6 +188,22 @@ func TestAPIContracts(t *testing.T) {
 							"subject_hint": "a***e@example.com",
 							"note_key": "profile.authBindings.notes.emailManagedFromProfile",
 							"note": "Primary account email is managed from the profile form."
+						},
+						"github": {
+							"provider": "github",
+							"bound": false,
+							"bound_count": 0,
+							"can_bind": true,
+							"can_unbind": false,
+							"bind_start_path": "/api/v1/auth/oauth/github/bind/start?intent=bind_current_user&redirect=%2Fsettings%2Fprofile"
+						},
+						"google": {
+							"provider": "google",
+							"bound": false,
+							"bound_count": 0,
+							"can_bind": true,
+							"can_unbind": false,
+							"bind_start_path": "/api/v1/auth/oauth/google/bind/start?intent=bind_current_user&redirect=%2Fsettings%2Fprofile"
 						},
 						"linuxdo": {
 							"provider": "linuxdo",
@@ -284,7 +332,6 @@ func TestAPIContracts(t *testing.T) {
 			name: "GET /api/v1/groups/available",
 			setup: func(t *testing.T, deps *contractDeps) {
 				t.Helper()
-				// 普通用户可见的分组列表不应包含内部字段（如 model_routing/account_count）。
 				deps.groupRepo.SetActive([]service.Group{
 					{
 						ID:                  10,
@@ -334,6 +381,7 @@ func TestAPIContracts(t *testing.T) {
 						"fallback_group_id_on_invalid_request": null,
 						"require_oauth_only": false,
 						"require_privacy_set": false,
+						"newapi_style_interface_enabled": false,
 						"rpm_limit": 0,
 						"created_at": "2025-01-02T03:04:05Z",
 						"updated_at": "2025-01-02T03:04:05Z"
@@ -345,14 +393,13 @@ func TestAPIContracts(t *testing.T) {
 			name: "GET /api/v1/subscriptions",
 			setup: func(t *testing.T, deps *contractDeps) {
 				t.Helper()
-				// 普通用户订阅接口不应包含 assigned_* / notes 等管理员字段。
 				deps.userSubRepo.SetByUserID(1, []service.UserSubscription{
 					{
 						ID:              501,
 						UserID:          1,
 						GroupID:         10,
 						StartsAt:        deps.now,
-						ExpiresAt:       time.Date(2099, 1, 2, 3, 4, 5, 0, time.UTC), // 使用未来日期避免 normalizeSubscriptionStatus 标记为过期
+						ExpiresAt:       time.Date(2099, 1, 2, 3, 4, 5, 0, time.UTC),
 						Status:          service.SubscriptionStatusActive,
 						DailyUsageUSD:   1.23,
 						WeeklyUsageUSD:  2.34,
@@ -395,7 +442,6 @@ func TestAPIContracts(t *testing.T) {
 			name: "GET /api/v1/redeem/history",
 			setup: func(t *testing.T, deps *contractDeps) {
 				t.Helper()
-				// 普通用户兑换历史不应包含 notes 等内部字段。
 				deps.redeemRepo.SetByUser(1, []service.RedeemCode{
 					{
 						ID:        900,
@@ -546,6 +592,9 @@ func TestAPIContracts(t *testing.T) {
 						"actual_cost": 0.5,
 						"rate_multiplier": 1,
 						"billing_type": 0,
+						"request_count": 0,
+						"task_count": 0,
+						"usage_estimated": false,
 							"stream": true,
 							"duration_ms": 100,
 							"first_token_ms": 50,
@@ -651,10 +700,10 @@ func TestAPIContracts(t *testing.T) {
 					"login_agreement_mode": "modal",
 					"login_agreement_updated_at": "2026-03-31",
 					"login_agreement_documents": [
-						{"id": "terms", "title": "????", "content_md": ""},
-						{"id": "usage-policy", "title": "????", "content_md": ""},
-						{"id": "supported-regions", "title": "????????", "content_md": ""},
-						{"id": "service-specific-terms", "title": "??????", "content_md": ""}
+						{"id": "terms", "title": "服务条款", "content_md": ""},
+						{"id": "usage-policy", "title": "使用政策", "content_md": ""},
+						{"id": "supported-regions", "title": "支持的国家和地区", "content_md": ""},
+						{"id": "service-specific-terms", "title": "服务特定条款", "content_md": ""}
 					],
 					"smtp_host": "smtp.example.com",
 					"smtp_port": 587,
@@ -707,6 +756,16 @@ func TestAPIContracts(t *testing.T) {
 					"auth_source_default_email_subscriptions": [],
 					"auth_source_default_email_grant_on_signup": false,
 					"auth_source_default_email_grant_on_first_bind": false,
+					"auth_source_default_github_balance": 0,
+					"auth_source_default_github_concurrency": 5,
+					"auth_source_default_github_subscriptions": [],
+					"auth_source_default_github_grant_on_signup": false,
+					"auth_source_default_github_grant_on_first_bind": false,
+					"auth_source_default_google_balance": 0,
+					"auth_source_default_google_concurrency": 5,
+					"auth_source_default_google_subscriptions": [],
+					"auth_source_default_google_grant_on_signup": false,
+					"auth_source_default_google_grant_on_first_bind": false,
 					"auth_source_default_linuxdo_balance": 0,
 					"auth_source_default_linuxdo_concurrency": 5,
 					"auth_source_default_linuxdo_subscriptions": [],
@@ -727,11 +786,23 @@ func TestAPIContracts(t *testing.T) {
 					"default_balance": 1.25,
 					"default_user_rpm_limit": 0,
 					"default_subscriptions": [],
+					"display_currency_symbol": "$",
+					"display_currency_symbol_local_only": true,
 					"enable_model_fallback": false,
 					"fallback_model_anthropic": "claude-3-5-sonnet-20241022",
 					"fallback_model_antigravity": "gemini-2.5-pro",
 					"fallback_model_gemini": "gemini-2.5-pro",
-						"fallback_model_openai": "gpt-4o",
+					"fallback_model_openai": "gpt-4o",
+						"github_oauth_enabled": false,
+						"github_oauth_client_id": "",
+						"github_oauth_client_secret_configured": false,
+						"github_oauth_redirect_url": "",
+						"github_oauth_frontend_redirect_url": "/auth/oauth/callback",
+						"google_oauth_enabled": false,
+						"google_oauth_client_id": "",
+						"google_oauth_client_secret_configured": false,
+						"google_oauth_redirect_url": "",
+						"google_oauth_frontend_redirect_url": "/auth/oauth/callback",
 						"enable_identity_patch": true,
 						"identity_patch_prompt": "",
 						"invitation_code_enabled": false,
@@ -756,6 +827,8 @@ func TestAPIContracts(t *testing.T) {
 					"payment_visible_method_alipay_enabled": true,
 					"payment_visible_method_wxpay_enabled": false,
 					"openai_advanced_scheduler_enabled": true,
+					"markdown_pages_enabled": false,
+					"risk_control_enabled": false,
 					"custom_menu_items": [],
 					"custom_endpoints": [],
 					"payment_enabled": false,
@@ -860,10 +933,10 @@ func TestAPIContracts(t *testing.T) {
 					"login_agreement_mode": "modal",
 					"login_agreement_updated_at": "2026-03-31",
 					"login_agreement_documents": [
-						{"id": "terms", "title": "????", "content_md": ""},
-						{"id": "usage-policy", "title": "????", "content_md": ""},
-						{"id": "supported-regions", "title": "????????", "content_md": ""},
-						{"id": "service-specific-terms", "title": "??????", "content_md": ""}
+						{"id": "terms", "title": "服务条款", "content_md": ""},
+						{"id": "usage-policy", "title": "使用政策", "content_md": ""},
+						{"id": "supported-regions", "title": "支持的国家和地区", "content_md": ""},
+						{"id": "service-specific-terms", "title": "服务特定条款", "content_md": ""}
 					],
 					"smtp_host": "",
 					"smtp_port": 587,
@@ -919,17 +992,31 @@ func TestAPIContracts(t *testing.T) {
 					"default_balance": 0,
 					"default_user_rpm_limit": 0,
 					"default_subscriptions": [],
+					"display_currency_symbol": "$",
+					"display_currency_symbol_local_only": true,
 					"enable_model_fallback": false,
 					"fallback_model_anthropic": "claude-3-5-sonnet-20241022",
 					"fallback_model_openai": "gpt-4o",
 					"fallback_model_gemini": "gemini-2.5-pro",
 					"fallback_model_antigravity": "gemini-2.5-pro",
+					"github_oauth_enabled": false,
+					"github_oauth_client_id": "",
+					"github_oauth_client_secret_configured": false,
+					"github_oauth_redirect_url": "",
+					"github_oauth_frontend_redirect_url": "/auth/oauth/callback",
+					"google_oauth_enabled": false,
+					"google_oauth_client_id": "",
+					"google_oauth_client_secret_configured": false,
+					"google_oauth_redirect_url": "",
+					"google_oauth_frontend_redirect_url": "/auth/oauth/callback",
 					"enable_identity_patch": true,
 					"identity_patch_prompt": "",
 					"ops_monitoring_enabled": false,
 					"ops_realtime_monitoring_enabled": true,
 					"ops_query_mode_default": "auto",
 					"ops_metrics_interval_seconds": 60,
+					"markdown_pages_enabled": false,
+					"risk_control_enabled": false,
 					"min_claude_code_version": "",
 					"max_claude_code_version": "",
 					"allow_ungrouped_key_scheduling": false,
@@ -993,6 +1080,16 @@ func TestAPIContracts(t *testing.T) {
 					"auth_source_default_email_subscriptions": [],
 					"auth_source_default_email_grant_on_signup": false,
 					"auth_source_default_email_grant_on_first_bind": false,
+					"auth_source_default_github_balance": 0,
+					"auth_source_default_github_concurrency": 5,
+					"auth_source_default_github_subscriptions": [],
+					"auth_source_default_github_grant_on_signup": false,
+					"auth_source_default_github_grant_on_first_bind": false,
+					"auth_source_default_google_balance": 0,
+					"auth_source_default_google_concurrency": 5,
+					"auth_source_default_google_subscriptions": [],
+					"auth_source_default_google_grant_on_signup": false,
+					"auth_source_default_google_grant_on_first_bind": false,
 					"auth_source_default_linuxdo_balance": 0,
 					"auth_source_default_linuxdo_concurrency": 5,
 					"auth_source_default_linuxdo_subscriptions": [],

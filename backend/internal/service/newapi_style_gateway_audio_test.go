@@ -204,11 +204,11 @@ func TestNewAPIStyleAudioTokenChannelPricingWinsOverRequestGuardrail(t *testing.
 	if cost == nil {
 		t.Fatalf("cost is nil")
 	}
-	if cost.BillingMode != string(BillingModeToken) {
+	if cost != nil && cost.BillingMode != string(BillingModeToken) {
 		t.Fatalf("billing mode = %q, want token", cost.BillingMode)
 	}
 	want := float64(119) * inputPrice
-	if math.Abs(cost.TotalCost-want) > 1e-12 {
+	if cost != nil && math.Abs(cost.TotalCost-want) > 1e-12 {
 		t.Fatalf("total cost = %.12f, want %.12f", cost.TotalCost, want)
 	}
 }
@@ -233,10 +233,10 @@ func TestNewAPIStyleAudioPerRequestChannelPricingStillUsesRequestCount(t *testin
 	if cost == nil {
 		t.Fatalf("cost is nil")
 	}
-	if cost.BillingMode != string(BillingModePerRequest) {
+	if cost != nil && cost.BillingMode != string(BillingModePerRequest) {
 		t.Fatalf("billing mode = %q, want per_request", cost.BillingMode)
 	}
-	if math.Abs(cost.TotalCost-perRequestPrice) > 1e-12 {
+	if cost != nil && math.Abs(cost.TotalCost-perRequestPrice) > 1e-12 {
 		t.Fatalf("total cost = %.12f, want %.12f", cost.TotalCost, perRequestPrice)
 	}
 }
@@ -263,13 +263,13 @@ func TestNewAPIStyleAudioTokenChannelPricingWithoutUsageStaysZero(t *testing.T) 
 			if cost == nil {
 				t.Fatalf("cost is nil")
 			}
-			if cost.BillingMode != string(BillingModeToken) {
+			if cost != nil && cost.BillingMode != string(BillingModeToken) {
 				t.Fatalf("billing mode = %q, want token", cost.BillingMode)
 			}
-			if cost.TotalCost != 0 {
+			if cost != nil && cost.TotalCost != 0 {
 				t.Fatalf("total cost = %.12f, want 0", cost.TotalCost)
 			}
-			if cost.ActualCost != 0 {
+			if cost != nil && cost.ActualCost != 0 {
 				t.Fatalf("actual cost = %.12f, want 0", cost.ActualCost)
 			}
 		})

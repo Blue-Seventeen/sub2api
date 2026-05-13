@@ -141,7 +141,6 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		if effort := gjson.GetBytes(responsesBody, "reasoning.effort").String(); effort != "" {
 			responsesReq.Reasoning = &apicompat.ResponsesReasoning{Effort: effort}
 		}
-		serviceTier = extractOpenAIServiceTierFromBody(responsesBody)
 	} else {
 		// Normal path: convert Chat Completions → Responses.
 		// ChatCompletionsToResponses always sets Stream=true (upstream always streams).
@@ -155,7 +154,6 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		if err != nil {
 			return nil, fmt.Errorf("marshal responses request: %w", err)
 		}
-		serviceTier = extractOpenAIServiceTierFromBody(responsesBody)
 	}
 
 	logFields := []zap.Field{

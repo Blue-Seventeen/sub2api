@@ -517,7 +517,13 @@ const loadSavedTTSVoices = () => {
 }
 
 const saveTTSVoice = (voice: string) => {
-  const normalized = voice.trim().replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 128)
+  const normalized = Array.from(voice.trim())
+    .filter((char) => {
+      const codePoint = char.codePointAt(0) ?? 0
+      return codePoint > 0x1f && codePoint !== 0x7f
+    })
+    .join('')
+    .slice(0, 128)
   if (!normalized) return
   const next = [normalized, ...savedTTSVoices.value.filter((item) => item !== normalized)].slice(0, 12)
   savedTTSVoices.value = next
