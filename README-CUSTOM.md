@@ -245,6 +245,9 @@ upstream 的 Affiliate / 邀请返利模块属于冗余功能，后续同步 ups
 
 - 账号自动运维：刷新令牌、测试连接、恢复状态、删除账号
 - 代理池自动检测、成功队列、账号选择最优代理
+- `/admin/proxies` 代理管理增强：真实 proxy stats、实时出口账号数、自动检测增量刷新、延迟/实时使用排序持久化、Quick Add/BatchCreate/ImportData 五元组去重语义
+- Clash 订阅托管代理：订阅保存在中央数据库，节点本地运行 mihomo runtime；托管代理仍通过 `proxy_id` 绑定账号，删除保护、计费、usage log、中转统计语义不变
+- 自动代理粘性保持：仅对“自动选择最优代理”的账号生效，优先复用上次命中的可用代理；Redis / 观测写入失败必须 best-effort 降级，不得阻塞中转链路
 - Available Channels 聚合视图
 - Channel Monitor / Request Template / Rollup / 用户侧状态页
 
@@ -253,6 +256,19 @@ upstream 的 Affiliate / 邀请返利模块属于冗余功能，后续同步 ups
 - `backend/internal/service/account_auto_ops*`
 - `backend/internal/service/account_refresh_service.go`
 - `backend/internal/service/proxy_*`
+- `backend/internal/service/managed_proxy*`
+- `backend/internal/service/proxy_active_usage.go`
+- `backend/internal/service/proxy_stats*`
+- `backend/internal/repository/proxy_stats_repo.go`
+- `backend/internal/repository/proxy_sticky_store.go`
+- `backend/internal/repository/proxy_subscription_repo.go`
+- `backend/migrations/135_add_proxy_request_stats.sql`
+- `backend/migrations/136_add_managed_proxy_subscriptions.sql`
+- `backend/migrations/137_add_proxy_subscription_nodes.sql`
+- `frontend/src/views/admin/ProxiesView.vue`
+- `frontend/src/api/admin/proxies.ts`
+- `frontend/src/utils/proxyBatchInput.ts`
+- `frontend/src/components/admin/proxy/ImportDataModal.vue`
 - `backend/internal/service/channel_monitor_*`
 - `backend/internal/service/channel_available.go`
 - `backend/internal/repository/channel_monitor_*`
