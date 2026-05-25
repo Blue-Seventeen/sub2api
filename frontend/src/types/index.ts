@@ -663,7 +663,11 @@ export interface Proxy {
   username: string | null
   password?: string | null
   status: 'active' | 'inactive'
+  source_type?: 'manual' | 'mihomo_subscription'
+  subscription_id?: number | null
+  runtime_status?: ManagedProxyRuntimeStatus | null
   account_count?: number // Number of accounts using this proxy
+  active_egress_account_count?: number
   latency_ms?: number
   latency_status?: 'success' | 'failed'
   latency_message?: string
@@ -681,10 +685,70 @@ export interface Proxy {
   updated_at: string
 }
 
+export interface ManagedProxyRuntimeStatus {
+  enabled: boolean
+  status: 'disabled' | 'starting' | 'running' | 'stopped' | 'error' | string
+  subscription_id?: number
+  local_url?: string
+  port?: number
+  revision?: number
+  last_error?: string
+  started_at?: string | null
+  updated_at?: string
+}
+
+export interface ProxySubscription {
+  id: number
+  name: string
+  subscription_url: string
+  status: 'active' | 'inactive'
+  refresh_interval_sec: number
+  test_url: string
+  revision: number
+  last_error?: string
+  proxy_id?: number | null
+  proxy_ids?: number[]
+  nodes?: ProxySubscriptionManagedNode[]
+  created_at: string
+  updated_at: string
+}
+
+export interface ProxySubscriptionManagedNode {
+  id: number
+  subscription_id: number
+  proxy_id?: number | null
+  node_key: string
+  name: string
+  provider_name: string
+  type: string
+  server?: string
+  port?: number
+  status: 'active' | 'inactive'
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateProxySubscriptionRequest {
+  name: string
+  subscription_url: string
+  refresh_interval_sec?: number
+  test_url?: string
+}
+
+export interface UpdateProxySubscriptionRequest {
+  name?: string
+  subscription_url?: string
+  status?: 'active' | 'inactive'
+  refresh_interval_sec?: number
+  test_url?: string
+}
+
 export interface ProxyAutoProbeConfig {
   enabled: boolean
   default_interval_sec: number
   retry_interval_sec: number
+  sticky_enabled: boolean
+  sticky_ttl_seconds: number
 }
 
 export interface ProxyAutoProbeStatus extends ProxyAutoProbeConfig {
@@ -692,6 +756,15 @@ export interface ProxyAutoProbeStatus extends ProxyAutoProbeConfig {
   success_queue_count: number
   failed_queue_count: number
   current_proxy_id?: number | null
+  recent_completions?: ProxyAutoProbeCompletion[]
+}
+
+export interface ProxyAutoProbeCompletion {
+  seq: number
+  proxy_id: number
+  finished_at: string
+  success: boolean
+  quality_status: string
 }
 
 export interface ProxyAccountSummary {

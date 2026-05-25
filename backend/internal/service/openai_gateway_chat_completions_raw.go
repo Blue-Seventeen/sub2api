@@ -160,10 +160,11 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	// 6. Send request
 	proxyURL := ""
 	if account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+		proxyURL = ResolveProxyURL(ctx, account.Proxy)
 	}
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
+		ClearAutoSelectedProxyStickyOnTransportError(ctx, account, err)
 		safeErr := sanitizeUpstreamErrorMessage(err.Error())
 		setOpsUpstreamError(c, 0, safeErr, "")
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{

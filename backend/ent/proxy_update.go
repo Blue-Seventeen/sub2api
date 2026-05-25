@@ -172,6 +172,47 @@ func (_u *ProxyUpdate) SetNillableStatus(v *string) *ProxyUpdate {
 	return _u
 }
 
+// SetSourceType sets the "source_type" field.
+func (_u *ProxyUpdate) SetSourceType(v string) *ProxyUpdate {
+	_u.mutation.SetSourceType(v)
+	return _u
+}
+
+// SetNillableSourceType sets the "source_type" field if the given value is not nil.
+func (_u *ProxyUpdate) SetNillableSourceType(v *string) *ProxyUpdate {
+	if v != nil {
+		_u.SetSourceType(*v)
+	}
+	return _u
+}
+
+// SetSubscriptionID sets the "subscription_id" field.
+func (_u *ProxyUpdate) SetSubscriptionID(v int64) *ProxyUpdate {
+	_u.mutation.ResetSubscriptionID()
+	_u.mutation.SetSubscriptionID(v)
+	return _u
+}
+
+// SetNillableSubscriptionID sets the "subscription_id" field if the given value is not nil.
+func (_u *ProxyUpdate) SetNillableSubscriptionID(v *int64) *ProxyUpdate {
+	if v != nil {
+		_u.SetSubscriptionID(*v)
+	}
+	return _u
+}
+
+// AddSubscriptionID adds value to the "subscription_id" field.
+func (_u *ProxyUpdate) AddSubscriptionID(v int64) *ProxyUpdate {
+	_u.mutation.AddSubscriptionID(v)
+	return _u
+}
+
+// ClearSubscriptionID clears the value of the "subscription_id" field.
+func (_u *ProxyUpdate) ClearSubscriptionID() *ProxyUpdate {
+	_u.mutation.ClearSubscriptionID()
+	return _u
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by IDs.
 func (_u *ProxyUpdate) AddAccountIDs(ids ...int64) *ProxyUpdate {
 	_u.mutation.AddAccountIDs(ids...)
@@ -287,6 +328,11 @@ func (_u *ProxyUpdate) check() error {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "Proxy.status": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.SourceType(); ok {
+		if err := proxy.SourceTypeValidator(v); err != nil {
+			return &ValidationError{Name: "source_type", err: fmt.Errorf(`ent: validator failed for field "Proxy.source_type": %w`, err)}
+		}
+	}
 	return nil
 }
 
@@ -340,6 +386,18 @@ func (_u *ProxyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(proxy.FieldStatus, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.SourceType(); ok {
+		_spec.SetField(proxy.FieldSourceType, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.SubscriptionID(); ok {
+		_spec.SetField(proxy.FieldSubscriptionID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedSubscriptionID(); ok {
+		_spec.AddField(proxy.FieldSubscriptionID, field.TypeInt64, value)
+	}
+	if _u.mutation.SubscriptionIDCleared() {
+		_spec.ClearField(proxy.FieldSubscriptionID, field.TypeInt64)
 	}
 	if _u.mutation.AccountsCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -549,6 +607,47 @@ func (_u *ProxyUpdateOne) SetNillableStatus(v *string) *ProxyUpdateOne {
 	return _u
 }
 
+// SetSourceType sets the "source_type" field.
+func (_u *ProxyUpdateOne) SetSourceType(v string) *ProxyUpdateOne {
+	_u.mutation.SetSourceType(v)
+	return _u
+}
+
+// SetNillableSourceType sets the "source_type" field if the given value is not nil.
+func (_u *ProxyUpdateOne) SetNillableSourceType(v *string) *ProxyUpdateOne {
+	if v != nil {
+		_u.SetSourceType(*v)
+	}
+	return _u
+}
+
+// SetSubscriptionID sets the "subscription_id" field.
+func (_u *ProxyUpdateOne) SetSubscriptionID(v int64) *ProxyUpdateOne {
+	_u.mutation.ResetSubscriptionID()
+	_u.mutation.SetSubscriptionID(v)
+	return _u
+}
+
+// SetNillableSubscriptionID sets the "subscription_id" field if the given value is not nil.
+func (_u *ProxyUpdateOne) SetNillableSubscriptionID(v *int64) *ProxyUpdateOne {
+	if v != nil {
+		_u.SetSubscriptionID(*v)
+	}
+	return _u
+}
+
+// AddSubscriptionID adds value to the "subscription_id" field.
+func (_u *ProxyUpdateOne) AddSubscriptionID(v int64) *ProxyUpdateOne {
+	_u.mutation.AddSubscriptionID(v)
+	return _u
+}
+
+// ClearSubscriptionID clears the value of the "subscription_id" field.
+func (_u *ProxyUpdateOne) ClearSubscriptionID() *ProxyUpdateOne {
+	_u.mutation.ClearSubscriptionID()
+	return _u
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by IDs.
 func (_u *ProxyUpdateOne) AddAccountIDs(ids ...int64) *ProxyUpdateOne {
 	_u.mutation.AddAccountIDs(ids...)
@@ -677,6 +776,11 @@ func (_u *ProxyUpdateOne) check() error {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "Proxy.status": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.SourceType(); ok {
+		if err := proxy.SourceTypeValidator(v); err != nil {
+			return &ValidationError{Name: "source_type", err: fmt.Errorf(`ent: validator failed for field "Proxy.source_type": %w`, err)}
+		}
+	}
 	return nil
 }
 
@@ -747,6 +851,18 @@ func (_u *ProxyUpdateOne) sqlSave(ctx context.Context) (_node *Proxy, err error)
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(proxy.FieldStatus, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.SourceType(); ok {
+		_spec.SetField(proxy.FieldSourceType, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.SubscriptionID(); ok {
+		_spec.SetField(proxy.FieldSubscriptionID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedSubscriptionID(); ok {
+		_spec.AddField(proxy.FieldSubscriptionID, field.TypeInt64, value)
+	}
+	if _u.mutation.SubscriptionIDCleared() {
+		_spec.ClearField(proxy.FieldSubscriptionID, field.TypeInt64)
 	}
 	if _u.mutation.AccountsCleared() {
 		edge := &sqlgraph.EdgeSpec{

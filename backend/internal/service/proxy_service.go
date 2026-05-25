@@ -26,7 +26,7 @@ type ProxyRepository interface {
 	ListActive(ctx context.Context) ([]Proxy, error)
 	ListActiveWithAccountCount(ctx context.Context) ([]ProxyWithAccountCount, error)
 
-	ExistsByHostPortAuth(ctx context.Context, host string, port int, username, password string) (bool, error)
+	ExistsByProtocolHostPortAuth(ctx context.Context, protocol, host string, port int, username, password string) (bool, error)
 	CountAccountsByProxyID(ctx context.Context, proxyID int64) (int64, error)
 	ListAccountSummariesByProxyID(ctx context.Context, proxyID int64) ([]ProxyAccountSummary, error)
 }
@@ -189,6 +189,5 @@ func (s *ProxyService) GetURL(ctx context.Context, id int64) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("get proxy: %w", err)
 	}
-
-	return proxy.URL(), nil
+	return ResolveProxyURL(ctx, proxy), nil
 }

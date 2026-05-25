@@ -1588,6 +1588,12 @@ func init() {
 	proxy.DefaultStatus = proxyDescStatus.Default.(string)
 	// proxy.StatusValidator is a validator for the "status" field. It is called by the builders before save.
 	proxy.StatusValidator = proxyDescStatus.Validators[0].(func(string) error)
+	// proxyDescSourceType is the schema descriptor for source_type field.
+	proxyDescSourceType := proxyFields[7].Descriptor()
+	// proxy.DefaultSourceType holds the default value on creation for the source_type field.
+	proxy.DefaultSourceType = proxyDescSourceType.Default.(string)
+	// proxy.SourceTypeValidator is a validator for the "source_type" field. It is called by the builders before save.
+	proxy.SourceTypeValidator = proxyDescSourceType.Validators[0].(func(string) error)
 	redeemcodeFields := schema.RedeemCode{}.Fields()
 	_ = redeemcodeFields
 	// redeemcodeDescCode is the schema descriptor for code field.

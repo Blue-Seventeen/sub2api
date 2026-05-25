@@ -82,6 +82,7 @@ func provideCleanup(
 	tokenRefresh *service.TokenRefreshService,
 	accountExpiry *service.AccountExpiryService,
 	proxyAutoProbe *service.ProxyAutoProbeService,
+	managedProxyRuntime *service.ManagedProxyRuntime,
 	subscriptionExpiry *service.SubscriptionExpiryService,
 	usageCleanup *service.UsageCleanupService,
 	idempotencyCleanup *service.IdempotencyCleanupService,
@@ -89,6 +90,8 @@ func provideCleanup(
 	emailQueue *service.EmailQueueService,
 	billingCache *service.BillingCacheService,
 	usageRecordWorkerPool *service.UsageRecordWorkerPool,
+	proxyStatsWorkerPool *service.ProxyStatsWorkerPool,
+	proxyActiveUsageTracker *service.ProxyActiveUsageTracker,
 	subscriptionService *service.SubscriptionService,
 	oauth *service.OAuthService,
 	openaiOAuth *service.OpenAIOAuthService,
@@ -181,6 +184,12 @@ func provideCleanup(
 				}
 				return nil
 			}},
+			{"ManagedProxyRuntime", func() error {
+				if managedProxyRuntime != nil {
+					managedProxyRuntime.Stop()
+				}
+				return nil
+			}},
 			{"SubscriptionExpiryService", func() error {
 				subscriptionExpiry.Stop()
 				return nil
@@ -269,6 +278,21 @@ func provideCleanup(
 			}},
 		}
 
+		drainSteps := []cleanupStep{
+			{"ProxyActiveUsageTracker", func() error {
+				if proxyActiveUsageTracker != nil {
+					proxyActiveUsageTracker.Stop()
+				}
+				return nil
+			}},
+			{"ProxyStatsWorkerPool", func() error {
+				if proxyStatsWorkerPool != nil {
+					proxyStatsWorkerPool.Stop()
+				}
+				return nil
+			}},
+		}
+
 		infraSteps := []cleanupStep{
 			{"Redis", func() error {
 				if rdb == nil {
@@ -313,6 +337,7 @@ func provideCleanup(
 		}
 
 		runParallel(parallelSteps)
+		runSequential(drainSteps)
 		runSequential(infraSteps)
 
 		// Check if context timed out

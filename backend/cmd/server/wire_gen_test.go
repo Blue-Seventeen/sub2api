@@ -62,6 +62,7 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		tokenRefreshSvc,
 		accountExpirySvc,
 		proxyAutoProbeSvc,
+		nil, // managedProxyRuntime
 		subscriptionExpirySvc,
 		&service.UsageCleanupService{},
 		idempotencyCleanupSvc,
@@ -69,6 +70,8 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		emailQueueSvc,
 		billingCacheSvc,
 		&service.UsageRecordWorkerPool{},
+		nil, // proxyStatsWorkerPool
+		nil, // proxyActiveUsageTracker
 		&service.SubscriptionService{},
 		oauthSvc,
 		openAIOAuthSvc,

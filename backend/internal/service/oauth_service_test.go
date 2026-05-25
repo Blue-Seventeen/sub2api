@@ -87,8 +87,8 @@ func (m *mockProxyRepoForOAuth) ListActive(ctx context.Context) ([]Proxy, error)
 func (m *mockProxyRepoForOAuth) ListActiveWithAccountCount(ctx context.Context) ([]ProxyWithAccountCount, error) {
 	panic("ListActiveWithAccountCount not implemented")
 }
-func (m *mockProxyRepoForOAuth) ExistsByHostPortAuth(ctx context.Context, host string, port int, username, password string) (bool, error) {
-	panic("ExistsByHostPortAuth not implemented")
+func (m *mockProxyRepoForOAuth) ExistsByProtocolHostPortAuth(ctx context.Context, protocol, host string, port int, username, password string) (bool, error) {
+	panic("ExistsByProtocolHostPortAuth not implemented")
 }
 func (m *mockProxyRepoForOAuth) CountAccountsByProxyID(ctx context.Context, proxyID int64) (int64, error) {
 	panic("CountAccountsByProxyID not implemented")

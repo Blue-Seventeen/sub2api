@@ -131,6 +131,34 @@ func (_c *ProxyCreate) SetNillableStatus(v *string) *ProxyCreate {
 	return _c
 }
 
+// SetSourceType sets the "source_type" field.
+func (_c *ProxyCreate) SetSourceType(v string) *ProxyCreate {
+	_c.mutation.SetSourceType(v)
+	return _c
+}
+
+// SetNillableSourceType sets the "source_type" field if the given value is not nil.
+func (_c *ProxyCreate) SetNillableSourceType(v *string) *ProxyCreate {
+	if v != nil {
+		_c.SetSourceType(*v)
+	}
+	return _c
+}
+
+// SetSubscriptionID sets the "subscription_id" field.
+func (_c *ProxyCreate) SetSubscriptionID(v int64) *ProxyCreate {
+	_c.mutation.SetSubscriptionID(v)
+	return _c
+}
+
+// SetNillableSubscriptionID sets the "subscription_id" field if the given value is not nil.
+func (_c *ProxyCreate) SetNillableSubscriptionID(v *int64) *ProxyCreate {
+	if v != nil {
+		_c.SetSubscriptionID(*v)
+	}
+	return _c
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by IDs.
 func (_c *ProxyCreate) AddAccountIDs(ids ...int64) *ProxyCreate {
 	_c.mutation.AddAccountIDs(ids...)
@@ -201,6 +229,10 @@ func (_c *ProxyCreate) defaults() error {
 		v := proxy.DefaultStatus
 		_c.mutation.SetStatus(v)
 	}
+	if _, ok := _c.mutation.SourceType(); !ok {
+		v := proxy.DefaultSourceType
+		_c.mutation.SetSourceType(v)
+	}
 	return nil
 }
 
@@ -255,6 +287,14 @@ func (_c *ProxyCreate) check() error {
 	if v, ok := _c.mutation.Status(); ok {
 		if err := proxy.StatusValidator(v); err != nil {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "Proxy.status": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.SourceType(); !ok {
+		return &ValidationError{Name: "source_type", err: errors.New(`ent: missing required field "Proxy.source_type"`)}
+	}
+	if v, ok := _c.mutation.SourceType(); ok {
+		if err := proxy.SourceTypeValidator(v); err != nil {
+			return &ValidationError{Name: "source_type", err: fmt.Errorf(`ent: validator failed for field "Proxy.source_type": %w`, err)}
 		}
 	}
 	return nil
@@ -323,6 +363,14 @@ func (_c *ProxyCreate) createSpec() (*Proxy, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Status(); ok {
 		_spec.SetField(proxy.FieldStatus, field.TypeString, value)
 		_node.Status = value
+	}
+	if value, ok := _c.mutation.SourceType(); ok {
+		_spec.SetField(proxy.FieldSourceType, field.TypeString, value)
+		_node.SourceType = value
+	}
+	if value, ok := _c.mutation.SubscriptionID(); ok {
+		_spec.SetField(proxy.FieldSubscriptionID, field.TypeInt64, value)
+		_node.SubscriptionID = &value
 	}
 	if nodes := _c.mutation.AccountsIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -524,6 +572,42 @@ func (u *ProxyUpsert) UpdateStatus() *ProxyUpsert {
 	return u
 }
 
+// SetSourceType sets the "source_type" field.
+func (u *ProxyUpsert) SetSourceType(v string) *ProxyUpsert {
+	u.Set(proxy.FieldSourceType, v)
+	return u
+}
+
+// UpdateSourceType sets the "source_type" field to the value that was provided on create.
+func (u *ProxyUpsert) UpdateSourceType() *ProxyUpsert {
+	u.SetExcluded(proxy.FieldSourceType)
+	return u
+}
+
+// SetSubscriptionID sets the "subscription_id" field.
+func (u *ProxyUpsert) SetSubscriptionID(v int64) *ProxyUpsert {
+	u.Set(proxy.FieldSubscriptionID, v)
+	return u
+}
+
+// UpdateSubscriptionID sets the "subscription_id" field to the value that was provided on create.
+func (u *ProxyUpsert) UpdateSubscriptionID() *ProxyUpsert {
+	u.SetExcluded(proxy.FieldSubscriptionID)
+	return u
+}
+
+// AddSubscriptionID adds v to the "subscription_id" field.
+func (u *ProxyUpsert) AddSubscriptionID(v int64) *ProxyUpsert {
+	u.Add(proxy.FieldSubscriptionID, v)
+	return u
+}
+
+// ClearSubscriptionID clears the value of the "subscription_id" field.
+func (u *ProxyUpsert) ClearSubscriptionID() *ProxyUpsert {
+	u.SetNull(proxy.FieldSubscriptionID)
+	return u
+}
+
 // UpdateNewValues updates the mutable fields using the new values that were set on create.
 // Using this option is equivalent to using:
 //
@@ -720,6 +804,48 @@ func (u *ProxyUpsertOne) SetStatus(v string) *ProxyUpsertOne {
 func (u *ProxyUpsertOne) UpdateStatus() *ProxyUpsertOne {
 	return u.Update(func(s *ProxyUpsert) {
 		s.UpdateStatus()
+	})
+}
+
+// SetSourceType sets the "source_type" field.
+func (u *ProxyUpsertOne) SetSourceType(v string) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetSourceType(v)
+	})
+}
+
+// UpdateSourceType sets the "source_type" field to the value that was provided on create.
+func (u *ProxyUpsertOne) UpdateSourceType() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateSourceType()
+	})
+}
+
+// SetSubscriptionID sets the "subscription_id" field.
+func (u *ProxyUpsertOne) SetSubscriptionID(v int64) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetSubscriptionID(v)
+	})
+}
+
+// AddSubscriptionID adds v to the "subscription_id" field.
+func (u *ProxyUpsertOne) AddSubscriptionID(v int64) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.AddSubscriptionID(v)
+	})
+}
+
+// UpdateSubscriptionID sets the "subscription_id" field to the value that was provided on create.
+func (u *ProxyUpsertOne) UpdateSubscriptionID() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateSubscriptionID()
+	})
+}
+
+// ClearSubscriptionID clears the value of the "subscription_id" field.
+func (u *ProxyUpsertOne) ClearSubscriptionID() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.ClearSubscriptionID()
 	})
 }
 
@@ -1085,6 +1211,48 @@ func (u *ProxyUpsertBulk) SetStatus(v string) *ProxyUpsertBulk {
 func (u *ProxyUpsertBulk) UpdateStatus() *ProxyUpsertBulk {
 	return u.Update(func(s *ProxyUpsert) {
 		s.UpdateStatus()
+	})
+}
+
+// SetSourceType sets the "source_type" field.
+func (u *ProxyUpsertBulk) SetSourceType(v string) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetSourceType(v)
+	})
+}
+
+// UpdateSourceType sets the "source_type" field to the value that was provided on create.
+func (u *ProxyUpsertBulk) UpdateSourceType() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateSourceType()
+	})
+}
+
+// SetSubscriptionID sets the "subscription_id" field.
+func (u *ProxyUpsertBulk) SetSubscriptionID(v int64) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetSubscriptionID(v)
+	})
+}
+
+// AddSubscriptionID adds v to the "subscription_id" field.
+func (u *ProxyUpsertBulk) AddSubscriptionID(v int64) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.AddSubscriptionID(v)
+	})
+}
+
+// UpdateSubscriptionID sets the "subscription_id" field to the value that was provided on create.
+func (u *ProxyUpsertBulk) UpdateSubscriptionID() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateSubscriptionID()
+	})
+}
+
+// ClearSubscriptionID clears the value of the "subscription_id" field.
+func (u *ProxyUpsertBulk) ClearSubscriptionID() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.ClearSubscriptionID()
 	})
 }
 

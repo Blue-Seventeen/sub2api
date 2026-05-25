@@ -638,6 +638,7 @@ urlFallbackLoop:
 				err = errors.New("upstream returned nil response")
 			}
 			if err != nil {
+				ClearAutoSelectedProxyStickyOnTransportError(p.ctx, p.account, err)
 				safeErr := sanitizeUpstreamErrorMessage(err.Error())
 				appendOpsUpstreamError(p.c, OpsUpstreamErrorEvent{
 					Platform:           p.account.Platform,
@@ -4246,6 +4247,7 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 	// 发送请求
 	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
+		ClearAutoSelectedProxyStickyOnTransportError(ctx, account, err)
 		logger.LegacyPrintf("service.antigravity_gateway", "%s upstream request failed: %v", prefix, err)
 		return nil, fmt.Errorf("upstream request failed: %w", err)
 	}

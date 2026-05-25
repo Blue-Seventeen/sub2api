@@ -186,6 +186,8 @@ const handleImport = async () => {
       appStore.showError(t('admin.proxies.dataImportCompletedWithErrors', msgParams))
     } else {
       appStore.showSuccess(t('admin.proxies.dataImportSuccess', msgParams))
+    }
+    if ((res.proxy_created || 0) > 0 || (res.proxy_reused || 0) > 0) {
       emit('imported')
     }
   } catch (error: any) {

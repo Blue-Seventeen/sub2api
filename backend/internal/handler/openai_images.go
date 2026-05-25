@@ -133,6 +133,8 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	failedAccountIDs := make(map[int64]struct{})
 	sameAccountRetryCount := make(map[int64]int)
 	var lastFailoverErr *service.UpstreamFailoverError
+	var lastFailedAccount *service.Account
+	var lastFailedDurationMs int64
 
 	for {
 		reqLog.Debug("openai.images.account_selecting", zap.Int("excluded_account_count", len(failedAccountIDs)))
@@ -154,6 +156,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 				return
 			}
 			if lastFailoverErr != nil {
+				recordOpenAIProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, lastFailedAccount, apiKey, lastFailedDurationMs, "handler.openai_gateway.images")
 				h.handleFailoverExhausted(c, lastFailoverErr, streamStarted)
 			} else {
 				h.handleFailoverExhaustedSimple(c, 502, streamStarted)
@@ -188,6 +191,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		forwardStart := time.Now()
 		var result *service.OpenAIForwardResult
 		var upstreamEndpoint string
+		activeUsageHandle := beginProxyActiveUsage(h.proxyActiveUsageTracker, account)
 		if h.newAPIStyleService != nil && h.newAPIStyleService.SupportsForGroup(account, apiKey.Group, service.NewAPIStyleRouteImages) {
 			result, upstreamEndpoint, err = h.newAPIStyleService.ForwardOpenAI(
 				c.Request.Context(),
@@ -210,6 +214,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		} else {
 			result, err = h.gatewayService.ForwardImages(c.Request.Context(), c, account, body, parsed, channelMapping.MappedModel)
 		}
+		endProxyActiveUsage(activeUsageHandle)
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
@@ -242,6 +247,8 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 							return
 						case <-time.After(sameAccountRetryDelay):
 						}
+						lastFailedAccount = account
+						lastFailedDurationMs = forwardDurationMs
 						continue
 					}
 				}
@@ -249,6 +256,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 				failedAccountIDs[account.ID] = struct{}{}
 				lastFailoverErr = failoverErr
 				if switchCount >= maxAccountSwitches {
+					recordOpenAIProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, account, apiKey, forwardDurationMs, "handler.openai_gateway.images")
 					h.handleFailoverExhausted(c, failoverErr, streamStarted)
 					return
 				}
@@ -259,6 +267,8 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 					zap.Int("switch_count", switchCount),
 					zap.Int("max_switches", maxAccountSwitches),
 				)
+				lastFailedAccount = account
+				lastFailedDurationMs = forwardDurationMs
 				continue
 			}
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
@@ -270,9 +280,11 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			}
 			if shouldLogOpenAIForwardFailureAsWarn(c, wroteFallback) {
 				reqLog.Warn("openai.images.forward_failed", fields...)
+				recordOpenAIProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, account, apiKey, forwardDurationMs, "handler.openai_gateway.images")
 				return
 			}
 			reqLog.Error("openai.images.forward_failed", fields...)
+			recordOpenAIProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, account, apiKey, forwardDurationMs, "handler.openai_gateway.images")
 			return
 		}
 

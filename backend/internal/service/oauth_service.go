@@ -83,7 +83,7 @@ func (s *OAuthService) generateAuthURLWithScope(ctx context.Context, scope strin
 	if proxyID != nil {
 		proxy, err := s.proxyRepo.GetByID(ctx, *proxyID)
 		if err == nil && proxy != nil {
-			proxyURL = proxy.URL()
+			proxyURL = ResolveProxyURL(ctx, proxy)
 		}
 	}
 
@@ -139,7 +139,7 @@ func (s *OAuthService) ExchangeCode(ctx context.Context, input *ExchangeCodeInpu
 	if input.ProxyID != nil {
 		proxy, err := s.proxyRepo.GetByID(ctx, *input.ProxyID)
 		if err == nil && proxy != nil {
-			proxyURL = proxy.URL()
+			proxyURL = ResolveProxyURL(ctx, proxy)
 		}
 	}
 
@@ -172,7 +172,7 @@ func (s *OAuthService) CookieAuth(ctx context.Context, input *CookieAuthInput) (
 	if input.ProxyID != nil {
 		proxy, err := s.proxyRepo.GetByID(ctx, *input.ProxyID)
 		if err == nil && proxy != nil {
-			proxyURL = proxy.URL()
+			proxyURL = ResolveProxyURL(ctx, proxy)
 		}
 	}
 

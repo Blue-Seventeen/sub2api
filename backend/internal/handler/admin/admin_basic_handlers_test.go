@@ -18,7 +18,7 @@ func setupAdminRouter() (*gin.Engine, *stubAdminService) {
 
 	userHandler := NewUserHandler(adminSvc, nil)
 	groupHandler := NewGroupHandler(adminSvc, nil, nil)
-	proxyHandler := NewProxyHandler(adminSvc, nil)
+	proxyHandler := NewProxyHandler(adminSvc, nil, nil)
 	redeemHandler := NewRedeemHandler(adminSvc, nil)
 
 	router.GET("/api/v1/admin/users", userHandler.List)
@@ -42,8 +42,11 @@ func setupAdminRouter() (*gin.Engine, *stubAdminService) {
 
 	router.GET("/api/v1/admin/proxies", proxyHandler.List)
 	router.GET("/api/v1/admin/proxies/all", proxyHandler.GetAll)
+	router.GET("/api/v1/admin/proxies/active-usage", proxyHandler.GetActiveUsage)
+	router.GET("/api/v1/admin/proxies/snapshots", proxyHandler.GetSnapshots)
 	router.GET("/api/v1/admin/proxies/:id", proxyHandler.GetByID)
 	router.POST("/api/v1/admin/proxies", proxyHandler.Create)
+	router.POST("/api/v1/admin/proxies/batch", proxyHandler.BatchCreate)
 	router.PUT("/api/v1/admin/proxies/:id", proxyHandler.Update)
 	router.DELETE("/api/v1/admin/proxies/:id", proxyHandler.Delete)
 	router.POST("/api/v1/admin/proxies/batch-delete", proxyHandler.BatchDelete)
@@ -221,6 +224,16 @@ func TestProxyHandlerEndpoints(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 
 	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/proxies/active-usage?ids=4", nil)
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/proxies/snapshots?ids=4", nil)
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/proxies/4", nil)
 	router.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -269,6 +282,31 @@ func TestProxyHandlerEndpoints(t *testing.T) {
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/proxies/4/accounts", nil)
 	router.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestProxyHandlerBatchCreateUsesProtocolInDuplicateKey(t *testing.T) {
+	router, adminSvc := setupAdminRouter()
+	adminSvc.proxyExists = map[string]bool{
+		proxyExistsKey(proxyExistsCall{protocol: "http", host: "example.com", port: 8080, username: "u", password: "p"}): true,
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"proxies": []map[string]any{
+			{"protocol": "http", "host": "example.com", "port": 8080, "username": "u", "password": "p"},
+			{"protocol": "socks5", "host": "example.com", "port": 8080, "username": "u", "password": "p"},
+		},
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/proxies/batch", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Len(t, adminSvc.proxyExistsCalls, 2)
+	require.Equal(t, "http", adminSvc.proxyExistsCalls[0].protocol)
+	require.Equal(t, "socks5", adminSvc.proxyExistsCalls[1].protocol)
+	require.Len(t, adminSvc.createdProxies, 1)
+	require.Equal(t, "socks5", adminSvc.createdProxies[0].Protocol)
 }
 
 func TestRedeemHandlerEndpoints(t *testing.T) {

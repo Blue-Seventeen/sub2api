@@ -84,6 +84,9 @@
             <button @click="showImportData = true" class="btn btn-secondary">
               {{ t('admin.proxies.dataImport') }}
             </button>
+            <button @click="openClashSubscriptionModal" class="btn btn-secondary">
+              {{ t('admin.proxies.clash.import') }}
+            </button>
             <button @click="showExportDataDialog = true" class="btn btn-secondary">
               {{ selectedCount > 0 ? t('admin.proxies.dataExportSelected') : t('admin.proxies.dataExport') }}
             </button>
@@ -102,8 +105,9 @@
           :data="proxies"
           :loading="loading"
           :server-side-sort="true"
-          default-sort-key="id"
-          default-sort-order="desc"
+          :default-sort-key="sortState.sort_by"
+          :default-sort-order="sortState.sort_order"
+          :sort-storage-key="PROXY_SORT_STORAGE_KEY"
           @sort="handleSort"
         >
           <template #header-select>
@@ -126,8 +130,18 @@
             />
           </template>
 
-          <template #cell-name="{ value }">
-            <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+          <template #cell-name="{ row, value }">
+            <div class="flex flex-col gap-1">
+              <div class="flex items-center gap-2">
+                <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+                <span v-if="isManagedProxy(row)" class="badge badge-primary">
+                  {{ t('admin.proxies.clash.managedBadge') }}
+                </span>
+              </div>
+              <span v-if="isManagedProxy(row)" class="text-xs text-gray-500 dark:text-gray-400">
+                {{ runtimeStatusText(row) }}
+              </span>
+            </div>
           </template>
 
           <template #cell-protocol="{ value }">
@@ -142,12 +156,15 @@
 
           <template #cell-address="{ row }">
             <div class="flex items-center gap-1.5">
-              <code class="code text-xs">{{ row.host }}:{{ row.port }}</code>
+              <code class="code text-xs">
+                {{ isManagedProxy(row) ? (row.runtime_status?.local_url || t('admin.proxies.clash.localRuntime')) : `${row.host}:${row.port}` }}
+              </code>
               <div class="relative">
                 <button
                   type="button"
                   class="rounded p-0.5 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400"
                   :title="t('admin.proxies.copyProxyUrl')"
+                  :disabled="isManagedProxy(row) && !row.runtime_status?.local_url"
                   @click.stop="copyProxyUrl(row)"
                   @contextmenu.prevent="toggleCopyMenu(row.id)"
                 >
@@ -172,7 +189,10 @@
           </template>
 
           <template #cell-auth="{ row }">
-            <div v-if="row.username || row.password" class="flex items-center gap-1.5">
+            <span v-if="isManagedProxy(row)" class="text-sm text-gray-400">
+              {{ t('admin.proxies.clash.managedAuth') }}
+            </span>
+            <div v-else-if="row.username || row.password" class="flex items-center gap-1.5">
               <div class="flex flex-col text-xs">
                 <span v-if="row.username" class="text-gray-700 dark:text-gray-200">{{ row.username }}</span>
                 <span v-if="row.password" class="font-mono text-gray-500 dark:text-gray-400">
@@ -220,6 +240,19 @@
               class="inline-flex items-center rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800 dark:bg-dark-600 dark:text-gray-300"
             >
               {{ t('admin.groups.accountsCount', { count: 0 }) }}
+            </span>
+          </template>
+
+          <template #cell-active_egress_account_count="{ value }">
+            <span
+              :class="[
+                'inline-flex items-center rounded px-2 py-0.5 text-xs font-medium',
+                (value || 0) > 0
+                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+                  : 'bg-gray-100 text-gray-600 dark:bg-dark-600 dark:text-gray-300'
+              ]"
+            >
+              {{ value || 0 }}
             </span>
           </template>
 
@@ -315,6 +348,15 @@
                 </svg>
                 <Icon v-else name="shield" size="sm" />
                 <span class="text-xs">{{ t('admin.proxies.qualityCheck') }}</span>
+              </button>
+              <button
+                v-if="isManagedProxy(row)"
+                @click="handleRefreshManagedProxy(row)"
+                :disabled="refreshingSubscriptionIds.has(row.subscription_id || 0)"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-cyan-50 hover:text-cyan-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-cyan-900/20 dark:hover:text-cyan-400"
+              >
+                <Icon name="refresh" size="sm" :class="refreshingSubscriptionIds.has(row.subscription_id || 0) ? 'animate-spin' : ''" />
+                <span class="text-xs">{{ t('admin.proxies.clash.refresh') }}</span>
               </button>
               <button
                 @click="handleEdit(row)"
@@ -630,9 +672,16 @@
         </div>
         <div>
           <label class="input-label">{{ t('admin.proxies.protocol') }}</label>
-          <Select v-model="editForm.protocol" :options="protocolSelectOptions" />
+          <Select
+            v-model="editForm.protocol"
+            :options="protocolSelectOptions"
+            :disabled="isManagedProxy(editingProxy)"
+          />
         </div>
-        <div class="grid grid-cols-2 gap-4">
+        <div v-if="isManagedProxy(editingProxy)" class="rounded-lg border border-cyan-200 bg-cyan-50 p-3 text-sm text-cyan-700 dark:border-cyan-800 dark:bg-cyan-900/20 dark:text-cyan-300">
+          {{ t('admin.proxies.clash.editManagedHint') }}
+        </div>
+        <div v-if="!isManagedProxy(editingProxy)" class="grid grid-cols-2 gap-4">
           <div>
             <label class="input-label">{{ t('admin.proxies.host') }}</label>
             <input v-model="editForm.host" type="text" required class="input" />
@@ -649,11 +698,11 @@
             />
           </div>
         </div>
-        <div>
+        <div v-if="!isManagedProxy(editingProxy)">
           <label class="input-label">{{ t('admin.proxies.username') }}</label>
           <input v-model="editForm.username" type="text" class="input" />
         </div>
-        <div>
+        <div v-if="!isManagedProxy(editingProxy)">
           <label class="input-label">{{ t('admin.proxies.password') }}</label>
           <div class="relative">
             <input
@@ -757,6 +806,76 @@
     />
 
     <BaseDialog
+      :show="showClashSubscriptionModal"
+      :title="t('admin.proxies.clash.import')"
+      width="normal"
+      @close="closeClashSubscriptionModal"
+    >
+      <form id="clash-subscription-form" class="space-y-5" @submit.prevent="handleCreateClashSubscription">
+        <div>
+          <label class="input-label">{{ t('admin.proxies.name') }}</label>
+          <input
+            v-model="clashSubscriptionForm.name"
+            type="text"
+            required
+            class="input"
+            :placeholder="t('admin.proxies.clash.namePlaceholder')"
+          />
+        </div>
+        <div>
+          <label class="input-label">{{ t('admin.proxies.clash.subscriptionUrl') }}</label>
+          <input
+            v-model="clashSubscriptionForm.subscription_url"
+            type="url"
+            required
+            class="input"
+            placeholder="https://example.com/clash.yaml"
+          />
+          <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.proxies.clash.urlHint') }}
+          </div>
+        </div>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label class="input-label">{{ t('admin.proxies.clash.refreshInterval') }}</label>
+            <input
+              v-model.number="clashSubscriptionForm.refresh_interval_sec"
+              type="number"
+              min="60"
+              step="1"
+              class="input"
+            />
+          </div>
+          <div>
+            <label class="input-label">{{ t('admin.proxies.clash.testUrl') }}</label>
+            <input
+              v-model="clashSubscriptionForm.test_url"
+              type="url"
+              class="input"
+              placeholder="https://www.gstatic.com/generate_204"
+            />
+          </div>
+        </div>
+      </form>
+      <template #footer>
+        <div class="grid w-full grid-cols-2 gap-3">
+          <button @click="closeClashSubscriptionModal" type="button" class="btn btn-secondary w-full justify-center">
+            {{ t('common.cancel') }}
+          </button>
+          <button
+            type="submit"
+            form="clash-subscription-form"
+            :disabled="submitting"
+            class="btn btn-primary w-full justify-center"
+          >
+            <Icon v-if="submitting" name="refresh" size="sm" class="mr-2 animate-spin" />
+            {{ submitting ? t('admin.proxies.creating') : t('admin.proxies.clash.create') }}
+          </button>
+        </div>
+      </template>
+    </BaseDialog>
+
+    <BaseDialog
       :show="showAutoProbeDialog"
       :title="t('admin.proxies.autoProbe.title')"
       width="normal"
@@ -801,6 +920,22 @@
           />
         </label>
 
+        <label class="flex items-center justify-between gap-4 rounded-lg border border-gray-200 px-4 py-3 dark:border-dark-600">
+          <div>
+            <div class="text-sm font-medium text-gray-900 dark:text-white">
+              {{ t('admin.proxies.autoProbe.stickyEnable') }}
+            </div>
+            <div class="text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.proxies.autoProbe.stickyEnableHint') }}
+            </div>
+          </div>
+          <input
+            v-model="autoProbeForm.sticky_enabled"
+            type="checkbox"
+            class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+          />
+        </label>
+
         <div class="grid gap-4 sm:grid-cols-2">
           <div>
             <label class="input-label">{{ t('admin.proxies.autoProbe.defaultInterval') }}</label>
@@ -826,6 +961,19 @@
             />
             <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
               {{ t('admin.proxies.autoProbe.retryIntervalHint') }}
+            </div>
+          </div>
+          <div>
+            <label class="input-label">{{ t('admin.proxies.autoProbe.stickyTTL') }}</label>
+            <input
+              v-model.number="autoProbeForm.sticky_ttl_seconds"
+              type="number"
+              min="1"
+              step="1"
+              class="input"
+            />
+            <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.proxies.autoProbe.stickyTTLHint') }}
             </div>
           </div>
         </div>
@@ -975,8 +1123,9 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
-import type { Proxy, ProxyAccountSummary, ProxyAutoProbeConfig, ProxyAutoProbeStatus, ProxyProtocol, ProxyQualityCheckResult } from '@/types'
+import type { ManagedProxyRuntimeStatus, Proxy, ProxyAccountSummary, ProxyAutoProbeConfig, ProxyAutoProbeStatus, ProxyProtocol, ProxyQualityCheckResult } from '@/types'
 import type { Column } from '@/components/common/types'
+import { parseProxyBatchInput } from '@/utils/proxyBatchInput'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
@@ -1005,7 +1154,8 @@ const columns = computed<Column[]>(() => [
   { key: 'auth', label: t('admin.proxies.columns.auth'), sortable: false },
   { key: 'location', label: t('admin.proxies.columns.location'), sortable: false },
   { key: 'account_count', label: t('admin.proxies.columns.accounts'), sortable: true },
-  { key: 'latency', label: t('admin.proxies.columns.latency'), sortable: false },
+  { key: 'active_egress_account_count', label: t('admin.proxies.columns.activeEgressAccounts'), sortable: true },
+  { key: 'latency', label: t('admin.proxies.columns.latency'), sortable: true },
   { key: 'status', label: t('admin.proxies.columns.status'), sortable: true },
   { key: 'actions', label: t('admin.proxies.columns.actions'), sortable: false }
 ])
@@ -1061,10 +1211,45 @@ const pagination = reactive({
   total: 0,
   pages: 0
 })
-const sortState = reactive({
-  sort_by: 'id',
-  sort_order: 'desc' as 'asc' | 'desc'
-})
+const PROXY_SORT_STORAGE_KEY = 'admin-proxies-table-sort'
+type ProxySortOrder = 'asc' | 'desc'
+type ProxySortState = {
+  sort_by: string
+  sort_order: ProxySortOrder
+}
+const PROXY_SORTABLE_KEYS = new Set([
+  'name',
+  'protocol',
+  'account_count',
+  'active_egress_account_count',
+  'latency',
+  'status'
+])
+const loadInitialProxySortState = (): ProxySortState => {
+  const fallback: ProxySortState = { sort_by: 'id', sort_order: 'desc' }
+  try {
+    const raw = localStorage.getItem(PROXY_SORT_STORAGE_KEY)
+    if (!raw) return fallback
+    const parsed = JSON.parse(raw) as { key?: string; order?: string }
+    let key = typeof parsed.key === 'string' ? parsed.key : ''
+    if (key === 'latency_ms') {
+      key = 'latency'
+      localStorage.setItem(PROXY_SORT_STORAGE_KEY, JSON.stringify({
+        key,
+        order: parsed.order === 'asc' ? 'asc' : 'desc'
+      }))
+    }
+    if (!PROXY_SORTABLE_KEYS.has(key)) return fallback
+    return {
+      sort_by: key,
+      sort_order: parsed.order === 'asc' ? 'asc' : 'desc'
+    }
+  } catch {
+    return fallback
+  }
+}
+const sortState = reactive<ProxySortState>(loadInitialProxySortState())
+const toProxyApiSortBy = (key: string) => key === 'latency' ? 'latency_ms' : key
 
 const showCreateModal = ref(false)
 const createPasswordVisible = ref(false)
@@ -1073,6 +1258,7 @@ const editPasswordVisible = ref(false)
 const editPasswordDirty = ref(false)
 const showImportData = ref(false)
 const showAutoProbeDialog = ref(false)
+const showClashSubscriptionModal = ref(false)
 const showDeleteDialog = ref(false)
 const showBatchDeleteDialog = ref(false)
 const showExportDataDialog = ref(false)
@@ -1082,6 +1268,7 @@ const exportingData = ref(false)
 const autoProbeSaving = ref(false)
 const testingProxyIds = ref<Set<number>>(new Set())
 const qualityCheckingProxyIds = ref<Set<number>>(new Set())
+const refreshingSubscriptionIds = ref<Set<number>>(new Set())
 const batchTesting = ref(false)
 const batchQualityChecking = ref(false)
 const proxyTableRef = ref<HTMLElement | null>(null)
@@ -1119,7 +1306,9 @@ const autoProbePolling = ref(false)
 const autoProbeForm = reactive<ProxyAutoProbeConfig>({
   enabled: false,
   default_interval_sec: 60,
-  retry_interval_sec: 5
+  retry_interval_sec: 5,
+  sticky_enabled: true,
+  sticky_ttl_seconds: 604800
 })
 
 // Batch import state
@@ -1158,9 +1347,22 @@ const editForm = reactive({
   status: 'active' as 'active' | 'inactive'
 })
 
+const clashSubscriptionForm = reactive({
+  name: '',
+  subscription_url: '',
+  refresh_interval_sec: 3600,
+  test_url: ''
+})
+
 let abortController: AbortController | null = null
 let autoProbePollTimer: ReturnType<typeof setInterval> | null = null
 let autoProbePollInFlight = false
+let autoProbeLastCompletionSeq = 0
+let activeUsagePollTimer: ReturnType<typeof setInterval> | null = null
+let activeUsagePollInFlight = false
+const managedRuntimePollTimers = new Map<number, ReturnType<typeof setInterval>>()
+const managedRuntimePollMaxAttempts = 15
+const managedRuntimePollIntervalMs = 1000
 
 const isAbortError = (error: unknown) => {
   if (!error || typeof error !== 'object') return false
@@ -1186,7 +1388,7 @@ const buildProxyQueryFilters = () => ({
   protocol: filters.protocol || undefined,
   status: (filters.status || undefined) as 'active' | 'inactive' | undefined,
   search: searchQuery.value || undefined,
-  sort_by: sortState.sort_by,
+  sort_by: toProxyApiSortBy(sortState.sort_by),
   sort_order: sortState.sort_order
 })
 
@@ -1210,6 +1412,7 @@ const loadProxies = async () => {
     proxies.value = response.items
     pagination.total = response.total
     pagination.pages = response.pages
+    refreshActiveUsageCounts()
   } catch (error) {
     if (isAbortError(error)) {
       return
@@ -1221,6 +1424,85 @@ const loadProxies = async () => {
       loading.value = false
       abortController = null
     }
+  }
+}
+
+const assignProxyField = <K extends keyof Proxy>(target: Proxy, key: K, value: Proxy[K]) => {
+  if (target[key] !== value) {
+    target[key] = value
+  }
+}
+
+const mergeProxySnapshot = (snapshot: Proxy) => {
+  const target = proxies.value.find((proxy) => proxy.id === snapshot.id)
+  if (!target) return
+
+  assignProxyField(target, 'active_egress_account_count', snapshot.active_egress_account_count)
+  assignProxyField(target, 'latency_ms', snapshot.latency_ms)
+  assignProxyField(target, 'latency_status', snapshot.latency_status)
+  assignProxyField(target, 'latency_message', snapshot.latency_message)
+  assignProxyField(target, 'ip_address', snapshot.ip_address)
+  assignProxyField(target, 'country', snapshot.country)
+  assignProxyField(target, 'country_code', snapshot.country_code)
+  assignProxyField(target, 'region', snapshot.region)
+  assignProxyField(target, 'city', snapshot.city)
+  assignProxyField(target, 'quality_status', snapshot.quality_status)
+  assignProxyField(target, 'quality_score', snapshot.quality_score)
+  assignProxyField(target, 'quality_grade', snapshot.quality_grade)
+  assignProxyField(target, 'quality_summary', snapshot.quality_summary)
+  assignProxyField(target, 'quality_checked', snapshot.quality_checked)
+  assignProxyField(target, 'runtime_status', snapshot.runtime_status)
+}
+
+const refreshProxySnapshots = async (ids: number[]) => {
+  const visibleIds = new Set(proxies.value.map((proxy) => proxy.id))
+  const uniqueIds = [...new Set(ids)].filter((id) => visibleIds.has(id))
+  if (uniqueIds.length === 0) return
+
+  try {
+    const snapshots = await adminAPI.proxies.getSnapshots(uniqueIds)
+    for (const snapshot of snapshots) {
+      mergeProxySnapshot(snapshot)
+    }
+  } catch (error) {
+    console.debug('Failed to refresh proxy snapshots:', error)
+  }
+}
+
+const refreshRowsFromAutoProbeStatus = async (status: ProxyAutoProbeStatus) => {
+  const completions = status.recent_completions ?? []
+  if (completions.length === 0) return
+
+  const nextSeq = completions.reduce((max, item) => Math.max(max, item.seq), autoProbeLastCompletionSeq)
+  const changedIds = completions
+    .filter((item) => item.seq > autoProbeLastCompletionSeq)
+    .map((item) => item.proxy_id)
+
+  autoProbeLastCompletionSeq = nextSeq
+  await refreshProxySnapshots(changedIds)
+}
+
+const refreshActiveUsageCounts = async () => {
+  if (activeUsagePollInFlight || proxies.value.length === 0) {
+    return
+  }
+  const ids = proxies.value.map((proxy) => proxy.id).filter((id) => Number.isFinite(id) && id > 0)
+  if (ids.length === 0) {
+    return
+  }
+  activeUsagePollInFlight = true
+  try {
+    const counts = await adminAPI.proxies.getActiveUsage(ids)
+    for (const proxy of proxies.value) {
+      const next = counts[String(proxy.id)] ?? 0
+      if (proxy.active_egress_account_count !== next) {
+        proxy.active_egress_account_count = next
+      }
+    }
+  } catch (error) {
+    console.debug('Failed to refresh proxy active usage counts:', error)
+  } finally {
+    activeUsagePollInFlight = false
   }
 }
 
@@ -1240,10 +1522,7 @@ const syncAutoProbePolling = () => {
   autoProbePollTimer = setInterval(() => {
     if (autoProbePollInFlight) return
     autoProbePollInFlight = true
-    Promise.all([
-      loadAutoProbeConfig(false),
-      loadProxies()
-    ]).finally(() => {
+    loadAutoProbeConfig(false).finally(() => {
       autoProbePollInFlight = false
     })
   }, 5000)
@@ -1253,6 +1532,7 @@ const loadAutoProbeConfig = async (notifyOnError: boolean = true) => {
   try {
     const status = await adminAPI.proxies.getAutoProbeConfig()
     autoProbeStatus.value = status
+    await refreshRowsFromAutoProbeStatus(status)
     syncAutoProbePolling()
   } catch (error: any) {
     if (notifyOnError) {
@@ -1271,6 +1551,8 @@ const openAutoProbeDialog = async () => {
     autoProbeForm.enabled = status.enabled
     autoProbeForm.default_interval_sec = status.default_interval_sec
     autoProbeForm.retry_interval_sec = status.retry_interval_sec
+    autoProbeForm.sticky_enabled = status.sticky_enabled ?? true
+    autoProbeForm.sticky_ttl_seconds = status.sticky_ttl_seconds || 604800
   }
   showAutoProbeDialog.value = true
 }
@@ -1282,6 +1564,7 @@ const closeAutoProbeDialog = () => {
 const saveAutoProbeConfig = async () => {
   const defaultInterval = Number(autoProbeForm.default_interval_sec)
   const retryInterval = Number(autoProbeForm.retry_interval_sec)
+  const stickyTTL = Number(autoProbeForm.sticky_ttl_seconds)
   if (!Number.isFinite(defaultInterval) || defaultInterval < 1) {
     appStore.showError(t('admin.proxies.autoProbe.invalidDefaultInterval'))
     return
@@ -1290,13 +1573,19 @@ const saveAutoProbeConfig = async () => {
     appStore.showError(t('admin.proxies.autoProbe.invalidRetryInterval'))
     return
   }
+  if (!Number.isFinite(stickyTTL) || stickyTTL < 1) {
+    appStore.showError(t('admin.proxies.autoProbe.invalidStickyTTL'))
+    return
+  }
 
   autoProbeSaving.value = true
   try {
     const status = await adminAPI.proxies.updateAutoProbeConfig({
       enabled: autoProbeForm.enabled,
       default_interval_sec: Math.trunc(defaultInterval),
-      retry_interval_sec: Math.trunc(retryInterval)
+      retry_interval_sec: Math.trunc(retryInterval),
+      sticky_enabled: autoProbeForm.sticky_enabled,
+      sticky_ttl_seconds: Math.trunc(stickyTTL)
     })
     autoProbeStatus.value = status
     syncAutoProbePolling()
@@ -1331,7 +1620,7 @@ const handlePageSizeChange = (pageSize: number) => {
   loadProxies()
 }
 
-const handleSort = (key: string, order: 'asc' | 'desc') => {
+const handleSort = (key: string, order: ProxySortOrder) => {
   sortState.sort_by = key
   sortState.sort_order = order
   pagination.page = 1
@@ -1356,73 +1645,147 @@ const closeCreateModal = () => {
   batchParseResult.proxies = []
 }
 
+const isManagedProxy = (proxy?: Proxy | null) => {
+  return proxy?.source_type === 'mihomo_subscription'
+}
+
+const runtimeStatusText = (proxy: Proxy) => {
+  const status = proxy.runtime_status
+  if (!status) return t('admin.proxies.clash.runtimeUnknown')
+  const label = t(`admin.proxies.clash.runtime.${status.status}`, status.status)
+  if (status.local_url) {
+    return `${label} ${status.local_url}`
+  }
+  if (status.last_error) {
+    return `${label}: ${status.last_error}`
+  }
+  return label
+}
+
+const applyManagedRuntimeStatus = (subscriptionID: number, status: ManagedProxyRuntimeStatus) => {
+  for (const proxy of proxies.value) {
+    if (proxy.subscription_id === subscriptionID) {
+      proxy.runtime_status = status
+    }
+  }
+}
+
+const stopManagedRuntimePolling = (subscriptionID: number) => {
+  const timer = managedRuntimePollTimers.get(subscriptionID)
+  if (!timer) return
+  clearInterval(timer)
+  managedRuntimePollTimers.delete(subscriptionID)
+}
+
+const pollManagedRuntimeStatus = (subscriptionID?: number | null) => {
+  if (!subscriptionID) return
+  stopManagedRuntimePolling(subscriptionID)
+  let attempts = 0
+  let inFlight = false
+  const poll = async () => {
+    if (inFlight) return
+    inFlight = true
+    attempts += 1
+    try {
+      const status = await adminAPI.proxies.getClashSubscriptionStatus(subscriptionID)
+      applyManagedRuntimeStatus(subscriptionID, status)
+      if (['running', 'error', 'disabled'].includes(status.status) || attempts >= managedRuntimePollMaxAttempts) {
+        stopManagedRuntimePolling(subscriptionID)
+        if (attempts >= managedRuntimePollMaxAttempts && status.status !== 'running') {
+          void loadProxies()
+        }
+      }
+    } catch (error) {
+      console.debug('Failed to poll managed proxy runtime status:', error)
+      if (attempts >= managedRuntimePollMaxAttempts) {
+        stopManagedRuntimePolling(subscriptionID)
+      }
+    } finally {
+      inFlight = false
+    }
+  }
+  const timer = setInterval(poll, managedRuntimePollIntervalMs)
+  managedRuntimePollTimers.set(subscriptionID, timer)
+  void poll()
+}
+
+const openClashSubscriptionModal = () => {
+  clashSubscriptionForm.name = ''
+  clashSubscriptionForm.subscription_url = ''
+  clashSubscriptionForm.refresh_interval_sec = 3600
+  clashSubscriptionForm.test_url = ''
+  showClashSubscriptionModal.value = true
+}
+
+const closeClashSubscriptionModal = () => {
+  if (submitting.value) return
+  showClashSubscriptionModal.value = false
+}
+
+const validateHTTPURL = (value: string) => {
+  try {
+    const parsed = new URL(value)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+const handleCreateClashSubscription = async () => {
+  const name = clashSubscriptionForm.name.trim()
+  const subscriptionURL = clashSubscriptionForm.subscription_url.trim()
+  const testURL = clashSubscriptionForm.test_url.trim()
+  const refreshInterval = Number(clashSubscriptionForm.refresh_interval_sec || 3600)
+  if (!name) {
+    appStore.showError(t('admin.proxies.nameRequired'))
+    return
+  }
+  if (!validateHTTPURL(subscriptionURL)) {
+    appStore.showError(t('admin.proxies.clash.invalidSubscriptionUrl'))
+    return
+  }
+  if (testURL && !validateHTTPURL(testURL)) {
+    appStore.showError(t('admin.proxies.clash.invalidTestUrl'))
+    return
+  }
+  if (!Number.isFinite(refreshInterval) || refreshInterval < 60) {
+    appStore.showError(t('admin.proxies.clash.invalidRefreshInterval'))
+    return
+  }
+
+  submitting.value = true
+  try {
+    const result = await adminAPI.proxies.createClashSubscription({
+      name,
+      subscription_url: subscriptionURL,
+      refresh_interval_sec: Math.trunc(refreshInterval),
+      test_url: testURL || undefined
+    })
+    appStore.showSuccess(t('admin.proxies.clash.created'))
+    showClashSubscriptionModal.value = false
+    await loadProxies()
+    const subscriptionID = result.subscription?.id || result.proxy?.subscription_id || result.proxies?.[0]?.subscription_id
+    pollManagedRuntimeStatus(subscriptionID)
+  } catch (error: any) {
+    appStore.showError(error.response?.data?.detail || t('admin.proxies.clash.createFailed'))
+    console.error('Error creating clash subscription:', error)
+  } finally {
+    submitting.value = false
+  }
+}
+
 const handleDataImported = () => {
   showImportData.value = false
   loadProxies()
 }
 
-// Parse proxy URL: protocol://user:pass@host:port or protocol://host:port
-const parseProxyUrl = (
-  line: string
-): {
-  protocol: ProxyProtocol
-  host: string
-  port: number
-  username: string
-  password: string
-} | null => {
-  const trimmed = line.trim()
-  if (!trimmed) return null
-
-  // Regex to parse proxy URL (supports http, https, socks5, socks5h)
-  const regex = /^(https?|socks5h?):\/\/(?:([^:@]+):([^@]+)@)?([^:]+):(\d+)$/i
-  const match = trimmed.match(regex)
-
-  if (!match) return null
-
-  const [, protocol, username, password, host, port] = match
-  const portNum = parseInt(port, 10)
-
-  if (portNum < 1 || portNum > 65535) return null
-
-  return {
-    protocol: protocol.toLowerCase() as ProxyProtocol,
-    host: host.trim(),
-    port: portNum,
-    username: username?.trim() || '',
-    password: password?.trim() || ''
-  }
-}
-
 const parseBatchInput = () => {
-  const lines = batchInput.value.split('\n').filter((l) => l.trim())
-  const seen = new Set<string>()
-  const proxies: typeof batchParseResult.proxies = []
-  let invalid = 0
-  let duplicate = 0
-
-  for (const line of lines) {
-    const parsed = parseProxyUrl(line)
-    if (!parsed) {
-      invalid++
-      continue
-    }
-
-    // Check for duplicates (same host:port:username:password)
-    const key = `${parsed.host}:${parsed.port}:${parsed.username}:${parsed.password}`
-    if (seen.has(key)) {
-      duplicate++
-      continue
-    }
-    seen.add(key)
-    proxies.push(parsed)
-  }
-
-  batchParseResult.total = lines.length
-  batchParseResult.valid = proxies.length
-  batchParseResult.invalid = invalid
-  batchParseResult.duplicate = duplicate
-  batchParseResult.proxies = proxies
+  const result = parseProxyBatchInput(batchInput.value)
+  batchParseResult.total = result.total
+  batchParseResult.valid = result.valid
+  batchParseResult.invalid = result.invalid
+  batchParseResult.duplicate = result.duplicate
+  batchParseResult.proxies = result.proxies
 }
 
 const handleBatchCreate = async () => {
@@ -1509,6 +1872,24 @@ const handleUpdateProxy = async () => {
   if (!editingProxy.value) return
   if (!editForm.name.trim()) {
     appStore.showError(t('admin.proxies.nameRequired'))
+    return
+  }
+  if (isManagedProxy(editingProxy.value)) {
+    submitting.value = true
+    try {
+      await adminAPI.proxies.update(editingProxy.value.id, {
+        name: editForm.name.trim(),
+        status: editForm.status
+      })
+      appStore.showSuccess(t('admin.proxies.proxyUpdated'))
+      closeEditModal()
+      loadProxies()
+    } catch (error: any) {
+      appStore.showError(error.response?.data?.detail || t('admin.proxies.failedToUpdate'))
+      console.error('Error updating managed proxy:', error)
+    } finally {
+      submitting.value = false
+    }
     return
   }
   if (!editForm.host.trim()) {
@@ -1694,6 +2075,27 @@ const handleQualityCheck = async (proxy: Proxy) => {
   }
 }
 
+const handleRefreshManagedProxy = async (proxy: Proxy) => {
+  const subscriptionID = proxy.subscription_id
+  if (!subscriptionID) return
+  refreshingSubscriptionIds.value = new Set([...refreshingSubscriptionIds.value, subscriptionID])
+  try {
+    await adminAPI.proxies.refreshClashSubscription(subscriptionID)
+    const status = await adminAPI.proxies.getClashSubscriptionStatus(subscriptionID)
+    applyManagedRuntimeStatus(subscriptionID, status)
+    appStore.showSuccess(t('admin.proxies.clash.refreshRequested'))
+    await loadProxies()
+    pollManagedRuntimeStatus(subscriptionID)
+  } catch (error: any) {
+    appStore.showError(error.response?.data?.detail || t('admin.proxies.clash.refreshFailed'))
+    console.error('Error refreshing clash subscription:', error)
+  } finally {
+    const next = new Set(refreshingSubscriptionIds.value)
+    next.delete(subscriptionID)
+    refreshingSubscriptionIds.value = next
+  }
+}
+
 const runBatchProxyQualityChecks = async (ids: number[]) => {
   if (ids.length === 0) return { total: 0, healthy: 0, warn: 0, challenge: 0, failed: 0 }
 
@@ -1817,7 +2219,7 @@ const fetchAllProxiesForBatch = async (): Promise<Proxy[]> => {
         protocol: filters.protocol || undefined,
         status: filters.status as any,
         search: searchQuery.value || undefined,
-        sort_by: sortState.sort_by,
+        sort_by: toProxyApiSortBy(sortState.sort_by),
         sort_order: sortState.sort_order
       }
     )
@@ -2039,10 +2441,28 @@ function buildAuthPart(row: any): string {
 }
 
 function buildProxyUrl(row: any): string {
+  if (isManagedProxy(row)) {
+    const localURL = row.runtime_status?.local_url || ''
+    if (!localURL) return ''
+    if (!row.username && !row.password) return localURL
+    try {
+      const parsed = new URL(localURL)
+      if (row.username) parsed.username = row.username
+      if (row.password) parsed.password = row.password
+      return parsed.toString()
+    } catch {
+      return localURL
+    }
+  }
   return `${row.protocol}://${buildAuthPart(row)}${row.host}:${row.port}`
 }
 
 function getCopyFormats(row: any) {
+  if (isManagedProxy(row)) {
+    const localURL = row.runtime_status?.local_url || ''
+    const nodeURL = buildProxyUrl(row)
+    return nodeURL ? [{ label: nodeURL, value: nodeURL }, ...(localURL && localURL !== nodeURL ? [{ label: localURL, value: localURL }] : [])] : []
+  }
   const hasAuth = row.username || row.password
   const fullUrl = buildProxyUrl(row)
   const formats = [
@@ -2057,7 +2477,12 @@ function getCopyFormats(row: any) {
 }
 
 function copyProxyUrl(row: any) {
-  copyToClipboard(buildProxyUrl(row), t('admin.proxies.urlCopied'))
+  const value = buildProxyUrl(row)
+  if (!value) {
+    appStore.showError(t('admin.proxies.clash.runtimeUnavailable'))
+    return
+  }
+  copyToClipboard(value, t('admin.proxies.urlCopied'))
   copyMenuProxyId.value = null
 }
 
@@ -2077,6 +2502,7 @@ function closeCopyMenu() {
 onMounted(() => {
   loadProxies()
   loadAutoProbeConfig(false)
+  activeUsagePollTimer = setInterval(refreshActiveUsageCounts, 5000)
   document.addEventListener('click', closeCopyMenu)
 })
 
@@ -2086,6 +2512,12 @@ onUnmounted(() => {
     clearInterval(autoProbePollTimer)
     autoProbePollTimer = null
   }
+  if (activeUsagePollTimer) {
+    clearInterval(activeUsagePollTimer)
+    activeUsagePollTimer = null
+  }
+  managedRuntimePollTimers.forEach((timer) => clearInterval(timer))
+  managedRuntimePollTimers.clear()
   abortController?.abort()
   document.removeEventListener('click', closeCopyMenu)
 })

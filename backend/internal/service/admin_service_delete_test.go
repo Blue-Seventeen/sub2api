@@ -242,10 +242,13 @@ func (s *groupRepoStub) UpdateSortOrders(ctx context.Context, updates []GroupSor
 }
 
 type proxyRepoStub struct {
-	deleteErr    error
-	countErr     error
-	accountCount int64
-	deletedIDs   []int64
+	proxy           *Proxy
+	deleteErr       error
+	countErr        error
+	accountCount    int64
+	accountCounts   map[int64]int64
+	countedProxyIDs []int64
+	deletedIDs      []int64
 }
 
 func (s *proxyRepoStub) Create(ctx context.Context, proxy *Proxy) error {
@@ -253,7 +256,10 @@ func (s *proxyRepoStub) Create(ctx context.Context, proxy *Proxy) error {
 }
 
 func (s *proxyRepoStub) GetByID(ctx context.Context, id int64) (*Proxy, error) {
-	panic("unexpected GetByID call")
+	if s.proxy != nil {
+		return s.proxy, nil
+	}
+	return &Proxy{ID: id, SourceType: ProxySourceManual}, nil
 }
 
 func (s *proxyRepoStub) ListByIDs(ctx context.Context, ids []int64) ([]Proxy, error) {
@@ -289,19 +295,78 @@ func (s *proxyRepoStub) ListWithFiltersAndAccountCount(ctx context.Context, para
 	panic("unexpected ListWithFiltersAndAccountCount call")
 }
 
-func (s *proxyRepoStub) ExistsByHostPortAuth(ctx context.Context, host string, port int, username, password string) (bool, error) {
-	panic("unexpected ExistsByHostPortAuth call")
+func (s *proxyRepoStub) ExistsByProtocolHostPortAuth(ctx context.Context, protocol, host string, port int, username, password string) (bool, error) {
+	panic("unexpected ExistsByProtocolHostPortAuth call")
 }
 
 func (s *proxyRepoStub) CountAccountsByProxyID(ctx context.Context, proxyID int64) (int64, error) {
+	s.countedProxyIDs = append(s.countedProxyIDs, proxyID)
 	if s.countErr != nil {
 		return 0, s.countErr
+	}
+	if s.accountCounts != nil {
+		return s.accountCounts[proxyID], nil
 	}
 	return s.accountCount, nil
 }
 
 func (s *proxyRepoStub) ListAccountSummariesByProxyID(ctx context.Context, proxyID int64) ([]ProxyAccountSummary, error) {
 	panic("unexpected ListAccountSummariesByProxyID call")
+}
+
+type proxySubscriptionRepoStub struct {
+	sub                 *ProxySubscription
+	getErr              error
+	deleteErr           error
+	listProxyIDs        []int64
+	deletedSubscription []int64
+}
+
+func (s *proxySubscriptionRepoStub) CreateWithNodes(ctx context.Context, sub *ProxySubscription, nodes []ProxySubscriptionNode) (*ProxySubscription, []Proxy, error) {
+	panic("unexpected CreateWithNodes call")
+}
+func (s *proxySubscriptionRepoStub) List(ctx context.Context) ([]ProxySubscription, error) {
+	panic("unexpected List call")
+}
+func (s *proxySubscriptionRepoStub) ListActive(ctx context.Context) ([]ProxySubscription, error) {
+	panic("unexpected ListActive call")
+}
+func (s *proxySubscriptionRepoStub) Get(ctx context.Context, id int64) (*ProxySubscription, error) {
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
+	if s.sub != nil {
+		return s.sub, nil
+	}
+	return &ProxySubscription{ID: id}, nil
+}
+func (s *proxySubscriptionRepoStub) GetByProxyID(ctx context.Context, proxyID int64) (*ProxySubscription, error) {
+	panic("unexpected GetByProxyID call")
+}
+func (s *proxySubscriptionRepoStub) Update(ctx context.Context, sub *ProxySubscription) error {
+	panic("unexpected Update call")
+}
+func (s *proxySubscriptionRepoStub) DeleteWithProxy(ctx context.Context, id int64) error {
+	s.deletedSubscription = append(s.deletedSubscription, id)
+	return s.deleteErr
+}
+func (s *proxySubscriptionRepoStub) IncrementRevision(ctx context.Context, id int64) (*ProxySubscription, error) {
+	panic("unexpected IncrementRevision call")
+}
+func (s *proxySubscriptionRepoStub) SyncNodes(ctx context.Context, subscriptionID int64, nodes []ProxySubscriptionNode) ([]Proxy, error) {
+	panic("unexpected SyncNodes call")
+}
+func (s *proxySubscriptionRepoStub) GetNodeByProxyID(ctx context.Context, proxyID int64) (*ProxySubscriptionNode, error) {
+	return nil, ErrProxySubscriptionNotFound
+}
+func (s *proxySubscriptionRepoStub) SetNodeStatusByProxyID(ctx context.Context, proxyID int64, status string) error {
+	panic("unexpected SetNodeStatusByProxyID call")
+}
+func (s *proxySubscriptionRepoStub) ListProxyIDsBySubscriptionID(ctx context.Context, subscriptionID int64) ([]int64, error) {
+	return append([]int64(nil), s.listProxyIDs...), nil
+}
+func (s *proxySubscriptionRepoStub) SetLastError(ctx context.Context, id int64, message string) error {
+	panic("unexpected SetLastError call")
 }
 
 type redeemRepoStub struct {
@@ -548,6 +613,36 @@ func TestAdminService_DeleteProxy_Error(t *testing.T) {
 
 	err := svc.DeleteProxy(context.Background(), 33)
 	require.ErrorIs(t, err, deleteErr)
+}
+
+func TestAdminService_DeleteProxySubscription_ChecksAllManagedProxyRows(t *testing.T) {
+	subRepo := &proxySubscriptionRepoStub{
+		sub:          &ProxySubscription{ID: 10},
+		listProxyIDs: []int64{101, 102},
+	}
+	proxyRepo := &proxyRepoStub{
+		accountCounts: map[int64]int64{102: 1},
+	}
+	svc := &adminServiceImpl{proxyRepo: proxyRepo, proxySubRepo: subRepo}
+
+	err := svc.DeleteProxySubscription(context.Background(), 10)
+	require.ErrorIs(t, err, ErrProxyInUse)
+	require.Equal(t, []int64{101, 102}, proxyRepo.countedProxyIDs)
+	require.Empty(t, subRepo.deletedSubscription)
+}
+
+func TestAdminService_DeleteProxySubscription_DeletesWhenAllRowsUnused(t *testing.T) {
+	subRepo := &proxySubscriptionRepoStub{
+		sub:          &ProxySubscription{ID: 10},
+		listProxyIDs: []int64{101, 102},
+	}
+	proxyRepo := &proxyRepoStub{}
+	svc := &adminServiceImpl{proxyRepo: proxyRepo, proxySubRepo: subRepo}
+
+	err := svc.DeleteProxySubscription(context.Background(), 10)
+	require.NoError(t, err)
+	require.Equal(t, []int64{101, 102}, proxyRepo.countedProxyIDs)
+	require.Equal(t, []int64{10}, subRepo.deletedSubscription)
 }
 
 func TestAdminService_DeleteRedeemCode_Success(t *testing.T) {

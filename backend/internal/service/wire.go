@@ -156,8 +156,9 @@ func ProvideProxyAutoProbeService(
 	proxyRepo ProxyRepository,
 	settingRepo SettingRepository,
 	proxyLatencyCache ProxyLatencyCache,
+	proxyStickyStore ProxyStickyStore,
 ) *ProxyAutoProbeService {
-	svc := NewProxyAutoProbeService(adminService, proxyRepo, settingRepo, proxyLatencyCache)
+	svc := NewProxyAutoProbeService(adminService, proxyRepo, settingRepo, proxyLatencyCache, proxyStickyStore)
 	SetDefaultProxyAutoProbeService(svc)
 	svc.Start()
 	return svc
@@ -568,6 +569,10 @@ var ProviderSet = wire.NewSet(
 	ProvideUserMessageQueueService,
 	NewContentModerationService,
 	NewUsageRecordWorkerPool,
+	NewProxyStatsWorkerPool,
+	NewProxyActiveUsageTracker,
+	ProvideManagedProxyRuntime,
+	wire.Bind(new(ManagedProxyResolver), new(*ManagedProxyRuntime)),
 	ProvideSchedulerSnapshotService,
 	NewIdentityService,
 	NewCRSSyncService,

@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -10,25 +11,31 @@ import (
 )
 
 type stubAdminService struct {
-	users                []service.User
-	apiKeys              []service.APIKey
-	groups               []service.Group
-	accounts             []service.Account
-	proxies              []service.Proxy
-	proxyCounts          []service.ProxyWithAccountCount
-	redeems              []service.RedeemCode
-	boundAuthIdentity    *service.AdminBindAuthIdentityInput
-	boundAuthIdentityFor int64
-	createdAccounts      []*service.CreateAccountInput
-	createdProxies       []*service.CreateProxyInput
-	updatedProxyIDs      []int64
-	updatedProxies       []*service.UpdateProxyInput
-	testedProxyIDs       []int64
-	createAccountErr     error
-	updateAccountErr     error
-	bulkUpdateAccountErr error
-	checkMixedErr        error
-	lastMixedCheck       struct {
+	users                       []service.User
+	apiKeys                     []service.APIKey
+	groups                      []service.Group
+	accounts                    []service.Account
+	proxies                     []service.Proxy
+	proxyCounts                 []service.ProxyWithAccountCount
+	proxySubscriptions          []service.ProxySubscription
+	redeems                     []service.RedeemCode
+	boundAuthIdentity           *service.AdminBindAuthIdentityInput
+	boundAuthIdentityFor        int64
+	createdAccounts             []*service.CreateAccountInput
+	createdProxies              []*service.CreateProxyInput
+	createdProxySubscriptions   []*service.CreateProxySubscriptionInput
+	updatedProxyIDs             []int64
+	updatedProxies              []*service.UpdateProxyInput
+	updatedProxySubscriptionIDs []int64
+	updatedProxySubscriptions   []*service.UpdateProxySubscriptionInput
+	testedProxyIDs              []int64
+	proxyExistsCalls            []proxyExistsCall
+	proxyExists                 map[string]bool
+	createAccountErr            error
+	updateAccountErr            error
+	bulkUpdateAccountErr        error
+	checkMixedErr               error
+	lastMixedCheck              struct {
 		accountID int64
 		platform  string
 		groupIDs  []int64
@@ -69,6 +76,14 @@ type stubAdminService struct {
 		calls     int
 	}
 	mu sync.Mutex
+}
+
+type proxyExistsCall struct {
+	protocol string
+	host     string
+	port     int
+	username string
+	password string
 }
 
 func newStubAdminService() *stubAdminService {
@@ -126,13 +141,14 @@ func newStubAdminService() *stubAdminService {
 		CreatedAt: now,
 	}
 	return &stubAdminService{
-		users:       []service.User{user},
-		apiKeys:     []service.APIKey{apiKey},
-		groups:      []service.Group{group},
-		accounts:    []service.Account{account},
-		proxies:     []service.Proxy{proxy},
-		proxyCounts: []service.ProxyWithAccountCount{{Proxy: proxy, AccountCount: 1}},
-		redeems:     []service.RedeemCode{redeem},
+		users:              []service.User{user},
+		apiKeys:            []service.APIKey{apiKey},
+		groups:             []service.Group{group},
+		accounts:           []service.Account{account},
+		proxies:            []service.Proxy{proxy},
+		proxyCounts:        []service.ProxyWithAccountCount{{Proxy: proxy, AccountCount: 1}},
+		proxySubscriptions: []service.ProxySubscription{},
+		redeems:            []service.RedeemCode{redeem},
 	}
 }
 
@@ -429,6 +445,23 @@ func (s *stubAdminService) GetProxy(ctx context.Context, id int64) (*service.Pro
 	return &proxy, nil
 }
 
+func (s *stubAdminService) GetProxySnapshots(ctx context.Context, ids []int64) ([]service.ProxyWithAccountCount, error) {
+	if len(ids) == 0 {
+		return []service.ProxyWithAccountCount{}, nil
+	}
+	allowed := make(map[int64]struct{}, len(ids))
+	for _, id := range ids {
+		allowed[id] = struct{}{}
+	}
+	out := make([]service.ProxyWithAccountCount, 0, len(ids))
+	for _, proxy := range s.proxyCounts {
+		if _, ok := allowed[proxy.ID]; ok {
+			out = append(out, proxy)
+		}
+	}
+	return out, nil
+}
+
 func (s *stubAdminService) GetProxiesByIDs(ctx context.Context, ids []int64) ([]service.Proxy, error) {
 	if len(ids) == 0 {
 		return []service.Proxy{}, nil
@@ -476,8 +509,23 @@ func (s *stubAdminService) GetProxyAccounts(ctx context.Context, proxyID int64) 
 	return []service.ProxyAccountSummary{{ID: 1, Name: "account"}}, nil
 }
 
-func (s *stubAdminService) CheckProxyExists(ctx context.Context, host string, port int, username, password string) (bool, error) {
-	return false, nil
+func (s *stubAdminService) CheckProxyExists(ctx context.Context, protocol, host string, port int, username, password string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	call := proxyExistsCall{protocol: protocol, host: host, port: port, username: username, password: password}
+	s.proxyExistsCalls = append(s.proxyExistsCalls, call)
+	if s.proxyExists == nil {
+		return false, nil
+	}
+	return s.proxyExists[proxyExistsKey(call)], nil
+}
+
+func proxyExistsKey(call proxyExistsCall) string {
+	return strings.Join([]string{call.protocol, call.host, strconv.Itoa(call.port), call.username, call.password}, "|")
+}
+
+func (s *stubAdminService) GetProxyStats(ctx context.Context, proxyID int64) (*service.ProxyStats, error) {
+	return &service.ProxyStats{}, nil
 }
 
 func (s *stubAdminService) TestProxy(ctx context.Context, id int64) (*service.ProxyTestResult, error) {
@@ -504,6 +552,85 @@ func (s *stubAdminService) CheckProxyQuality(ctx context.Context, id int64) (*se
 			{Target: "anthropic", Status: "pass", HTTPStatus: 401},
 			{Target: "gemini", Status: "pass", HTTPStatus: 200},
 		},
+	}, nil
+}
+
+func (s *stubAdminService) CreateProxySubscription(ctx context.Context, input *service.CreateProxySubscriptionInput) (*service.ProxySubscription, []service.Proxy, error) {
+	s.mu.Lock()
+	s.createdProxySubscriptions = append(s.createdProxySubscriptions, input)
+	s.mu.Unlock()
+	subID := int64(600)
+	proxyID := int64(601)
+	sub := &service.ProxySubscription{
+		ID:                 subID,
+		Name:               input.Name,
+		SubscriptionURL:    input.SubscriptionURL,
+		Status:             service.StatusActive,
+		RefreshIntervalSec: input.RefreshIntervalSec,
+		TestURL:            input.TestURL,
+		Revision:           1,
+		ProxyID:            &proxyID,
+		CreatedAt:          time.Now(),
+		UpdatedAt:          time.Now(),
+	}
+	proxy := service.Proxy{
+		ID:             proxyID,
+		Name:           input.Name,
+		Protocol:       "socks5h",
+		Host:           "managed.local",
+		Port:           1,
+		Status:         service.StatusActive,
+		SourceType:     service.ProxySourceMihomoSubscription,
+		SubscriptionID: &subID,
+	}
+	return sub, []service.Proxy{proxy}, nil
+}
+
+func (s *stubAdminService) ListProxySubscriptions(ctx context.Context) ([]service.ProxySubscription, error) {
+	return s.proxySubscriptions, nil
+}
+
+func (s *stubAdminService) GetProxySubscription(ctx context.Context, id int64) (*service.ProxySubscription, error) {
+	for i := range s.proxySubscriptions {
+		if s.proxySubscriptions[i].ID == id {
+			return &s.proxySubscriptions[i], nil
+		}
+	}
+	return &service.ProxySubscription{ID: id, Name: "subscription", Status: service.StatusActive}, nil
+}
+
+func (s *stubAdminService) UpdateProxySubscription(ctx context.Context, id int64, input *service.UpdateProxySubscriptionInput) (*service.ProxySubscription, error) {
+	s.mu.Lock()
+	s.updatedProxySubscriptionIDs = append(s.updatedProxySubscriptionIDs, id)
+	s.updatedProxySubscriptions = append(s.updatedProxySubscriptions, input)
+	s.mu.Unlock()
+	return &service.ProxySubscription{
+		ID:                 id,
+		Name:               input.Name,
+		SubscriptionURL:    input.SubscriptionURL,
+		Status:             input.Status,
+		RefreshIntervalSec: input.RefreshIntervalSec,
+		TestURL:            input.TestURL,
+		Revision:           2,
+	}, nil
+}
+
+func (s *stubAdminService) DeleteProxySubscription(ctx context.Context, id int64) error {
+	return nil
+}
+
+func (s *stubAdminService) RefreshProxySubscription(ctx context.Context, id int64) (*service.ProxySubscription, error) {
+	return &service.ProxySubscription{ID: id, Name: "subscription", Status: service.StatusActive, Revision: 2}, nil
+}
+
+func (s *stubAdminService) GetProxySubscriptionRuntimeStatus(ctx context.Context, id int64) (*service.ManagedProxyRuntimeStatus, error) {
+	return &service.ManagedProxyRuntimeStatus{
+		Enabled:        true,
+		Status:         service.ManagedProxyRuntimeStatusRunning,
+		SubscriptionID: id,
+		LocalURL:       "socks5h://127.0.0.1:10000",
+		Port:           10000,
+		UpdatedAt:      time.Now(),
 	}, nil
 }
 

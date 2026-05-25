@@ -581,6 +581,7 @@ type GatewayService struct {
 	debugGatewayBodyUnsafeFull atomic.Bool
 	tlsFPProfileService        *TLSFingerprintProfileService
 	balanceNotifyService       *BalanceNotifyService
+	proxyStatsRepo             ProxyStatsRepository
 }
 
 // NewGatewayService creates a new GatewayService
@@ -611,6 +612,7 @@ func NewGatewayService(
 	channelService *ChannelService,
 	resolver *ModelPricingResolver,
 	balanceNotifyService *BalanceNotifyService,
+	proxyStatsRepo ProxyStatsRepository,
 ) *GatewayService {
 	userGroupRateTTL := resolveUserGroupRateCacheTTL(cfg)
 	modelsListTTL := resolveModelsListCacheTTL(cfg)
@@ -646,6 +648,7 @@ func NewGatewayService(
 		channelService:       channelService,
 		resolver:             resolver,
 		balanceNotifyService: balanceNotifyService,
+		proxyStatsRepo:       proxyStatsRepo,
 	}
 	svc.userGroupRateResolver = newUserGroupRateResolver(
 		userGroupRateRepo,
@@ -4420,6 +4423,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		// 发送请求
 		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
 		if err != nil {
+			ClearAutoSelectedProxyStickyOnTransportError(ctx, account, err)
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()
 			}
@@ -8433,6 +8437,12 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 			cost.TotalCost,
 		)
 	}
+
+	durationMs := int64(0)
+	if usageLog.DurationMs != nil {
+		durationMs = int64(*usageLog.DurationMs)
+	}
+	s.RecordProxyRequestStat(ctx, account, apiKey, true, durationMs, usageLog.RequestID, "service.gateway")
 
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
 		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.gateway")

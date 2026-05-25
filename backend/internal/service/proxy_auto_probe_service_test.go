@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"errors"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 
@@ -115,7 +117,7 @@ func (s *proxyAutoProbeRepoStub) ListActive(ctx context.Context) ([]Proxy, error
 func (s *proxyAutoProbeRepoStub) ListActiveWithAccountCount(ctx context.Context) ([]ProxyWithAccountCount, error) {
 	return nil, nil
 }
-func (s *proxyAutoProbeRepoStub) ExistsByHostPortAuth(ctx context.Context, host string, port int, username, password string) (bool, error) {
+func (s *proxyAutoProbeRepoStub) ExistsByProtocolHostPortAuth(ctx context.Context, protocol, host string, port int, username, password string) (bool, error) {
 	return false, nil
 }
 func (s *proxyAutoProbeRepoStub) CountAccountsByProxyID(ctx context.Context, proxyID int64) (int64, error) {
@@ -147,6 +149,59 @@ func (s *proxyAutoProbeLatencyCacheStub) SetProxyLatency(ctx context.Context, pr
 	return nil
 }
 
+type proxyStickyStoreStub struct {
+	mu     sync.Mutex
+	items  map[int64]int64
+	getErr error
+}
+
+func (s *proxyStickyStoreStub) Get(ctx context.Context, accountID int64) (int64, bool, error) {
+	if s.getErr != nil {
+		return 0, false, s.getErr
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.items == nil {
+		return 0, false, nil
+	}
+	proxyID, ok := s.items[accountID]
+	return proxyID, ok, nil
+}
+
+func (s *proxyStickyStoreStub) Set(ctx context.Context, accountID, proxyID int64, ttl time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.items == nil {
+		s.items = map[int64]int64{}
+	}
+	s.items[accountID] = proxyID
+	return nil
+}
+
+func (s *proxyStickyStoreStub) Refresh(ctx context.Context, accountID int64, ttl time.Duration) error {
+	return nil
+}
+
+func (s *proxyStickyStoreStub) DeleteIfMatch(ctx context.Context, accountID, proxyID int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.items != nil && s.items[accountID] == proxyID {
+		delete(s.items, accountID)
+	}
+	return nil
+}
+
+func seedProxyAutoProbeSnapshots(svc *ProxyAutoProbeService, proxies ...Proxy) {
+	svc.mu.Lock()
+	defer svc.mu.Unlock()
+	if svc.proxySnapshots == nil {
+		svc.proxySnapshots = map[int64]Proxy{}
+	}
+	for _, proxy := range proxies {
+		svc.proxySnapshots[proxy.ID] = proxy
+	}
+}
+
 func TestProxyAutoProbeServiceUpdateConfigRejectsInvalidIntervals(t *testing.T) {
 	svc := NewProxyAutoProbeService(nil, &proxyAutoProbeRepoStub{}, &proxyAutoProbeSettingRepoStub{}, nil)
 
@@ -165,20 +220,38 @@ func TestProxyAutoProbeServiceUpdateConfigRejectsInvalidIntervals(t *testing.T) 
 	require.Error(t, err)
 }
 
+func TestProxyAutoProbeServiceLoadConfigDefaultsStickyForOldConfig(t *testing.T) {
+	settingRepo := &proxyAutoProbeSettingRepoStub{values: map[string]string{
+		SettingKeyProxyAutoProbeConfig: `{"enabled":true,"default_interval_sec":60,"retry_interval_sec":5}`,
+	}}
+	svc := NewProxyAutoProbeService(nil, &proxyAutoProbeRepoStub{}, settingRepo, nil)
+
+	cfg, err := svc.loadConfig(context.Background())
+
+	require.NoError(t, err)
+	require.True(t, cfg.StickyEnabled)
+	require.Equal(t, defaultProxyStickyTTLSeconds, cfg.StickyTTLSeconds)
+}
+
 func TestProxyAutoProbeServiceInitializeEntriesUsesCachedQueues(t *testing.T) {
 	healthyLatency := int64(30)
+	warnLatency := int64(45)
 	failedLatency := int64(80)
 	repo := &proxyAutoProbeRepoStub{
 		proxies: []Proxy{
 			{ID: 1, Name: "p1"},
 			{ID: 2, Name: "p2"},
 			{ID: 3, Name: "p3"},
+			{ID: 4, Name: "p4"},
+			{ID: 5, Name: "p5"},
 		},
 	}
 	cache := &proxyAutoProbeLatencyCacheStub{
 		items: map[int64]*ProxyLatencyInfo{
 			1: {Success: true, QualityStatus: "healthy", LatencyMs: &healthyLatency},
 			2: {Success: false, LatencyMs: &failedLatency},
+			4: {Success: true, QualityStatus: "warn", LatencyMs: &warnLatency},
+			5: {Success: false, QualityStatus: "healthy"},
 		},
 	}
 	svc := NewProxyAutoProbeService(nil, repo, &proxyAutoProbeSettingRepoStub{}, cache)
@@ -187,14 +260,20 @@ func TestProxyAutoProbeServiceInitializeEntriesUsesCachedQueues(t *testing.T) {
 	now := time.Now().UTC()
 	require.NoError(t, svc.initializeEntries(context.Background(), now))
 
-	require.Len(t, svc.entries, 3)
+	require.Len(t, svc.entries, 5)
 	require.Equal(t, ProxyAutoProbeQueueSuccess, svc.entries[1].Queue)
 	require.Equal(t, ProxyAutoProbeQueueFailed, svc.entries[2].Queue)
 	require.Equal(t, ProxyAutoProbeQueueSuccess, svc.entries[3].Queue)
+	require.Equal(t, ProxyAutoProbeQueueSuccess, svc.entries[4].Queue)
+	require.Equal(t, ProxyAutoProbeQueueFailed, svc.entries[5].Queue)
 	require.Equal(t, now.Add(60*time.Second), svc.entries[1].NextDueAt)
 	require.Equal(t, now.Add(5*time.Second), svc.entries[2].NextDueAt)
+	require.Equal(t, now.Add(60*time.Second), svc.entries[4].NextDueAt)
+	require.Equal(t, now.Add(5*time.Second), svc.entries[5].NextDueAt)
 	require.NotNil(t, svc.entries[1].LastLatencyMs)
 	require.Equal(t, healthyLatency, *svc.entries[1].LastLatencyMs)
+	require.NotNil(t, svc.entries[4].LastLatencyMs)
+	require.Equal(t, warnLatency, *svc.entries[4].LastLatencyMs)
 }
 
 func TestProxyAutoProbeEntryLessPrefersFailedThenSuccessLatency(t *testing.T) {
@@ -226,6 +305,12 @@ func TestProxyAutoProbeServiceFinishProbeTransitionsQueue(t *testing.T) {
 	require.Nil(t, svc.currentProxyID)
 	require.Equal(t, ProxyAutoProbeQueueFailed, svc.entries[7].Queue)
 	require.Equal(t, finishedAt.Add(5*time.Second), svc.entries[7].NextDueAt)
+	status := svc.GetStatus()
+	require.Len(t, status.RecentCompletions, 1)
+	require.Equal(t, int64(1), status.RecentCompletions[0].Seq)
+	require.Equal(t, int64(7), status.RecentCompletions[0].ProxyID)
+	require.False(t, status.RecentCompletions[0].Success)
+	require.Equal(t, "failed", status.RecentCompletions[0].QualityStatus)
 
 	latency := int64(18)
 	svc.currentProxyID = ptrProxyInt64(7)
@@ -234,6 +319,182 @@ func TestProxyAutoProbeServiceFinishProbeTransitionsQueue(t *testing.T) {
 	require.Equal(t, finishedAt.Add(60*time.Second), svc.entries[7].NextDueAt)
 	require.NotNil(t, svc.entries[7].LastLatencyMs)
 	require.Equal(t, latency, *svc.entries[7].LastLatencyMs)
+	status = svc.GetStatus()
+	require.Len(t, status.RecentCompletions, 2)
+	require.Equal(t, int64(2), status.RecentCompletions[1].Seq)
+	require.Equal(t, int64(7), status.RecentCompletions[1].ProxyID)
+	require.True(t, status.RecentCompletions[1].Success)
+	require.Equal(t, "healthy", status.RecentCompletions[1].QualityStatus)
+}
+
+func TestProxyAutoProbeStickyKeepsAccountOnSameProxyWhenFasterProxyAppears(t *testing.T) {
+	latency10 := int64(10)
+	latency50 := int64(50)
+	store := &proxyStickyStoreStub{}
+	repo := &proxyAutoProbeRepoStub{proxies: []Proxy{
+		{ID: 1, Name: "p1", Status: StatusActive},
+		{ID: 2, Name: "p2", Status: StatusActive},
+	}}
+	svc := NewProxyAutoProbeService(nil, repo, &proxyAutoProbeSettingRepoStub{}, nil, store)
+	defer svc.Stop()
+	svc.config = ProxyAutoProbeConfig{Enabled: true, DefaultIntervalSec: 60, RetryIntervalSec: 5, StickyEnabled: true, StickyTTLSeconds: 60}
+	svc.entries[1] = &proxyAutoProbeEntry{ProxyID: 1, Queue: ProxyAutoProbeQueueSuccess, LastLatencyMs: &latency10}
+	svc.entries[2] = &proxyAutoProbeEntry{ProxyID: 2, Queue: ProxyAutoProbeQueueSuccess, LastLatencyMs: &latency50}
+	seedProxyAutoProbeSnapshots(svc, repo.proxies...)
+	account := &Account{ID: 100, Extra: map[string]any{"auto_select_proxy": true}}
+
+	first := svc.selectProxyForAccount(context.Background(), account)
+	require.NotNil(t, first)
+	require.Equal(t, int64(1), first.ID)
+
+	fasterLatency := int64(1)
+	svc.entries[2].LastLatencyMs = &fasterLatency
+	second := svc.selectProxyForAccount(context.Background(), account)
+	require.NotNil(t, second)
+	require.Equal(t, int64(1), second.ID)
+}
+
+func TestProxyAutoProbeStickySwitchesWhenStickyProxyFails(t *testing.T) {
+	latency10 := int64(10)
+	latency50 := int64(50)
+	store := &proxyStickyStoreStub{}
+	repo := &proxyAutoProbeRepoStub{proxies: []Proxy{
+		{ID: 1, Name: "p1", Status: StatusActive},
+		{ID: 2, Name: "p2", Status: StatusActive},
+	}}
+	svc := NewProxyAutoProbeService(nil, repo, &proxyAutoProbeSettingRepoStub{}, nil, store)
+	defer svc.Stop()
+	svc.config = ProxyAutoProbeConfig{Enabled: true, DefaultIntervalSec: 60, RetryIntervalSec: 5, StickyEnabled: true, StickyTTLSeconds: 60}
+	svc.entries[1] = &proxyAutoProbeEntry{ProxyID: 1, Queue: ProxyAutoProbeQueueSuccess, LastLatencyMs: &latency10}
+	svc.entries[2] = &proxyAutoProbeEntry{ProxyID: 2, Queue: ProxyAutoProbeQueueSuccess, LastLatencyMs: &latency50}
+	seedProxyAutoProbeSnapshots(svc, repo.proxies...)
+	account := &Account{ID: 100, Extra: map[string]any{"auto_select_proxy": true}}
+
+	first := svc.selectProxyForAccount(context.Background(), account)
+	require.NotNil(t, first)
+	require.Equal(t, int64(1), first.ID)
+
+	svc.finishProbe(1, proxyAutoProbeOutcome{Success: false, QualityStatus: "failed"}, time.Now())
+	second := svc.selectProxyForAccount(context.Background(), account)
+	require.NotNil(t, second)
+	require.Equal(t, int64(2), second.ID)
+}
+
+func TestProxyAutoProbeStickyStoreErrorFallsBackToCurrentBest(t *testing.T) {
+	latency10 := int64(10)
+	latency50 := int64(50)
+	store := &proxyStickyStoreStub{getErr: errors.New("redis unavailable")}
+	repo := &proxyAutoProbeRepoStub{proxies: []Proxy{
+		{ID: 1, Name: "p1", Status: StatusActive},
+		{ID: 2, Name: "p2", Status: StatusActive},
+	}}
+	svc := NewProxyAutoProbeService(nil, repo, &proxyAutoProbeSettingRepoStub{}, nil, store)
+	defer svc.Stop()
+	svc.config = ProxyAutoProbeConfig{Enabled: true, DefaultIntervalSec: 60, RetryIntervalSec: 5, StickyEnabled: true, StickyTTLSeconds: 60}
+	svc.entries[1] = &proxyAutoProbeEntry{ProxyID: 1, Queue: ProxyAutoProbeQueueSuccess, LastLatencyMs: &latency10}
+	svc.entries[2] = &proxyAutoProbeEntry{ProxyID: 2, Queue: ProxyAutoProbeQueueSuccess, LastLatencyMs: &latency50}
+	seedProxyAutoProbeSnapshots(svc, repo.proxies...)
+
+	account := &Account{ID: 100, Extra: map[string]any{"auto_select_proxy": true}}
+	selected := svc.selectProxyForAccount(context.Background(), account)
+	require.NotNil(t, selected)
+	require.Equal(t, int64(1), selected.ID)
+
+	fasterLatency := int64(1)
+	svc.entries[2].LastLatencyMs = &fasterLatency
+	selected = svc.selectProxyForAccount(context.Background(), account)
+	require.NotNil(t, selected)
+	require.Equal(t, int64(2), selected.ID)
+}
+
+func TestAccountEffectiveProxyIDPrefersRuntimeProxyForAutoSelectAccount(t *testing.T) {
+	staleProxyID := int64(1)
+	account := &Account{
+		ID:      100,
+		ProxyID: &staleProxyID,
+		Proxy:   &Proxy{ID: 2, Status: StatusActive},
+		Extra:   map[string]any{"auto_select_proxy": true},
+	}
+
+	effectiveProxyID := account.EffectiveProxyID()
+	require.NotNil(t, effectiveProxyID)
+	require.Equal(t, int64(2), *effectiveProxyID)
+
+	account.Extra = nil
+	effectiveProxyID = account.EffectiveProxyID()
+	require.NotNil(t, effectiveProxyID)
+	require.Equal(t, int64(1), *effectiveProxyID)
+}
+
+func TestClearAutoSelectedProxyStickyOnTransportErrorDeletesBindingForNextRequest(t *testing.T) {
+	latency10 := int64(10)
+	latency50 := int64(50)
+	store := &proxyStickyStoreStub{}
+	repo := &proxyAutoProbeRepoStub{proxies: []Proxy{
+		{ID: 1, Name: "p1", Status: StatusActive},
+		{ID: 2, Name: "p2", Status: StatusActive},
+	}}
+	svc := NewProxyAutoProbeService(nil, repo, &proxyAutoProbeSettingRepoStub{}, nil, store)
+	defer svc.Stop()
+	SetDefaultProxyAutoProbeService(svc)
+	svc.config = ProxyAutoProbeConfig{Enabled: true, DefaultIntervalSec: 60, RetryIntervalSec: 5, StickyEnabled: true, StickyTTLSeconds: 60}
+	svc.entries[1] = &proxyAutoProbeEntry{ProxyID: 1, Queue: ProxyAutoProbeQueueSuccess, LastLatencyMs: &latency10}
+	svc.entries[2] = &proxyAutoProbeEntry{ProxyID: 2, Queue: ProxyAutoProbeQueueSuccess, LastLatencyMs: &latency50}
+	seedProxyAutoProbeSnapshots(svc, repo.proxies...)
+	account := &Account{ID: 100, Extra: map[string]any{"auto_select_proxy": true}}
+
+	first := svc.selectProxyForAccount(context.Background(), account)
+	require.NotNil(t, first)
+	account.Proxy = first
+	ClearAutoSelectedProxyStickyOnTransportError(context.Background(), account, errors.New("dial tcp failed"))
+
+	second := svc.selectProxyForAccount(context.Background(), account)
+	require.NotNil(t, second)
+	require.Equal(t, int64(2), second.ID)
+}
+
+func TestClearAutoSelectedProxyStickyFallsBackToOnlyAvailableProxy(t *testing.T) {
+	latency10 := int64(10)
+	store := &proxyStickyStoreStub{}
+	repo := &proxyAutoProbeRepoStub{proxies: []Proxy{{ID: 1, Name: "p1", Status: StatusActive}}}
+	svc := NewProxyAutoProbeService(nil, repo, &proxyAutoProbeSettingRepoStub{}, nil, store)
+	defer svc.Stop()
+	SetDefaultProxyAutoProbeService(svc)
+	svc.config = ProxyAutoProbeConfig{Enabled: true, DefaultIntervalSec: 60, RetryIntervalSec: 5, StickyEnabled: true, StickyTTLSeconds: 60}
+	svc.entries[1] = &proxyAutoProbeEntry{ProxyID: 1, Queue: ProxyAutoProbeQueueSuccess, LastLatencyMs: &latency10}
+	seedProxyAutoProbeSnapshots(svc, repo.proxies...)
+	account := &Account{ID: 100, Extra: map[string]any{"auto_select_proxy": true}}
+
+	first := svc.selectProxyForAccount(context.Background(), account)
+	require.NotNil(t, first)
+	account.Proxy = first
+	ClearAutoSelectedProxyStickyOnTransportError(context.Background(), account, errors.New("dial tcp failed"))
+
+	second := svc.selectProxyForAccount(context.Background(), account)
+	require.NotNil(t, second)
+	require.Equal(t, int64(1), second.ID)
+}
+
+func TestIsAutoProbeSuccessStatus(t *testing.T) {
+	tests := []struct {
+		name    string
+		status  string
+		success bool
+		want    bool
+	}{
+		{name: "healthy success", status: "healthy", success: true, want: true},
+		{name: "warn success", status: "warn", success: true, want: true},
+		{name: "challenge failed", status: "challenge", success: true, want: false},
+		{name: "failed failed", status: "failed", success: true, want: false},
+		{name: "success flag wins over healthy", status: "healthy", success: false, want: false},
+		{name: "unknown preserves success flag", status: "", success: true, want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, isAutoProbeSuccessStatus(tt.status, tt.success))
+		})
+	}
 }
 
 func TestClassifyAutoProbeQueueFromQuality_OpenAIStatusRules(t *testing.T) {

@@ -92,15 +92,24 @@ type AdminService interface {
 	GetAllProxies(ctx context.Context) ([]Proxy, error)
 	GetAllProxiesWithAccountCount(ctx context.Context) ([]ProxyWithAccountCount, error)
 	GetProxy(ctx context.Context, id int64) (*Proxy, error)
+	GetProxySnapshots(ctx context.Context, ids []int64) ([]ProxyWithAccountCount, error)
 	GetProxiesByIDs(ctx context.Context, ids []int64) ([]Proxy, error)
 	CreateProxy(ctx context.Context, input *CreateProxyInput) (*Proxy, error)
 	UpdateProxy(ctx context.Context, id int64, input *UpdateProxyInput) (*Proxy, error)
 	DeleteProxy(ctx context.Context, id int64) error
 	BatchDeleteProxies(ctx context.Context, ids []int64) (*ProxyBatchDeleteResult, error)
 	GetProxyAccounts(ctx context.Context, proxyID int64) ([]ProxyAccountSummary, error)
-	CheckProxyExists(ctx context.Context, host string, port int, username, password string) (bool, error)
+	GetProxyStats(ctx context.Context, proxyID int64) (*ProxyStats, error)
+	CheckProxyExists(ctx context.Context, protocol, host string, port int, username, password string) (bool, error)
 	TestProxy(ctx context.Context, id int64) (*ProxyTestResult, error)
 	CheckProxyQuality(ctx context.Context, id int64) (*ProxyQualityCheckResult, error)
+	CreateProxySubscription(ctx context.Context, input *CreateProxySubscriptionInput) (*ProxySubscription, []Proxy, error)
+	ListProxySubscriptions(ctx context.Context) ([]ProxySubscription, error)
+	GetProxySubscription(ctx context.Context, id int64) (*ProxySubscription, error)
+	UpdateProxySubscription(ctx context.Context, id int64, input *UpdateProxySubscriptionInput) (*ProxySubscription, error)
+	DeleteProxySubscription(ctx context.Context, id int64) error
+	RefreshProxySubscription(ctx context.Context, id int64) (*ProxySubscription, error)
+	GetProxySubscriptionRuntimeStatus(ctx context.Context, id int64) (*ManagedProxyRuntimeStatus, error)
 
 	// Redeem code management
 	ListRedeemCodes(ctx context.Context, page, pageSize int, codeType, status, search string, sortBy, sortOrder string) ([]RedeemCode, int64, error)
@@ -515,6 +524,9 @@ type adminServiceImpl struct {
 	groupRepo            GroupRepository
 	accountRepo          AccountRepository
 	proxyRepo            ProxyRepository
+	proxyStatsRepo       ProxyStatsRepository
+	proxySubRepo         ProxySubscriptionRepository
+	managedProxyResolver ManagedProxyResolver
 	apiKeyRepo           APIKeyRepository
 	redeemCodeRepo       RedeemCodeRepository
 	userGroupRateRepo    UserGroupRateRepository
@@ -545,6 +557,9 @@ func NewAdminService(
 	groupRepo GroupRepository,
 	accountRepo AccountRepository,
 	proxyRepo ProxyRepository,
+	proxyStatsRepo ProxyStatsRepository,
+	proxySubRepo ProxySubscriptionRepository,
+	managedProxyResolver ManagedProxyResolver,
 	apiKeyRepo APIKeyRepository,
 	redeemCodeRepo RedeemCodeRepository,
 	userGroupRateRepo UserGroupRateRepository,
@@ -564,6 +579,9 @@ func NewAdminService(
 		groupRepo:            groupRepo,
 		accountRepo:          accountRepo,
 		proxyRepo:            proxyRepo,
+		proxyStatsRepo:       proxyStatsRepo,
+		proxySubRepo:         proxySubRepo,
+		managedProxyResolver: managedProxyResolver,
 		apiKeyRepo:           apiKeyRepo,
 		redeemCodeRepo:       redeemCodeRepo,
 		userGroupRateRepo:    userGroupRateRepo,
@@ -2680,6 +2698,7 @@ func (s *adminServiceImpl) ListProxies(ctx context.Context, page, pageSize int, 
 	if err != nil {
 		return nil, 0, err
 	}
+	s.attachManagedProxyRuntimeStatus(proxies)
 	return proxies, result.Total, nil
 }
 
@@ -2690,11 +2709,17 @@ func (s *adminServiceImpl) ListProxiesWithAccountCount(ctx context.Context, page
 		return nil, 0, err
 	}
 	s.attachProxyLatency(ctx, proxies)
+	s.attachManagedProxyRuntimeStatusToCounts(proxies)
 	return proxies, result.Total, nil
 }
 
 func (s *adminServiceImpl) GetAllProxies(ctx context.Context) ([]Proxy, error) {
-	return s.proxyRepo.ListActive(ctx)
+	proxies, err := s.proxyRepo.ListActive(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.attachManagedProxyRuntimeStatus(proxies)
+	return proxies, nil
 }
 
 func (s *adminServiceImpl) GetAllProxiesWithAccountCount(ctx context.Context) ([]ProxyWithAccountCount, error) {
@@ -2703,11 +2728,47 @@ func (s *adminServiceImpl) GetAllProxiesWithAccountCount(ctx context.Context) ([
 		return nil, err
 	}
 	s.attachProxyLatency(ctx, proxies)
+	s.attachManagedProxyRuntimeStatusToCounts(proxies)
 	return proxies, nil
 }
 
 func (s *adminServiceImpl) GetProxy(ctx context.Context, id int64) (*Proxy, error) {
-	return s.proxyRepo.GetByID(ctx, id)
+	proxy, err := s.proxyRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	s.attachManagedProxyRuntimeStatusToProxy(proxy)
+	return proxy, nil
+}
+
+func (s *adminServiceImpl) GetProxySnapshots(ctx context.Context, ids []int64) ([]ProxyWithAccountCount, error) {
+	if len(ids) == 0 {
+		return []ProxyWithAccountCount{}, nil
+	}
+	proxies, err := s.proxyRepo.ListByIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+
+	accountsByProxyID := make(map[int64]int64, len(proxies))
+	for i := range proxies {
+		count, countErr := s.proxyRepo.CountAccountsByProxyID(ctx, proxies[i].ID)
+		if countErr != nil {
+			return nil, countErr
+		}
+		accountsByProxyID[proxies[i].ID] = count
+	}
+
+	out := make([]ProxyWithAccountCount, 0, len(proxies))
+	for i := range proxies {
+		out = append(out, ProxyWithAccountCount{
+			Proxy:        proxies[i],
+			AccountCount: accountsByProxyID[proxies[i].ID],
+		})
+	}
+	s.attachProxyLatency(ctx, out)
+	s.attachManagedProxyRuntimeStatusToCounts(out)
+	return out, nil
 }
 
 func (s *adminServiceImpl) GetProxiesByIDs(ctx context.Context, ids []int64) ([]Proxy, error) {
@@ -2716,13 +2777,14 @@ func (s *adminServiceImpl) GetProxiesByIDs(ctx context.Context, ids []int64) ([]
 
 func (s *adminServiceImpl) CreateProxy(ctx context.Context, input *CreateProxyInput) (*Proxy, error) {
 	proxy := &Proxy{
-		Name:     input.Name,
-		Protocol: input.Protocol,
-		Host:     input.Host,
-		Port:     input.Port,
-		Username: input.Username,
-		Password: input.Password,
-		Status:   StatusActive,
+		Name:       input.Name,
+		Protocol:   input.Protocol,
+		Host:       input.Host,
+		Port:       input.Port,
+		Username:   input.Username,
+		Password:   input.Password,
+		Status:     StatusActive,
+		SourceType: ProxySourceManual,
 	}
 	if err := s.proxyRepo.Create(ctx, proxy); err != nil {
 		return nil, err
@@ -2736,6 +2798,46 @@ func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *Upd
 	proxy, err := s.proxyRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+
+	if proxy.IsManagedMihomoSubscription() {
+		if input.Name != "" {
+			proxy.Name = input.Name
+		}
+		if input.Status != "" {
+			proxy.Status = input.Status
+		}
+		if err := s.proxyRepo.Update(ctx, proxy); err != nil {
+			return nil, err
+		}
+		if s.proxySubRepo != nil {
+			if _, nodeErr := s.proxySubRepo.GetNodeByProxyID(ctx, proxy.ID); nodeErr == nil {
+				if input.Status != "" {
+					if err := s.proxySubRepo.SetNodeStatusByProxyID(ctx, proxy.ID, input.Status); err != nil {
+						return nil, err
+					}
+				}
+				if proxy.SubscriptionID != nil {
+					s.reloadManagedProxy(*proxy.SubscriptionID)
+				}
+				return proxy, nil
+			}
+		}
+		if s.proxySubRepo != nil && proxy.SubscriptionID != nil {
+			if sub, subErr := s.proxySubRepo.Get(ctx, *proxy.SubscriptionID); subErr == nil && sub != nil {
+				if input.Name != "" {
+					sub.Name = input.Name
+				}
+				if input.Status != "" {
+					sub.Status = input.Status
+				}
+				if updateErr := s.proxySubRepo.Update(ctx, sub); updateErr != nil {
+					return nil, updateErr
+				}
+				s.reloadManagedProxy(sub.ID)
+			}
+		}
+		return proxy, nil
 	}
 
 	if input.Name != "" {
@@ -2774,6 +2876,28 @@ func (s *adminServiceImpl) DeleteProxy(ctx context.Context, id int64) error {
 	if count > 0 {
 		return ErrProxyInUse
 	}
+	proxy, err := s.proxyRepo.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if proxy.IsManagedMihomoSubscription() && s.proxySubRepo != nil {
+		subID := *proxy.SubscriptionID
+		if _, nodeErr := s.proxySubRepo.GetNodeByProxyID(ctx, id); nodeErr == nil {
+			if err := s.proxySubRepo.SetNodeStatusByProxyID(ctx, id, ProxySubscriptionNodeStatusInactive); err != nil {
+				return err
+			}
+			if err := s.proxyRepo.Delete(ctx, id); err != nil {
+				return err
+			}
+			s.reloadManagedProxy(subID)
+			return nil
+		}
+		if err := s.proxySubRepo.DeleteWithProxy(ctx, subID); err != nil {
+			return err
+		}
+		s.reloadManagedProxy(subID)
+		return nil
+	}
 	return s.proxyRepo.Delete(ctx, id)
 }
 
@@ -2799,6 +2923,46 @@ func (s *adminServiceImpl) BatchDeleteProxies(ctx context.Context, ids []int64) 
 			})
 			continue
 		}
+		proxy, err := s.proxyRepo.GetByID(ctx, id)
+		if err != nil {
+			result.Skipped = append(result.Skipped, ProxyBatchDeleteSkipped{
+				ID:     id,
+				Reason: err.Error(),
+			})
+			continue
+		}
+		if proxy.IsManagedMihomoSubscription() && s.proxySubRepo != nil {
+			subID := *proxy.SubscriptionID
+			if _, nodeErr := s.proxySubRepo.GetNodeByProxyID(ctx, id); nodeErr == nil {
+				if err := s.proxySubRepo.SetNodeStatusByProxyID(ctx, id, ProxySubscriptionNodeStatusInactive); err != nil {
+					result.Skipped = append(result.Skipped, ProxyBatchDeleteSkipped{
+						ID:     id,
+						Reason: err.Error(),
+					})
+					continue
+				}
+				if err := s.proxyRepo.Delete(ctx, id); err != nil {
+					result.Skipped = append(result.Skipped, ProxyBatchDeleteSkipped{
+						ID:     id,
+						Reason: err.Error(),
+					})
+					continue
+				}
+				s.reloadManagedProxy(subID)
+				result.DeletedIDs = append(result.DeletedIDs, id)
+				continue
+			}
+			if err := s.proxySubRepo.DeleteWithProxy(ctx, subID); err != nil {
+				result.Skipped = append(result.Skipped, ProxyBatchDeleteSkipped{
+					ID:     id,
+					Reason: err.Error(),
+				})
+				continue
+			}
+			s.reloadManagedProxy(subID)
+			result.DeletedIDs = append(result.DeletedIDs, id)
+			continue
+		}
 		if err := s.proxyRepo.Delete(ctx, id); err != nil {
 			result.Skipped = append(result.Skipped, ProxyBatchDeleteSkipped{
 				ID:     id,
@@ -2816,8 +2980,195 @@ func (s *adminServiceImpl) GetProxyAccounts(ctx context.Context, proxyID int64) 
 	return s.proxyRepo.ListAccountSummariesByProxyID(ctx, proxyID)
 }
 
-func (s *adminServiceImpl) CheckProxyExists(ctx context.Context, host string, port int, username, password string) (bool, error) {
-	return s.proxyRepo.ExistsByHostPortAuth(ctx, host, port, username, password)
+func (s *adminServiceImpl) GetProxyStats(ctx context.Context, proxyID int64) (*ProxyStats, error) {
+	if _, err := s.proxyRepo.GetByID(ctx, proxyID); err != nil {
+		return nil, err
+	}
+	if s.proxyStatsRepo == nil {
+		count, err := s.proxyRepo.CountAccountsByProxyID(ctx, proxyID)
+		if err != nil {
+			return nil, err
+		}
+		return &ProxyStats{
+			TotalAccounts:  count,
+			ActiveAccounts: count,
+			SuccessRate:    0,
+		}, nil
+	}
+	return s.proxyStatsRepo.GetStats(ctx, proxyID)
+}
+
+func (s *adminServiceImpl) CheckProxyExists(ctx context.Context, protocol, host string, port int, username, password string) (bool, error) {
+	return s.proxyRepo.ExistsByProtocolHostPortAuth(ctx, protocol, host, port, username, password)
+}
+
+func (s *adminServiceImpl) CreateProxySubscription(ctx context.Context, input *CreateProxySubscriptionInput) (*ProxySubscription, []Proxy, error) {
+	if s.proxySubRepo == nil {
+		return nil, nil, errors.New("proxy subscription repository not configured")
+	}
+	defaultRefresh := 3600
+	defaultTestURL := "https://www.gstatic.com/generate_204"
+	if err := ValidateProxySubscriptionInput(input, defaultRefresh, defaultTestURL); err != nil {
+		return nil, nil, err
+	}
+	sub := &ProxySubscription{
+		Name:               input.Name,
+		SubscriptionURL:    input.SubscriptionURL,
+		Status:             StatusActive,
+		RefreshIntervalSec: input.RefreshIntervalSec,
+		TestURL:            input.TestURL,
+	}
+	nodes, err := FetchProxySubscriptionNodes(ctx, input.SubscriptionURL)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := prepareProxySubscriptionNodes(nodes); err != nil {
+		return nil, nil, err
+	}
+	created, proxies, err := s.proxySubRepo.CreateWithNodes(ctx, sub, nodes)
+	if err != nil {
+		return nil, nil, err
+	}
+	s.reloadManagedProxy(created.ID)
+	for i := range proxies {
+		s.attachManagedProxyRuntimeStatusToProxy(&proxies[i])
+	}
+	return created, proxies, nil
+}
+
+func (s *adminServiceImpl) ListProxySubscriptions(ctx context.Context) ([]ProxySubscription, error) {
+	if s.proxySubRepo == nil {
+		return []ProxySubscription{}, nil
+	}
+	return s.proxySubRepo.List(ctx)
+}
+
+func (s *adminServiceImpl) GetProxySubscription(ctx context.Context, id int64) (*ProxySubscription, error) {
+	if s.proxySubRepo == nil {
+		return nil, ErrProxySubscriptionNotFound
+	}
+	return s.proxySubRepo.Get(ctx, id)
+}
+
+func (s *adminServiceImpl) UpdateProxySubscription(ctx context.Context, id int64, input *UpdateProxySubscriptionInput) (*ProxySubscription, error) {
+	if s.proxySubRepo == nil {
+		return nil, ErrProxySubscriptionNotFound
+	}
+	if err := ValidateProxySubscriptionUpdate(input); err != nil {
+		return nil, err
+	}
+	sub, err := s.proxySubRepo.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	shouldSyncNodes := input.SubscriptionURL != "" && input.SubscriptionURL != sub.SubscriptionURL
+	if input.Name != "" {
+		sub.Name = input.Name
+	}
+	if input.SubscriptionURL != "" {
+		sub.SubscriptionURL = input.SubscriptionURL
+	}
+	if input.Status != "" {
+		sub.Status = input.Status
+	}
+	if input.RefreshIntervalSec > 0 {
+		sub.RefreshIntervalSec = input.RefreshIntervalSec
+	}
+	if input.TestURL != "" {
+		sub.TestURL = input.TestURL
+	}
+	if err := s.proxySubRepo.Update(ctx, sub); err != nil {
+		return nil, err
+	}
+	if shouldSyncNodes {
+		nodes, err := FetchProxySubscriptionNodes(ctx, sub.SubscriptionURL)
+		if err != nil {
+			_ = s.proxySubRepo.SetLastError(ctx, id, sanitizeManagedProxyError(err))
+			return nil, err
+		}
+		if err := prepareProxySubscriptionNodes(nodes); err != nil {
+			return nil, err
+		}
+		if _, err := s.proxySubRepo.SyncNodes(ctx, id, nodes); err != nil {
+			return nil, err
+		}
+	}
+	s.reloadManagedProxy(id)
+	return s.proxySubRepo.Get(ctx, id)
+}
+
+func (s *adminServiceImpl) DeleteProxySubscription(ctx context.Context, id int64) error {
+	if s.proxySubRepo == nil {
+		return ErrProxySubscriptionNotFound
+	}
+	sub, err := s.proxySubRepo.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	proxyIDs, err := s.proxySubRepo.ListProxyIDsBySubscriptionID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if len(proxyIDs) == 0 && len(sub.ProxyIDs) > 0 {
+		proxyIDs = sub.ProxyIDs
+	}
+	if len(proxyIDs) == 0 && sub.ProxyID != nil {
+		proxyIDs = []int64{*sub.ProxyID}
+	}
+	for _, proxyID := range proxyIDs {
+		count, err := s.proxyRepo.CountAccountsByProxyID(ctx, proxyID)
+		if err != nil {
+			return err
+		}
+		if count > 0 {
+			return ErrProxyInUse
+		}
+	}
+	if err := s.proxySubRepo.DeleteWithProxy(ctx, id); err != nil {
+		return err
+	}
+	s.reloadManagedProxy(id)
+	return nil
+}
+
+func (s *adminServiceImpl) RefreshProxySubscription(ctx context.Context, id int64) (*ProxySubscription, error) {
+	if s.proxySubRepo == nil {
+		return nil, ErrProxySubscriptionNotFound
+	}
+	sub, err := s.proxySubRepo.IncrementRevision(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	nodes, err := FetchProxySubscriptionNodes(ctx, sub.SubscriptionURL)
+	if err != nil {
+		_ = s.proxySubRepo.SetLastError(ctx, id, sanitizeManagedProxyError(err))
+		return sub, err
+	}
+	if err := prepareProxySubscriptionNodes(nodes); err != nil {
+		return nil, err
+	}
+	if _, err := s.proxySubRepo.SyncNodes(ctx, id, nodes); err != nil {
+		return nil, err
+	}
+	s.reloadManagedProxy(id)
+	return s.proxySubRepo.Get(ctx, id)
+}
+
+func (s *adminServiceImpl) GetProxySubscriptionRuntimeStatus(ctx context.Context, id int64) (*ManagedProxyRuntimeStatus, error) {
+	if s.proxySubRepo != nil {
+		if _, err := s.proxySubRepo.Get(ctx, id); err != nil {
+			return nil, err
+		}
+	}
+	resolver := s.managedProxyResolver
+	if resolver == nil {
+		resolver = GetDefaultManagedProxyResolver()
+	}
+	status := managedProxyNoopResolver{}.GetStatus(id)
+	if resolver != nil {
+		status = resolver.GetStatus(id)
+	}
+	return &status, nil
 }
 
 // Redeem code management implementations
@@ -2910,7 +3261,18 @@ func (s *adminServiceImpl) TestProxy(ctx context.Context, id int64) (*ProxyTestR
 		return nil, err
 	}
 
-	proxyURL := proxy.URL()
+	proxyURL, err := s.resolveProxyURL(ctx, proxy)
+	if err != nil {
+		s.saveProxyLatency(ctx, id, &ProxyLatencyInfo{
+			Success:   false,
+			Message:   err.Error(),
+			UpdatedAt: time.Now(),
+		})
+		return &ProxyTestResult{
+			Success: false,
+			Message: err.Error(),
+		}, nil
+	}
 	exitInfo, latencyMs, err := s.proxyProber.ProbeProxy(ctx, proxyURL)
 	if err != nil {
 		s.saveProxyLatency(ctx, id, &ProxyLatencyInfo{
@@ -2962,7 +3324,18 @@ func (s *adminServiceImpl) CheckProxyQuality(ctx context.Context, id int64) (*Pr
 		Items:     make([]ProxyQualityCheckItem, 0, len(proxyQualityTargets)+1),
 	}
 
-	proxyURL := proxy.URL()
+	proxyURL, err := s.resolveProxyURL(ctx, proxy)
+	if err != nil {
+		result.Items = append(result.Items, ProxyQualityCheckItem{
+			Target:  "base_connectivity",
+			Status:  "fail",
+			Message: err.Error(),
+		})
+		result.FailedCount++
+		finalizeProxyQualityResult(result)
+		s.saveProxyQualitySnapshot(ctx, id, result, nil)
+		return result, nil
+	}
 	if s.proxyProber == nil {
 		result.Items = append(result.Items, ProxyQualityCheckItem{
 			Target:  "base_connectivity",
@@ -3212,11 +3585,121 @@ func (s *adminServiceImpl) saveProxyQualitySnapshot(ctx context.Context, proxyID
 	s.saveProxyLatency(ctx, proxyID, info)
 }
 
+func (s *adminServiceImpl) resolveProxyURL(ctx context.Context, proxy *Proxy) (string, error) {
+	if proxy == nil {
+		return "", nil
+	}
+	if !proxy.IsManagedMihomoSubscription() {
+		return proxy.URL(), nil
+	}
+	if proxy.SubscriptionID == nil || *proxy.SubscriptionID <= 0 {
+		return "", errors.New("managed proxy subscription id is missing")
+	}
+	resolver := s.managedProxyResolver
+	if resolver == nil {
+		resolver = GetDefaultManagedProxyResolver()
+	}
+	if resolver == nil {
+		return "", errors.New("managed proxy runtime is unavailable")
+	}
+	proxyURL, err := resolver.ResolveProxyURL(ctx, *proxy.SubscriptionID)
+	if err == nil && strings.TrimSpace(proxyURL) != "" {
+		return managedProxyURLForProxy(proxyURL, proxy), nil
+	}
+	status := resolver.GetStatus(*proxy.SubscriptionID)
+	return "", managedProxyRuntimeResolveError(status, err)
+}
+
+func managedProxyRuntimeResolveError(status ManagedProxyRuntimeStatus, err error) error {
+	message := "managed proxy runtime is not ready"
+	switch {
+	case !status.Enabled || status.Status == ManagedProxyRuntimeStatusDisabled:
+		message = "managed proxy runtime is disabled; set managed_proxy.enabled=true or MANAGED_PROXY_ENABLED=true and restart Sub2API"
+	case strings.TrimSpace(status.Status) != "":
+		message = fmt.Sprintf("managed proxy runtime is not ready (status=%s)", status.Status)
+	}
+	if strings.TrimSpace(status.LastError) != "" {
+		message = fmt.Sprintf("%s: %s", message, status.LastError)
+	} else if err != nil && !errors.Is(err, ErrManagedProxyDisabled) && !errors.Is(err, ErrManagedProxyUnavailable) {
+		message = fmt.Sprintf("%s: %v", message, err)
+	}
+	return errors.New(message)
+}
+
+func prepareProxySubscriptionNodes(nodes []ProxySubscriptionNode) error {
+	for i := range nodes {
+		if nodes[i].Username == "" {
+			value, err := managedProxyRandomHexString(8)
+			if err != nil {
+				return err
+			}
+			nodes[i].Username = "mpu_" + value
+		}
+		if nodes[i].Password == "" {
+			value, err := managedProxyRandomHexString(16)
+			if err != nil {
+				return err
+			}
+			nodes[i].Password = "mpp_" + value
+		}
+		if nodes[i].Status == "" {
+			nodes[i].Status = ProxySubscriptionNodeStatusActive
+		}
+	}
+	return nil
+}
+
+func (s *adminServiceImpl) attachManagedProxyRuntimeStatus(proxies []Proxy) {
+	for i := range proxies {
+		s.attachManagedProxyRuntimeStatusToProxy(&proxies[i])
+	}
+}
+
+func (s *adminServiceImpl) attachManagedProxyRuntimeStatusToCounts(proxies []ProxyWithAccountCount) {
+	for i := range proxies {
+		s.attachManagedProxyRuntimeStatusToProxy(&proxies[i].Proxy)
+	}
+}
+
+func (s *adminServiceImpl) attachManagedProxyRuntimeStatusToProxy(proxy *Proxy) {
+	if proxy == nil || !proxy.IsManagedMihomoSubscription() {
+		return
+	}
+	resolver := s.managedProxyResolver
+	if resolver == nil {
+		resolver = GetDefaultManagedProxyResolver()
+	}
+	status := managedProxyNoopResolver{}.GetStatus(*proxy.SubscriptionID)
+	if resolver != nil {
+		status = resolver.GetStatus(*proxy.SubscriptionID)
+	}
+	proxy.RuntimeStatus = &status
+}
+
+func (s *adminServiceImpl) reloadManagedProxy(subscriptionID int64) {
+	resolver := s.managedProxyResolver
+	if resolver == nil {
+		resolver = GetDefaultManagedProxyResolver()
+	}
+	if resolver != nil {
+		resolver.Reload(subscriptionID)
+	}
+}
+
 func (s *adminServiceImpl) probeProxyLatency(ctx context.Context, proxy *Proxy) {
 	if s.proxyProber == nil || proxy == nil {
 		return
 	}
-	exitInfo, latencyMs, err := s.proxyProber.ProbeProxy(ctx, proxy.URL())
+	proxyURL, err := s.resolveProxyURL(ctx, proxy)
+	if err != nil {
+		s.saveProxyLatency(ctx, proxy.ID, &ProxyLatencyInfo{
+			Success:   false,
+			Message:   err.Error(),
+			UpdatedAt: time.Now(),
+		})
+		return
+	}
+	exitInfo, latencyMs, err := s.proxyProber.ProbeProxy(ctx, proxyURL)
 	if err != nil {
 		s.saveProxyLatency(ctx, proxy.ID, &ProxyLatencyInfo{
 			Success:   false,

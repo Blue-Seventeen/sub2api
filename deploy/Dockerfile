@@ -11,6 +11,9 @@ ARG GOLANG_IMAGE=golang:1.26.3-alpine
 ARG ALPINE_IMAGE=alpine:3.20
 ARG GOPROXY=https://goproxy.cn,direct
 ARG GOSUMDB=sum.golang.google.cn
+ARG MIHOMO_VERSION=1.19.24
+ARG MIHOMO_AMD64_SHA256=7c8678fc20a1d3af9bfb87ccee428112b74398f7e04b6ddb044f1e7b94539870
+ARG MIHOMO_ARM64_SHA256=6d4a278e7ace1016f23d7245f6f8911f6f7a4adfba2095704473d937e1911840
 
 # -----------------------------------------------------------------------------
 # Stage 1: Frontend Builder
@@ -68,7 +71,30 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     ./cmd/server
 
 # -----------------------------------------------------------------------------
-# Stage 3: Final Runtime Image
+# Stage 3: mihomo managed proxy core
+# -----------------------------------------------------------------------------
+FROM ${ALPINE_IMAGE} AS mihomo-core
+
+ARG TARGETARCH
+ARG MIHOMO_VERSION
+ARG MIHOMO_AMD64_SHA256
+ARG MIHOMO_ARM64_SHA256
+
+RUN apk add --no-cache ca-certificates wget gzip && \
+    case "${TARGETARCH}" in \
+      amd64) MIHOMO_ASSET="mihomo-linux-amd64-compatible-v${MIHOMO_VERSION}.gz"; MIHOMO_SHA256="${MIHOMO_AMD64_SHA256}" ;; \
+      arm64) MIHOMO_ASSET="mihomo-linux-arm64-v${MIHOMO_VERSION}.gz"; MIHOMO_SHA256="${MIHOMO_ARM64_SHA256}" ;; \
+      *) echo "unsupported TARGETARCH for bundled mihomo: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac && \
+    wget -O /tmp/mihomo.gz "https://github.com/MetaCubeX/mihomo/releases/download/v${MIHOMO_VERSION}/${MIHOMO_ASSET}" && \
+    echo "${MIHOMO_SHA256}  /tmp/mihomo.gz" | sha256sum -c - && \
+    mkdir -p /app/bin && \
+    gzip -dc /tmp/mihomo.gz > /app/bin/mihomo && \
+    chmod 755 /app/bin/mihomo && \
+    /app/bin/mihomo -v
+
+# -----------------------------------------------------------------------------
+# Stage 4: Final Runtime Image
 # -----------------------------------------------------------------------------
 FROM ${ALPINE_IMAGE}
 
@@ -94,6 +120,7 @@ WORKDIR /app
 
 # Copy binary from builder
 COPY --from=backend-builder /app/sub2api /app/sub2api
+COPY --from=mihomo-core /app/bin/mihomo /app/bin/mihomo
 
 # Create data directory
 RUN mkdir -p /app/data && chown -R sub2api:sub2api /app

@@ -183,6 +183,7 @@ func (s *NewAPIStyleGatewayService) Forward(
 	proxyURL := resolveAccountProxyURL(ctx, account, nil)
 	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsProfile(account))
 	if err != nil {
+		ClearAutoSelectedProxyStickyOnTransportError(ctx, account, err)
 		safeErr := sanitizeUpstreamErrorMessage(err.Error())
 		setOpsUpstreamError(c, 0, safeErr, "")
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{

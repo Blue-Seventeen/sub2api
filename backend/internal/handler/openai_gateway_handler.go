@@ -31,6 +31,8 @@ type OpenAIGatewayHandler struct {
 	billingCacheService      *service.BillingCacheService
 	apiKeyService            *service.APIKeyService
 	usageRecordWorkerPool    *service.UsageRecordWorkerPool
+	proxyStatsWorkerPool     *service.ProxyStatsWorkerPool
+	proxyActiveUsageTracker  *service.ProxyActiveUsageTracker
 	errorPassthroughService  *service.ErrorPassthroughService
 	contentModerationService *service.ContentModerationService
 	concurrencyHelper        *ConcurrencyHelper
@@ -53,6 +55,8 @@ func NewOpenAIGatewayHandler(
 	billingCacheService *service.BillingCacheService,
 	apiKeyService *service.APIKeyService,
 	usageRecordWorkerPool *service.UsageRecordWorkerPool,
+	proxyStatsWorkerPool *service.ProxyStatsWorkerPool,
+	proxyActiveUsageTracker *service.ProxyActiveUsageTracker,
 	errorPassthroughService *service.ErrorPassthroughService,
 	contentModerationService *service.ContentModerationService,
 	cfg *config.Config,
@@ -71,6 +75,8 @@ func NewOpenAIGatewayHandler(
 		billingCacheService:      billingCacheService,
 		apiKeyService:            apiKeyService,
 		usageRecordWorkerPool:    usageRecordWorkerPool,
+		proxyStatsWorkerPool:     proxyStatsWorkerPool,
+		proxyActiveUsageTracker:  proxyActiveUsageTracker,
 		errorPassthroughService:  errorPassthroughService,
 		contentModerationService: contentModerationService,
 		concurrencyHelper:        NewConcurrencyHelper(concurrencyService, SSEPingFormatComment, pingInterval),
@@ -245,6 +251,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	failedAccountIDs := make(map[int64]struct{})
 	sameAccountRetryCount := make(map[int64]int)
 	var lastFailoverErr *service.UpstreamFailoverError
+	var lastFailedAccount *service.Account
+	var lastFailedDurationMs int64
 
 	for {
 		// Select account supporting the requested model
@@ -273,6 +281,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				return
 			}
 			if lastFailoverErr != nil {
+				recordOpenAIProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, lastFailedAccount, apiKey, lastFailedDurationMs, "handler.openai_gateway.responses")
 				h.handleFailoverExhausted(c, lastFailoverErr, streamStarted)
 			} else {
 				h.handleFailoverExhaustedSimple(c, 502, streamStarted)
@@ -315,6 +324,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		}
 		var result *service.OpenAIForwardResult
 		var upstreamEndpoint string
+		activeUsageHandle := beginProxyActiveUsage(h.proxyActiveUsageTracker, account)
 		if h.newAPIStyleService != nil && h.newAPIStyleService.SupportsForGroup(account, apiKey.Group, service.NewAPIStyleRouteResponses) {
 			result, upstreamEndpoint, err = h.newAPIStyleService.ForwardOpenAI(
 				c.Request.Context(),
@@ -336,6 +346,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		} else {
 			result, err = h.gatewayService.Forward(c.Request.Context(), c, account, forwardBody)
 		}
+		endProxyActiveUsage(activeUsageHandle)
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
@@ -369,6 +380,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 							return
 						case <-time.After(sameAccountRetryDelay):
 						}
+						lastFailedAccount = account
+						lastFailedDurationMs = forwardDurationMs
 						continue
 					}
 				}
@@ -376,6 +389,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				failedAccountIDs[account.ID] = struct{}{}
 				lastFailoverErr = failoverErr
 				if switchCount >= maxAccountSwitches {
+					recordOpenAIProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, account, apiKey, forwardDurationMs, "handler.openai_gateway.responses")
 					h.handleFailoverExhausted(c, failoverErr, streamStarted)
 					return
 				}
@@ -386,6 +400,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					zap.Int("switch_count", switchCount),
 					zap.Int("max_switches", maxAccountSwitches),
 				)
+				lastFailedAccount = account
+				lastFailedDurationMs = forwardDurationMs
 				continue
 			}
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
@@ -397,9 +413,11 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			}
 			if shouldLogOpenAIForwardFailureAsWarn(c, wroteFallback) {
 				reqLog.Warn("openai.forward_failed", fields...)
+				recordOpenAIProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, account, apiKey, forwardDurationMs, "handler.openai_gateway.responses")
 				return
 			}
 			reqLog.Error("openai.forward_failed", fields...)
+			recordOpenAIProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, account, apiKey, forwardDurationMs, "handler.openai_gateway.responses")
 			return
 		}
 		if result != nil {
@@ -674,6 +692,8 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	failedAccountIDs := make(map[int64]struct{})
 	sameAccountRetryCount := make(map[int64]int)
 	var lastFailoverErr *service.UpstreamFailoverError
+	var lastFailedAccount *service.Account
+	var lastFailedDurationMs int64
 	effectiveMappedModel := preferredMappedModel
 
 	for {
@@ -714,6 +734,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 				}
 			} else {
 				if lastFailoverErr != nil {
+					recordOpenAIProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, lastFailedAccount, apiKey, lastFailedDurationMs, "handler.openai_gateway.messages")
 					h.handleAnthropicFailoverExhausted(c, lastFailoverErr, streamStarted)
 				} else {
 					h.anthropicStreamingAwareError(c, http.StatusBadGateway, "api_error", "Upstream request failed", streamStarted)
@@ -753,6 +774,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		}
 		var result *service.OpenAIForwardResult
 		var upstreamEndpoint string
+		activeUsageHandle := beginProxyActiveUsage(h.proxyActiveUsageTracker, account)
 		if h.newAPIStyleService != nil && h.newAPIStyleService.SupportsForGroup(account, apiKey.Group, service.NewAPIStyleRouteMessages) {
 			result, upstreamEndpoint, err = h.newAPIStyleService.ForwardOpenAI(
 				c.Request.Context(),
@@ -774,6 +796,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		} else {
 			result, err = h.gatewayService.ForwardAsAnthropic(c.Request.Context(), c, account, forwardBody, promptCacheKey, defaultMappedModel)
 		}
+		endProxyActiveUsage(activeUsageHandle)
 
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		if accountReleaseFunc != nil {
@@ -813,6 +836,8 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 							return
 						case <-time.After(sameAccountRetryDelay):
 						}
+						lastFailedAccount = account
+						lastFailedDurationMs = forwardDurationMs
 						continue
 					}
 				}
@@ -820,6 +845,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 				failedAccountIDs[account.ID] = struct{}{}
 				lastFailoverErr = failoverErr
 				if switchCount >= maxAccountSwitches {
+					recordOpenAIProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, account, apiKey, forwardDurationMs, "handler.openai_gateway.messages")
 					h.handleAnthropicFailoverExhausted(c, failoverErr, streamStarted)
 					return
 				}
@@ -835,6 +861,8 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 				}
 				fields = append(fields, openAIMessagesHandlerLogFields(c, currentRoutingModel, currentRoutingModel, account, sameAccountRetryCount[account.ID], nil)...)
 				reqLog.Warn("openai_messages.upstream_failover_switching", fields...)
+				lastFailedAccount = account
+				lastFailedDurationMs = forwardDurationMs
 				continue
 			}
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
@@ -846,6 +874,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 					zap.Error(err),
 				}, openAIMessagesHandlerLogFields(c, currentRoutingModel, currentRoutingModel, account, sameAccountRetryCount[account.ID], nil)...)...,
 			)
+			recordOpenAIProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, account, apiKey, forwardDurationMs, "handler.openai_gateway.messages")
 			return
 		}
 		if result != nil {
@@ -1431,8 +1460,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		wsFirstMessage = h.gatewayService.ReplaceModelInBody(firstMessage, channelMappingWS.MappedModel)
 	}
 
+	proxyStart := time.Now()
 	if err := h.gatewayService.ProxyResponsesWebSocketFromClient(ctx, c, wsConn, account, token, wsFirstMessage, hooks); err != nil {
 		h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
+		recordOpenAIProxyFailureStat(ctx, h.gatewayService, h.proxyStatsWorkerPool, account, apiKey, elapsedMillisSince(proxyStart), "handler.openai_gateway.websocket")
 		closeStatus, closeReason := summarizeWSCloseErrorForLog(err)
 		reqLog.Warn("openai.websocket_proxy_failed",
 			zap.Int64("account_id", account.ID),
@@ -1721,7 +1752,7 @@ func (h *OpenAIGatewayHandler) handleStreamingAwareError(c *gin.Context, status 
 	h.errorResponse(c, status, errType, message)
 }
 
-// ensureForwardErrorResponse 在 Forward 返回错误但尚未写响应时补写统一错误响应。
+// ensureForwardErrorResponse writes a fallback error response when possible.
 func (h *OpenAIGatewayHandler) ensureForwardErrorResponse(c *gin.Context, streamStarted bool) bool {
 	if c == nil || c.Writer == nil || c.Writer.Written() {
 		return false

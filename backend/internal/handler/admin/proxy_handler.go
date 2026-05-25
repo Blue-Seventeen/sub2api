@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -15,15 +16,17 @@ import (
 
 // ProxyHandler handles admin proxy management
 type ProxyHandler struct {
-	adminService service.AdminService
-	autoProbe    *service.ProxyAutoProbeService
+	adminService     service.AdminService
+	autoProbe        *service.ProxyAutoProbeService
+	activeUsageStats *service.ProxyActiveUsageTracker
 }
 
 // NewProxyHandler creates a new admin proxy handler
-func NewProxyHandler(adminService service.AdminService, autoProbe *service.ProxyAutoProbeService) *ProxyHandler {
+func NewProxyHandler(adminService service.AdminService, autoProbe *service.ProxyAutoProbeService, activeUsageStats *service.ProxyActiveUsageTracker) *ProxyHandler {
 	return &ProxyHandler{
-		adminService: adminService,
-		autoProbe:    autoProbe,
+		adminService:     adminService,
+		autoProbe:        autoProbe,
+		activeUsageStats: activeUsageStats,
 	}
 }
 
@@ -49,9 +52,26 @@ type UpdateProxyRequest struct {
 }
 
 type ProxyAutoProbeConfigRequest struct {
-	Enabled            bool `json:"enabled"`
-	DefaultIntervalSec int  `json:"default_interval_sec"`
-	RetryIntervalSec   int  `json:"retry_interval_sec"`
+	Enabled            bool  `json:"enabled"`
+	DefaultIntervalSec int   `json:"default_interval_sec"`
+	RetryIntervalSec   int   `json:"retry_interval_sec"`
+	StickyEnabled      *bool `json:"sticky_enabled"`
+	StickyTTLSeconds   int   `json:"sticky_ttl_seconds"`
+}
+
+type CreateProxySubscriptionRequest struct {
+	Name               string `json:"name" binding:"required"`
+	SubscriptionURL    string `json:"subscription_url" binding:"required"`
+	RefreshIntervalSec int    `json:"refresh_interval_sec"`
+	TestURL            string `json:"test_url"`
+}
+
+type UpdateProxySubscriptionRequest struct {
+	Name               string `json:"name"`
+	SubscriptionURL    string `json:"subscription_url"`
+	Status             string `json:"status" binding:"omitempty,oneof=active inactive"`
+	RefreshIntervalSec int    `json:"refresh_interval_sec"`
+	TestURL            string `json:"test_url"`
 }
 
 // List handles listing all proxies with pagination
@@ -69,17 +89,129 @@ func (h *ProxyHandler) List(c *gin.Context) {
 		search = search[:100]
 	}
 
+	if isProxyRuntimeSort(sortBy) {
+		proxies, total, err := h.listProxiesWithRuntimeSort(c.Request.Context(), page, pageSize, protocol, status, search, sortBy, sortOrder)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		out := make([]dto.AdminProxyWithAccountCount, 0, len(proxies))
+		for i := range proxies {
+			out = append(out, *dto.ProxyWithAccountCountFromServiceAdmin(&proxies[i]))
+		}
+		response.Paginated(c, out, total, page, pageSize)
+		return
+	}
+
 	proxies, total, err := h.adminService.ListProxiesWithAccountCount(c.Request.Context(), page, pageSize, protocol, status, search, sortBy, sortOrder)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
+	h.applyActiveEgressAccountCounts(c.Request.Context(), proxies)
 
 	out := make([]dto.AdminProxyWithAccountCount, 0, len(proxies))
 	for i := range proxies {
 		out = append(out, *dto.ProxyWithAccountCountFromServiceAdmin(&proxies[i]))
 	}
 	response.Paginated(c, out, total, page, pageSize)
+}
+
+func isProxyRuntimeSort(sortBy string) bool {
+	switch strings.ToLower(strings.TrimSpace(sortBy)) {
+	case "active_egress_account_count", "latency", "latency_ms":
+		return true
+	default:
+		return false
+	}
+}
+
+func (h *ProxyHandler) listProxiesWithRuntimeSort(ctx context.Context, page, pageSize int, protocol, status, search, sortBy, sortOrder string) ([]service.ProxyWithAccountCount, int64, error) {
+	const batchSize = 1000
+	var all []service.ProxyWithAccountCount
+	var total int64
+
+	for currentPage := 1; ; currentPage++ {
+		batch, batchTotal, err := h.adminService.ListProxiesWithAccountCount(ctx, currentPage, batchSize, protocol, status, search, "id", "desc")
+		if err != nil {
+			return nil, 0, err
+		}
+		if currentPage == 1 {
+			total = batchTotal
+			if total == 0 {
+				return []service.ProxyWithAccountCount{}, 0, nil
+			}
+			all = make([]service.ProxyWithAccountCount, 0, int(total))
+		}
+		all = append(all, batch...)
+		if int64(len(all)) >= total || len(batch) == 0 {
+			break
+		}
+	}
+
+	h.applyActiveEgressAccountCounts(ctx, all)
+	sortProxyRuntimeRows(all, sortBy, sortOrder)
+	return paginateProxyRuntimeRows(all, page, pageSize), total, nil
+}
+
+func sortProxyRuntimeRows(rows []service.ProxyWithAccountCount, sortBy, sortOrder string) {
+	sortKey := strings.ToLower(strings.TrimSpace(sortBy))
+	order := strings.ToLower(strings.TrimSpace(sortOrder))
+	ascending := order == "asc"
+
+	sort.SliceStable(rows, func(i, j int) bool {
+		left := rows[i]
+		right := rows[j]
+		switch sortKey {
+		case "active_egress_account_count":
+			if left.ActiveEgressAccountCount == right.ActiveEgressAccountCount {
+				return left.ID > right.ID
+			}
+			if ascending {
+				return left.ActiveEgressAccountCount < right.ActiveEgressAccountCount
+			}
+			return left.ActiveEgressAccountCount > right.ActiveEgressAccountCount
+		case "latency", "latency_ms":
+			leftMissing := left.LatencyMs == nil
+			rightMissing := right.LatencyMs == nil
+			if leftMissing || rightMissing {
+				if leftMissing == rightMissing {
+					return left.ID > right.ID
+				}
+				return !leftMissing
+			}
+			if *left.LatencyMs == *right.LatencyMs {
+				return left.ID > right.ID
+			}
+			if ascending {
+				return *left.LatencyMs < *right.LatencyMs
+			}
+			return *left.LatencyMs > *right.LatencyMs
+		default:
+			return left.ID > right.ID
+		}
+	})
+}
+
+func paginateProxyRuntimeRows(rows []service.ProxyWithAccountCount, page, pageSize int) []service.ProxyWithAccountCount {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 1000 {
+		pageSize = 1000
+	}
+	start := (page - 1) * pageSize
+	if start >= len(rows) {
+		return []service.ProxyWithAccountCount{}
+	}
+	end := start + pageSize
+	if end > len(rows) {
+		end = len(rows)
+	}
+	return rows[start:end]
 }
 
 // GetAll handles getting all active proxies without pagination
@@ -94,6 +226,7 @@ func (h *ProxyHandler) GetAll(c *gin.Context) {
 			response.ErrorFrom(c, err)
 			return
 		}
+		h.applyActiveEgressAccountCounts(c.Request.Context(), proxies)
 		out := make([]dto.AdminProxyWithAccountCount, 0, len(proxies))
 		for i := range proxies {
 			out = append(out, *dto.ProxyWithAccountCountFromServiceAdmin(&proxies[i]))
@@ -113,6 +246,83 @@ func (h *ProxyHandler) GetAll(c *gin.Context) {
 		out = append(out, *dto.ProxyFromServiceAdmin(&proxies[i]))
 	}
 	response.Success(c, out)
+}
+
+func (h *ProxyHandler) GetActiveUsage(c *gin.Context) {
+	idsParam := strings.TrimSpace(c.Query("ids"))
+	if idsParam == "" {
+		response.Success(c, map[int64]int64{})
+		return
+	}
+	parts := strings.Split(idsParam, ",")
+	proxyIDs := make([]int64, 0, len(parts))
+	for _, part := range parts {
+		id, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64)
+		if err != nil || id <= 0 {
+			response.BadRequest(c, "Invalid proxy ID")
+			return
+		}
+		proxyIDs = append(proxyIDs, id)
+	}
+	response.Success(c, h.activeUsageCounts(c.Request.Context(), proxyIDs))
+}
+
+func (h *ProxyHandler) GetSnapshots(c *gin.Context) {
+	proxyIDs, err := parseProxyIDs(c)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if len(proxyIDs) == 0 {
+		response.Success(c, []dto.AdminProxyWithAccountCount{})
+		return
+	}
+
+	proxies, err := h.adminService.GetProxySnapshots(c.Request.Context(), proxyIDs)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	h.applyActiveEgressAccountCounts(c.Request.Context(), proxies)
+
+	out := make([]dto.AdminProxyWithAccountCount, 0, len(proxies))
+	for i := range proxies {
+		out = append(out, *dto.ProxyWithAccountCountFromServiceAdmin(&proxies[i]))
+	}
+	response.Success(c, out)
+}
+
+func (h *ProxyHandler) applyActiveEgressAccountCounts(ctx context.Context, proxies []service.ProxyWithAccountCount) {
+	if len(proxies) == 0 {
+		return
+	}
+	proxyIDs := make([]int64, 0, len(proxies))
+	for i := range proxies {
+		if proxies[i].ID > 0 {
+			proxyIDs = append(proxyIDs, proxies[i].ID)
+		}
+	}
+	counts := h.activeUsageCounts(ctx, proxyIDs)
+	for i := range proxies {
+		proxies[i].ActiveEgressAccountCount = counts[proxies[i].ID]
+	}
+}
+
+func (h *ProxyHandler) activeUsageCounts(ctx context.Context, proxyIDs []int64) map[int64]int64 {
+	out := make(map[int64]int64, len(proxyIDs))
+	for _, proxyID := range proxyIDs {
+		if proxyID > 0 {
+			out[proxyID] = 0
+		}
+	}
+	if h == nil || h.activeUsageStats == nil || len(out) == 0 {
+		return out
+	}
+	counts := h.activeUsageStats.GetActiveAccountCounts(ctx, proxyIDs)
+	for proxyID, count := range counts {
+		out[proxyID] = count
+	}
+	return out
 }
 
 // GetAutoProbeConfig handles getting proxy auto probe config and runtime status.
@@ -143,12 +353,121 @@ func (h *ProxyHandler) UpdateAutoProbeConfig(c *gin.Context) {
 		Enabled:            req.Enabled,
 		DefaultIntervalSec: req.DefaultIntervalSec,
 		RetryIntervalSec:   req.RetryIntervalSec,
+		StickyEnabled:      req.StickyEnabled,
+		StickyTTLSeconds:   req.StickyTTLSeconds,
 	})
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
 	}
 
+	response.Success(c, status)
+}
+
+func (h *ProxyHandler) ListClashSubscriptions(c *gin.Context) {
+	subs, err := h.adminService.ListProxySubscriptions(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, subs)
+}
+
+func (h *ProxyHandler) CreateClashSubscription(c *gin.Context) {
+	var req CreateProxySubscriptionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	executeAdminIdempotentJSON(c, "admin.proxies.clash_subscriptions.create", req, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
+		sub, proxies, err := h.adminService.CreateProxySubscription(ctx, &service.CreateProxySubscriptionInput{
+			Name:               strings.TrimSpace(req.Name),
+			SubscriptionURL:    strings.TrimSpace(req.SubscriptionURL),
+			RefreshIntervalSec: req.RefreshIntervalSec,
+			TestURL:            strings.TrimSpace(req.TestURL),
+		})
+		if err != nil {
+			return nil, err
+		}
+		out := make([]dto.AdminProxy, 0, len(proxies))
+		for i := range proxies {
+			out = append(out, *dto.ProxyFromServiceAdmin(&proxies[i]))
+		}
+		var firstProxy *dto.AdminProxy
+		if len(proxies) > 0 {
+			firstProxy = dto.ProxyFromServiceAdmin(&proxies[0])
+		}
+		return gin.H{
+			"subscription": sub,
+			"proxy":        firstProxy,
+			"proxies":      out,
+		}, nil
+	})
+}
+
+func (h *ProxyHandler) UpdateClashSubscription(c *gin.Context) {
+	subID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid subscription ID")
+		return
+	}
+	var req UpdateProxySubscriptionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	sub, err := h.adminService.UpdateProxySubscription(c.Request.Context(), subID, &service.UpdateProxySubscriptionInput{
+		Name:               strings.TrimSpace(req.Name),
+		SubscriptionURL:    strings.TrimSpace(req.SubscriptionURL),
+		Status:             strings.TrimSpace(req.Status),
+		RefreshIntervalSec: req.RefreshIntervalSec,
+		TestURL:            strings.TrimSpace(req.TestURL),
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, sub)
+}
+
+func (h *ProxyHandler) DeleteClashSubscription(c *gin.Context) {
+	subID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid subscription ID")
+		return
+	}
+	if err := h.adminService.DeleteProxySubscription(c.Request.Context(), subID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"message": "Subscription deleted successfully"})
+}
+
+func (h *ProxyHandler) RefreshClashSubscription(c *gin.Context) {
+	subID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid subscription ID")
+		return
+	}
+	sub, err := h.adminService.RefreshProxySubscription(c.Request.Context(), subID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, sub)
+}
+
+func (h *ProxyHandler) GetClashSubscriptionStatus(c *gin.Context) {
+	subID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid subscription ID")
+		return
+	}
+	status, err := h.adminService.GetProxySubscriptionRuntimeStatus(c.Request.Context(), subID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	response.Success(c, status)
 }
 
@@ -312,14 +631,18 @@ func (h *ProxyHandler) GetStats(c *gin.Context) {
 		return
 	}
 
-	// Return mock data for now
-	_ = proxyID
+	stats, err := h.adminService.GetProxyStats(c.Request.Context(), proxyID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
 	response.Success(c, gin.H{
-		"total_accounts":  0,
-		"active_accounts": 0,
-		"total_requests":  0,
-		"success_rate":    100.0,
-		"average_latency": 0,
+		"total_accounts":  stats.TotalAccounts,
+		"active_accounts": stats.ActiveAccounts,
+		"total_requests":  stats.TotalRequests,
+		"success_rate":    stats.SuccessRate,
+		"average_latency": stats.AverageLatency,
 	})
 }
 
@@ -378,8 +701,8 @@ func (h *ProxyHandler) BatchCreate(c *gin.Context) {
 		username := strings.TrimSpace(item.Username)
 		password := strings.TrimSpace(item.Password)
 
-		// Check for duplicates (same host, port, username, password)
-		exists, err := h.adminService.CheckProxyExists(c.Request.Context(), host, item.Port, username, password)
+		// Check for duplicates (same protocol, host, port, username, password)
+		exists, err := h.adminService.CheckProxyExists(c.Request.Context(), protocol, host, item.Port, username, password)
 		if err != nil {
 			response.ErrorFrom(c, err)
 			return

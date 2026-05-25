@@ -10,6 +10,10 @@ import type {
   ProxyAutoProbeStatus,
   ProxyAccountSummary,
   ProxyQualityCheckResult,
+  ProxySubscription,
+  ManagedProxyRuntimeStatus,
+  CreateProxySubscriptionRequest,
+  UpdateProxySubscriptionRequest,
   CreateProxyRequest,
   UpdateProxyRequest,
   PaginatedResponse,
@@ -76,6 +80,14 @@ export async function getAllWithCount(): Promise<Proxy[]> {
  */
 export async function getById(id: number): Promise<Proxy> {
   const { data } = await apiClient.get<Proxy>(`/admin/proxies/${id}`)
+  return data
+}
+
+export async function getSnapshots(ids: number[]): Promise<Proxy[]> {
+  if (ids.length === 0) return []
+  const { data } = await apiClient.get<Proxy[]>('/admin/proxies/snapshots', {
+    params: { ids: ids.join(',') }
+  })
   return data
 }
 
@@ -190,6 +202,14 @@ export async function getProxyAccounts(id: number): Promise<ProxyAccountSummary[
   return data
 }
 
+export async function getActiveUsage(ids: number[]): Promise<Record<string, number>> {
+  if (ids.length === 0) return {}
+  const { data } = await apiClient.get<Record<string, number>>('/admin/proxies/active-usage', {
+    params: { ids: ids.join(',') }
+  })
+  return data
+}
+
 export async function getAutoProbeConfig(): Promise<ProxyAutoProbeStatus> {
   const { data } = await apiClient.get<ProxyAutoProbeStatus>('/admin/proxies/auto-probe/config')
   return data
@@ -197,6 +217,44 @@ export async function getAutoProbeConfig(): Promise<ProxyAutoProbeStatus> {
 
 export async function updateAutoProbeConfig(payload: ProxyAutoProbeConfig): Promise<ProxyAutoProbeStatus> {
   const { data } = await apiClient.put<ProxyAutoProbeStatus>('/admin/proxies/auto-probe/config', payload)
+  return data
+}
+
+export async function listClashSubscriptions(): Promise<ProxySubscription[]> {
+  const { data } = await apiClient.get<ProxySubscription[]>('/admin/proxies/clash-subscriptions')
+  return data
+}
+
+export async function createClashSubscription(payload: CreateProxySubscriptionRequest): Promise<{
+  subscription: ProxySubscription
+  proxy?: Proxy | null
+  proxies: Proxy[]
+}> {
+  const { data } = await apiClient.post<{
+    subscription: ProxySubscription
+    proxy?: Proxy | null
+    proxies: Proxy[]
+  }>('/admin/proxies/clash-subscriptions', payload)
+  return data
+}
+
+export async function updateClashSubscription(id: number, payload: UpdateProxySubscriptionRequest): Promise<ProxySubscription> {
+  const { data } = await apiClient.put<ProxySubscription>(`/admin/proxies/clash-subscriptions/${id}`, payload)
+  return data
+}
+
+export async function deleteClashSubscription(id: number): Promise<{ message: string }> {
+  const { data } = await apiClient.delete<{ message: string }>(`/admin/proxies/clash-subscriptions/${id}`)
+  return data
+}
+
+export async function refreshClashSubscription(id: number): Promise<ProxySubscription> {
+  const { data } = await apiClient.post<ProxySubscription>(`/admin/proxies/clash-subscriptions/${id}/refresh`)
+  return data
+}
+
+export async function getClashSubscriptionStatus(id: number): Promise<ManagedProxyRuntimeStatus> {
+  const { data } = await apiClient.get<ManagedProxyRuntimeStatus>(`/admin/proxies/clash-subscriptions/${id}/status`)
   return data
 }
 
@@ -272,6 +330,7 @@ export const proxiesAPI = {
   getAll,
   getAllWithCount,
   getById,
+  getSnapshots,
   create,
   update,
   delete: deleteProxy,
@@ -280,8 +339,15 @@ export const proxiesAPI = {
   checkProxyQuality,
   getStats,
   getProxyAccounts,
+  getActiveUsage,
   getAutoProbeConfig,
   updateAutoProbeConfig,
+  listClashSubscriptions,
+  createClashSubscription,
+  updateClashSubscription,
+  deleteClashSubscription,
+  refreshClashSubscription,
+  getClashSubscriptionStatus,
   batchCreate,
   batchDelete,
   exportData,

@@ -44,6 +44,8 @@ type GatewayHandler struct {
 	usageService              *service.UsageService
 	apiKeyService             *service.APIKeyService
 	usageRecordWorkerPool     *service.UsageRecordWorkerPool
+	proxyStatsWorkerPool      *service.ProxyStatsWorkerPool
+	proxyActiveUsageTracker   *service.ProxyActiveUsageTracker
 	errorPassthroughService   *service.ErrorPassthroughService
 	contentModerationService  *service.ContentModerationService
 	concurrencyHelper         *ConcurrencyHelper
@@ -66,6 +68,8 @@ func NewGatewayHandler(
 	usageService *service.UsageService,
 	apiKeyService *service.APIKeyService,
 	usageRecordWorkerPool *service.UsageRecordWorkerPool,
+	proxyStatsWorkerPool *service.ProxyStatsWorkerPool,
+	proxyActiveUsageTracker *service.ProxyActiveUsageTracker,
 	errorPassthroughService *service.ErrorPassthroughService,
 	contentModerationService *service.ContentModerationService,
 	userMsgQueueService *service.UserMessageQueueService,
@@ -101,6 +105,8 @@ func NewGatewayHandler(
 		usageService:              usageService,
 		apiKeyService:             apiKeyService,
 		usageRecordWorkerPool:     usageRecordWorkerPool,
+		proxyStatsWorkerPool:      proxyStatsWorkerPool,
+		proxyActiveUsageTracker:   proxyActiveUsageTracker,
 		errorPassthroughService:   errorPassthroughService,
 		contentModerationService:  contentModerationService,
 		concurrencyHelper:         NewConcurrencyHelper(concurrencyService, SSEPingFormatClaude, pingInterval),
@@ -302,6 +308,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 	if platform == service.PlatformGemini {
 		fs := NewFailoverState(h.maxAccountSwitchesGemini, hasBoundSession)
+		var lastFailedAccount *service.Account
+		var lastFailedDurationMs int64
 
 		// 单账号分组提前设置 SingleAccountRetry 标记，让 Service 层首次 503 就不设模型限流标记。
 		// 避免单账号分组收到 503 (MODEL_CAPACITY_EXHAUSTED) 时设 29s 限流，导致后续请求连续快速失败。
@@ -333,6 +341,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					return
 				default: // FailoverExhausted
 					if fs.LastFailoverErr != nil {
+						recordGatewayProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, lastFailedAccount, apiKey, lastFailedDurationMs, "handler.gateway.messages")
 						h.handleFailoverExhausted(c, fs.LastFailoverErr, service.PlatformGemini, streamStarted)
 					} else {
 						h.handleFailoverExhaustedSimple(c, 502, streamStarted)
@@ -424,6 +433,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
 			writerSizeBeforeForward := c.Writer.Size()
+			forwardStart := time.Now()
+			activeUsageHandle := beginProxyActiveUsage(h.proxyActiveUsageTracker, account)
 			if h.newAPIStyleService != nil && h.newAPIStyleService.SupportsForGroup(account, apiKey.Group, service.NewAPIStyleRouteMessages) {
 				result, _, err = h.newAPIStyleService.Forward(
 					requestCtx,
@@ -447,22 +458,28 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			} else {
 				result, err = h.geminiCompatService.Forward(requestCtx, c, account, body)
 			}
+			endProxyActiveUsage(activeUsageHandle)
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()
 			}
+			forwardDurationMs := elapsedMillisSince(forwardStart)
 			if err != nil {
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
 					// 流式内容已写入客户端，无法撤销，禁止 failover 以防止流拼接腐化
 					if c.Writer.Size() != writerSizeBeforeForward {
+						recordGatewayProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, account, apiKey, forwardDurationMs, "handler.gateway.messages")
 						h.handleFailoverExhausted(c, failoverErr, service.PlatformGemini, true)
 						return
 					}
 					action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, failoverErr)
 					switch action {
 					case FailoverContinue:
+						lastFailedAccount = account
+						lastFailedDurationMs = forwardDurationMs
 						continue
 					case FailoverExhausted:
+						recordGatewayProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, account, apiKey, forwardDurationMs, "handler.gateway.messages")
 						h.handleFailoverExhausted(c, fs.LastFailoverErr, service.PlatformGemini, streamStarted)
 						return
 					case FailoverCanceled:
@@ -488,6 +505,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					forwardFailedFields = append(forwardFailedFields, zap.Int64p("proxy_id", account.ProxyID))
 				}
 				reqLog.Error("gateway.forward_failed", forwardFailedFields...)
+				recordGatewayProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, account, apiKey, forwardDurationMs, "handler.gateway.messages")
 				return
 			}
 
@@ -574,6 +592,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 	for {
 		fs := NewFailoverState(h.maxAccountSwitches, hasBoundSession)
+		var lastFailedAccount *service.Account
+		var lastFailedDurationMs int64
 		retryWithFallback := false
 
 		for {
@@ -601,6 +621,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					return
 				default: // FailoverExhausted
 					if fs.LastFailoverErr != nil {
+						recordGatewayProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, lastFailedAccount, currentAPIKey, lastFailedDurationMs, "handler.gateway.messages")
 						h.handleFailoverExhausted(c, fs.LastFailoverErr, platform, streamStarted)
 					} else {
 						h.handleFailoverExhaustedSimple(c, 502, streamStarted)
@@ -752,6 +773,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
 			writerSizeBeforeForward := c.Writer.Size()
+			forwardStart := time.Now()
+			activeUsageHandle := beginProxyActiveUsage(h.proxyActiveUsageTracker, account)
 			if h.newAPIStyleService != nil && h.newAPIStyleService.SupportsForGroup(account, currentAPIKey.Group, service.NewAPIStyleRouteMessages) {
 				result, _, err = h.newAPIStyleService.Forward(
 					requestCtx,
@@ -775,6 +798,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			} else {
 				result, err = h.gatewayService.Forward(requestCtx, c, account, parsedReq)
 			}
+			endProxyActiveUsage(activeUsageHandle)
 
 			// 兜底释放串行锁（正常情况已通过回调提前释放）
 			if queueRelease != nil {
@@ -786,6 +810,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()
 			}
+			forwardDurationMs := elapsedMillisSince(forwardStart)
 			if err != nil {
 				// Beta policy block: return 400 immediately, no failover
 				var betaBlockedErr *service.BetaBlockedError
@@ -805,6 +830,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						fallbackGroup, err := h.gatewayService.ResolveGroupByID(c.Request.Context(), *fallbackGroupID)
 						if err != nil {
 							reqLog.Warn("gateway.resolve_fallback_group_failed", zap.Int64("fallback_group_id", *fallbackGroupID), zap.Error(err))
+							recordGatewayProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, account, currentAPIKey, forwardDurationMs, "handler.gateway.messages")
 							_ = h.antigravityGatewayService.WriteMappedClaudeError(c, account, promptTooLongErr.StatusCode, promptTooLongErr.RequestID, promptTooLongErr.Body)
 							return
 						}
@@ -816,6 +842,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 								zap.String("fallback_platform", fallbackGroup.Platform),
 								zap.String("fallback_subscription_type", fallbackGroup.SubscriptionType),
 							)
+							recordGatewayProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, account, currentAPIKey, forwardDurationMs, "handler.gateway.messages")
 							_ = h.antigravityGatewayService.WriteMappedClaudeError(c, account, promptTooLongErr.StatusCode, promptTooLongErr.RequestID, promptTooLongErr.Body)
 							return
 						}
@@ -837,6 +864,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						retryWithFallback = true
 						break
 					}
+					recordGatewayProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, account, currentAPIKey, forwardDurationMs, "handler.gateway.messages")
 					_ = h.antigravityGatewayService.WriteMappedClaudeError(c, account, promptTooLongErr.StatusCode, promptTooLongErr.RequestID, promptTooLongErr.Body)
 					return
 				}
@@ -844,14 +872,18 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				if errors.As(err, &failoverErr) {
 					// 流式内容已写入客户端，无法撤销，禁止 failover 以防止流拼接腐化
 					if c.Writer.Size() != writerSizeBeforeForward {
+						recordGatewayProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, account, currentAPIKey, forwardDurationMs, "handler.gateway.messages")
 						h.handleFailoverExhausted(c, failoverErr, account.Platform, true)
 						return
 					}
 					action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, failoverErr)
 					switch action {
 					case FailoverContinue:
+						lastFailedAccount = account
+						lastFailedDurationMs = forwardDurationMs
 						continue
 					case FailoverExhausted:
+						recordGatewayProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, account, currentAPIKey, forwardDurationMs, "handler.gateway.messages")
 						h.handleFailoverExhausted(c, fs.LastFailoverErr, account.Platform, streamStarted)
 						return
 					case FailoverCanceled:
@@ -877,6 +909,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					forwardFailedFields = append(forwardFailedFields, zap.Int64p("proxy_id", account.ProxyID))
 				}
 				reqLog.Error("gateway.forward_failed", forwardFailedFields...)
+				recordGatewayProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, account, currentAPIKey, forwardDurationMs, "handler.gateway.messages")
 				return
 			}
 
@@ -1061,7 +1094,7 @@ func (h *GatewayHandler) Usage(c *gin.Context) {
 	h.usageUnrestricted(c, ctx, apiKey, subject, usageData, modelStats)
 }
 
-// parseUsageDateRange 解析 start_date / end_date query params，默认返回近 30 天范围
+// parseUsageDateRange parses optional start_date / end_date query params.
 func (h *GatewayHandler) parseUsageDateRange(c *gin.Context) (time.Time, time.Time) {
 	now := timezone.Now()
 	endTime := now
@@ -1116,7 +1149,7 @@ func (h *GatewayHandler) buildUsageData(ctx context.Context, apiKeyID int64) gin
 	}
 }
 
-// usageQuotaLimited 处理 quota_limited 模式的响应
+// usageQuotaLimited handles quota-limited API key usage responses.
 func (h *GatewayHandler) usageQuotaLimited(c *gin.Context, ctx context.Context, apiKey *service.APIKey, usageData gin.H, modelStats any) {
 	resp := gin.H{
 		"mode":    "quota_limited",
@@ -1206,7 +1239,7 @@ func (h *GatewayHandler) usageQuotaLimited(c *gin.Context, ctx context.Context, 
 	c.JSON(http.StatusOK, resp)
 }
 
-// usageUnrestricted 处理 unrestricted 模式的响应（向后兼容）
+// usageUnrestricted handles unrestricted API key usage responses.
 func (h *GatewayHandler) usageUnrestricted(c *gin.Context, ctx context.Context, apiKey *service.APIKey, subject middleware2.AuthSubject, usageData gin.H, modelStats any) {
 	// 订阅模式
 	if apiKey.Group != nil && apiKey.Group.IsSubscriptionType() {
@@ -1268,9 +1301,7 @@ func (h *GatewayHandler) usageUnrestricted(c *gin.Context, ctx context.Context, 
 }
 
 // calculateSubscriptionRemaining 计算订阅剩余可用额度
-// 逻辑：
-// 1. 如果日/周/月任一限额达到100%，返回0
-// 2. 否则返回所有已配置周期中剩余额度的最小值
+// calculateSubscriptionRemaining returns the minimum remaining subscription quota.
 func (h *GatewayHandler) calculateSubscriptionRemaining(group *service.Group, sub *service.UserSubscription) float64 {
 	var remainingValues []float64
 
@@ -1403,7 +1434,7 @@ func (h *GatewayHandler) handleStreamingAwareError(c *gin.Context, status int, e
 	h.errorResponse(c, status, errType, message)
 }
 
-// ensureForwardErrorResponse 在 Forward 返回错误但尚未写响应时补写统一错误响应。
+// ensureForwardErrorResponse writes a fallback error response when possible.
 func (h *GatewayHandler) ensureForwardErrorResponse(c *gin.Context, streamStarted bool) bool {
 	if c == nil || c.Writer == nil || c.Writer.Written() {
 		return false
@@ -1413,7 +1444,6 @@ func (h *GatewayHandler) ensureForwardErrorResponse(c *gin.Context, streamStarte
 }
 
 // checkClaudeCodeVersion 检查 Claude Code 客户端版本是否满足版本要求
-// 仅对已识别的 Claude Code 客户端执行，count_tokens 路径除外
 func (h *GatewayHandler) checkClaudeCodeVersion(c *gin.Context) bool {
 	ctx := c.Request.Context()
 	if !service.IsClaudeCodeClient(ctx) {
@@ -1469,7 +1499,7 @@ func (h *GatewayHandler) errorResponse(c *gin.Context, status int, errType, mess
 
 // CountTokens handles token counting endpoint
 // POST /v1/messages/count_tokens
-// 特点：校验订阅/余额，但不计算并发、不记录使用量
+// CountTokens checks billing eligibility but does not record usage or concurrency.
 func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	// 从context获取apiKey和user（ApiKeyAuth中间件已设置）
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
@@ -1572,31 +1602,23 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 type InterceptType int
 
 const (
-	InterceptTypeNone              InterceptType = iota
-	InterceptTypeWarmup                          // 预热请求（返回 "New Conversation"）
-	InterceptTypeSuggestionMode                  // SUGGESTION MODE（返回空字符串）
-	InterceptTypeMaxTokensOneHaiku               // max_tokens=1 + haiku 探测请求（返回 "#"）
+	InterceptTypeNone InterceptType = iota
+	InterceptTypeWarmup
+	InterceptTypeSuggestionMode
+	InterceptTypeMaxTokensOneHaiku
 )
 
-// isHaikuModel 检查模型名称是否包含 "haiku"（大小写不敏感）
+// isHaikuModel checks whether the model name contains "haiku".
 func isHaikuModel(model string) bool {
 	return strings.Contains(strings.ToLower(model), "haiku")
 }
 
-// isMaxTokensOneHaikuRequest 检查是否为 max_tokens=1 + haiku 模型的探测请求
-// 这类请求用于 Claude Code 验证 API 连通性
-// 条件：max_tokens == 1 且 model 包含 "haiku" 且非流式请求
+// isMaxTokensOneHaikuRequest checks for the Claude Code connectivity probe.
 func isMaxTokensOneHaikuRequest(model string, maxTokens int, isStream bool) bool {
 	return maxTokens == 1 && isHaikuModel(model) && !isStream
 }
 
 // detectInterceptType 检测请求是否需要拦截，返回拦截类型
-// 参数说明：
-//   - body: 请求体字节
-//   - model: 请求的模型名称
-//   - maxTokens: max_tokens 值
-//   - isStream: 是否为流式请求
-//   - isClaudeCodeClient: 是否已通过 Claude Code 客户端校验
 func detectInterceptType(body []byte, model string, maxTokens int, isStream bool, isClaudeCodeClient bool) InterceptType {
 	// 优先检查 max_tokens=1 + haiku 探测请求（仅非流式）
 	if isClaudeCodeClient && isMaxTokensOneHaikuRequest(model, maxTokens, isStream) {
@@ -1717,8 +1739,7 @@ func sendMockInterceptStream(c *gin.Context, model string, interceptType Interce
 	}
 }
 
-// generateRealisticMsgID 生成仿真的消息 ID（msg_bdrk_XXXXXXX 格式）
-// 格式与 Claude API 真实响应一致，24 位随机字母数字
+// generateRealisticMsgID generates a realistic Claude-style message ID.
 func generateRealisticMsgID() string {
 	const charset = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 	const idLen = 24

@@ -103,7 +103,7 @@ func (s *proxyAutoProbeHandlerProxyRepoStub) ListActive(ctx context.Context) ([]
 func (s *proxyAutoProbeHandlerProxyRepoStub) ListActiveWithAccountCount(ctx context.Context) ([]service.ProxyWithAccountCount, error) {
 	return []service.ProxyWithAccountCount{}, nil
 }
-func (s *proxyAutoProbeHandlerProxyRepoStub) ExistsByHostPortAuth(ctx context.Context, host string, port int, username, password string) (bool, error) {
+func (s *proxyAutoProbeHandlerProxyRepoStub) ExistsByProtocolHostPortAuth(ctx context.Context, protocol, host string, port int, username, password string) (bool, error) {
 	return false, nil
 }
 func (s *proxyAutoProbeHandlerProxyRepoStub) CountAccountsByProxyID(ctx context.Context, proxyID int64) (int64, error) {
@@ -121,7 +121,7 @@ func TestProxyHandlerAutoProbeConfigEndpoints(t *testing.T) {
 	settingRepo := &proxyAutoProbeHandlerSettingRepoStub{}
 	proxyRepo := &proxyAutoProbeHandlerProxyRepoStub{}
 	autoProbeSvc := service.NewProxyAutoProbeService(nil, proxyRepo, settingRepo, nil)
-	handler := NewProxyHandler(adminSvc, autoProbeSvc)
+	handler := NewProxyHandler(adminSvc, autoProbeSvc, nil)
 
 	router.GET("/api/v1/admin/proxies/auto-probe/config", handler.GetAutoProbeConfig)
 	router.PUT("/api/v1/admin/proxies/auto-probe/config", handler.UpdateAutoProbeConfig)

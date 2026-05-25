@@ -4024,6 +4024,7 @@ export default {
         location: 'Location',
         status: 'Status',
         accounts: 'Accounts',
+        activeEgressAccounts: 'Live Use',
         latency: 'Latency',
         actions: 'Actions'
       },
@@ -4099,7 +4100,42 @@ export default {
         loadFailed: 'Failed to load auto probe settings',
         saveFailed: 'Failed to save auto probe settings',
         invalidDefaultInterval: 'Default interval must be at least 1 second',
-        invalidRetryInterval: 'Retry interval must be at least 1 second'
+        invalidRetryInterval: 'Retry interval must be at least 1 second',
+        stickyEnable: 'Keep auto-selected proxy sticky',
+        stickyEnableHint: 'Accounts using auto proxy selection will keep the same proxy until it becomes unavailable.',
+        stickyTTL: 'Sticky TTL (seconds)',
+        stickyTTLHint: 'How long an account-to-proxy binding is kept in Redis.',
+        invalidStickyTTL: 'Sticky TTL must be at least 1 second'
+      },
+      clash: {
+        import: 'Import Clash Subscription',
+        create: 'Create Subscription',
+        namePlaceholder: 'Managed proxy name',
+        subscriptionUrl: 'Subscription URL',
+        urlHint: 'Only http/https Clash subscription URLs are accepted. The URL is stored for admins only.',
+        refreshInterval: 'Refresh Interval (seconds)',
+        testUrl: 'Test URL',
+        managedBadge: 'Managed',
+        managedAuth: 'Managed by mihomo',
+        localRuntime: 'Local mihomo runtime',
+        editManagedHint: 'This is a managed Clash subscription proxy. Only name and status can be edited here.',
+        refresh: 'Refresh',
+        refreshRequested: 'Subscription refresh requested',
+        refreshFailed: 'Failed to refresh subscription',
+        runtimeUnavailable: 'Managed runtime is not ready on this node',
+        runtimeUnknown: 'Runtime status unknown',
+        invalidSubscriptionUrl: 'Subscription URL must be a valid http/https URL',
+        invalidTestUrl: 'Test URL must be a valid http/https URL',
+        invalidRefreshInterval: 'Refresh interval must be at least 60 seconds',
+        created: 'Clash subscription created',
+        createFailed: 'Failed to create Clash subscription',
+        runtime: {
+          disabled: 'Disabled',
+          starting: 'Starting',
+          running: 'Running',
+          stopped: 'Stopped',
+          error: 'Error'
+        }
       },
       // Other messages
       creating: 'Creating...',

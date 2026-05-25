@@ -168,6 +168,8 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 
 	// 3. Account selection + failover loop
 	fs := NewFailoverState(h.maxAccountSwitches, false)
+	var lastFailedAccount *service.Account
+	var lastFailedDurationMs int64
 
 	for {
 		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, sessionHash, reqModel, fs.FailedAccountIDs, "", int64(0))
@@ -184,6 +186,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 				return
 			default:
 				if fs.LastFailoverErr != nil {
+					recordGatewayProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, lastFailedAccount, apiKey, lastFailedDurationMs, "handler.gateway.responses")
 					h.handleResponsesFailoverExhausted(c, fs.LastFailoverErr, streamStarted)
 				} else {
 					h.responsesErrorResponse(c, http.StatusBadGateway, "server_error", "All available accounts exhausted")
@@ -219,12 +222,14 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 
 		// 5. Forward request
 		writerSizeBeforeForward := c.Writer.Size()
+		forwardStart := time.Now()
 		forwardBody := body
 		if channelMapping.Mapped {
 			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
 		}
 		var result *service.ForwardResult
 		var upstreamEndpoint string
+		activeUsageHandle := beginProxyActiveUsage(h.proxyActiveUsageTracker, account)
 		if h.newAPIStyleService != nil && h.newAPIStyleService.SupportsForGroup(account, apiKey.Group, service.NewAPIStyleRouteResponses) {
 			result, upstreamEndpoint, err = h.newAPIStyleService.Forward(
 				c.Request.Context(),
@@ -246,24 +251,30 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		} else {
 			result, err = h.gatewayService.ForwardAsResponses(c.Request.Context(), c, account, forwardBody, parsedReq)
 		}
+		endProxyActiveUsage(activeUsageHandle)
 
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
 		}
+		forwardDurationMs := elapsedMillisSince(forwardStart)
 
 		if err != nil {
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(err, &failoverErr) {
 				// Can't failover if streaming content already sent
 				if c.Writer.Size() != writerSizeBeforeForward {
+					recordGatewayProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, account, apiKey, forwardDurationMs, "handler.gateway.responses")
 					h.handleResponsesFailoverExhausted(c, failoverErr, true)
 					return
 				}
 				action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, failoverErr)
 				switch action {
 				case FailoverContinue:
+					lastFailedAccount = account
+					lastFailedDurationMs = forwardDurationMs
 					continue
 				case FailoverExhausted:
+					recordGatewayProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, account, apiKey, forwardDurationMs, "handler.gateway.responses")
 					h.handleResponsesFailoverExhausted(c, fs.LastFailoverErr, streamStarted)
 					return
 				case FailoverCanceled:
@@ -275,6 +286,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 				zap.Int64("account_id", account.ID),
 				zap.Error(err),
 			)
+			recordGatewayProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, account, apiKey, forwardDurationMs, "handler.gateway.responses")
 			return
 		}
 

@@ -67,6 +67,23 @@ server:
 run_mode: "standard"
 
 # =============================================================================
+# Managed Proxy Configuration
+# =============================================================================
+# Built Docker images include mihomo v1.19.24 at /app/bin/mihomo.
+# Keep enabled=false unless you want Sub2API to manage Clash subscriptions.
+# The binary path can be overridden with MANAGED_PROXY_MIHOMO_BINARY_PATH.
+managed_proxy:
+  enabled: false
+  mihomo_binary_path: "/app/bin/mihomo"
+  work_dir: "/app/data/managed-proxy"
+  bind_host: "127.0.0.1"
+  sync_interval_sec: 30
+  start_timeout_sec: 10
+  max_instances: 32
+  default_refresh_interval_sec: 3600
+  health_check_url: "https://www.gstatic.com/generate_204"
+
+# =============================================================================
 # CORS Configuration
 # 跨域资源共享 (CORS) 配置
 # =============================================================================

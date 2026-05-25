@@ -172,6 +172,7 @@ func newTestGatewayHandler(t *testing.T, group *service.Group, accounts []*servi
 		nil, // channelService
 		nil, // resolver
 		nil, // balanceNotifyService
+		nil, // proxyStatsRepo
 	)
 
 	// RunModeSimple：跳过计费检查，避免引入 repo/cache 依赖。

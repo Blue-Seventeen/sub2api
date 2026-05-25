@@ -913,6 +913,7 @@ func (s *CompatibleGatewayService) executePreparedRequest(
 
 			resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 			if err != nil {
+				ClearAutoSelectedProxyStickyOnTransportError(ctx, account, err)
 				return nil, false, &CompatibleUpstreamError{
 					StatusCode: http.StatusBadGateway,
 					Message:    sanitizeUpstreamErrorMessage(err.Error()),

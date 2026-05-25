@@ -411,15 +411,18 @@ func ProxyFromService(p *service.Proxy) *Proxy {
 		return nil
 	}
 	return &Proxy{
-		ID:        p.ID,
-		Name:      p.Name,
-		Protocol:  p.Protocol,
-		Host:      p.Host,
-		Port:      p.Port,
-		Username:  p.Username,
-		Status:    p.Status,
-		CreatedAt: p.CreatedAt,
-		UpdatedAt: p.UpdatedAt,
+		ID:             p.ID,
+		Name:           p.Name,
+		Protocol:       p.Protocol,
+		Host:           p.Host,
+		Port:           p.Port,
+		Username:       p.Username,
+		Status:         p.Status,
+		SourceType:     p.SourceType,
+		SubscriptionID: p.SubscriptionID,
+		RuntimeStatus:  p.RuntimeStatus,
+		CreatedAt:      p.CreatedAt,
+		UpdatedAt:      p.UpdatedAt,
 	}
 }
 
@@ -473,21 +476,22 @@ func ProxyWithAccountCountFromServiceAdmin(p *service.ProxyWithAccountCount) *Ad
 		return nil
 	}
 	return &AdminProxyWithAccountCount{
-		AdminProxy:     *admin,
-		AccountCount:   p.AccountCount,
-		LatencyMs:      p.LatencyMs,
-		LatencyStatus:  p.LatencyStatus,
-		LatencyMessage: p.LatencyMessage,
-		IPAddress:      p.IPAddress,
-		Country:        p.Country,
-		CountryCode:    p.CountryCode,
-		Region:         p.Region,
-		City:           p.City,
-		QualityStatus:  p.QualityStatus,
-		QualityScore:   p.QualityScore,
-		QualityGrade:   p.QualityGrade,
-		QualitySummary: p.QualitySummary,
-		QualityChecked: p.QualityChecked,
+		AdminProxy:               *admin,
+		AccountCount:             p.AccountCount,
+		ActiveEgressAccountCount: p.ActiveEgressAccountCount,
+		LatencyMs:                p.LatencyMs,
+		LatencyStatus:            p.LatencyStatus,
+		LatencyMessage:           p.LatencyMessage,
+		IPAddress:                p.IPAddress,
+		Country:                  p.Country,
+		CountryCode:              p.CountryCode,
+		Region:                   p.Region,
+		City:                     p.City,
+		QualityStatus:            p.QualityStatus,
+		QualityScore:             p.QualityScore,
+		QualityGrade:             p.QualityGrade,
+		QualitySummary:           p.QualitySummary,
+		QualityChecked:           p.QualityChecked,
 	}
 }
 

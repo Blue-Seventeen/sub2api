@@ -321,6 +321,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	defer cancelDial()
 	upstreamConn, statusCode, handshakeHeaders, err := dialer.Dial(dialCtx, wsURL, headers, proxyURL)
 	if err != nil {
+		if statusCode == 0 {
+			ClearAutoSelectedProxyStickyOnTransportError(ctx, account, err)
+		}
 		logOpenAIWSV2Passthrough(
 			"relay_dial_failed account_id=%d status_code=%d err=%s",
 			account.ID,

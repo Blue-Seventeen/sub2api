@@ -66,6 +66,27 @@ type Account struct {
 	modelMappingCacheRawSig         uint64
 }
 
+func (a *Account) EffectiveProxyID() *int64 {
+	if a == nil {
+		return nil
+	}
+	if a.IsAutoSelectProxyEnabled() {
+		if a.Proxy != nil && a.Proxy.ID > 0 {
+			proxyID := a.Proxy.ID
+			return &proxyID
+		}
+		return nil
+	}
+	if a.ProxyID != nil && *a.ProxyID > 0 {
+		return a.ProxyID
+	}
+	if a.Proxy != nil && a.Proxy.ID > 0 {
+		proxyID := a.Proxy.ID
+		return &proxyID
+	}
+	return nil
+}
+
 type TempUnschedulableRule struct {
 	ErrorCode       int      `json:"error_code"`
 	Keywords        []string `json:"keywords"`

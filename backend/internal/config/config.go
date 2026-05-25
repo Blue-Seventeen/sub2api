@@ -78,6 +78,7 @@ type Config struct {
 	RateLimit               RateLimitConfig               `mapstructure:"rate_limit"`
 	Pricing                 PricingConfig                 `mapstructure:"pricing"`
 	Gateway                 GatewayConfig                 `mapstructure:"gateway"`
+	ManagedProxy            ManagedProxyConfig            `mapstructure:"managed_proxy"`
 	APIKeyAuth              APIKeyAuthCacheConfig         `mapstructure:"api_key_auth_cache"`
 	SubscriptionCache       SubscriptionCacheConfig       `mapstructure:"subscription_cache"`
 	SubscriptionMaintenance SubscriptionMaintenanceConfig `mapstructure:"subscription_maintenance"`
@@ -152,6 +153,18 @@ type UpdateConfig struct {
 	// 支持 http/https/socks5/socks5h 协议
 	// 例如: "http://127.0.0.1:7890", "socks5://127.0.0.1:1080"
 	ProxyURL string `mapstructure:"proxy_url"`
+}
+
+type ManagedProxyConfig struct {
+	Enabled                    bool   `mapstructure:"enabled"`
+	MihomoBinaryPath           string `mapstructure:"mihomo_binary_path"`
+	WorkDir                    string `mapstructure:"work_dir"`
+	BindHost                   string `mapstructure:"bind_host"`
+	SyncIntervalSec            int    `mapstructure:"sync_interval_sec"`
+	StartTimeoutSec            int    `mapstructure:"start_timeout_sec"`
+	MaxInstances               int    `mapstructure:"max_instances"`
+	DefaultRefreshIntervalSec  int    `mapstructure:"default_refresh_interval_sec"`
+	HealthCheckURL             string `mapstructure:"health_check_url"`
 }
 
 type IdempotencyConfig struct {
@@ -1829,6 +1842,15 @@ func setDefaults() {
 	viper.SetDefault("gateway.user_message_queue.cleanup_interval_seconds", 60)
 
 	viper.SetDefault("gateway.tls_fingerprint.enabled", true)
+	viper.SetDefault("managed_proxy.enabled", false)
+	viper.SetDefault("managed_proxy.mihomo_binary_path", "/app/bin/mihomo")
+	viper.SetDefault("managed_proxy.work_dir", "./data/managed-proxy")
+	viper.SetDefault("managed_proxy.bind_host", "127.0.0.1")
+	viper.SetDefault("managed_proxy.sync_interval_sec", 30)
+	viper.SetDefault("managed_proxy.start_timeout_sec", 10)
+	viper.SetDefault("managed_proxy.max_instances", 32)
+	viper.SetDefault("managed_proxy.default_refresh_interval_sec", 3600)
+	viper.SetDefault("managed_proxy.health_check_url", "https://www.gstatic.com/generate_204")
 	viper.SetDefault("concurrency.ping_interval", 10)
 
 	// TokenRefresh

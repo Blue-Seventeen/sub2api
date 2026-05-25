@@ -16,10 +16,16 @@ import (
 const (
 	defaultProxyAutoProbeIntervalSec = 60
 	defaultProxyAutoProbeRetrySec    = 5
+	defaultProxyStickyTTLSeconds     = 604800
 	proxyAutoProbeTickInterval       = time.Second
 	proxyAutoProbeReconcileInterval  = 10 * time.Second
 	proxyAutoProbePageSize           = 200
 	proxyAutoProbeRunTimeout         = 45 * time.Second
+	proxyAutoProbeCompletionRingSize = 32
+	proxyStickyCacheTTL              = 30 * time.Second
+	proxyStickyRejectedProxyTTL      = 60 * time.Second
+	proxyStickyOperationTimeout      = 100 * time.Millisecond
+	proxyStickyWriteQueueSize        = 1024
 )
 
 const (
@@ -31,22 +37,37 @@ type ProxyAutoProbeConfig struct {
 	Enabled            bool `json:"enabled"`
 	DefaultIntervalSec int  `json:"default_interval_sec"`
 	RetryIntervalSec   int  `json:"retry_interval_sec"`
+	StickyEnabled      bool `json:"sticky_enabled"`
+	StickyTTLSeconds   int  `json:"sticky_ttl_seconds"`
 }
 
 type ProxyAutoProbeStatus struct {
-	Enabled            bool   `json:"enabled"`
-	DefaultIntervalSec int    `json:"default_interval_sec"`
-	RetryIntervalSec   int    `json:"retry_interval_sec"`
-	Running            bool   `json:"running"`
-	SuccessQueueCount  int    `json:"success_queue_count"`
-	FailedQueueCount   int    `json:"failed_queue_count"`
-	CurrentProxyID     *int64 `json:"current_proxy_id,omitempty"`
+	Enabled            bool                       `json:"enabled"`
+	DefaultIntervalSec int                        `json:"default_interval_sec"`
+	RetryIntervalSec   int                        `json:"retry_interval_sec"`
+	StickyEnabled      bool                       `json:"sticky_enabled"`
+	StickyTTLSeconds   int                        `json:"sticky_ttl_seconds"`
+	Running            bool                       `json:"running"`
+	SuccessQueueCount  int                        `json:"success_queue_count"`
+	FailedQueueCount   int                        `json:"failed_queue_count"`
+	CurrentProxyID     *int64                     `json:"current_proxy_id,omitempty"`
+	RecentCompletions  []ProxyAutoProbeCompletion `json:"recent_completions"`
+}
+
+type ProxyAutoProbeCompletion struct {
+	Seq           int64     `json:"seq"`
+	ProxyID       int64     `json:"proxy_id"`
+	FinishedAt    time.Time `json:"finished_at"`
+	Success       bool      `json:"success"`
+	QualityStatus string    `json:"quality_status"`
 }
 
 type ProxyAutoProbeUpdateInput struct {
 	Enabled            bool `json:"enabled"`
 	DefaultIntervalSec int  `json:"default_interval_sec"`
 	RetryIntervalSec   int  `json:"retry_interval_sec"`
+	StickyEnabled      *bool
+	StickyTTLSeconds   int `json:"sticky_ttl_seconds"`
 }
 
 type proxyAutoProbeEntry struct {
@@ -62,11 +83,21 @@ type proxyAutoProbeOutcome struct {
 	QualityStatus string
 }
 
+type proxyStickyCacheEntry struct {
+	ProxyID   int64
+	ExpiresAt time.Time
+}
+
+type proxyStickyWriteTask struct {
+	fn func(context.Context)
+}
+
 type ProxyAutoProbeService struct {
 	adminService      AdminService
 	proxyRepo         ProxyRepository
 	settingRepo       SettingRepository
 	proxyLatencyCache ProxyLatencyCache
+	proxyStickyStore  ProxyStickyStore
 	tickInterval      time.Duration
 
 	stopCh   chan struct{}
@@ -79,6 +110,14 @@ type ProxyAutoProbeService struct {
 	currentProxyID  *int64
 	lastReconcileAt time.Time
 	entries         map[int64]*proxyAutoProbeEntry
+	proxySnapshots  map[int64]Proxy
+	completionSeq   int64
+	completions     []ProxyAutoProbeCompletion
+
+	stickyMu      sync.Mutex
+	stickyCache   map[int64]proxyStickyCacheEntry
+	stickyRejects map[int64]proxyStickyCacheEntry
+	stickyWriteCh chan proxyStickyWriteTask
 }
 
 var (
@@ -91,17 +130,32 @@ func NewProxyAutoProbeService(
 	proxyRepo ProxyRepository,
 	settingRepo SettingRepository,
 	proxyLatencyCache ProxyLatencyCache,
+	proxyStickyStores ...ProxyStickyStore,
 ) *ProxyAutoProbeService {
-	return &ProxyAutoProbeService{
+	var proxyStickyStore ProxyStickyStore
+	if len(proxyStickyStores) > 0 {
+		proxyStickyStore = proxyStickyStores[0]
+	}
+	svc := &ProxyAutoProbeService{
 		adminService:      adminService,
 		proxyRepo:         proxyRepo,
 		settingRepo:       settingRepo,
 		proxyLatencyCache: proxyLatencyCache,
+		proxyStickyStore:  proxyStickyStore,
 		tickInterval:      proxyAutoProbeTickInterval,
 		stopCh:            make(chan struct{}),
 		config:            defaultProxyAutoProbeConfig(),
 		entries:           make(map[int64]*proxyAutoProbeEntry),
+		proxySnapshots:    make(map[int64]Proxy),
+		stickyCache:       make(map[int64]proxyStickyCacheEntry),
+		stickyRejects:     make(map[int64]proxyStickyCacheEntry),
 	}
+	if proxyStickyStore != nil {
+		svc.stickyWriteCh = make(chan proxyStickyWriteTask, proxyStickyWriteQueueSize)
+		svc.wg.Add(1)
+		go svc.runProxyStickyWriteWorker()
+	}
+	return svc
 }
 
 func SetDefaultProxyAutoProbeService(svc *ProxyAutoProbeService) {
@@ -121,6 +175,8 @@ func defaultProxyAutoProbeConfig() ProxyAutoProbeConfig {
 		Enabled:            false,
 		DefaultIntervalSec: defaultProxyAutoProbeIntervalSec,
 		RetryIntervalSec:   defaultProxyAutoProbeRetrySec,
+		StickyEnabled:      true,
+		StickyTTLSeconds:   defaultProxyStickyTTLSeconds,
 	}
 }
 
@@ -130,6 +186,9 @@ func normalizeProxyAutoProbeConfig(cfg ProxyAutoProbeConfig) ProxyAutoProbeConfi
 	}
 	if cfg.RetryIntervalSec < 1 {
 		cfg.RetryIntervalSec = defaultProxyAutoProbeRetrySec
+	}
+	if cfg.StickyTTLSeconds < 1 {
+		cfg.StickyTTLSeconds = defaultProxyStickyTTLSeconds
 	}
 	return cfg
 }
@@ -190,6 +249,9 @@ func (s *ProxyAutoProbeService) Stop() {
 	s.running = false
 	s.currentProxyID = nil
 	s.entries = make(map[int64]*proxyAutoProbeEntry)
+	s.proxySnapshots = make(map[int64]Proxy)
+	s.completionSeq = 0
+	s.completions = nil
 	s.mu.Unlock()
 	SetDefaultProxyAutoProbeService(nil)
 }
@@ -214,9 +276,15 @@ func (s *ProxyAutoProbeService) GetStatus() ProxyAutoProbeStatus {
 		Enabled:            cfg.Enabled,
 		DefaultIntervalSec: cfg.DefaultIntervalSec,
 		RetryIntervalSec:   cfg.RetryIntervalSec,
+		StickyEnabled:      cfg.StickyEnabled,
+		StickyTTLSeconds:   cfg.StickyTTLSeconds,
 		Running:            s.running,
 		SuccessQueueCount:  successCount,
 		FailedQueueCount:   failedCount,
+		RecentCompletions:  append([]ProxyAutoProbeCompletion(nil), s.completions...),
+	}
+	if status.RecentCompletions == nil {
+		status.RecentCompletions = []ProxyAutoProbeCompletion{}
 	}
 	if s.currentProxyID != nil {
 		current := *s.currentProxyID
@@ -234,7 +302,7 @@ func applyAutoSelectedProxy(ctx context.Context, account *Account) *Account {
 		account.Proxy = nil
 		return account
 	}
-	best := svc.getBestProxy(ctx)
+	best := svc.selectProxyForAccount(ctx, account)
 	account.Proxy = best
 	return account
 }
@@ -249,7 +317,9 @@ func resolveAccountProxy(ctx context.Context, account *Account, proxyRepo ProxyR
 		}
 		svc := GetDefaultProxyAutoProbeService()
 		if svc != nil {
-			return svc.getBestProxy(ctx)
+			selected := svc.selectProxyForAccount(ctx, account)
+			account.Proxy = selected
+			return selected
 		}
 		return nil
 	}
@@ -270,7 +340,25 @@ func resolveAccountProxyURL(ctx context.Context, account *Account, proxyRepo Pro
 	if proxy == nil {
 		return ""
 	}
-	return proxy.URL()
+	return ResolveProxyURL(ctx, proxy)
+}
+
+func ClearAutoSelectedProxyStickyOnTransportError(ctx context.Context, account *Account, err error) {
+	if err == nil || account == nil || !account.IsAutoSelectProxyEnabled() || account.ID <= 0 {
+		return
+	}
+	if errors.Is(err, context.Canceled) {
+		return
+	}
+	proxyID := account.EffectiveProxyID()
+	if proxyID == nil || *proxyID <= 0 {
+		return
+	}
+	svc := GetDefaultProxyAutoProbeService()
+	if svc == nil {
+		return
+	}
+	svc.ClearStickyProxy(ctx, account.ID, *proxyID)
 }
 
 func (s *ProxyAutoProbeService) UpdateConfig(ctx context.Context, input *ProxyAutoProbeUpdateInput) (ProxyAutoProbeStatus, error) {
@@ -283,11 +371,26 @@ func (s *ProxyAutoProbeService) UpdateConfig(ctx context.Context, input *ProxyAu
 	if input.RetryIntervalSec < 1 {
 		return ProxyAutoProbeStatus{}, errors.New("retry_interval_sec must be >= 1")
 	}
+	if input.StickyTTLSeconds < 0 {
+		return ProxyAutoProbeStatus{}, errors.New("sticky_ttl_seconds must be >= 1")
+	}
+
+	currentCfg := s.snapshotConfig()
+	stickyEnabled := currentCfg.StickyEnabled
+	if input.StickyEnabled != nil {
+		stickyEnabled = *input.StickyEnabled
+	}
+	stickyTTLSeconds := input.StickyTTLSeconds
+	if stickyTTLSeconds == 0 {
+		stickyTTLSeconds = currentCfg.StickyTTLSeconds
+	}
 
 	cfg := ProxyAutoProbeConfig{
 		Enabled:            input.Enabled,
 		DefaultIntervalSec: input.DefaultIntervalSec,
 		RetryIntervalSec:   input.RetryIntervalSec,
+		StickyEnabled:      stickyEnabled,
+		StickyTTLSeconds:   stickyTTLSeconds,
 	}
 
 	payload, err := json.Marshal(cfg)
@@ -384,7 +487,22 @@ func (s *ProxyAutoProbeService) loadConfig(ctx context.Context) (ProxyAutoProbeC
 	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
 		return defaultProxyAutoProbeConfig(), nil
 	}
+	cfg = applyProxyAutoProbeConfigCompatibility(raw, cfg)
 	return normalizeProxyAutoProbeConfig(cfg), nil
+}
+
+func applyProxyAutoProbeConfigCompatibility(raw string, cfg ProxyAutoProbeConfig) ProxyAutoProbeConfig {
+	fields := map[string]json.RawMessage{}
+	if err := json.Unmarshal([]byte(raw), &fields); err != nil {
+		return cfg
+	}
+	if _, ok := fields["sticky_enabled"]; !ok {
+		cfg.StickyEnabled = true
+	}
+	if _, ok := fields["sticky_ttl_seconds"]; !ok {
+		cfg.StickyTTLSeconds = defaultProxyStickyTTLSeconds
+	}
+	return cfg
 }
 
 func (s *ProxyAutoProbeService) initializeEntries(ctx context.Context, now time.Time) error {
@@ -408,16 +526,17 @@ func (s *ProxyAutoProbeService) initializeEntries(ctx context.Context, now time.
 
 	cfg := s.snapshotConfig()
 	entries := make(map[int64]*proxyAutoProbeEntry, len(proxies))
+	proxySnapshots := make(map[int64]Proxy, len(proxies))
 	for i := range proxies {
 		proxy := proxies[i]
+		proxySnapshots[proxy.ID] = proxy
 		queue := ProxyAutoProbeQueueSuccess
 		var latency *int64
 		if info := latencies[proxy.ID]; info != nil {
 			latency = info.LatencyMs
-			switch {
-			case info.QualityStatus == "healthy":
+			if isAutoProbeSuccessStatus(info.QualityStatus, info.Success) {
 				queue = ProxyAutoProbeQueueSuccess
-			case info.QualityStatus == "warn", info.QualityStatus == "challenge", info.QualityStatus == "failed", !info.Success:
+			} else {
 				queue = ProxyAutoProbeQueueFailed
 			}
 		}
@@ -433,6 +552,7 @@ func (s *ProxyAutoProbeService) initializeEntries(ctx context.Context, now time.
 
 	s.mu.Lock()
 	s.entries = entries
+	s.proxySnapshots = proxySnapshots
 	s.running = cfg.Enabled
 	s.currentProxyID = nil
 	s.lastReconcileAt = now
@@ -454,10 +574,15 @@ func (s *ProxyAutoProbeService) reconcileEntries(ctx context.Context, now time.T
 	if s.entries == nil {
 		s.entries = make(map[int64]*proxyAutoProbeEntry)
 	}
+	if s.proxySnapshots == nil {
+		s.proxySnapshots = make(map[int64]Proxy)
+	}
 
 	for i := range proxies {
-		id := proxies[i].ID
+		proxy := proxies[i]
+		id := proxy.ID
 		currentIDs[id] = struct{}{}
+		s.proxySnapshots[id] = proxy
 		if _, ok := s.entries[id]; ok {
 			continue
 		}
@@ -473,6 +598,7 @@ func (s *ProxyAutoProbeService) reconcileEntries(ctx context.Context, now time.T
 			continue
 		}
 		delete(s.entries, id)
+		delete(s.proxySnapshots, id)
 		if s.currentProxyID != nil && *s.currentProxyID == id {
 			s.currentProxyID = nil
 		}
@@ -510,22 +636,279 @@ func (s *ProxyAutoProbeService) listAllProxies(ctx context.Context) ([]Proxy, er
 	return all, nil
 }
 
+func (s *ProxyAutoProbeService) selectProxyForAccount(ctx context.Context, account *Account) *Proxy {
+	if s == nil || account == nil || account.ID <= 0 {
+		return s.getBestProxy(ctx)
+	}
+	cfg := s.snapshotConfig()
+	if !cfg.StickyEnabled || s.proxyStickyStore == nil {
+		return s.getBestProxy(ctx)
+	}
+
+	ttl := proxyStickyTTL(cfg)
+	rejectedProxyID, hasRejectedProxy := s.getProxyStickyReject(account.ID)
+	if proxyID, ok := s.getProxyStickyCache(account.ID); ok {
+		if hasRejectedProxy && proxyID == rejectedProxyID {
+			s.deleteProxyStickyCacheIfMatch(account.ID, proxyID)
+			s.deleteStickyProxy(account.ID, proxyID)
+		} else if proxy := s.getUsableSuccessProxy(ctx, proxyID); proxy != nil {
+			s.setProxyStickyCache(account.ID, proxyID, ttl)
+			s.refreshStickyProxy(account.ID, ttl)
+			return proxy
+		} else {
+			s.deleteProxyStickyCacheIfMatch(account.ID, proxyID)
+			s.deleteStickyProxy(account.ID, proxyID)
+		}
+	}
+
+	if proxyID, ok, err := s.getStickyProxyFromStore(ctx, account.ID); err != nil {
+		s.deleteProxyStickyCache(account.ID)
+		return s.getBestProxy(ctx)
+	} else if ok && proxyID > 0 {
+		if hasRejectedProxy && proxyID == rejectedProxyID {
+			s.deleteStickyProxy(account.ID, proxyID)
+		} else if proxy := s.getUsableSuccessProxy(ctx, proxyID); proxy != nil {
+			s.setProxyStickyCache(account.ID, proxyID, ttl)
+			s.refreshStickyProxy(account.ID, ttl)
+			return proxy
+		} else {
+			s.deleteStickyProxy(account.ID, proxyID)
+		}
+	}
+
+	best := s.getBestProxyExcluding(ctx, rejectedProxyID)
+	if best == nil && hasRejectedProxy {
+		best = s.getBestProxy(ctx)
+	}
+	if best != nil && best.ID > 0 {
+		s.setProxyStickyCache(account.ID, best.ID, ttl)
+		s.setStickyProxy(account.ID, best.ID, ttl)
+	}
+	return best
+}
+
+func (s *ProxyAutoProbeService) ClearStickyProxy(ctx context.Context, accountID, proxyID int64) {
+	if s == nil || accountID <= 0 || proxyID <= 0 {
+		return
+	}
+	s.deleteProxyStickyCacheIfMatch(accountID, proxyID)
+	s.setProxyStickyReject(accountID, proxyID)
+	s.deleteStickyProxy(accountID, proxyID)
+}
+
+func (s *ProxyAutoProbeService) getStickyProxyFromStore(ctx context.Context, accountID int64) (int64, bool, error) {
+	if s == nil || s.proxyStickyStore == nil || accountID <= 0 {
+		return 0, false, nil
+	}
+	stickyCtx, cancel := proxyStickyContext(ctx)
+	defer cancel()
+	proxyID, ok, err := s.proxyStickyStore.Get(stickyCtx, accountID)
+	if err != nil || !ok || proxyID <= 0 {
+		return 0, false, err
+	}
+	return proxyID, true, nil
+}
+
+func (s *ProxyAutoProbeService) getUsableSuccessProxy(ctx context.Context, proxyID int64) *Proxy {
+	if s == nil || proxyID <= 0 || !s.isProxyInSuccessQueue(proxyID) {
+		return nil
+	}
+	proxy, ok := s.getProxySnapshot(proxyID)
+	if !ok || !proxy.IsActive() {
+		return nil
+	}
+	return &proxy
+}
+
+func (s *ProxyAutoProbeService) isProxyInSuccessQueue(proxyID int64) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	entry := s.entries[proxyID]
+	return entry != nil && entry.Queue == ProxyAutoProbeQueueSuccess
+}
+
+func (s *ProxyAutoProbeService) getProxyStickyCache(accountID int64) (int64, bool) {
+	s.stickyMu.Lock()
+	defer s.stickyMu.Unlock()
+	entry, ok := s.stickyCache[accountID]
+	if !ok {
+		return 0, false
+	}
+	if time.Now().After(entry.ExpiresAt) {
+		delete(s.stickyCache, accountID)
+		return 0, false
+	}
+	if entry.ProxyID <= 0 {
+		return 0, false
+	}
+	return entry.ProxyID, true
+}
+
+func (s *ProxyAutoProbeService) setProxyStickyCache(accountID, proxyID int64, ttl ...time.Duration) {
+	if s == nil || accountID <= 0 || proxyID <= 0 {
+		return
+	}
+	s.stickyMu.Lock()
+	defer s.stickyMu.Unlock()
+	if s.stickyCache == nil {
+		s.stickyCache = make(map[int64]proxyStickyCacheEntry)
+	}
+	s.stickyCache[accountID] = proxyStickyCacheEntry{
+		ProxyID:   proxyID,
+		ExpiresAt: time.Now().Add(proxyStickyCacheTTL),
+	}
+}
+
+func (s *ProxyAutoProbeService) deleteProxyStickyCacheIfMatch(accountID, proxyID int64) {
+	if s == nil || accountID <= 0 || proxyID <= 0 {
+		return
+	}
+	s.stickyMu.Lock()
+	defer s.stickyMu.Unlock()
+	entry, ok := s.stickyCache[accountID]
+	if ok && entry.ProxyID == proxyID {
+		delete(s.stickyCache, accountID)
+	}
+}
+
+func (s *ProxyAutoProbeService) deleteProxyStickyCache(accountID int64) {
+	if s == nil || accountID <= 0 {
+		return
+	}
+	s.stickyMu.Lock()
+	defer s.stickyMu.Unlock()
+	delete(s.stickyCache, accountID)
+}
+
+func (s *ProxyAutoProbeService) getProxyStickyReject(accountID int64) (int64, bool) {
+	if s == nil || accountID <= 0 {
+		return 0, false
+	}
+	s.stickyMu.Lock()
+	defer s.stickyMu.Unlock()
+	entry, ok := s.stickyRejects[accountID]
+	if !ok {
+		return 0, false
+	}
+	if time.Now().After(entry.ExpiresAt) {
+		delete(s.stickyRejects, accountID)
+		return 0, false
+	}
+	if entry.ProxyID <= 0 {
+		return 0, false
+	}
+	return entry.ProxyID, true
+}
+
+func (s *ProxyAutoProbeService) setProxyStickyReject(accountID, proxyID int64) {
+	if s == nil || accountID <= 0 || proxyID <= 0 {
+		return
+	}
+	s.stickyMu.Lock()
+	defer s.stickyMu.Unlock()
+	if s.stickyRejects == nil {
+		s.stickyRejects = make(map[int64]proxyStickyCacheEntry)
+	}
+	s.stickyRejects[accountID] = proxyStickyCacheEntry{
+		ProxyID:   proxyID,
+		ExpiresAt: time.Now().Add(proxyStickyRejectedProxyTTL),
+	}
+}
+
+func (s *ProxyAutoProbeService) setStickyProxy(accountID, proxyID int64, ttl time.Duration) {
+	s.submitProxyStickyWrite(func(ctx context.Context) {
+		_ = s.proxyStickyStore.Set(ctx, accountID, proxyID, ttl)
+	})
+}
+
+func (s *ProxyAutoProbeService) refreshStickyProxy(accountID int64, ttl time.Duration) {
+	s.submitProxyStickyWrite(func(ctx context.Context) {
+		_ = s.proxyStickyStore.Refresh(ctx, accountID, ttl)
+	})
+}
+
+func (s *ProxyAutoProbeService) deleteStickyProxy(accountID, proxyID int64) {
+	s.submitProxyStickyWrite(func(ctx context.Context) {
+		_ = s.proxyStickyStore.DeleteIfMatch(ctx, accountID, proxyID)
+	})
+}
+
+func (s *ProxyAutoProbeService) submitProxyStickyWrite(fn func(context.Context)) {
+	if s == nil || s.proxyStickyStore == nil || s.stickyWriteCh == nil || fn == nil {
+		return
+	}
+	select {
+	case s.stickyWriteCh <- proxyStickyWriteTask{fn: fn}:
+	default:
+	}
+}
+
+func (s *ProxyAutoProbeService) runProxyStickyWriteWorker() {
+	defer s.wg.Done()
+	for {
+		select {
+		case task := <-s.stickyWriteCh:
+			if task.fn == nil {
+				continue
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), proxyStickyOperationTimeout)
+			task.fn(ctx)
+			cancel()
+		case <-s.stopCh:
+			return
+		}
+	}
+}
+
+func proxyStickyContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithTimeout(ctx, proxyStickyOperationTimeout)
+}
+
+func proxyStickyTTL(cfg ProxyAutoProbeConfig) time.Duration {
+	ttl := cfg.StickyTTLSeconds
+	if ttl < 1 {
+		ttl = defaultProxyStickyTTLSeconds
+	}
+	return time.Duration(ttl) * time.Second
+}
+
 func (s *ProxyAutoProbeService) getBestProxy(ctx context.Context) *Proxy {
-	if s == nil || s.proxyRepo == nil {
+	return s.getBestProxyExcluding(ctx, 0)
+}
+
+func (s *ProxyAutoProbeService) getBestProxyExcluding(ctx context.Context, excludedProxyID int64) *Proxy {
+	if s == nil {
 		return nil
 	}
 
+	type proxyCandidate struct {
+		Entry *proxyAutoProbeEntry
+		Proxy Proxy
+	}
 	s.mu.RLock()
-	candidates := make([]*proxyAutoProbeEntry, 0, len(s.entries))
+	candidates := make([]proxyCandidate, 0, len(s.entries))
 	for _, entry := range s.entries {
 		if entry == nil || entry.Queue != ProxyAutoProbeQueueSuccess {
 			continue
 		}
-		candidates = append(candidates, &proxyAutoProbeEntry{
-			ProxyID:       entry.ProxyID,
-			Queue:         entry.Queue,
-			NextDueAt:     entry.NextDueAt,
-			LastLatencyMs: entry.LastLatencyMs,
+		if excludedProxyID > 0 && entry.ProxyID == excludedProxyID {
+			continue
+		}
+		proxy, ok := s.proxySnapshots[entry.ProxyID]
+		if !ok || !proxy.IsActive() {
+			continue
+		}
+		candidates = append(candidates, proxyCandidate{
+			Entry: &proxyAutoProbeEntry{
+				ProxyID:       entry.ProxyID,
+				Queue:         entry.Queue,
+				NextDueAt:     entry.NextDueAt,
+				LastLatencyMs: entry.LastLatencyMs,
+			},
+			Proxy: proxy,
 		})
 	}
 	s.mu.RUnlock()
@@ -535,8 +918,8 @@ func (s *ProxyAutoProbeService) getBestProxy(ctx context.Context) *Proxy {
 	}
 
 	sort.SliceStable(candidates, func(i, j int) bool {
-		left := candidates[i]
-		right := candidates[j]
+		left := candidates[i].Entry
+		right := candidates[j].Entry
 		switch {
 		case left.LastLatencyMs == nil && right.LastLatencyMs != nil:
 			return false
@@ -550,13 +933,20 @@ func (s *ProxyAutoProbeService) getBestProxy(ctx context.Context) *Proxy {
 	})
 
 	for _, candidate := range candidates {
-		proxy, err := s.proxyRepo.GetByID(ctx, candidate.ProxyID)
-		if err != nil || proxy == nil {
-			continue
-		}
-		return proxy
+		proxy := candidate.Proxy
+		return &proxy
 	}
 	return nil
+}
+
+func (s *ProxyAutoProbeService) getProxySnapshot(proxyID int64) (Proxy, bool) {
+	if s == nil || proxyID <= 0 {
+		return Proxy{}, false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	proxy, ok := s.proxySnapshots[proxyID]
+	return proxy, ok
 }
 
 func (s *ProxyAutoProbeService) acquireDueProxy(now time.Time) (int64, bool) {
@@ -641,8 +1031,22 @@ func (s *ProxyAutoProbeService) probeProxy(ctx context.Context, proxyID int64) p
 		latency := qualityResult.BaseLatencyMs
 		outcome.LatencyMs = &latency
 	}
-	outcome.Success = qualityStatus == "healthy" || qualityStatus == "warn"
+	outcome.Success = isAutoProbeSuccessStatus(qualityStatus, true)
 	return outcome
+}
+
+func isAutoProbeSuccessStatus(qualityStatus string, success bool) bool {
+	if !success {
+		return false
+	}
+	switch qualityStatus {
+	case "healthy", "warn":
+		return true
+	case "challenge", "failed":
+		return false
+	default:
+		return success
+	}
 }
 
 func classifyAutoProbeQueueFromQuality(result *ProxyQualityCheckResult) string {
@@ -674,6 +1078,7 @@ func (s *ProxyAutoProbeService) finishProbe(proxyID int64, outcome proxyAutoProb
 	if s.currentProxyID != nil && *s.currentProxyID == proxyID {
 		s.currentProxyID = nil
 	}
+	s.recordProbeCompletionLocked(proxyID, outcome, finishedAt)
 
 	entry, ok := s.entries[proxyID]
 	if !ok || entry == nil {
@@ -687,6 +1092,20 @@ func (s *ProxyAutoProbeService) finishProbe(proxyID int64, outcome proxyAutoProb
 	}
 	entry.LastLatencyMs = outcome.LatencyMs
 	entry.NextDueAt = finishedAt.Add(s.intervalForQueueLocked(entry.Queue))
+}
+
+func (s *ProxyAutoProbeService) recordProbeCompletionLocked(proxyID int64, outcome proxyAutoProbeOutcome, finishedAt time.Time) {
+	s.completionSeq++
+	s.completions = append(s.completions, ProxyAutoProbeCompletion{
+		Seq:           s.completionSeq,
+		ProxyID:       proxyID,
+		FinishedAt:    finishedAt,
+		Success:       outcome.Success,
+		QualityStatus: outcome.QualityStatus,
+	})
+	if len(s.completions) > proxyAutoProbeCompletionRingSize {
+		s.completions = append([]ProxyAutoProbeCompletion(nil), s.completions[len(s.completions)-proxyAutoProbeCompletionRingSize:]...)
+	}
 }
 
 func (s *ProxyAutoProbeService) intervalForQueueLocked(queue string) time.Duration {

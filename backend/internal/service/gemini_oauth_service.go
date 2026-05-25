@@ -117,7 +117,7 @@ func (s *GeminiOAuthService) GenerateAuthURL(ctx context.Context, proxyID *int64
 	if proxyID != nil {
 		proxy, err := s.proxyRepo.GetByID(ctx, *proxyID)
 		if err == nil && proxy != nil {
-			proxyURL = proxy.URL()
+			proxyURL = ResolveProxyURL(ctx, proxy)
 		}
 	}
 
@@ -412,7 +412,7 @@ func (s *GeminiOAuthService) RefreshAccountGoogleOneTier(
 	// 获取 proxy URL
 	var proxyURL string
 	if account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+		proxyURL = ResolveProxyURL(ctx, account.Proxy)
 	}
 
 	// 调用 Drive API
@@ -460,7 +460,7 @@ func (s *GeminiOAuthService) ExchangeCode(ctx context.Context, input *GeminiExch
 	if input.ProxyID != nil {
 		proxy, err := s.proxyRepo.GetByID(ctx, *input.ProxyID)
 		if err == nil && proxy != nil {
-			proxyURL = proxy.URL()
+			proxyURL = ResolveProxyURL(ctx, proxy)
 		}
 	}
 	logger.LegacyPrintf("service.gemini_oauth", "[GeminiOAuth] ProxyURL: %s", proxyURL)

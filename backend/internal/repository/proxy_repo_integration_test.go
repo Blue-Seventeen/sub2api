@@ -146,9 +146,9 @@ func (s *ProxyRepoSuite) TestListActive() {
 	s.Require().Equal("active1", proxies[0].Name)
 }
 
-// --- ExistsByHostPortAuth ---
+// --- ExistsByProtocolHostPortAuth ---
 
-func (s *ProxyRepoSuite) TestExistsByHostPortAuth() {
+func (s *ProxyRepoSuite) TestExistsByProtocolHostPortAuth() {
 	s.mustCreateProxy(&service.Proxy{
 		Name:     "p1",
 		Protocol: "http",
@@ -159,16 +159,20 @@ func (s *ProxyRepoSuite) TestExistsByHostPortAuth() {
 		Status:   service.StatusActive,
 	})
 
-	exists, err := s.repo.ExistsByHostPortAuth(s.ctx, "1.2.3.4", 8080, "user", "pass")
-	s.Require().NoError(err, "ExistsByHostPortAuth")
+	exists, err := s.repo.ExistsByProtocolHostPortAuth(s.ctx, "http", "1.2.3.4", 8080, "user", "pass")
+	s.Require().NoError(err, "ExistsByProtocolHostPortAuth")
 	s.Require().True(exists)
 
-	notExists, err := s.repo.ExistsByHostPortAuth(s.ctx, "1.2.3.4", 8080, "wrong", "creds")
+	notExists, err := s.repo.ExistsByProtocolHostPortAuth(s.ctx, "http", "1.2.3.4", 8080, "wrong", "creds")
 	s.Require().NoError(err)
 	s.Require().False(notExists)
+
+	differentProtocol, err := s.repo.ExistsByProtocolHostPortAuth(s.ctx, "socks5", "1.2.3.4", 8080, "user", "pass")
+	s.Require().NoError(err)
+	s.Require().False(differentProtocol)
 }
 
-func (s *ProxyRepoSuite) TestExistsByHostPortAuth_NoAuth() {
+func (s *ProxyRepoSuite) TestExistsByProtocolHostPortAuth_NoAuth() {
 	s.mustCreateProxy(&service.Proxy{
 		Name:     "p-noauth",
 		Protocol: "http",
@@ -179,7 +183,7 @@ func (s *ProxyRepoSuite) TestExistsByHostPortAuth_NoAuth() {
 		Status:   service.StatusActive,
 	})
 
-	exists, err := s.repo.ExistsByHostPortAuth(s.ctx, "5.6.7.8", 8081, "", "")
+	exists, err := s.repo.ExistsByProtocolHostPortAuth(s.ctx, "http", "5.6.7.8", 8081, "", "")
 	s.Require().NoError(err)
 	s.Require().True(exists)
 }
@@ -253,12 +257,12 @@ func (s *ProxyRepoSuite) TestListActiveWithAccountCount() {
 
 // --- Combined original test ---
 
-func (s *ProxyRepoSuite) TestExistsByHostPortAuth_And_AccountCountAggregates() {
+func (s *ProxyRepoSuite) TestExistsByProtocolHostPortAuth_And_AccountCountAggregates() {
 	p1 := s.mustCreateProxy(&service.Proxy{Name: "p1", Protocol: "http", Host: "1.2.3.4", Port: 8080, Username: "u", Password: "p", Status: service.StatusActive})
 	p2 := s.mustCreateProxy(&service.Proxy{Name: "p2", Protocol: "http", Host: "5.6.7.8", Port: 8081, Username: "", Password: "", Status: service.StatusActive})
 
-	exists, err := s.repo.ExistsByHostPortAuth(s.ctx, "1.2.3.4", 8080, "u", "p")
-	s.Require().NoError(err, "ExistsByHostPortAuth")
+	exists, err := s.repo.ExistsByProtocolHostPortAuth(s.ctx, "http", "1.2.3.4", 8080, "u", "p")
+	s.Require().NoError(err, "ExistsByProtocolHostPortAuth")
 	s.Require().True(exists, "expected proxy to exist")
 
 	s.mustInsertAccount("a1", &p1.ID)

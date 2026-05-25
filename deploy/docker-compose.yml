@@ -142,6 +142,15 @@ services:
       # Proxy for accessing GitHub (online updates + pricing data)
       # Examples: http://host:port, socks5://host:port
       - UPDATE_PROXY_URL=${UPDATE_PROXY_URL:-}
+
+      # =======================================================================
+      # Managed Clash Subscription Proxy
+      # =======================================================================
+      # The Docker image bundles a stable mihomo core at /app/bin/mihomo.
+      # Set MANAGED_PROXY_ENABLED=true to let Sub2API manage Clash subscriptions
+      # without mounting an external mihomo binary.
+      - MANAGED_PROXY_ENABLED=${MANAGED_PROXY_ENABLED:-false}
+      - MANAGED_PROXY_MIHOMO_BINARY_PATH=${MANAGED_PROXY_MIHOMO_BINARY_PATH:-/app/bin/mihomo}
     depends_on:
       postgres:
         condition: service_healthy
