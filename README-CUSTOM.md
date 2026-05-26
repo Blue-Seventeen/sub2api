@@ -743,3 +743,14 @@ Protect files:
 - `frontend/src/utils/format.ts`
 - `frontend/src/utils/pricing.ts`
 - `frontend/src/views/admin/SettingsView.vue`
+
+## 14. v0.1.130 升级兼容说明
+
+- 当前 `codex/sync-v0.1.130` 已包含 upstream `v0.1.130` tag；后续从 `dev` / `0.1.125` 升级时，以该分支为 v0.1.130 兼容基线。
+- upstream Affiliate 仍不吸收；本 fork 继续以 Promotion 作为唯一推广返佣体系，不允许重新引入 `/affiliate`、admin affiliate 页面、Affiliate repository/service 或 affiliate migrations。
+- 已按 upstream 删除 Ops retry/replay storage 与管理入口；升级后管理员不能再从 Ops 错误日志直接重放原请求，只保留脱敏后的 ops error log 与统计分析。
+- `/admin/proxies` 继续以本 fork 自定义体系为准：proxy stats、实时出口账号数、自动检测增量刷新、自动代理粘性、Clash/mihomo 托管订阅和订阅节点拆分都必须保留。
+- 分布式代理订阅运行态仍是节点本地状态：订阅和 proxy 绑定存在中央数据库；mihomo 进程、本地端口和 runtime 状态由每个节点本地维护；集群级实时使用统计依赖共享 Redis。
+- 图片计费语义为按实际生成图片数计费，OpenAI / Gateway 路径中 `RequestCount` 使用 `ImageCount` 属于正确行为，不得改回“每个请求一次”。
+- v0.1.130 兼容修复要求保持中转热路径轻量：OpenAI ChatCompletions SSE 必须先写 `text/event-stream` header；usage 成功统计不能只依赖 `actual_cost > 0`；sticky 调试日志不得使用默认 `Info`；OpenAI 抢槽失败后不得同步 fresh-load Redis 兜底。
+- 发布前至少验证：`go test ./internal/config ./internal/service ./internal/repository ./internal/handler ./internal/handler/admin ./internal/server ./cmd/server -count=1`、`go test ./internal/pkg/apicompat ./internal/pkg/openai_compat ./internal/service -run "Test.*(OpenAI|Compatible|Gateway|Image|Proxy|Sticky|Usage|Billing)" -count=1`、`npm run typecheck`、`npm run build`、`git diff --check`。

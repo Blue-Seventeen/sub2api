@@ -109,13 +109,28 @@ const rawUsageLogModelColumn = "model"
 // usageLogSuccessFilterUL 用于把"失败请求 usage log"（tokens=0、cost=0、不计费的占位记录）
 // 从统计性聚合中排除，避免污染 Dashboard / 用量拆分等指标。
 //
-// schema 中没有 success bool 列；新增列要做迁移，风险大；这里用 actual_cost > 0 作为代理：
-// 任何成功落账的请求都会产生 actual_cost（包括 token 计费、纯图片 token 计费、按次/按图计费），
-// 反之 failed-request usage log 的 actual_cost 为 0。
-// 早期版本用 4 项 token 和 > 0 判定会把"按次/按图计费"与"image_output_tokens 独立计费"的纯图片
-// 请求误判为失败，导致这部分请求从用量统计里消失，故改用 actual_cost。
+// schema 中没有 success bool 列；这里用"产生过用量或计费单位"作为成功代理。
+// 这会保留免费额度、0 价格模型、按次/按图但实际扣费为 0 的成功请求，同时继续排除全 0 占位记录。
 // 配合 `FROM usage_logs ul` JOIN 查询使用。
-const usageLogSuccessFilterUL = "ul.actual_cost > 0"
+const usageLogSuccessFilterUL = `(
+	COALESCE(ul.actual_cost, 0) > 0
+	OR COALESCE(ul.total_cost, 0) > 0
+	OR COALESCE(ul.input_cost, 0) > 0
+	OR COALESCE(ul.output_cost, 0) > 0
+	OR COALESCE(ul.cache_creation_cost, 0) > 0
+	OR COALESCE(ul.cache_read_cost, 0) > 0
+	OR COALESCE(ul.image_output_cost, 0) > 0
+	OR COALESCE(ul.input_tokens, 0) > 0
+	OR COALESCE(ul.output_tokens, 0) > 0
+	OR COALESCE(ul.cache_creation_tokens, 0) > 0
+	OR COALESCE(ul.cache_read_tokens, 0) > 0
+	OR COALESCE(ul.cache_creation_5m_tokens, 0) > 0
+	OR COALESCE(ul.cache_creation_1h_tokens, 0) > 0
+	OR COALESCE(ul.image_output_tokens, 0) > 0
+	OR COALESCE(ul.image_count, 0) > 0
+	OR COALESCE(ul.request_count, 0) > 0
+	OR COALESCE(ul.task_count, 0) > 0
+)`
 
 // usageLogEffectivePlatformExpr 用于按"有效平台"维度聚合 usage_logs：
 // 优先取请求实际走的分组 platform，若分组未设置 platform 再 fallback 到 account.platform。
@@ -2662,7 +2677,7 @@ func (r *usageLogRepository) GetUserDashboardStats(ctx context.Context, userID i
 	// 与 ops 路径口径一致；HAVING 过滤掉无法确定平台的行（避免出现空字符串平台）。
 	// 与上面 totalStatsQuery/todayStatsQuery 的总值可能略微差异，原因有二：
 	//   1) 无平台归属的极少数行（group/account 都没 platform）会被 HAVING 排除；
-	//   2) usageLogSuccessFilterUL 会把 actual_cost = 0 的失败 placeholder 行排除，
+	//   2) usageLogSuccessFilterUL 会把全 0 的失败 placeholder 行排除，
 	//      而 totalStatsQuery/todayStatsQuery 没有这层过滤、会把这些行的 request 计数算进去。
 	platformQuery := `
 		SELECT

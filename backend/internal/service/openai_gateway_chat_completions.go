@@ -497,6 +497,9 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 
 		chunks := apicompat.ResponsesEventToChatChunks(&event, state)
 		if !clientDisconnected {
+			if len(chunks) > 0 {
+				writeStreamHeaders()
+			}
 			for _, chunk := range chunks {
 				sse, err := apicompat.ChatChunkToSSE(chunk)
 				if err != nil {
@@ -523,6 +526,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 
 	finalizeStream := func() (*OpenAIForwardResult, error) {
 		if finalChunks := apicompat.FinalizeResponsesChatStream(state); len(finalChunks) > 0 && !clientDisconnected {
+			writeStreamHeaders()
 			for _, chunk := range finalChunks {
 				refusalDetector.ObserveChatChunk(chunk)
 				sse, err := apicompat.ChatChunkToSSE(chunk)
@@ -540,6 +544,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		}
 		// Send [DONE] sentinel
 		if !clientDisconnected {
+			writeStreamHeaders()
 			if _, err := fmt.Fprint(c.Writer, "data: [DONE]\n\n"); err != nil {
 				clientDisconnected = true
 				logger.L().Info("openai chat_completions stream: client disconnected during done flush",

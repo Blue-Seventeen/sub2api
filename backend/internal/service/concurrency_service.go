@@ -325,7 +325,7 @@ func (s *ConcurrencyService) GetAccountsLoadBatch(ctx context.Context, accounts 
 	return s.getAccountsLoadBatch(ctx, accounts, true)
 }
 
-// GetAccountsLoadBatchFresh 绕过极短 TTL 缓存，用于抢槽失败后的实时刷新兜底。
+// GetAccountsLoadBatchFresh 绕过极短 TTL 缓存；请求调度热路径不应把它作为抢槽失败后的同步兜底。
 func (s *ConcurrencyService) GetAccountsLoadBatchFresh(ctx context.Context, accounts []AccountWithConcurrency) (map[int64]*AccountLoadInfo, error) {
 	return s.getAccountsLoadBatch(ctx, accounts, false)
 }

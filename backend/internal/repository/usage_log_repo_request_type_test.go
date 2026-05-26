@@ -139,6 +139,25 @@ func TestPrepareUsageLogInsert_ArgCountMatchesTypes(t *testing.T) {
 	require.Len(t, prepared.args, len(usageLogInsertArgTypes))
 }
 
+func TestUsageLogSuccessFilterIncludesZeroCostSuccessSignals(t *testing.T) {
+	require.NotEqual(t, "ul.actual_cost > 0", usageLogSuccessFilterUL)
+
+	for _, want := range []string{
+		"COALESCE(ul.actual_cost, 0) > 0",
+		"COALESCE(ul.total_cost, 0) > 0",
+		"COALESCE(ul.input_tokens, 0) > 0",
+		"COALESCE(ul.output_tokens, 0) > 0",
+		"COALESCE(ul.cache_creation_tokens, 0) > 0",
+		"COALESCE(ul.cache_read_tokens, 0) > 0",
+		"COALESCE(ul.image_output_tokens, 0) > 0",
+		"COALESCE(ul.image_count, 0) > 0",
+		"COALESCE(ul.request_count, 0) > 0",
+		"COALESCE(ul.task_count, 0) > 0",
+	} {
+		require.Contains(t, usageLogSuccessFilterUL, want)
+	}
+}
+
 func TestPrepareUsageLogInsert_PersistsImageSizeMetadata(t *testing.T) {
 	imageSize := "4K"
 	inputSize := "1024x1024"
