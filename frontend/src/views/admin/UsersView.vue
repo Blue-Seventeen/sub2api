@@ -199,15 +199,22 @@
                   <button
                     v-for="col in toggleableColumns"
                     :key="col.key"
+                    :disabled="isForcedVisibleColumn(col.key)"
                     @click="toggleColumn(col.key)"
-                    class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+                    :class="[
+                      'flex w-full items-center justify-between px-4 py-2 text-left text-sm',
+                      isForcedVisibleColumn(col.key)
+                        ? 'cursor-not-allowed text-gray-400 dark:text-gray-500'
+                        : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700'
+                    ]"
+                    :title="isForcedVisibleColumn(col.key) ? t('admin.users.columnAlwaysVisible') : ''"
                   >
                     <span>{{ col.label }}</span>
                     <Icon
                       v-if="isColumnVisible(col.key)"
                       name="check"
                       size="sm"
-                      class="text-primary-500"
+                      :class="isForcedVisibleColumn(col.key) ? 'text-gray-400 dark:text-gray-500' : 'text-primary-500'"
                       :stroke-width="2"
                     />
                   </button>
@@ -237,7 +244,7 @@
       <template #table>
         <DataTable
           :columns="columns"
-          :data="users"
+          :data="sortedUsers"
           :loading="loading"
           :actions-count="7"
           :server-side-sort="true"
@@ -420,20 +427,27 @@
           </template>
 
           <template #cell-usage="{ row }">
-            <div class="text-sm">
-              <div class="flex items-center gap-1.5">
-                <span class="text-gray-500 dark:text-gray-400">{{ t('admin.users.today') }}:</span>
-                <span class="font-medium text-gray-900 dark:text-white">
-                  {{ formatCostAmount(getBatchRealTodayCost(row.id)) }}
-                </span>
-              </div>
-              <div class="mt-0.5 flex items-center gap-1.5">
-                <span class="text-gray-500 dark:text-gray-400">{{ t('admin.users.total') }}:</span>
-                <span class="font-medium text-gray-900 dark:text-white">
-                  {{ formatCostAmount(getBatchRealTotalCost(row.id)) }}
-                </span>
-              </div>
-            </div>
+            <PlatformUsageBreakdown
+              :today="getBatchRealTodayCost(row.id)"
+              :total="getBatchRealTotalCost(row.id)"
+              :by-platform="usageStats[row.id]?.by_platform"
+            />
+          </template>
+
+          <template #cell-usage_anthropic="{ row }">
+            <PlatformCostCell :usage="getPlatformUsage(row.id, 'anthropic')" />
+          </template>
+
+          <template #cell-usage_openai="{ row }">
+            <PlatformCostCell :usage="getPlatformUsage(row.id, 'openai')" />
+          </template>
+
+          <template #cell-usage_gemini="{ row }">
+            <PlatformCostCell :usage="getPlatformUsage(row.id, 'gemini')" />
+          </template>
+
+          <template #cell-usage_antigravity="{ row }">
+            <PlatformCostCell :usage="getPlatformUsage(row.id, 'antigravity')" />
           </template>
 
           <template #cell-concurrency="{ row }">
@@ -629,13 +643,13 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
-import { formatCostAmount, formatCurrencyAmount, formatDateTime } from '@/utils/format'
+import { formatCurrencyAmount, formatDateTime } from '@/utils/format'
 import Icon from '@/components/icons/Icon.vue'
 
 const { t } = useI18n()
 import { adminAPI } from '@/api/admin'
 import type { AdminUser, AdminGroup, UserAttributeDefinition } from '@/types'
-import type { BatchUserUsageStats } from '@/api/admin/dashboard'
+import type { BatchUserUsageStats, PlatformUsage } from '@/api/admin/dashboard'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
@@ -647,6 +661,8 @@ import GroupBadge from '@/components/common/GroupBadge.vue'
 import Select from '@/components/common/Select.vue'
 import UserAttributesConfigModal from '@/components/user/UserAttributesConfigModal.vue'
 import UserConcurrencyCell from '@/components/user/UserConcurrencyCell.vue'
+import PlatformUsageBreakdown from '@/components/user/PlatformUsageBreakdown.vue'
+import PlatformCostCell from '@/components/user/PlatformCostCell.vue'
 import UserCreateModal from '@/components/admin/user/UserCreateModal.vue'
 import UserEditModal from '@/components/admin/user/UserEditModal.vue'
 import UserApiKeysModal from '@/components/admin/user/UserApiKeysModal.vue'
@@ -717,6 +733,10 @@ const allColumns = computed<Column[]>(() => [
   { key: 'real_balance', label: t('admin.users.columns.realBalance'), sortable: true },
   { key: 'balance', label: t('admin.users.columns.displayBalance'), sortable: true },
   { key: 'usage', label: t('admin.users.columns.usage'), sortable: false },
+  { key: 'usage_anthropic', label: t('admin.users.columns.usageAnthropic'), sortable: false },
+  { key: 'usage_openai', label: t('admin.users.columns.usageOpenAI'), sortable: false },
+  { key: 'usage_gemini', label: t('admin.users.columns.usageGemini'), sortable: false },
+  { key: 'usage_antigravity', label: t('admin.users.columns.usageAntigravity'), sortable: false },
   { key: 'concurrency', label: t('admin.users.columns.concurrency'), sortable: true },
   { key: 'status', label: t('admin.users.columns.status'), sortable: true },
   { key: 'last_active_at', label: t('admin.users.columns.lastActive'), sortable: true },
@@ -735,12 +755,25 @@ const toggleableColumns = computed(() =>
 const hiddenColumns = reactive<Set<string>>(new Set())
 
 // Default hidden columns (columns hidden by default on first load)
-const DEFAULT_HIDDEN_COLUMNS = ['notes', 'groups', 'subscriptions', 'usage', 'concurrency']
+const DEFAULT_HIDDEN_COLUMNS = [
+  'notes', 'groups', 'subscriptions', 'usage', 'concurrency',
+  'usage_anthropic', 'usage_openai', 'usage_gemini', 'usage_antigravity'
+]
 const REMOVED_COLUMNS = new Set(['last_login_at'])
-const FORCED_VISIBLE_COLUMNS = new Set(['last_active_at'])
+// 强制可见列：加载时会被强制移出 hiddenColumns，并在列设置 UI 上 disabled。
+// 当前没有列需要强制可见 —— last_active_at 已改为可被用户隐藏。
+const FORCED_VISIBLE_COLUMNS = new Set<string>()
 
-// localStorage key for column settings
+// localStorage keys for column settings
 const HIDDEN_COLUMNS_KEY = 'user-hidden-columns'
+// 列设置 schema 版本号。每次给 DEFAULT_HIDDEN_COLUMNS 新增列时 bump 一次，
+// 并在 VERSION_NEW_HIDDEN_COLUMNS 中登记该版本新增的 key。
+// 这样老用户升级后这些新列会被自动隐藏一次，而不会影响他们对其它老列的偏好。
+const COLUMN_SETTINGS_VERSION_KEY = 'user-column-settings-version'
+const COLUMN_SETTINGS_VERSION = 2
+const VERSION_NEW_HIDDEN_COLUMNS: Record<number, string[]> = {
+  2: ['usage_anthropic', 'usage_openai', 'usage_gemini', 'usage_antigravity']
+}
 
 // Load saved column settings
 const loadSavedColumns = () => {
@@ -761,14 +794,23 @@ const loadSavedColumns = () => {
         normalized.add('real_balance')
         migrated = true
       }
+      const savedVersion = Number(localStorage.getItem(COLUMN_SETTINGS_VERSION_KEY) || '0')
+      Object.entries(VERSION_NEW_HIDDEN_COLUMNS).forEach(([version, keys]) => {
+        if (savedVersion < Number(version)) {
+          keys.forEach((key) => normalized.add(key))
+          migrated = true
+        }
+      })
       if (migrated) {
         localStorage.setItem(HIDDEN_COLUMNS_KEY, JSON.stringify([...normalized]))
+        localStorage.setItem(COLUMN_SETTINGS_VERSION_KEY, String(COLUMN_SETTINGS_VERSION))
       }
       normalized.forEach(key => hiddenColumns.add(key))
 
     } else {
       // Use default hidden columns on first load
       DEFAULT_HIDDEN_COLUMNS.forEach(key => hiddenColumns.add(key))
+      localStorage.setItem(COLUMN_SETTINGS_VERSION_KEY, String(COLUMN_SETTINGS_VERSION))
     }
   } catch (e) {
     console.error('Failed to load saved columns:', e)
@@ -780,13 +822,18 @@ const loadSavedColumns = () => {
 const saveColumnsToStorage = () => {
   try {
     localStorage.setItem(HIDDEN_COLUMNS_KEY, JSON.stringify([...hiddenColumns]))
+    localStorage.setItem(COLUMN_SETTINGS_VERSION_KEY, String(COLUMN_SETTINGS_VERSION))
   } catch (e) {
     console.error('Failed to save columns:', e)
   }
 }
 
 // Toggle column visibility
+const isForcedVisibleColumn = (key: string) => FORCED_VISIBLE_COLUMNS.has(key)
 const toggleColumn = (key: string) => {
+  // 强制可见列(如 last_active_at)在加载时会被恢复成可见，
+  // 这里阻止用户在当前会话隐藏它，避免"取消勾选 → 刷新又恢复"的反直觉行为。
+  if (FORCED_VISIBLE_COLUMNS.has(key)) return
   const wasHidden = hiddenColumns.has(key)
   if (hiddenColumns.has(key)) {
     hiddenColumns.delete(key)
@@ -794,7 +841,7 @@ const toggleColumn = (key: string) => {
     hiddenColumns.add(key)
   }
   saveColumnsToStorage()
-  if (wasHidden && (key === 'usage' || key.startsWith('attr_'))) {
+  if (wasHidden && (key === 'usage' || key.startsWith('usage_') || key.startsWith('attr_'))) {
     refreshCurrentPageSecondaryData()
   }
   if (key === 'subscriptions') {
@@ -807,7 +854,22 @@ const toggleColumn = (key: string) => {
 
 // Check if column is visible (not in hidden set)
 const isColumnVisible = (key: string) => !hiddenColumns.has(key)
-const hasVisibleUsageColumn = computed(() => !hiddenColumns.has('usage'))
+// usage 主列或任意 usage_<platform> 子列可见时都需要批量拉取用量数据
+// 列 key → 平台名（'usage' 主列汇总所有平台时为 null）
+// 显式数组取代 Object.keys()：保证迭代顺序（决定列头排序按钮渲染顺序）
+// 不会因 JS 引擎差异或 USAGE_COLUMN_PLATFORMS 属性顺序调整而静默变化。
+const USAGE_COLUMN_KEYS: readonly string[] = ['usage', 'usage_anthropic', 'usage_openai', 'usage_gemini', 'usage_antigravity']
+const USAGE_COLUMN_PLATFORMS: Record<string, string | null> = {
+  usage: null,
+  usage_anthropic: 'anthropic',
+  usage_openai: 'openai',
+  usage_gemini: 'gemini',
+  usage_antigravity: 'antigravity'
+}
+const PLATFORM_USAGE_COLUMNS = USAGE_COLUMN_KEYS.filter((k) => k !== 'usage')
+const hasVisibleUsageColumn = computed(
+  () => !hiddenColumns.has('usage') || PLATFORM_USAGE_COLUMNS.some((k) => !hiddenColumns.has(k))
+)
 const hasVisibleSubscriptionsColumn = computed(() => !hiddenColumns.has('subscriptions'))
 const hasVisibleGroupsColumn = computed(() => !hiddenColumns.has('groups'))
 const hasVisibleAttributeColumns = computed(() =>
@@ -822,6 +884,7 @@ const columns = computed<Column[]>(() =>
 )
 
 const users = ref<AdminUser[]>([])
+const sortedUsers = computed(() => users.value)
 const loading = ref(false)
 const searchQuery = ref('')
 const USER_SORT_STORAGE_KEY = 'admin-users-table-sort'
@@ -983,6 +1046,11 @@ const getAdminRealBalance = (user: AdminUser) => user.real_balance ?? user.balan
 const getAdminDisplayBalance = (user: AdminUser) => user.balance ?? user.display_balance ?? getAdminRealBalance(user)
 const getBatchRealTodayCost = (userId: number) => usageStats.value[userId]?.real_today_actual_cost ?? usageStats.value[userId]?.today_actual_cost ?? 0
 const getBatchRealTotalCost = (userId: number) => usageStats.value[userId]?.real_total_actual_cost ?? usageStats.value[userId]?.total_actual_cost ?? 0
+const getPlatformUsage = (userId: number, platform: string): PlatformUsage | undefined => {
+  const platformKey = Object.entries(USAGE_COLUMN_PLATFORMS).find(([, value]) => value === platform)?.[1]
+  if (!platformKey) return undefined
+  return usageStats.value[userId]?.by_platform?.find((item) => item.platform === platformKey)
+}
 // User attribute definitions and values
 const attributeDefinitions = ref<UserAttributeDefinition[]>([])
 const userAttributeValues = ref<Record<number, Record<number, string>>>({})
@@ -1060,6 +1128,7 @@ const refreshCurrentPageSecondaryData = () => {
 // Action Menu State
 const activeMenuId = ref<number | null>(null)
 const menuPosition = ref<{ top: number; left: number } | null>(null)
+const openUsageSortMenu = ref<string | null>(null)
 
 const openActionMenu = (user: AdminUser, e: MouseEvent) => {
   if (activeMenuId.value === user.id) {
@@ -1132,6 +1201,10 @@ const handleClickOutside = (event: MouseEvent) => {
   // Close column dropdown when clicking outside
   if (columnDropdownRef.value && !columnDropdownRef.value.contains(target)) {
     showColumnDropdown.value = false
+  }
+  // Close usage sort dropdown when clicking outside any usage-sort-trigger
+  if (openUsageSortMenu.value !== null && !target.closest('.usage-sort-trigger')) {
+    openUsageSortMenu.value = null
   }
   // Close expanded group dropdown when clicking outside
   if (expandedGroupUserId.value !== null) {

@@ -25,6 +25,7 @@ const (
 	emailOAuthStateCookieName = "email_oauth_state"
 	emailOAuthRedirectCookie  = "email_oauth_redirect"
 	emailOAuthProviderCookie  = "email_oauth_provider"
+	emailOAuthAffiliateCookie = "email_oauth_affiliate"
 	emailOAuthIntentCookie    = "email_oauth_intent"
 	emailOAuthBindUserCookie  = "email_oauth_bind_user"
 	emailOAuthCookieMaxAgeSec = 10 * 60
@@ -174,16 +175,18 @@ func (h *AuthHandler) emailOAuthCallback(c *gin.Context, provider string) {
 		redirectToFrontendCallback(c, frontendCallback)
 		return
 	}
-	h.emailOAuthCallbackWithProfile(c, provider, frontendCallback, redirectTo, profile)
+	h.emailOAuthCallbackWithProfile(c, provider, cfg, frontendCallback, redirectTo, profile)
 }
 
 func (h *AuthHandler) emailOAuthCallbackWithProfile(
 	c *gin.Context,
 	provider string,
+	cfg config.EmailOAuthProviderConfig,
 	frontendCallback string,
 	redirectTo string,
 	profile *emailOAuthProfile,
 ) {
+	_ = cfg
 	input := service.EmailOAuthIdentityInput{
 		ProviderType:     provider,
 		ProviderKey:      provider,
@@ -453,6 +456,7 @@ func (h *AuthHandler) completeEmailOAuthRegistration(c *gin.Context, provider st
 		user,
 		strings.TrimSpace(req.InvitationCode),
 		strings.TrimSpace(session.ProviderType),
+		"",
 	); err != nil {
 		_ = tx.Rollback()
 		_ = h.authService.RollbackOAuthEmailAccountCreation(c.Request.Context(), user.ID, strings.TrimSpace(req.InvitationCode))

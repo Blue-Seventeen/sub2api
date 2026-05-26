@@ -34,7 +34,7 @@ export interface NotifyEmailEntry {
 
 // ==================== User & Auth Types ====================
 
-export type UserAuthProvider = 'email' | 'linuxdo' | 'oidc' | 'wechat' | 'github' | 'google'
+export type UserAuthProvider = 'email' | 'linuxdo' | 'oidc' | 'wechat' | 'github' | 'google' | 'dingtalk'
 
 export interface UserAuthBindingStatus {
   bound?: boolean
@@ -149,6 +149,7 @@ export interface CustomMenuItem {
   label: string
   icon_svg: string
   url: string
+  page_slug?: string
   visibility: 'user' | 'admin'
   sort_order: number
   open_in_new_tab?: boolean
@@ -192,6 +193,7 @@ export interface PublicSettings {
   home_content: string
   hide_ccs_import_button: boolean
   payment_enabled: boolean
+  risk_control_enabled: boolean
   table_default_page_size: number
   table_page_size_options: number[]
   custom_menu_items: CustomMenuItem[]
@@ -205,6 +207,7 @@ export interface PublicSettings {
   wechat_oauth_mobile_enabled?: boolean
   oidc_oauth_enabled: boolean
   oidc_oauth_provider_name: string
+  dingtalk_oauth_enabled: boolean
   backend_mode_enabled: boolean
   version: string
   balance_low_notify_enabled: boolean
@@ -213,7 +216,6 @@ export interface PublicSettings {
   channel_monitor_enabled: boolean
   channel_monitor_default_interval_seconds: number
   available_channels_enabled: boolean
-  risk_control_enabled: boolean
   markdown_pages_enabled: boolean
 }
 
@@ -491,7 +493,10 @@ export interface Group {
   daily_limit_usd: number | null
   weekly_limit_usd: number | null
   monthly_limit_usd: number | null
-  // 图片生成计费配置（仅 antigravity 平台使用）
+  // 图片生成计费配置
+  allow_image_generation: boolean
+  image_rate_independent: boolean
+  image_rate_multiplier: number
   image_price_1k: number | null
   image_price_2k: number | null
   image_price_4k: number | null
@@ -601,6 +606,9 @@ export interface CreateGroupRequest {
   daily_limit_usd?: number | null
   weekly_limit_usd?: number | null
   monthly_limit_usd?: number | null
+  allow_image_generation?: boolean
+  image_rate_independent?: boolean
+  image_rate_multiplier?: number
   image_price_1k?: number | null
   image_price_2k?: number | null
   image_price_4k?: number | null
@@ -626,6 +634,9 @@ export interface UpdateGroupRequest {
   daily_limit_usd?: number | null
   weekly_limit_usd?: number | null
   monthly_limit_usd?: number | null
+  allow_image_generation?: boolean
+  image_rate_independent?: boolean
+  image_rate_multiplier?: number
   image_price_1k?: number | null
   image_price_2k?: number | null
   image_price_4k?: number | null
@@ -856,7 +867,12 @@ export interface Account {
   notes?: string | null
   platform: AccountPlatform
   type: AccountType
+  // 后端响应里 credentials 已脱敏：access_token / refresh_token / id_token /
+  // api_key / session_key / cookie / aws_secret_access_key / aws_session_token /
+  // service_account_json / service_account / private_key 不会出现，
+  // 改为通过 credentials_status.has_<key> 暴露存在性。
   credentials?: Record<string, unknown>
+  credentials_status?: Record<string, boolean>
   // Extra fields including Codex usage, OpenAI compact capability, and model-level rate limits.
   extra?: (CodexUsageSnapshot & OpenAICompactState & {
     model_rate_limits?: Record<string, { rate_limited_at: string; rate_limit_reset_at: string }>
@@ -1032,6 +1048,7 @@ export interface CodexUsageSnapshot {
 }
 
 export type OpenAICompactMode = 'auto' | 'force_on' | 'force_off'
+export type OpenAIResponsesMode = 'auto' | 'force_responses' | 'force_chat_completions'
 
 export interface OpenAICompactState {
   openai_compact_mode?: OpenAICompactMode
@@ -1039,6 +1056,11 @@ export interface OpenAICompactState {
   openai_compact_checked_at?: string
   openai_compact_last_status?: number
   openai_compact_last_error?: string
+}
+
+export interface OpenAIResponsesState {
+  openai_responses_mode?: OpenAIResponsesMode
+  openai_responses_supported?: boolean
 }
 
 export interface CreateAccountRequest {
@@ -1167,10 +1189,57 @@ export interface AdminDataImportResult {
   errors?: AdminDataImportError[]
 }
 
+export interface CodexSessionImportRequest {
+  content?: string
+  contents?: string[]
+  name?: string
+  notes?: string | null
+  group_ids?: number[]
+  proxy_id?: number | null
+  concurrency?: number
+  priority?: number
+  rate_multiplier?: number
+  load_factor?: number | null
+  expires_at?: number | null
+  auto_pause_on_expired?: boolean
+  credential_extras?: Record<string, unknown>
+  extra?: Record<string, unknown>
+  update_existing?: boolean
+  skip_default_group_bind?: boolean
+  confirm_mixed_channel_risk?: boolean
+}
+
+export interface CodexSessionImportMessage {
+  index: number
+  name?: string
+  message: string
+}
+
+export interface CodexSessionImportItem {
+  index: number
+  name?: string
+  action: 'created' | 'updated' | 'skipped' | 'failed'
+  account_id?: number
+  message?: string
+}
+
+export interface CodexSessionImportResult {
+  total: number
+  created: number
+  updated: number
+  skipped: number
+  failed: number
+  items?: CodexSessionImportItem[]
+  warnings?: CodexSessionImportMessage[]
+  errors?: CodexSessionImportMessage[]
+}
+
 // ==================== Usage & Redeem Types ====================
 
 export type RedeemCodeType = 'balance' | 'concurrency' | 'subscription' | 'invitation'
 export type UsageRequestType = 'unknown' | 'sync' | 'stream' | 'ws_v2'
+export type ImageSizeSource = 'output' | 'input' | 'default' | 'legacy'
+export type ImageSizeBreakdown = Record<string, number>
 
 export interface UsageLog {
   id: number
@@ -1212,6 +1281,10 @@ export interface UsageLog {
   // 图片生成字段
   image_count: number
   image_size: string | null
+  image_input_size?: string | null
+  image_output_size?: string | null
+  image_size_source?: string | null
+  image_size_breakdown?: ImageSizeBreakdown | null
   request_count: number
   task_count: number
   usage_estimated: boolean
@@ -1294,11 +1367,13 @@ export interface RedeemCode {
   code: string
   type: RedeemCodeType
   value: number
-  status: 'active' | 'used' | 'expired' | 'unused'
+  status: 'active' | 'used' | 'expired' | 'unused' | 'disabled'
   used_by: number | null
   used_at: string | null
   created_at: string
+  expires_at?: string | null
   updated_at?: string
+  notes?: string
   group_id?: number | null // 订阅类型专用
   validity_days?: number // 订阅类型专用
   user?: User
@@ -1311,6 +1386,20 @@ export interface GenerateRedeemCodesRequest {
   value: number
   group_id?: number | null // 订阅类型专用
   validity_days?: number // 订阅类型专用
+  expires_at?: string | null
+  expires_in_days?: number
+}
+
+export interface BatchUpdateRedeemCodeFields {
+  status?: 'unused' | 'disabled'
+  expires_at?: string | null
+  notes?: string
+  group_id?: number | null
+}
+
+export interface BatchUpdateRedeemCodesRequest {
+  ids: number[]
+  fields: BatchUpdateRedeemCodeFields
 }
 
 export interface RedeemCodeRequest {
@@ -1527,6 +1616,7 @@ export interface UserSubscription {
   user_id: number
   group_id: number
   status: 'active' | 'expired' | 'revoked'
+  starts_at: string
   daily_usage_usd: number
   weekly_usage_usd: number
   monthly_usage_usd: number

@@ -143,13 +143,15 @@ const props = defineProps<{
   paymentType: string
   payUrl?: string
   orderType?: string
+  currency?: string
 }>()
 
 type PaymentOutcome = 'success' | 'cancelled' | 'expired'
 
 const emit = defineEmits<{ done: []; success: []; settled: [outcome: PaymentOutcome] }>()
 
-const { t } = useI18n()
+const i18n = useI18n()
+const { t } = i18n
 const paymentStore = usePaymentStore()
 const appStore = useAppStore()
 
@@ -164,6 +166,11 @@ const outcome = ref<PaymentOutcome | null>(null)
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let countdownTimer: ReturnType<typeof setInterval> | null = null
+let verifyAttempts = 0
+let lastVerifyAt = 0
+
+const VERIFY_RETRY_INTERVAL_MS = 15000
+const VERIFY_RETRY_MAX_ATTEMPTS = 6
 
 const isAlipay = computed(() => props.paymentType.includes('alipay'))
 const isWxpay = computed(() => props.paymentType.includes('wxpay'))
@@ -227,10 +234,32 @@ async function renderQR() {
   })
 }
 
+async function tryRecoverPendingOrder(order: PaymentOrder): Promise<PaymentOrder> {
+  if (!isWxpay.value) return order
+  const outTradeNo = String(order.out_trade_no || '').trim()
+  if (!outTradeNo) return order
+  const normalizedStatus = String(order.status || '').trim().toUpperCase()
+  if (normalizedStatus !== 'PENDING') return order
+  const now = Date.now()
+  if (verifyAttempts >= VERIFY_RETRY_MAX_ATTEMPTS || now - lastVerifyAt < VERIFY_RETRY_INTERVAL_MS) {
+    return order
+  }
+
+  lastVerifyAt = now
+  verifyAttempts += 1
+  try {
+    const result = await paymentAPI.verifyOrder(outTradeNo)
+    return result.data ?? order
+  } catch {
+    return order
+  }
+}
+
 async function pollStatus() {
   if (!props.orderId || outcome.value) return
-  const order = await paymentStore.pollOrderStatus(props.orderId)
+  let order = await paymentStore.pollOrderStatus(props.orderId)
   if (!order) return
+  order = await tryRecoverPendingOrder(order)
   if (isSuccessStatus(order.status)) {
     cleanup()
     paidOrder.value = order
@@ -277,6 +306,8 @@ function cleanup() {
 
 // Initialize on mount
 qrUrl.value = props.qrCode
+verifyAttempts = 0
+lastVerifyAt = 0
 let seconds = 30 * 60
 if (props.expiresAt) {
   seconds = Math.floor((new Date(props.expiresAt).getTime() - Date.now()) / 1000)

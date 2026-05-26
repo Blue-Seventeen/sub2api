@@ -1,6 +1,6 @@
 <template>
   <AppLayout>
-    <div class="mx-auto max-w-4xl space-y-6">
+    <div class="mx-auto max-w-6xl space-y-6">
       <!-- Loading State -->
       <div v-if="loading" class="flex items-center justify-center py-12">
         <div
@@ -11,23 +11,36 @@
       <!-- Settings Form -->
       <form v-else @submit.prevent="saveSettings" class="space-y-6" novalidate>
         <!-- Tab Navigation -->
-        <div class="sticky top-0 z-10 overflow-x-auto settings-tabs-scroll">
-          <nav class="settings-tabs">
-            <button
-              v-for="tab in settingsTabs"
-              :key="tab.key"
-              type="button"
-              :class="[
-                'settings-tab',
-                activeTab === tab.key && 'settings-tab-active',
-              ]"
-              @click="activeTab = tab.key"
-            >
-              <span class="settings-tab-icon">
-                <Icon :name="tab.icon" size="sm" />
-              </span>
-              <span>{{ t(`admin.settings.tabs.${tab.key}`) }}</span>
-            </button>
+        <div class="settings-tabs-shell">
+          <nav
+            class="settings-tabs-scroll"
+            role="tablist"
+            :aria-label="t('admin.settings.title')"
+          >
+            <div class="settings-tabs">
+              <button
+                v-for="tab in settingsTabs"
+                :key="tab.key"
+                :id="`settings-tab-${tab.key}`"
+                type="button"
+                role="tab"
+                :aria-selected="activeTab === tab.key"
+                :tabindex="activeTab === tab.key ? 0 : -1"
+                :class="[
+                  'settings-tab',
+                  activeTab === tab.key && 'settings-tab-active',
+                ]"
+                @click="selectSettingsTab(tab.key)"
+                @keydown="handleSettingsTabKeydown($event, tab.key)"
+              >
+                <span class="settings-tab-icon">
+                  <Icon :name="tab.icon" size="sm" />
+                </span>
+                <span class="settings-tab-label">{{
+                  t(`admin.settings.tabs.${tab.key}`)
+                }}</span>
+              </button>
+            </div>
           </nav>
         </div>
 
@@ -282,6 +295,113 @@
                     </svg>
                     {{
                       overloadCooldownSaving
+                        ? t("common.saving")
+                        : t("common.save")
+                    }}
+                  </button>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <!-- Rate Limit Cooldown (429) Settings -->
+          <div class="card">
+            <div
+              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
+            >
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                {{ t("admin.settings.rateLimit429Cooldown.title") }}
+              </h2>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {{ t("admin.settings.rateLimit429Cooldown.description") }}
+              </p>
+            </div>
+            <div class="space-y-5 p-6">
+              <div
+                v-if="rateLimit429CooldownLoading"
+                class="flex items-center gap-2 text-gray-500"
+              >
+                <div
+                  class="h-4 w-4 animate-spin rounded-full border-b-2 border-primary-600"
+                ></div>
+                {{ t("common.loading") }}
+              </div>
+
+              <template v-else>
+                <div class="flex items-center justify-between">
+                  <div>
+                    <label class="font-medium text-gray-900 dark:text-white">{{
+                      t("admin.settings.rateLimit429Cooldown.enabled")
+                    }}</label>
+                    <p class="text-sm text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.rateLimit429Cooldown.enabledHint") }}
+                    </p>
+                  </div>
+                  <Toggle v-model="rateLimit429CooldownForm.enabled" />
+                </div>
+
+                <div
+                  v-if="rateLimit429CooldownForm.enabled"
+                  class="space-y-4 border-t border-gray-100 pt-4 dark:border-dark-700"
+                >
+                  <div>
+                    <label
+                      class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                    >
+                      {{
+                        t(
+                          "admin.settings.rateLimit429Cooldown.cooldownSeconds",
+                        )
+                      }}
+                    </label>
+                    <input
+                      v-model.number="rateLimit429CooldownForm.cooldown_seconds"
+                      type="number"
+                      min="1"
+                      max="7200"
+                      class="input w-32"
+                    />
+                    <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                      {{
+                        t(
+                          "admin.settings.rateLimit429Cooldown.cooldownSecondsHint",
+                        )
+                      }}
+                    </p>
+                  </div>
+                </div>
+
+                <div
+                  class="flex justify-end border-t border-gray-100 pt-4 dark:border-dark-700"
+                >
+                  <button
+                    type="button"
+                    @click="saveRateLimit429CooldownSettings"
+                    :disabled="rateLimit429CooldownSaving"
+                    class="btn btn-primary btn-sm"
+                  >
+                    <svg
+                      v-if="rateLimit429CooldownSaving"
+                      class="mr-1 h-4 w-4 animate-spin"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        class="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        stroke-width="4"
+                      ></circle>
+                      <path
+                        class="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      ></path>
+                    </svg>
+                    {{
+                      rateLimit429CooldownSaving
                         ? t("common.saving")
                         : t("common.save")
                     }}
@@ -1239,7 +1359,6 @@
                       :key="suffix"
                       class="inline-flex items-center gap-1 rounded bg-gray-100 px-2 py-1 text-xs font-mono text-gray-700 dark:bg-dark-600 dark:text-gray-200"
                     >
-                      <span class="text-gray-400 dark:text-gray-500">@</span>
                       <span>{{ suffix }}</span>
                       <button
                         type="button"
@@ -1260,10 +1379,6 @@
                     <div
                       class="flex min-w-[220px] flex-1 items-center gap-1 rounded border border-transparent px-2 py-1 focus-within:border-primary-300 dark:focus-within:border-primary-700"
                     >
-                      <span
-                        class="font-mono text-sm text-gray-400 dark:text-gray-500"
-                        >@</span
-                      >
                       <input
                         v-model="registrationEmailSuffixWhitelistDraft"
                         type="text"
@@ -1416,6 +1531,33 @@
                   v-model="form.totp_enabled"
                   :disabled="!form.totp_encryption_key_configured"
                 />
+              </div>
+            </div>
+          </div>
+
+          <!-- API Key IP ACL Settings -->
+          <div class="card">
+            <div
+              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
+            >
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                {{ t("admin.settings.apiKeyAcl.title") }}
+              </h2>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {{ t("admin.settings.apiKeyAcl.description") }}
+              </p>
+            </div>
+            <div class="space-y-5 p-6">
+              <div class="flex items-center justify-between gap-4">
+                <div>
+                  <label class="font-medium text-gray-900 dark:text-white">
+                    {{ t("admin.settings.apiKeyAcl.trustForwardedIp") }}
+                  </label>
+                  <p class="text-sm text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.apiKeyAcl.trustForwardedIpHint") }}
+                  </p>
+                </div>
+                <Toggle v-model="form.api_key_acl_trust_forwarded_ip" />
               </div>
             </div>
           </div>
@@ -1615,6 +1757,232 @@
                     <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
                       {{ t("admin.settings.linuxdo.redirectUrlHint") }}
                     </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- GitHub / Google 邮箱快捷登录 -->
+          <div class="card">
+            <div
+              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
+            >
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                {{ localText("邮箱快捷登录", "Email OAuth Sign-in") }}
+              </h2>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {{
+                  localText(
+                    "开启 GitHub 或 Google 邮箱授权登录后，系统会读取已验证邮箱，存在则直接登录，不存在则自动注册。",
+                    "After GitHub or Google email OAuth is enabled, the system reads a verified email, signs in matching users, and auto-registers missing users.",
+                  )
+                }}
+              </p>
+            </div>
+            <div class="space-y-6 p-6">
+              <div class="grid grid-cols-1 gap-6 xl:grid-cols-2">
+                <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-700">
+                  <div class="flex items-start justify-between gap-4">
+                    <div>
+                      <h3 class="font-medium text-gray-900 dark:text-white">
+                        GitHub
+                      </h3>
+                      <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                        {{
+                          localText(
+                            "GitHub OAuth App 需要 read:user user:email 权限，回调地址填写下方后端地址。",
+                            "GitHub OAuth App needs read:user user:email scopes. Use the backend callback URL below.",
+                          )
+                        }}
+                      </p>
+                    </div>
+                    <Toggle v-model="form.github_oauth_enabled" />
+                  </div>
+
+                  <div v-if="form.github_oauth_enabled" class="mt-4 space-y-4">
+                    <div class="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:bg-dark-800 dark:text-gray-300">
+                      <template v-if="isZhLocale">
+                        开通引导：GitHub Settings → Developer settings →
+                        <a
+                          data-testid="github-oauth-apps-guide-link"
+                          href="https://github.com/settings/developers"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          class="font-medium text-primary-600 hover:underline dark:text-primary-400"
+                        >OAuth Apps</a>
+                        → New OAuth App；Homepage URL 填站点域名，Authorization callback URL 填下面的后端回调地址。
+                      </template>
+                      <template v-else>
+                        Setup guide: GitHub Settings → Developer settings →
+                        <a
+                          data-testid="github-oauth-apps-guide-link"
+                          href="https://github.com/settings/developers"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          class="font-medium text-primary-600 hover:underline dark:text-primary-400"
+                        >OAuth Apps</a>
+                        → New OAuth App. Use your site origin as Homepage URL and the backend callback URL below as Authorization callback URL.
+                      </template>
+                    </div>
+
+                    <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                      <div>
+                        <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Client ID</label>
+                        <input
+                          v-model="form.github_oauth_client_id"
+                          type="text"
+                          class="input font-mono text-sm"
+                          placeholder="GitHub OAuth Client ID"
+                        />
+                      </div>
+                      <div>
+                        <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Client Secret</label>
+                        <input
+                          v-model="form.github_oauth_client_secret"
+                          type="password"
+                          class="input font-mono text-sm"
+                          :placeholder="
+                            form.github_oauth_client_secret_configured
+                              ? localText('密钥已配置，留空以保留当前值。', 'Secret configured. Leave empty to keep the current value.')
+                              : 'GitHub OAuth Client Secret'
+                          "
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        {{ localText("后端回调地址", "Backend Callback URL") }}
+                      </label>
+                      <input
+                        v-model="form.github_oauth_redirect_url"
+                        type="url"
+                        class="input font-mono text-sm"
+                        placeholder="https://your-domain.com/api/v1/auth/oauth/github/callback"
+                      />
+                      <div class="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+                        <button
+                          type="button"
+                          class="btn btn-secondary btn-sm w-fit"
+                          @click="setAndCopyEmailOAuthRedirectUrl('github')"
+                        >
+                          {{ localText("生成并复制", "Generate and copy") }}
+                        </button>
+                        <code
+                          v-if="githubOAuthRedirectUrlSuggestion"
+                          class="select-all break-all rounded bg-gray-50 px-2 py-1 font-mono text-xs text-gray-600 dark:bg-dark-800 dark:text-gray-300"
+                        >
+                          {{ githubOAuthRedirectUrlSuggestion }}
+                        </code>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        {{ localText("前端回跳地址", "Frontend Callback URL") }}
+                      </label>
+                      <input
+                        v-model="form.github_oauth_frontend_redirect_url"
+                        type="text"
+                        class="input font-mono text-sm"
+                        placeholder="/auth/oauth/callback"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-700">
+                  <div class="flex items-start justify-between gap-4">
+                    <div>
+                      <h3 class="font-medium text-gray-900 dark:text-white">
+                        Google
+                      </h3>
+                      <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                        {{
+                          localText(
+                            "Google OAuth 客户端需要 openid email profile 范围，并在凭据里登记后端回调地址。",
+                            "Google OAuth client needs openid email profile scopes and the backend callback URL registered in credentials.",
+                          )
+                        }}
+                      </p>
+                    </div>
+                    <Toggle v-model="form.google_oauth_enabled" />
+                  </div>
+
+                  <div v-if="form.google_oauth_enabled" class="mt-4 space-y-4">
+                    <div class="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:bg-dark-800 dark:text-gray-300">
+                      {{
+                        localText(
+                          "开通引导：Google Cloud Console → APIs & Services → OAuth consent screen 完成同意屏幕；Credentials → Create Credentials → OAuth client ID，类型选择 Web application，并把下面地址加入 Authorized redirect URIs。",
+                          "Setup guide: Google Cloud Console → APIs & Services → OAuth consent screen, then Credentials → Create Credentials → OAuth client ID, choose Web application, and add the URL below to Authorized redirect URIs.",
+                        )
+                      }}
+                    </div>
+
+                    <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                      <div>
+                        <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Client ID</label>
+                        <input
+                          v-model="form.google_oauth_client_id"
+                          type="text"
+                          class="input font-mono text-sm"
+                          placeholder="Google OAuth Client ID"
+                        />
+                      </div>
+                      <div>
+                        <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Client Secret</label>
+                        <input
+                          v-model="form.google_oauth_client_secret"
+                          type="password"
+                          class="input font-mono text-sm"
+                          :placeholder="
+                            form.google_oauth_client_secret_configured
+                              ? localText('密钥已配置，留空以保留当前值。', 'Secret configured. Leave empty to keep the current value.')
+                              : 'Google OAuth Client Secret'
+                          "
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        {{ localText("后端回调地址", "Backend Callback URL") }}
+                      </label>
+                      <input
+                        v-model="form.google_oauth_redirect_url"
+                        type="url"
+                        class="input font-mono text-sm"
+                        placeholder="https://your-domain.com/api/v1/auth/oauth/google/callback"
+                      />
+                      <div class="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+                        <button
+                          type="button"
+                          class="btn btn-secondary btn-sm w-fit"
+                          @click="setAndCopyEmailOAuthRedirectUrl('google')"
+                        >
+                          {{ localText("生成并复制", "Generate and copy") }}
+                        </button>
+                        <code
+                          v-if="googleOAuthRedirectUrlSuggestion"
+                          class="select-all break-all rounded bg-gray-50 px-2 py-1 font-mono text-xs text-gray-600 dark:bg-dark-800 dark:text-gray-300"
+                        >
+                          {{ googleOAuthRedirectUrlSuggestion }}
+                        </code>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        {{ localText("前端回跳地址", "Frontend Callback URL") }}
+                      </label>
+                      <input
+                        v-model="form.google_oauth_frontend_redirect_url"
+                        type="text"
+                        class="input font-mono text-sm"
+                        placeholder="/auth/oauth/callback"
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2077,6 +2445,294 @@
                   <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
                     {{ t("admin.settings.wechatConnect.frontendRedirectUrlHint") }}
                   </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- DingTalk Connect OAuth 登录 -->
+          <div class="card">
+            <div
+              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
+            >
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                {{ t("admin.settings.dingtalk.title") }}
+              </h2>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {{ t("admin.settings.dingtalk.description") }}
+              </p>
+            </div>
+            <div class="space-y-5 p-6">
+              <div class="flex items-center justify-between">
+                <div>
+                  <label class="font-medium text-gray-900 dark:text-white">{{
+                    t("admin.settings.dingtalk.enable")
+                  }}</label>
+                  <p class="text-sm text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.dingtalk.enableHint") }}
+                  </p>
+                </div>
+                <Toggle v-model="form.dingtalk_connect_enabled" />
+              </div>
+
+              <div
+                v-if="form.dingtalk_connect_enabled"
+                class="border-t border-gray-100 pt-4 dark:border-dark-700"
+              >
+                <div class="grid grid-cols-1 gap-6">
+                  <div>
+                    <label
+                      class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                    >
+                      {{ t("admin.settings.dingtalk.clientId") }}
+                    </label>
+                    <input
+                      v-model="form.dingtalk_connect_client_id"
+                      type="text"
+                      class="input font-mono text-sm"
+                      :placeholder="
+                        t('admin.settings.dingtalk.clientIdPlaceholder')
+                      "
+                    />
+                    <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.dingtalk.clientIdHint") }}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label
+                      class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                    >
+                      {{ t("admin.settings.dingtalk.clientSecret") }}
+                    </label>
+                    <input
+                      v-model="form.dingtalk_connect_client_secret"
+                      type="password"
+                      class="input font-mono text-sm"
+                      :placeholder="
+                        form.dingtalk_connect_client_secret_configured
+                          ? t(
+                              'admin.settings.dingtalk.clientSecretConfiguredPlaceholder',
+                            )
+                          : t('admin.settings.dingtalk.clientSecretPlaceholder')
+                      "
+                    />
+                    <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                      {{
+                        form.dingtalk_connect_client_secret_configured
+                          ? t(
+                              "admin.settings.dingtalk.clientSecretConfiguredHint",
+                            )
+                          : t("admin.settings.dingtalk.clientSecretHint")
+                      }}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label
+                      class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                    >
+                      {{ t("admin.settings.dingtalk.redirectUrl") }}
+                    </label>
+                    <input
+                      v-model="form.dingtalk_connect_redirect_url"
+                      type="url"
+                      class="input font-mono text-sm"
+                      :placeholder="
+                        t('admin.settings.dingtalk.redirectUrlPlaceholder')
+                      "
+                    />
+                    <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.dingtalk.redirectUrlHint") }}
+                    </p>
+                  </div>
+
+                  <!-- Corp Restriction Policy -->
+                  <div class="border-t border-gray-100 pt-4 dark:border-dark-700">
+                    <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      {{ t("admin.settings.dingtalk.corpPolicy.label") }}
+                    </label>
+                    <p class="mb-3 text-xs text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.dingtalk.corpPolicy.hint") }}
+                    </p>
+                    <div class="space-y-2">
+                      <label class="flex cursor-pointer items-center gap-3">
+                        <input
+                          v-model="form.dingtalk_connect_corp_restriction_policy"
+                          type="radio"
+                          value="none"
+                          class="h-4 w-4 text-primary-600"
+                        />
+                        <span class="text-sm text-gray-700 dark:text-gray-300">
+                          {{ t("admin.settings.dingtalk.corpPolicy.none") }}
+                        </span>
+                      </label>
+                      <label class="flex cursor-pointer items-center gap-3">
+                        <input
+                          v-model="form.dingtalk_connect_corp_restriction_policy"
+                          type="radio"
+                          value="internal_only"
+                          class="h-4 w-4 text-primary-600"
+                        />
+                        <span class="text-sm text-gray-700 dark:text-gray-300">
+                          {{ t("admin.settings.dingtalk.corpPolicy.internalOnly") }}
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <!-- bypass_registration toggle（仅 internal_only 模式下可见可用） -->
+                  <div
+                    v-if="form.dingtalk_connect_corp_restriction_policy === 'internal_only'"
+                    class="flex items-center justify-between pt-4 border-t border-gray-100 dark:border-dark-700"
+                  >
+                    <div>
+                      <label class="font-medium text-gray-900 dark:text-white">{{
+                        t("admin.settings.dingtalk.bypassRegistration")
+                      }}</label>
+                      <p class="text-sm text-gray-500 dark:text-gray-400">
+                        {{ t("admin.settings.dingtalk.bypassRegistrationHint") }}
+                      </p>
+                    </div>
+                    <Toggle v-model="form.dingtalk_connect_bypass_registration" />
+                  </div>
+
+                  <!-- 身份同步开关（仅 internal_only 模式下可见） -->
+                  <div
+                    v-if="form.dingtalk_connect_corp_restriction_policy === 'internal_only'"
+                    class="pt-4 border-t border-gray-100 dark:border-dark-700 space-y-2"
+                  >
+                    <div class="flex items-center justify-between">
+                      <div>
+                        <label class="font-medium text-gray-900 dark:text-white">{{
+                          t("admin.settings.dingtalk.syncDisplayName")
+                        }}</label>
+                        <p class="text-sm text-gray-500 dark:text-gray-400">
+                          {{ t("admin.settings.dingtalk.syncDisplayNameHint") }}
+                        </p>
+                      </div>
+                      <Toggle v-model="form.dingtalk_connect_sync_display_name" />
+                    </div>
+                    <div v-if="form.dingtalk_connect_sync_display_name" class="space-y-2">
+                      <div class="flex items-center gap-2">
+                        <label class="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap min-w-[5rem]">
+                          {{ t("admin.settings.dingtalk.syncDisplayNameTarget") }}
+                        </label>
+                        <input
+                          v-model="form.dingtalk_connect_sync_display_name_attr_key"
+                          type="text"
+                          placeholder="dingtalk_name"
+                          class="input text-sm flex-1 max-w-xs"
+                        />
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <label class="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap min-w-[5rem]">
+                          {{ t("admin.settings.dingtalk.syncAttrDisplayName") }}
+                        </label>
+                        <input
+                          v-model="form.dingtalk_connect_sync_display_name_attr_name"
+                          type="text"
+                          placeholder="钉钉姓名"
+                          class="input text-sm flex-1 max-w-xs"
+                        />
+                      </div>
+                    </div>
+                    <p v-if="form.dingtalk_connect_sync_display_name" class="text-xs text-gray-400 dark:text-gray-500">
+                      {{ t("admin.settings.dingtalk.syncDisplayNameTargetHint") }}
+                    </p>
+                  </div>
+                  <div
+                    v-if="form.dingtalk_connect_corp_restriction_policy === 'internal_only'"
+                    class="pt-4 border-t border-gray-100 dark:border-dark-700 space-y-2"
+                  >
+                    <div class="flex items-center justify-between">
+                      <div>
+                        <label class="font-medium text-gray-900 dark:text-white">{{
+                          t("admin.settings.dingtalk.syncCorpEmail")
+                        }}</label>
+                        <p class="text-sm text-gray-500 dark:text-gray-400">
+                          {{ t("admin.settings.dingtalk.syncCorpEmailHint") }}
+                        </p>
+                        <p class="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                          {{ t("admin.settings.dingtalk.syncCorpEmailPermissionHint") }}
+                        </p>
+                      </div>
+                      <Toggle v-model="form.dingtalk_connect_sync_corp_email" />
+                    </div>
+                    <div v-if="form.dingtalk_connect_sync_corp_email" class="space-y-2">
+                      <div class="flex items-center gap-2">
+                        <label class="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap min-w-[5rem]">
+                          {{ t("admin.settings.dingtalk.syncCorpEmailTarget") }}
+                        </label>
+                        <input
+                          v-model="form.dingtalk_connect_sync_corp_email_attr_key"
+                          type="text"
+                          placeholder="dingtalk_email"
+                          class="input text-sm flex-1 max-w-xs"
+                        />
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <label class="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap min-w-[5rem]">
+                          {{ t("admin.settings.dingtalk.syncAttrDisplayName") }}
+                        </label>
+                        <input
+                          v-model="form.dingtalk_connect_sync_corp_email_attr_name"
+                          type="text"
+                          placeholder="钉钉企业邮箱"
+                          class="input text-sm flex-1 max-w-xs"
+                        />
+                      </div>
+                    </div>
+                    <p v-if="form.dingtalk_connect_sync_corp_email" class="text-xs text-gray-400 dark:text-gray-500">
+                      {{ t("admin.settings.dingtalk.syncCorpEmailTargetHint") }}
+                    </p>
+                  </div>
+                  <div
+                    v-if="form.dingtalk_connect_corp_restriction_policy === 'internal_only'"
+                    class="pt-4 border-t border-gray-100 dark:border-dark-700 space-y-2"
+                  >
+                    <div class="flex items-center justify-between">
+                      <div>
+                        <label class="font-medium text-gray-900 dark:text-white">{{
+                          t("admin.settings.dingtalk.syncDept")
+                        }}</label>
+                        <p class="text-sm text-gray-500 dark:text-gray-400">
+                          {{ t("admin.settings.dingtalk.syncDeptHint") }}
+                        </p>
+                        <p class="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                          {{ t("admin.settings.dingtalk.syncDeptPermissionHint") }}
+                        </p>
+                      </div>
+                      <Toggle v-model="form.dingtalk_connect_sync_dept" />
+                    </div>
+                    <div v-if="form.dingtalk_connect_sync_dept" class="space-y-2">
+                      <div class="flex items-center gap-2">
+                        <label class="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap min-w-[5rem]">
+                          {{ t("admin.settings.dingtalk.syncDeptTarget") }}
+                        </label>
+                        <input
+                          v-model="form.dingtalk_connect_sync_dept_attr_key"
+                          type="text"
+                          placeholder="dingtalk_department"
+                          class="input text-sm flex-1 max-w-xs"
+                        />
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <label class="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap min-w-[5rem]">
+                          {{ t("admin.settings.dingtalk.syncAttrDisplayName") }}
+                        </label>
+                        <input
+                          v-model="form.dingtalk_connect_sync_dept_attr_name"
+                          type="text"
+                          placeholder="钉钉部门"
+                          class="input text-sm flex-1 max-w-xs"
+                        />
+                      </div>
+                    </div>
+                    <p v-if="form.dingtalk_connect_sync_dept" class="text-xs text-gray-400 dark:text-gray-500">
+                      {{ t("admin.settings.dingtalk.syncDeptTargetHint") }}
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
@@ -4931,6 +5587,38 @@
                       >
                     </div>
                   </div>
+                  <div>
+                    <label class="input-label">{{
+                      t("admin.settings.payment.alipayForceQRCode")
+                    }}</label>
+                    <div class="flex items-center gap-2">
+                      <button
+                        type="button"
+                        :class="[
+                          'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                          form.payment_alipay_force_qrcode
+                            ? 'bg-primary-500'
+                            : 'bg-gray-300 dark:bg-dark-600',
+                        ]"
+                        @click="
+                          form.payment_alipay_force_qrcode =
+                            !form.payment_alipay_force_qrcode
+                        "
+                      >
+                        <span
+                          :class="[
+                            'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                            form.payment_alipay_force_qrcode
+                              ? 'translate-x-5'
+                              : 'translate-x-0',
+                          ]"
+                        />
+                      </button>
+                      <span class="text-sm text-gray-500 dark:text-gray-400">{{
+                        t("admin.settings.payment.alipayForceQRCodeHint")
+                      }}</span>
+                    </div>
+                  </div>
                 </div>
                 <!-- Row 4: Enabled payment types (provider badges like sub2apipay) -->
                 <div>
@@ -5282,6 +5970,38 @@
               </div>
             </div>
           </div>
+
+          <!-- 订阅到期提醒 -->
+          <div class="card">
+            <div
+              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
+            >
+              <h3 class="text-base font-medium text-gray-900 dark:text-white">
+                {{ t("admin.settings.subscriptionExpiryNotify.title") }}
+              </h3>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {{ t("admin.settings.subscriptionExpiryNotify.description") }}
+              </p>
+            </div>
+            <div class="px-6 py-6">
+              <div class="flex items-center justify-between gap-4">
+                <div>
+                  <label
+                    class="mb-0 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
+                    {{ t("admin.settings.subscriptionExpiryNotify.enabled") }}
+                  </label>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.subscriptionExpiryNotify.enabledHint") }}
+                  </p>
+                </div>
+                <Toggle v-model="form.subscription_expiry_notify_enabled" />
+              </div>
+            </div>
+          </div>
+
+          <EmailTemplateEditor />
+
           <!-- Balance Low Notification -->
           <div class="card">
             <div
@@ -5488,7 +6208,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from "vue";
+import { ref, reactive, computed, onMounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { adminAPI } from "@/api";
 import {
@@ -5505,11 +6225,11 @@ import type {
   SystemSettings,
   UpdateSettingsRequest,
   DefaultSubscriptionSetting,
+  OpenAIFastPolicyRule,
   WeChatConnectMode,
   WebSearchEmulationConfig,
   WebSearchProviderConfig,
   WebSearchTestResult,
-  OpenAIFastPolicyRule,
   OpenAIFastPolicyTier,
 } from "@/api/admin/settings";
 import type {
@@ -5531,6 +6251,7 @@ import Toggle from "@/components/common/Toggle.vue";
 import ProxySelector from "@/components/common/ProxySelector.vue";
 import ImageUpload from "@/components/common/ImageUpload.vue";
 import BackupSettings from "@/views/admin/BackupView.vue";
+import EmailTemplateEditor from "@/views/admin/settings/EmailTemplateEditor.vue";
 import { useClipboard } from "@/composables/useClipboard";
 import { extractApiErrorMessage, extractI18nErrorMessage } from "@/utils/apiError";
 import {
@@ -5550,9 +6271,10 @@ import {
 const { t, locale } = useI18n();
 const appStore = useAppStore();
 const adminSettingsStore = useAdminSettingsStore();
+const isZhLocale = computed(() => locale.value.startsWith("zh"));
 
 function localText(zh: string, en: string): string {
-  return locale.value.startsWith("zh") ? zh : en;
+  return isZhLocale.value ? zh : en;
 }
 
 const paymentGuideHref = computed(() =>
@@ -5589,6 +6311,57 @@ const settingsTabs = [
   { key: "email" as SettingsTab, icon: "mail" as const },
   { key: "backup" as SettingsTab, icon: "database" as const },
 ];
+
+const settingsTabKeyboardActions = {
+  ArrowLeft: -1,
+  ArrowUp: -1,
+  ArrowRight: 1,
+  ArrowDown: 1,
+  Home: "first",
+  End: "last",
+} as const;
+
+function selectSettingsTab(tab: SettingsTab): void {
+  activeTab.value = tab;
+}
+
+function focusSettingsTab(tab: SettingsTab): void {
+  window.requestAnimationFrame(() => {
+    document.getElementById(`settings-tab-${tab}`)?.focus();
+  });
+}
+
+function handleSettingsTabKeydown(event: KeyboardEvent, tab: SettingsTab): void {
+  const action =
+    settingsTabKeyboardActions[
+      event.key as keyof typeof settingsTabKeyboardActions
+    ];
+  if (action === undefined) {
+    return;
+  }
+
+  event.preventDefault();
+  const currentIndex = settingsTabs.findIndex((item) => item.key === tab);
+  let nextIndex = currentIndex < 0 ? 0 : currentIndex;
+
+  if (action === "first") {
+    nextIndex = 0;
+  } else if (action === "last") {
+    nextIndex = settingsTabs.length - 1;
+  } else {
+    nextIndex =
+      (nextIndex + action + settingsTabs.length) % settingsTabs.length;
+  }
+
+  const nextTab = settingsTabs[nextIndex]?.key;
+  if (!nextTab) {
+    return;
+  }
+
+  selectSettingsTab(nextTab);
+  focusSettingsTab(nextTab);
+}
+
 const { copyToClipboard } = useClipboard();
 
 const loading = ref(true);
@@ -5616,6 +6389,14 @@ const overloadCooldownSaving = ref(false);
 const overloadCooldownForm = reactive({
   enabled: true,
   cooldown_minutes: 10,
+});
+
+// Rate Limit Cooldown (429) 状态
+const rateLimit429CooldownLoading = ref(true);
+const rateLimit429CooldownSaving = ref(false);
+const rateLimit429CooldownForm = reactive({
+  enabled: true,
+  cooldown_seconds: 5,
 });
 
 // Stream Timeout 状态
@@ -5657,6 +6438,7 @@ const betaPolicyForm = reactive({
 
 const openaiFastPolicyLoading = ref(true);
 const openaiFastPolicySaving = ref(false);
+const openaiFastPolicyLoaded = ref(false);
 const openaiFastPolicyForm = reactive({
   rules: [] as OpenAIFastPolicyRule[],
 });
@@ -5727,6 +6509,7 @@ type SettingsForm = Omit<
   smtp_password: string;
   turnstile_secret_key: string;
   linuxdo_connect_client_secret: string;
+  dingtalk_connect_client_secret: string;
   wechat_connect_app_secret: string;
   wechat_connect_open_app_secret: string;
   wechat_connect_mp_app_secret: string;
@@ -5772,6 +6555,7 @@ const form = reactive<SettingsForm>({
   backend_mode_enabled: false,
   hide_ccs_import_button: false,
   payment_enabled: false,
+  risk_control_enabled: false,
   payment_min_amount: 1,
   payment_max_amount: 10000,
   payment_daily_limit: 50000,
@@ -5791,6 +6575,7 @@ const form = reactive<SettingsForm>({
   payment_cancel_rate_limit_window: 1,
   payment_cancel_rate_limit_unit: "day",
   payment_cancel_rate_limit_window_mode: "rolling",
+  payment_alipay_force_qrcode: false,
   table_default_page_size: tablePageSizeDefault,
   table_page_size_options: [10, 20, 50, 100],
   custom_menu_items: [] as Array<{
@@ -5822,12 +6607,31 @@ const form = reactive<SettingsForm>({
   turnstile_site_key: "",
   turnstile_secret_key: "",
   turnstile_secret_key_configured: false,
+  api_key_acl_trust_forwarded_ip: false,
   // LinuxDo Connect OAuth 登录
   linuxdo_connect_enabled: false,
   linuxdo_connect_client_id: "",
   linuxdo_connect_client_secret: "",
   linuxdo_connect_client_secret_configured: false,
   linuxdo_connect_redirect_url: "",
+  // DingTalk Connect OAuth 登录
+  dingtalk_connect_enabled: false,
+  dingtalk_connect_client_id: "",
+  dingtalk_connect_client_secret: "",
+  dingtalk_connect_client_secret_configured: false,
+  dingtalk_connect_redirect_url: "",
+  dingtalk_connect_corp_restriction_policy: "none",
+  dingtalk_connect_internal_corp_id: "",
+  dingtalk_connect_bypass_registration: false,
+  dingtalk_connect_sync_corp_email: false,
+  dingtalk_connect_sync_display_name: false,
+  dingtalk_connect_sync_dept: false,
+  dingtalk_connect_sync_corp_email_attr_key: "dingtalk_email",
+  dingtalk_connect_sync_display_name_attr_key: "dingtalk_name",
+  dingtalk_connect_sync_dept_attr_key: "dingtalk_department",
+  dingtalk_connect_sync_corp_email_attr_name: "钉钉企业邮箱",
+  dingtalk_connect_sync_display_name_attr_name: "钉钉姓名",
+  dingtalk_connect_sync_dept_attr_name: "钉钉部门",
   wechat_connect_enabled: false,
   wechat_connect_app_id: "",
   wechat_connect_app_secret: "",
@@ -5913,6 +6717,7 @@ const form = reactive<SettingsForm>({
   balance_low_notify_enabled: false,
   balance_low_notify_threshold: 0,
   balance_low_notify_recharge_url: "",
+  subscription_expiry_notify_enabled: true,
   account_quota_notify_enabled: false,
   account_quota_notify_emails: [] as NotifyEmailEntry[],
   // Channel Monitor feature switch
@@ -5920,7 +6725,6 @@ const form = reactive<SettingsForm>({
   channel_monitor_default_interval_seconds: 60,
   // Available Channels feature switch
   available_channels_enabled: false,
-  risk_control_enabled: false,
   markdown_pages_enabled: false,
 });
 
@@ -6283,6 +7087,42 @@ async function setAndCopyLinuxdoRedirectUrl() {
   );
 }
 
+type EmailOAuthProvider = "github" | "google";
+
+const githubOAuthRedirectUrlSuggestion = computed(() => {
+  if (typeof window === "undefined") return "";
+  const origin =
+    window.location.origin ||
+    `${window.location.protocol}//${window.location.host}`;
+  return `${origin}/api/v1/auth/oauth/github/callback`;
+});
+
+const googleOAuthRedirectUrlSuggestion = computed(() => {
+  if (typeof window === "undefined") return "";
+  const origin =
+    window.location.origin ||
+    `${window.location.protocol}//${window.location.host}`;
+  return `${origin}/api/v1/auth/oauth/google/callback`;
+});
+
+async function setAndCopyEmailOAuthRedirectUrl(provider: EmailOAuthProvider) {
+  const url =
+    provider === "github"
+      ? githubOAuthRedirectUrlSuggestion.value
+      : googleOAuthRedirectUrlSuggestion.value;
+  if (!url) return;
+
+  if (provider === "github") {
+    form.github_oauth_redirect_url = url;
+  } else {
+    form.google_oauth_redirect_url = url;
+  }
+  await copyToClipboard(
+    url,
+    localText("回调地址已写入并复制。", "Callback URL set and copied."),
+  );
+}
+
 const wechatRedirectUrlSuggestion = computed(() => {
   if (typeof window === "undefined") return "";
   const origin =
@@ -6360,6 +7200,7 @@ const oidcRedirectUrlSuggestion = computed(() => {
   return `${origin}/api/v1/auth/oauth/oidc/callback`;
 });
 
+/*
 type EmailOAuthProvider = "github" | "google";
 
 const githubOAuthRedirectUrlSuggestion = computed(() => {
@@ -6396,6 +7237,7 @@ async function setAndCopyEmailOAuthRedirectUrl(provider: EmailOAuthProvider) {
   );
 }
 
+*/
 async function setAndCopyOIDCRedirectUrl() {
   const url = oidcRedirectUrlSuggestion.value;
   if (!url) return;
@@ -6568,6 +7410,9 @@ async function loadSettings() {
     smtpPasswordManuallyEdited.value = false;
     form.turnstile_secret_key = "";
     form.linuxdo_connect_client_secret = "";
+    form.dingtalk_connect_client_secret = "";
+    form.github_oauth_client_secret = "";
+    form.google_oauth_client_secret = "";
     form.wechat_connect_app_secret = "";
     form.wechat_connect_open_app_secret = "";
     form.wechat_connect_mp_app_secret = "";
@@ -6626,6 +7471,23 @@ async function loadSettings() {
     form.oidc_connect_client_secret = "";
     form.github_oauth_client_secret = "";
     form.google_oauth_client_secret = "";
+
+    // Load OpenAI fast/flex policy rules from bulk settings.
+    // 仅当 payload 真的包含该字段时填充并标记为已加载；否则保持表单空值，
+    // 让 saveSettings 在未加载时跳过该字段，防止覆盖后端默认规则。
+    if (
+      settings.openai_fast_policy_settings &&
+      Array.isArray(settings.openai_fast_policy_settings.rules)
+    ) {
+      openaiFastPolicyForm.rules =
+        settings.openai_fast_policy_settings.rules.map((rule) => ({
+          ...rule,
+          model_whitelist: rule.model_whitelist
+            ? [...rule.model_whitelist]
+            : [],
+        }));
+      openaiFastPolicyLoaded.value = true;
+    }
 
     // Load web search emulation config separately
     await loadWebSearchConfig();
@@ -6851,8 +7713,8 @@ async function saveSettings() {
       registration_enabled: form.registration_enabled,
       email_verify_enabled: form.email_verify_enabled,
       registration_email_suffix_whitelist:
-        registrationEmailSuffixWhitelistTags.value.map(
-          (suffix) => `@${suffix}`,
+        registrationEmailSuffixWhitelistTags.value.map((suffix) =>
+          suffix.startsWith("*.") ? suffix : `@${suffix}`,
         ),
       promo_code_enabled: form.promo_code_enabled,
       invitation_code_enabled: form.invitation_code_enabled,
@@ -6898,11 +7760,30 @@ async function saveSettings() {
       turnstile_enabled: form.turnstile_enabled,
       turnstile_site_key: form.turnstile_site_key,
       turnstile_secret_key: form.turnstile_secret_key || undefined,
+      api_key_acl_trust_forwarded_ip: form.api_key_acl_trust_forwarded_ip,
       linuxdo_connect_enabled: form.linuxdo_connect_enabled,
       linuxdo_connect_client_id: form.linuxdo_connect_client_id,
       linuxdo_connect_client_secret:
         form.linuxdo_connect_client_secret || undefined,
       linuxdo_connect_redirect_url: form.linuxdo_connect_redirect_url,
+      dingtalk_connect_enabled: form.dingtalk_connect_enabled,
+      dingtalk_connect_client_id: form.dingtalk_connect_client_id,
+      dingtalk_connect_client_secret:
+        form.dingtalk_connect_client_secret || undefined,
+      dingtalk_connect_redirect_url: form.dingtalk_connect_redirect_url,
+      dingtalk_connect_corp_restriction_policy:
+        form.dingtalk_connect_corp_restriction_policy,
+      dingtalk_connect_internal_corp_id: form.dingtalk_connect_internal_corp_id,
+      dingtalk_connect_bypass_registration: form.dingtalk_connect_bypass_registration,
+      dingtalk_connect_sync_corp_email: form.dingtalk_connect_sync_corp_email,
+      dingtalk_connect_sync_display_name: form.dingtalk_connect_sync_display_name,
+      dingtalk_connect_sync_dept: form.dingtalk_connect_sync_dept,
+      dingtalk_connect_sync_corp_email_attr_key: form.dingtalk_connect_sync_corp_email_attr_key,
+      dingtalk_connect_sync_display_name_attr_key: form.dingtalk_connect_sync_display_name_attr_key,
+      dingtalk_connect_sync_dept_attr_key: form.dingtalk_connect_sync_dept_attr_key,
+      dingtalk_connect_sync_corp_email_attr_name: form.dingtalk_connect_sync_corp_email_attr_name,
+      dingtalk_connect_sync_display_name_attr_name: form.dingtalk_connect_sync_display_name_attr_name,
+      dingtalk_connect_sync_dept_attr_name: form.dingtalk_connect_sync_dept_attr_name,
       wechat_connect_enabled: form.wechat_connect_enabled,
       wechat_connect_app_id:
         form.wechat_connect_open_app_id ||
@@ -6982,6 +7863,7 @@ async function saveSettings() {
         form.enable_anthropic_cache_ttl_1h_injection,
       // Payment configuration
       payment_enabled: form.payment_enabled,
+      risk_control_enabled: form.risk_control_enabled,
       payment_min_amount: Number(form.payment_min_amount) || 0,
       payment_max_amount: Number(form.payment_max_amount) || 0,
       payment_daily_limit: Number(form.payment_daily_limit) || 0,
@@ -7006,13 +7888,16 @@ async function saveSettings() {
       payment_cancel_rate_limit_unit: form.payment_cancel_rate_limit_unit,
       payment_cancel_rate_limit_window_mode:
         form.payment_cancel_rate_limit_window_mode,
+      payment_alipay_force_qrcode: form.payment_alipay_force_qrcode,
       openai_advanced_scheduler_enabled: form.openai_advanced_scheduler_enabled,
-      // Balance & quota notification
+      // 余额、订阅到期与账号限额通知
       balance_low_notify_enabled: form.balance_low_notify_enabled,
       balance_low_notify_threshold:
         Number(form.balance_low_notify_threshold) || 0,
       balance_low_notify_recharge_url: (form.balance_low_notify_recharge_url =
         form.balance_low_notify_recharge_url || currentOrigin),
+      subscription_expiry_notify_enabled:
+        form.subscription_expiry_notify_enabled,
       account_quota_notify_enabled: form.account_quota_notify_enabled,
       account_quota_notify_emails: (
         form.account_quota_notify_emails || []
@@ -7023,14 +7908,42 @@ async function saveSettings() {
         Number(form.channel_monitor_default_interval_seconds) || 60,
       // Available Channels feature switch
       available_channels_enabled: form.available_channels_enabled,
-      risk_control_enabled: form.risk_control_enabled,
       markdown_pages_enabled: form.markdown_pages_enabled,
     };
+
+    // 仅当 openai_fast_policy_settings 已成功从后端加载时才回写，
+    // 否则省略整个字段，让后端保留既有规则（含默认值）。
+    if (openaiFastPolicyLoaded.value) {
+      payload.openai_fast_policy_settings = {
+        rules: openaiFastPolicyForm.rules.map((rule) => {
+          const whitelist = (rule.model_whitelist || [])
+            .map((p) => p.trim())
+            .filter((p) => p !== "");
+          const hasWhitelist = whitelist.length > 0;
+          return {
+            service_tier: rule.service_tier,
+            action: rule.action,
+            scope: rule.scope,
+            error_message:
+              rule.action === "block" ? rule.error_message : undefined,
+            model_whitelist: hasWhitelist ? whitelist : undefined,
+            fallback_action: hasWhitelist
+              ? rule.fallback_action || "pass"
+              : undefined,
+            fallback_error_message:
+              hasWhitelist && rule.fallback_action === "block"
+                ? rule.fallback_error_message
+                : undefined,
+          };
+        }),
+      };
+    }
 
     appendAuthSourceDefaultsToUpdateRequest(payload, authSourceDefaults);
 
     const updated = await adminAPI.settings.updateSettings(payload);
     for (const [key, value] of Object.entries(updated)) {
+      if (key === "openai_fast_policy_settings") continue;
       if (value !== null && value !== undefined) {
         (form as Record<string, unknown>)[key] = value;
       }
@@ -7050,6 +7963,9 @@ async function saveSettings() {
     smtpPasswordManuallyEdited.value = false;
     form.turnstile_secret_key = "";
     form.linuxdo_connect_client_secret = "";
+    form.dingtalk_connect_client_secret = "";
+    form.github_oauth_client_secret = "";
+    form.google_oauth_client_secret = "";
     form.wechat_connect_app_secret = "";
     form.wechat_connect_open_app_secret = "";
     form.wechat_connect_mp_app_secret = "";
@@ -7247,6 +8163,40 @@ async function saveOverloadCooldownSettings() {
   }
 }
 
+// Rate Limit Cooldown (429) 方法
+async function loadRateLimit429CooldownSettings() {
+  rateLimit429CooldownLoading.value = true;
+  try {
+    const settings = await adminAPI.settings.getRateLimit429CooldownSettings();
+    Object.assign(rateLimit429CooldownForm, settings);
+  } catch (_error: unknown) {
+    // Silent fail - settings will use defaults
+  } finally {
+    rateLimit429CooldownLoading.value = false;
+  }
+}
+
+async function saveRateLimit429CooldownSettings() {
+  rateLimit429CooldownSaving.value = true;
+  try {
+    const updated = await adminAPI.settings.updateRateLimit429CooldownSettings({
+      enabled: rateLimit429CooldownForm.enabled,
+      cooldown_seconds: rateLimit429CooldownForm.cooldown_seconds,
+    });
+    Object.assign(rateLimit429CooldownForm, updated);
+    appStore.showSuccess(t("admin.settings.rateLimit429Cooldown.saved"));
+  } catch (error: unknown) {
+    appStore.showError(
+      extractApiErrorMessage(
+        error,
+        t("admin.settings.rateLimit429Cooldown.saveFailed"),
+      ),
+    );
+  } finally {
+    rateLimit429CooldownSaving.value = false;
+  }
+}
+
 // Stream Timeout 方法
 async function loadStreamTimeoutSettings() {
   streamTimeoutLoading.value = true;
@@ -7415,6 +8365,61 @@ async function loadBetaPolicySettings() {
   }
 }
 
+// ==================== OpenAI Fast/Flex Policy ====================
+
+const openaiFastPolicyTierOptions = computed(() => [
+  { value: "all", label: t("admin.settings.openaiFastPolicy.tierAll") },
+  {
+    value: "priority",
+    label: t("admin.settings.openaiFastPolicy.tierPriority"),
+  },
+  { value: "flex", label: t("admin.settings.openaiFastPolicy.tierFlex") },
+]);
+
+const openaiFastPolicyActionOptions = computed(() => [
+  { value: "pass", label: t("admin.settings.openaiFastPolicy.actionPass") },
+  { value: "filter", label: t("admin.settings.openaiFastPolicy.actionFilter") },
+  { value: "block", label: t("admin.settings.openaiFastPolicy.actionBlock") },
+]);
+
+const openaiFastPolicyScopeOptions = computed(() => [
+  { value: "all", label: t("admin.settings.openaiFastPolicy.scopeAll") },
+  { value: "oauth", label: t("admin.settings.openaiFastPolicy.scopeOAuth") },
+  { value: "apikey", label: t("admin.settings.openaiFastPolicy.scopeAPIKey") },
+  {
+    value: "bedrock",
+    label: t("admin.settings.openaiFastPolicy.scopeBedrock"),
+  },
+]);
+
+function addOpenAIFastPolicyRule() {
+  openaiFastPolicyForm.rules.push({
+    service_tier: "priority",
+    action: "filter",
+    scope: "all",
+    error_message: "",
+    model_whitelist: [],
+    fallback_action: "pass",
+    fallback_error_message: "",
+  });
+}
+
+function removeOpenAIFastPolicyRule(index: number) {
+  openaiFastPolicyForm.rules.splice(index, 1);
+}
+
+function addOpenAIFastPolicyModelPattern(rule: OpenAIFastPolicyRule) {
+  if (!rule.model_whitelist) rule.model_whitelist = [];
+  rule.model_whitelist.push("");
+}
+
+function removeOpenAIFastPolicyModelPattern(
+  rule: OpenAIFastPolicyRule,
+  idx: number,
+) {
+  rule.model_whitelist?.splice(idx, 1);
+}
+
 async function saveBetaPolicySettings() {
   betaPolicySaving.value = true;
   try {
@@ -7451,6 +8456,7 @@ async function saveBetaPolicySettings() {
   }
 }
 
+/*
 const openaiFastPolicyTierOptions = computed(() => [
   { value: "all", label: t("admin.settings.openaiFastPolicy.tierAll") },
   { value: "priority", label: t("admin.settings.openaiFastPolicy.tierPriority") },
@@ -7499,6 +8505,7 @@ function removeOpenAIFastPolicyModelPattern(
   rule.model_whitelist?.splice(idx, 1);
 }
 
+*/
 async function loadOpenAIFastPolicySettings() {
   openaiFastPolicyLoading.value = true;
   try {
@@ -7575,6 +8582,7 @@ const allPaymentTypes = computed(() => [
   { value: "alipay", label: t("payment.methods.alipay") },
   { value: "wxpay", label: t("payment.methods.wxpay") },
   { value: "stripe", label: t("payment.methods.stripe") },
+  { value: "airwallex", label: t("payment.methods.airwallex") },
 ]);
 
 function isPaymentTypeEnabled(type: string): boolean {
@@ -7631,6 +8639,7 @@ const providerKeyOptions = computed(() => [
   { value: "alipay", label: t("admin.settings.payment.providerAlipay") },
   { value: "wxpay", label: t("admin.settings.payment.providerWxpay") },
   { value: "stripe", label: t("admin.settings.payment.providerStripe") },
+  { value: "airwallex", label: t("admin.settings.payment.providerAirwallex") },
 ]);
 
 const enabledProviderKeyOptions = computed(() => {
@@ -7920,12 +8929,384 @@ onMounted(() => {
   loadSubscriptionGroups();
   loadAdminApiKey();
   loadOverloadCooldownSettings();
+  loadRateLimit429CooldownSettings();
   loadStreamTimeoutSettings();
   loadRectifierSettings();
   loadBetaPolicySettings();
   loadOpenAIFastPolicySettings();
   loadProviders();
 });
+
+/*
+// =========================
+// Affiliate (邀请返利) 专属用户管理
+// =========================
+
+interface AffiliateState {
+  loading: boolean;
+  entries: AffiliateAdminEntry[];
+  total: number;
+  page: number;
+  pageSize: number;
+  search: string;
+  selected: number[];
+  searchTimer: number | null;
+}
+
+const affiliateState = reactive<AffiliateState>({
+  loading: false,
+  entries: [],
+  total: 0,
+  page: 1,
+  pageSize: 20,
+  search: "",
+  selected: [],
+  searchTimer: null,
+});
+
+// `rate` is typed as string|number because <input type="number"> makes Vue's
+// v-model auto-cast the bound value to a Number on every keystroke. We keep
+// both shapes and normalize at read time.
+interface AffiliateModalState {
+  open: boolean;
+  mode: "add" | "edit";
+  saving: boolean;
+  userQuery: string;
+  userResults: AffiliateSimpleUser[];
+  selectedUser: AffiliateSimpleUser | null;
+  editingEntry: AffiliateAdminEntry | null;
+  code: string;
+  rate: string | number;
+  searchTimer: number | null;
+}
+
+const affiliateModal = reactive<AffiliateModalState>({
+  open: false,
+  mode: "add",
+  saving: false,
+  userQuery: "",
+  userResults: [],
+  selectedUser: null,
+  editingEntry: null,
+  code: "",
+  rate: "",
+  searchTimer: null,
+});
+
+const affiliateBatchModal = reactive<{
+  open: boolean;
+  saving: boolean;
+  rate: string | number;
+}>({
+  open: false,
+  saving: false,
+  rate: "",
+});
+
+// affiliateConfirmDialog drives the project-standard <ConfirmDialog>. We can't
+// `await` the user's response from the dialog component, so the confirm action
+// runs from the @confirm callback once the user clicks the dialog's confirm
+// button.
+const affiliateConfirmDialog = reactive<{
+  show: boolean;
+  title: string;
+  message: string;
+  confirmText: string;
+  pending: (() => Promise<unknown>) | null;
+}>({
+  show: false,
+  title: "",
+  message: "",
+  confirmText: "",
+  pending: null,
+});
+
+function openAffiliateConfirm(
+  title: string,
+  message: string,
+  confirmText: string,
+  fn: () => Promise<unknown>,
+) {
+  affiliateConfirmDialog.title = title;
+  affiliateConfirmDialog.message = message;
+  affiliateConfirmDialog.confirmText = confirmText;
+  affiliateConfirmDialog.pending = fn;
+  affiliateConfirmDialog.show = true;
+}
+
+async function handleAffiliateConfirm() {
+  const fn = affiliateConfirmDialog.pending;
+  affiliateConfirmDialog.show = false;
+  affiliateConfirmDialog.pending = null;
+  if (!fn) return;
+  try {
+    await fn();
+    appStore.showSuccess(t("common.saved"));
+    await loadAffiliateUsers();
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t("common.error")));
+  }
+}
+
+function cancelAffiliateConfirm() {
+  affiliateConfirmDialog.show = false;
+  affiliateConfirmDialog.pending = null;
+}
+
+// debounceTimer wires a single timer slot to a callback with a delay,
+// canceling any pending invocation. Used for type-as-you-go search inputs.
+function debounceTimer(slot: { searchTimer: number | null }, delayMs: number, run: () => void) {
+  if (slot.searchTimer != null) window.clearTimeout(slot.searchTimer);
+  slot.searchTimer = window.setTimeout(run, delayMs);
+}
+
+// parseRebateRate validates 0-100 numeric input. Returns the parsed number on
+// success, null when the field is empty (caller decides empty semantics), or
+// undefined on invalid input (after surfacing a toast).
+//
+// Accepts unknown because <input type="number"> makes Vue's v-model coerce
+// the value to Number on each keystroke (e.g. typing "30" lands a `30: number`
+// in state, not a `"30": string`). String("") and (30).trim() would crash, so
+// we normalize here instead of forcing every caller to remember.
+function parseRebateRate(raw: unknown): number | null | undefined {
+  const s = String(raw ?? "").trim();
+  if (s === "") return null;
+  const parsed = Number(s);
+  if (Number.isNaN(parsed) || parsed < 0 || parsed > 100) {
+    appStore.showError(t("admin.settings.features.affiliate.modal.errorBadRate"));
+    return undefined;
+  }
+  return parsed;
+}
+
+async function loadAffiliateUsers() {
+  affiliateState.loading = true;
+  try {
+    const res = await affiliatesAPI.listUsers({
+      page: affiliateState.page,
+      page_size: affiliateState.pageSize,
+      search: affiliateState.search,
+    });
+    affiliateState.entries = res.items ?? [];
+    affiliateState.total = res.total ?? 0;
+    // Drop selections that are no longer visible.
+    const visibleIds = new Set(affiliateState.entries.map((e) => e.user_id));
+    affiliateState.selected = affiliateState.selected.filter((id) => visibleIds.has(id));
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t("common.error")));
+  } finally {
+    affiliateState.loading = false;
+  }
+}
+
+function onAffiliateSearchInput() {
+  debounceTimer(affiliateState, 300, () => {
+    affiliateState.page = 1;
+    loadAffiliateUsers();
+  });
+}
+
+function changeAffiliatePage(page: number) {
+  if (page < 1) return;
+  affiliateState.page = page;
+  loadAffiliateUsers();
+}
+
+function toggleAffiliateSelectAll(e: Event) {
+  const checked = (e.target as HTMLInputElement).checked;
+  affiliateState.selected = checked ? affiliateState.entries.map((entry) => entry.user_id) : [];
+}
+
+function toggleAffiliateSelect(userId: number) {
+  const idx = affiliateState.selected.indexOf(userId);
+  if (idx >= 0) affiliateState.selected.splice(idx, 1);
+  else affiliateState.selected.push(userId);
+}
+
+// openAffiliateModal opens the add/edit modal, prefilling fields from the
+// edited entry when present and resetting them otherwise.
+function openAffiliateModal(entry: AffiliateAdminEntry | null) {
+  affiliateModal.open = true;
+  affiliateModal.mode = entry ? "edit" : "add";
+  affiliateModal.userQuery = "";
+  affiliateModal.userResults = [];
+  affiliateModal.selectedUser = null;
+  affiliateModal.editingEntry = entry;
+  affiliateModal.code = entry?.aff_code_custom ? entry.aff_code : "";
+  affiliateModal.rate =
+    entry?.aff_rebate_rate_percent != null ? String(entry.aff_rebate_rate_percent) : "";
+}
+
+function closeAffiliateModal() {
+  affiliateModal.open = false;
+  if (affiliateModal.searchTimer != null) {
+    window.clearTimeout(affiliateModal.searchTimer);
+    affiliateModal.searchTimer = null;
+  }
+}
+
+function onAffiliateUserSearchInput() {
+  const q = affiliateModal.userQuery.trim();
+  if (!q) {
+    affiliateModal.userResults = [];
+    return;
+  }
+  debounceTimer(affiliateModal, 300, async () => {
+    try {
+      affiliateModal.userResults = await affiliatesAPI.lookupUsers(q);
+    } catch (err) {
+      appStore.showError(extractApiErrorMessage(err, t("common.error")));
+    }
+  });
+}
+
+// selectAffiliateUser picks a user from the dropdown and collapses the search
+// UI. Clearing the result list also clears the visual dropdown.
+function selectAffiliateUser(user: AffiliateSimpleUser) {
+  affiliateModal.selectedUser = user;
+  affiliateModal.userQuery = "";
+  affiliateModal.userResults = [];
+}
+
+function clearSelectedAffiliateUser() {
+  affiliateModal.selectedUser = null;
+}
+
+// affiliateModalCanSubmit guards the Save button: must have a user picked AND
+// produce at least one field change. Without this the admin could "save" an
+// empty payload that silently does nothing — the user reported exactly that
+// confusion.
+const affiliateModalCanSubmit = computed(() => {
+  if (affiliateModal.mode === "add") {
+    if (!affiliateModal.selectedUser) return false;
+  } else if (!affiliateModal.editingEntry) {
+    return false;
+  }
+  const codeFilled = affiliateModal.code.trim() !== "";
+  const rateFilled = String(affiliateModal.rate ?? "").trim() !== "";
+  if (codeFilled || rateFilled) return true;
+  // Edit mode + empty rate input is a meaningful "clear" only if the user
+  // currently has an exclusive rate to clear.
+  return (
+    affiliateModal.mode === "edit" &&
+    affiliateModal.editingEntry?.aff_rebate_rate_percent != null
+  );
+});
+
+async function submitAffiliateModal() {
+  if (!affiliateModalCanSubmit.value) {
+    // Should be unreachable because the button is disabled, but keep a guard.
+    appStore.showError(t("admin.settings.features.affiliate.modal.errorEmpty"));
+    return;
+  }
+
+  let userId: number;
+  if (affiliateModal.mode === "add") {
+    userId = affiliateModal.selectedUser!.id;
+  } else {
+    userId = affiliateModal.editingEntry!.user_id;
+  }
+
+  const payload: Parameters<typeof affiliatesAPI.updateUserSettings>[1] = {};
+  const codeRaw = affiliateModal.code.trim();
+  if (codeRaw) payload.aff_code = codeRaw.toUpperCase();
+
+  const rateInput = parseRebateRate(affiliateModal.rate);
+  if (rateInput === undefined) return; // toast already shown
+  if (rateInput === null) {
+    if (affiliateModal.mode === "edit" && affiliateModal.editingEntry?.aff_rebate_rate_percent != null) {
+      payload.clear_rebate_rate = true;
+    }
+  } else {
+    payload.aff_rebate_rate_percent = rateInput;
+  }
+
+  affiliateModal.saving = true;
+  try {
+    await affiliatesAPI.updateUserSettings(userId, payload);
+    appStore.showSuccess(t("common.saved"));
+    closeAffiliateModal();
+    affiliateState.page = 1;
+    await loadAffiliateUsers();
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t("common.error")));
+  } finally {
+    affiliateModal.saving = false;
+  }
+}
+
+// askResetAffiliateUser prompts via the project ConfirmDialog, then on confirm
+// calls the backend "reset all" endpoint that clears both the exclusive rate
+// AND regenerates the invite code as a system random one.
+function askResetAffiliateUser(entry: AffiliateAdminEntry) {
+  openAffiliateConfirm(
+    t("admin.settings.features.affiliate.customUsers.resetTitle"),
+    t("admin.settings.features.affiliate.customUsers.resetMessage", {
+      email: entry.email || `#${entry.user_id}`,
+    }),
+    t("common.delete"),
+    () => affiliatesAPI.clearUserSettings(entry.user_id),
+  );
+}
+
+function openAffiliateBatchModal() {
+  if (affiliateState.selected.length === 0) return;
+  affiliateBatchModal.open = true;
+  affiliateBatchModal.rate = "";
+}
+
+async function submitAffiliateBatchModal() {
+  const rateInput = parseRebateRate(affiliateBatchModal.rate);
+  if (rateInput === undefined) return;
+  const userIDs = [...affiliateState.selected];
+  const payload: Parameters<typeof affiliatesAPI.batchSetRate>[0] =
+    rateInput === null
+      ? { user_ids: userIDs, clear: true }
+      : { user_ids: userIDs, aff_rebate_rate_percent: rateInput };
+
+  affiliateBatchModal.saving = true;
+  try {
+    await affiliatesAPI.batchSetRate(payload);
+    appStore.showSuccess(t("common.saved"));
+    affiliateBatchModal.open = false;
+    affiliateState.selected = [];
+    await loadAffiliateUsers();
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, t("common.error")));
+  } finally {
+    affiliateBatchModal.saving = false;
+  }
+}
+
+// Load the per-user table the first time the affiliate switch is observed
+// as enabled. The form starts disabled and is updated to the server's value
+// after the settings load — so this fires either when the saved value is
+// truthy on first paint, or when the admin manually toggles it on.
+watch(
+  () => form.affiliate_enabled,
+  (enabled, prev) => {
+    if (enabled && !prev) {
+      loadAffiliateUsers();
+    }
+  },
+);
+
+*/
+
+// bypass_registration 与身份同步三开关仅在 internal_only 模式下生效。切换 policy 到其它值时，
+// 立即把相关字段重置为 false，避免保存请求里残留旧值。后端 admin handler 与
+// 配置加载层都有 coerce 兜底，这里是 UX 层的同步而非安全防线。
+watch(
+  () => form.dingtalk_connect_corp_restriction_policy,
+  (policy) => {
+    if (policy !== "internal_only") {
+      if (form.dingtalk_connect_bypass_registration) form.dingtalk_connect_bypass_registration = false;
+      if (form.dingtalk_connect_sync_corp_email) form.dingtalk_connect_sync_corp_email = false;
+      if (form.dingtalk_connect_sync_display_name) form.dingtalk_connect_sync_display_name = false;
+      if (form.dingtalk_connect_sync_dept) form.dingtalk_connect_sync_dept = false;
+    }
+  },
+);
 </script>
 
 <style scoped>
@@ -7937,94 +9318,121 @@ onMounted(() => {
   @apply h-[42px];
 }
 
-/* ============ Settings Tab Navigation ============ */
+/* ============ 系统设置 Tab 导航 ============ */
+.settings-tabs-shell {
+  @apply sticky z-20 -mx-1 rounded-2xl border border-white/80 bg-white/90 p-1.5 backdrop-blur-xl;
+  top: 4.75rem;
+  box-shadow:
+    0 12px 28px rgb(15 23 42 / 0.07),
+    0 1px 0 rgb(255 255 255 / 0.9) inset;
+}
 
-/* Scroll container: thin scrollbar on PC, auto-hide on mobile */
 .settings-tabs-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
+  @apply overflow-x-auto;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
-.settings-tabs-scroll:hover {
-  scrollbar-color: rgb(0 0 0 / 0.15) transparent;
-}
-:root.dark .settings-tabs-scroll:hover {
-  scrollbar-color: rgb(255 255 255 / 0.2) transparent;
-}
+
 .settings-tabs-scroll::-webkit-scrollbar {
-  height: 3px;
-}
-.settings-tabs-scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
-.settings-tabs-scroll::-webkit-scrollbar-thumb {
-  background: transparent;
-  border-radius: 3px;
-}
-.settings-tabs-scroll:hover::-webkit-scrollbar-thumb {
-  background: rgb(0 0 0 / 0.15);
-}
-:root.dark .settings-tabs-scroll:hover::-webkit-scrollbar-thumb {
-  background: rgb(255 255 255 / 0.2);
+  display: none;
 }
 
 .settings-tabs {
-  @apply inline-flex min-w-full gap-0.5 rounded-2xl
-         border border-gray-100 bg-white/80 p-1 backdrop-blur-sm
-         dark:border-dark-700/50 dark:bg-dark-800/80;
-  box-shadow:
-    0 1px 3px rgb(0 0 0 / 0.04),
-    0 1px 2px rgb(0 0 0 / 0.02);
-}
-
-@media (min-width: 640px) {
-  .settings-tabs {
-    @apply flex;
-  }
+  @apply flex min-w-max items-center gap-1;
 }
 
 .settings-tab {
-  @apply relative flex flex-1 items-center justify-center gap-1.5
-         whitespace-nowrap rounded-xl px-2.5 py-2
-         text-sm font-medium
-         text-gray-500 dark:text-dark-400
-         transition-all duration-200 ease-out;
+  @apply relative isolate flex h-10 min-w-[6.75rem] shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-transparent px-3 text-sm font-medium text-gray-600 outline-none transition-colors duration-200 ease-out dark:text-gray-300;
 }
 
-.settings-tab:hover:not(.settings-tab-active) {
-  @apply text-gray-700 dark:text-gray-300;
-  background: rgb(0 0 0 / 0.03);
+@media (min-width: 768px) {
+  .settings-tabs {
+    @apply min-w-full;
+  }
+
+  .settings-tab {
+    @apply min-w-0 flex-1 basis-0 overflow-hidden px-2 text-[13px];
+  }
+
+  .settings-tab-icon {
+    @apply h-6 w-6;
+  }
 }
 
-:root.dark .settings-tab:hover:not(.settings-tab-active) {
-  background: rgb(255 255 255 / 0.04);
+.settings-tab::before {
+  @apply absolute inset-0 -z-10 rounded-xl opacity-0 transition-opacity duration-200;
+  content: "";
+  background: linear-gradient(135deg, rgb(248 250 252 / 0.95), rgb(241 245 249 / 0.8));
+}
+
+.settings-tab:hover::before,
+.settings-tab:focus-visible::before {
+  opacity: 1;
+}
+
+.settings-tab:focus-visible {
+  @apply ring-2 ring-primary-500/40 ring-offset-2 ring-offset-white dark:ring-offset-dark-900;
 }
 
 .settings-tab-active {
-  @apply text-primary-600 dark:text-primary-400;
-  background: linear-gradient(
-    135deg,
-    rgba(20, 184, 166, 0.08),
-    rgba(20, 184, 166, 0.03)
-  );
-  box-shadow: 0 1px 2px rgba(20, 184, 166, 0.1);
+  @apply border-primary-200/80 bg-white text-primary-700 shadow-sm dark:border-primary-400/30 dark:bg-dark-700/95 dark:text-primary-200;
+  box-shadow:
+    0 8px 18px rgb(15 23 42 / 0.08),
+    0 1px 0 rgb(255 255 255 / 0.92) inset;
 }
 
-:root.dark .settings-tab-active {
-  background: linear-gradient(
-    135deg,
-    rgba(45, 212, 191, 0.12),
-    rgba(45, 212, 191, 0.05)
-  );
-  box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
+.settings-tab-active::before {
+  opacity: 0;
+}
+
+.settings-tab-active::after {
+  position: absolute;
+  right: 0.75rem;
+  bottom: 0.25rem;
+  left: 0.75rem;
+  height: 2px;
+  border-radius: 9999px;
+  content: "";
+  background: linear-gradient(90deg, #14b8a6, #0ea5e9);
 }
 
 .settings-tab-icon {
-  @apply flex h-6 w-6 items-center justify-center rounded-lg
-         transition-all duration-200;
+  @apply flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-gray-500 transition-colors duration-200 dark:text-gray-400;
+}
+
+.settings-tab:hover .settings-tab-icon,
+.settings-tab:focus-visible .settings-tab-icon {
+  @apply text-gray-700 dark:text-gray-200;
 }
 
 .settings-tab-active .settings-tab-icon {
-  @apply bg-primary-500/15 text-primary-600
-         dark:bg-primary-400/15 dark:text-primary-400;
+  @apply bg-primary-50 text-primary-600 dark:bg-primary-400/10 dark:text-primary-300;
+}
+
+.settings-tab-label {
+  @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap leading-none;
+}
+</style>
+
+<style>
+/* Dark-mode overrides for the settings tabs shell. Kept in an UNSCOPED block
+   because Vue's scoped-CSS compiler was dropping the `:global(.dark) ...`
+   rules in the production build, leaving inactive tabs unreadable on dark. */
+.dark .settings-tabs-shell {
+  border-color: rgb(51 65 85 / 0.65);
+  background: rgb(15 23 42 / 0.86);
+  box-shadow:
+    0 16px 36px rgb(0 0 0 / 0.28),
+    0 1px 0 rgb(255 255 255 / 0.06) inset;
+}
+
+.dark .settings-tab::before {
+  background: linear-gradient(135deg, rgb(30 41 59 / 0.9), rgb(51 65 85 / 0.62));
+}
+
+.dark .settings-tab-active {
+  box-shadow:
+    0 12px 26px rgb(0 0 0 / 0.22),
+    0 1px 0 rgb(255 255 255 / 0.08) inset;
 }
 </style>

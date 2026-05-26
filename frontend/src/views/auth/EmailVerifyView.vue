@@ -164,9 +164,15 @@ import {
 import { apiClient } from '@/api/client'
 import { buildAuthErrorMessage } from '@/utils/authError'
 import {
+  formatRegistrationEmailSuffixWhitelistForMessage,
   isRegistrationEmailSuffixAllowed,
   normalizeRegistrationEmailSuffixWhitelist
 } from '@/utils/registrationEmailPolicy'
+import {
+  clearAllAffiliateReferralCodes,
+  loadAffiliateReferralCode,
+  oauthAffiliatePayload
+} from '@/utils/oauthAffiliate'
 
 const { t, locale } = useI18n()
 
@@ -182,6 +188,7 @@ const isLoading = ref<boolean>(false)
 const isSendingCode = ref<boolean>(false)
 const errorMessage = ref<string>('')
 const codeSent = ref<boolean>(false)
+const affCode = ref<string>('')
 const verifyCode = ref<string>('')
 const countdown = ref<number>(0)
 let countdownTimer: ReturnType<typeof setInterval> | null = null
@@ -499,6 +506,7 @@ async function handleVerify(): Promise<void> {
           password: password.value,
           verify_code: verifyCode.value.trim(),
           invitation_code: invitationCode.value || undefined,
+          ...oauthAffiliatePayload(affCode.value || loadAffiliateReferralCode()),
           adopt_display_name: pendingAdoptionDecision.value?.adoptDisplayName,
           adopt_avatar: pendingAdoptionDecision.value?.adoptAvatar
         }
@@ -530,6 +538,7 @@ async function handleVerify(): Promise<void> {
 
     // Clear session data
     sessionStorage.removeItem('register_data')
+    clearAllAffiliateReferralCodes()
 
     // Show success toast
     appStore.showSuccess(t('auth.accountCreatedSuccess', { siteName: siteName.value }))
@@ -564,7 +573,10 @@ function buildEmailSuffixNotAllowedMessage(): string {
   }
   const separator = String(locale.value || '').toLowerCase().startsWith('zh') ? '、' : ', '
   return t('auth.emailSuffixNotAllowedWithAllowed', {
-    suffixes: normalizedWhitelist.join(separator)
+    suffixes: formatRegistrationEmailSuffixWhitelistForMessage(normalizedWhitelist, {
+      separator,
+      more: (count) => t('auth.emailSuffixAllowedMore', { count })
+    })
   })
 }
 </script>

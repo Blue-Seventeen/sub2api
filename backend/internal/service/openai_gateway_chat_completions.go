@@ -269,9 +269,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 				Message:            upstreamMsg,
 				Detail:             upstreamDetail,
 			})
-			if s.rateLimitService != nil {
-				s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
-			}
+			s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
 			return nil, &UpstreamFailoverError{
 				StatusCode:             resp.StatusCode,
 				ResponseBody:           respBody,
@@ -285,7 +283,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	var result *OpenAIForwardResult
 	var handleErr error
 	if clientStream {
-		result, handleErr = s.handleChatStreamingResponse(resp, c, originalModel, billingModel, upstreamModel, includeUsage, startTime)
+		result, handleErr = s.handleChatStreamingResponse(resp, c, account, originalModel, billingModel, upstreamModel, includeUsage, startTime, len(body))
 	} else {
 		result, handleErr = s.handleChatBufferedStreamingResponse(resp, c, originalModel, billingModel, upstreamModel, startTime)
 	}
@@ -404,22 +402,31 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	resp *http.Response,
 	c *gin.Context,
+	account *Account,
 	originalModel string,
 	billingModel string,
 	upstreamModel string,
 	includeUsage bool,
 	startTime time.Time,
+	requestBodyLen int,
 ) (*OpenAIForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
 
-	if s.responseHeaderFilter != nil {
-		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+	headersWritten := false
+	writeStreamHeaders := func() {
+		if headersWritten {
+			return
+		}
+		headersWritten = true
+		if s.responseHeaderFilter != nil {
+			responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+		}
+		c.Writer.Header().Set("Content-Type", "text/event-stream")
+		c.Writer.Header().Set("Cache-Control", "no-cache")
+		c.Writer.Header().Set("Connection", "keep-alive")
+		c.Writer.Header().Set("X-Accel-Buffering", "no")
+		c.Writer.WriteHeader(http.StatusOK)
 	}
-	c.Writer.Header().Set("Content-Type", "text/event-stream")
-	c.Writer.Header().Set("Cache-Control", "no-cache")
-	c.Writer.Header().Set("Connection", "keep-alive")
-	c.Writer.Header().Set("X-Accel-Buffering", "no")
-	c.Writer.WriteHeader(http.StatusOK)
 
 	state := apicompat.NewResponsesEventToChatState()
 	state.Model = originalModel
@@ -429,6 +436,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	var firstTokenMs *int
 	firstChunk := true
 	clientDisconnected := false
+	refusalDetector := newOpenAIChatSilentRefusalDetector(requestBodyLen)
 
 	scanner := bufio.NewScanner(resp.Body)
 	maxLineSize := defaultMaxLineSize
@@ -479,6 +487,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			)
 			return false
 		}
+		refusalDetector.ObservePayload([]byte(payload))
 
 		// 仅按兼容转换器支持的终止事件提取 usage，避免无意扩大事件语义。
 		isTerminalEvent := isOpenAICompatResponsesTerminalEvent(event.Type)
@@ -515,6 +524,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	finalizeStream := func() (*OpenAIForwardResult, error) {
 		if finalChunks := apicompat.FinalizeResponsesChatStream(state); len(finalChunks) > 0 && !clientDisconnected {
 			for _, chunk := range finalChunks {
+				refusalDetector.ObserveChatChunk(chunk)
 				sse, err := apicompat.ChatChunkToSSE(chunk)
 				if err != nil {
 					continue
@@ -554,6 +564,22 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	missingTerminalErr := func() (*OpenAIForwardResult, error) {
 		return resultWithUsage(), fmt.Errorf("stream usage incomplete: missing terminal event")
 	}
+	currentSSEEventType := ""
+	prepareSSEDataPayload := func(line string) (string, bool) {
+		if eventType, ok := extractOpenAISSEEventLine(line); ok {
+			currentSSEEventType = eventType
+			return "", false
+		}
+		if strings.TrimSpace(line) == "" {
+			currentSSEEventType = ""
+			return "", false
+		}
+		payload, ok := extractOpenAISSEDataLine(line)
+		if !ok {
+			return "", false
+		}
+		return openAICompatPayloadWithEventType(payload, currentSSEEventType), true
+	}
 
 	// Determine keepalive interval
 	keepaliveInterval := time.Duration(0)
@@ -565,7 +591,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	if streamInterval <= 0 && keepaliveInterval <= 0 {
 		for scanner.Scan() {
 			line := scanner.Text()
-			payload, ok := extractOpenAISSEDataLine(line)
+			payload, ok := prepareSSEDataPayload(line)
 			if !ok {
 				continue
 			}
@@ -637,7 +663,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			}
 			lastDataAt = time.Now()
 			line := ev.line
-			payload, ok := extractOpenAISSEDataLine(line)
+			payload, ok := prepareSSEDataPayload(line)
 			if !ok {
 				continue
 			}
@@ -671,6 +697,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				continue
 			}
 			// Send SSE comment as keepalive
+			writeStreamHeaders()
 			if _, err := fmt.Fprint(c.Writer, ":\n\n"); err != nil {
 				logger.L().Info("openai chat_completions stream: client disconnected during keepalive",
 					zap.String("request_id", requestID),

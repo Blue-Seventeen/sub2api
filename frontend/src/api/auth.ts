@@ -564,9 +564,10 @@ export async function resetPassword(request: ResetPasswordRequest): Promise<Rese
  */
 export async function completeLinuxDoOAuthRegistration(
   invitationCode: string,
-  decision?: OAuthAdoptionDecision
+  decision?: OAuthAdoptionDecision,
+  affiliateCode?: string
 ): Promise<OAuthTokenResponse> {
-  return createPendingLinuxDoOAuthAccount(invitationCode, decision)
+  return createPendingLinuxDoOAuthAccount(invitationCode, decision, affiliateCode)
 }
 
 /**
@@ -576,27 +577,32 @@ export async function completeLinuxDoOAuthRegistration(
  */
 export async function completeOIDCOAuthRegistration(
   invitationCode: string,
-  decision?: OAuthAdoptionDecision
+  decision?: OAuthAdoptionDecision,
+  affiliateCode?: string
 ): Promise<OAuthTokenResponse> {
-  return createPendingOIDCOAuthAccount(invitationCode, decision)
+  return createPendingOIDCOAuthAccount(invitationCode, decision, affiliateCode)
 }
 
 export async function completeWeChatOAuthRegistration(
   invitationCode: string,
-  decision?: OAuthAdoptionDecision
+  decision?: OAuthAdoptionDecision,
+  affiliateCode?: string
 ): Promise<OAuthTokenResponse> {
-  return createPendingWeChatOAuthAccount(invitationCode, decision)
+  return createPendingWeChatOAuthAccount(invitationCode, decision, affiliateCode)
 }
 
 async function createPendingOAuthAccount(
-  provider: 'linuxdo' | 'oidc' | 'wechat',
+  provider: 'linuxdo' | 'oidc' | 'wechat' | 'dingtalk',
   invitationCode: string,
-  decision?: OAuthAdoptionDecision
+  decision?: OAuthAdoptionDecision,
+  affiliateCode?: string
 ): Promise<PendingOAuthCreateAccountResponse> {
+  const normalizedAffiliateCode = affiliateCode?.trim()
   const { data } = await apiClient.post<PendingOAuthCreateAccountResponse>(
     `/auth/oauth/${provider}/complete-registration`,
     {
       invitation_code: invitationCode,
+      ...(normalizedAffiliateCode ? { aff_code: normalizedAffiliateCode } : {}),
       ...serializeOAuthAdoptionDecision(decision)
     }
   )
@@ -605,23 +611,34 @@ async function createPendingOAuthAccount(
 
 export async function createPendingLinuxDoOAuthAccount(
   invitationCode: string,
-  decision?: OAuthAdoptionDecision
+  decision?: OAuthAdoptionDecision,
+  affiliateCode?: string
 ): Promise<PendingOAuthCreateAccountResponse> {
-  return createPendingOAuthAccount('linuxdo', invitationCode, decision)
+  return createPendingOAuthAccount('linuxdo', invitationCode, decision, affiliateCode)
 }
 
 export async function createPendingOIDCOAuthAccount(
   invitationCode: string,
-  decision?: OAuthAdoptionDecision
+  decision?: OAuthAdoptionDecision,
+  affiliateCode?: string
 ): Promise<PendingOAuthCreateAccountResponse> {
-  return createPendingOAuthAccount('oidc', invitationCode, decision)
+  return createPendingOAuthAccount('oidc', invitationCode, decision, affiliateCode)
 }
 
 export async function createPendingWeChatOAuthAccount(
   invitationCode: string,
-  decision?: OAuthAdoptionDecision
+  decision?: OAuthAdoptionDecision,
+  affiliateCode?: string
 ): Promise<PendingOAuthCreateAccountResponse> {
-  return createPendingOAuthAccount('wechat', invitationCode, decision)
+  return createPendingOAuthAccount('wechat', invitationCode, decision, affiliateCode)
+}
+
+export async function createPendingDingTalkOAuthAccount(
+  invitationCode: string,
+  decision?: OAuthAdoptionDecision,
+  affiliateCode?: string
+): Promise<PendingOAuthCreateAccountResponse> {
+  return createPendingOAuthAccount('dingtalk', invitationCode, decision, affiliateCode)
 }
 
 export async function completePendingOAuthBindLogin(
@@ -674,7 +691,8 @@ export const authAPI = {
   exchangePendingOAuthCompletion,
   completeLinuxDoOAuthRegistration,
   completeOIDCOAuthRegistration,
-  completeWeChatOAuthRegistration
+  completeWeChatOAuthRegistration,
+  createPendingDingTalkOAuthAccount
 }
 
 export default authAPI

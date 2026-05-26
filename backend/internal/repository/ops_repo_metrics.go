@@ -423,23 +423,9 @@ ORDER BY job_name ASC`
 	return out, nil
 }
 
-func opsNullBool(v *bool) any {
-	if v == nil {
-		return sql.NullBool{}
-	}
-	return sql.NullBool{Bool: *v, Valid: true}
-}
-
 func opsNullFloat64(v *float64) any {
 	if v == nil {
 		return sql.NullFloat64{}
 	}
 	return sql.NullFloat64{Float64: *v, Valid: true}
-}
-
-func opsNullTime(v *time.Time) any {
-	if v == nil || v.IsZero() {
-		return sql.NullTime{}
-	}
-	return sql.NullTime{Time: *v, Valid: true}
 }

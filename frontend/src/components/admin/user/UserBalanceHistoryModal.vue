@@ -204,6 +204,7 @@ const formatMoney = (value: number) => formatCurrencyAmount(value)
 const typeOptions = computed(() => [
   { value: '', label: t('admin.users.allTypes') },
   { value: 'balance', label: t('admin.users.typeBalance') },
+  { value: 'affiliate_balance', label: t('admin.users.typeAffiliateBalance') },
   { value: 'admin_balance', label: t('admin.users.typeAdminBalance') },
   { value: 'promotion_balance', label: '推广收益' },
   { value: 'concurrency', label: t('admin.users.typeConcurrency') },
@@ -300,6 +301,8 @@ const getItemTitle = (item: BalanceHistoryItem) => {
   switch (item.type) {
     case 'balance':
       return t('redeem.balanceAddedRedeem')
+    case 'affiliate_balance':
+      return t('redeem.balanceAddedAffiliate')
     case 'admin_balance':
       return item.value >= 0 ? t('redeem.balanceAddedAdmin') : t('redeem.balanceDeductedAdmin')
     case 'promotion_balance':

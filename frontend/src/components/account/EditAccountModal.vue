@@ -124,10 +124,10 @@
 
             <!-- Whitelist Mode -->
             <div v-if="modelRestrictionMode === 'whitelist'">
-              <ModelWhitelistSelector v-model="allowedModels" :platform="account?.platform || 'anthropic'" />
+              <ModelWhitelistSelector v-model="allowedModels" :platform="account?.platform || 'anthropic'" :account-id="account?.id" />
               <p class="text-xs text-gray-500 dark:text-gray-400">
                 {{ t('admin.accounts.selectedModels', { count: allowedModels.length }) }}
-                <span v-if="allowedModels.length === 0">{{
+                <span v-if="allowedModels.length === 0 && modelMappings.length === 0">{{
                   t('admin.accounts.supportsAllModels')
                 }}</span>
               </p>
@@ -439,10 +439,10 @@
 
           <!-- Whitelist Mode -->
           <div v-if="modelRestrictionMode === 'whitelist'">
-            <ModelWhitelistSelector v-model="allowedModels" :platform="account?.platform || 'anthropic'" />
+            <ModelWhitelistSelector v-model="allowedModels" :platform="account?.platform || 'anthropic'" :account-id="account?.id" />
             <p class="text-xs text-gray-500 dark:text-gray-400">
               {{ t('admin.accounts.selectedModels', { count: allowedModels.length }) }}
-              <span v-if="allowedModels.length === 0">{{
+              <span v-if="allowedModels.length === 0 && modelMappings.length === 0">{{
                 t('admin.accounts.supportsAllModels')
               }}</span>
             </p>
@@ -701,7 +701,7 @@
             <ModelWhitelistSelector v-model="allowedModels" platform="anthropic" />
             <p class="text-xs text-gray-500 dark:text-gray-400">
               {{ t('admin.accounts.selectedModels', { count: allowedModels.length }) }}
-              <span v-if="allowedModels.length === 0">{{ t('admin.accounts.supportsAllModels') }}</span>
+              <span v-if="allowedModels.length === 0 && modelMappings.length === 0">{{ t('admin.accounts.supportsAllModels') }}</span>
             </p>
           </div>
 
@@ -795,6 +795,17 @@
         <div>
           <div class="mb-3 rounded-lg bg-purple-50 p-3 dark:bg-purple-900/20">
             <p class="text-xs text-purple-700 dark:text-purple-400">{{ t('admin.accounts.mapRequestModels') }}</p>
+          </div>
+
+          <div class="mb-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              @click="syncAntigravityUpstreamModels"
+              :disabled="isSyncingAntigravityUpstream || !account?.id"
+              class="rounded-lg border border-emerald-200 px-3 py-1.5 text-sm text-emerald-600 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-900/30"
+            >
+              {{ isSyncingAntigravityUpstream ? t('admin.accounts.syncUpstreamModelsLoading') : t('admin.accounts.syncUpstreamModels') }}
+            </button>
           </div>
 
           <div v-if="antigravityModelMappings.length > 0" class="mb-3 space-y-2">
@@ -1161,6 +1172,66 @@
         </div>
       </div>
 
+      <!-- OpenAI Codex 图片生成桥接账号级覆盖 -->
+      <div
+        v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'apikey')"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <div class="overflow-hidden rounded-lg border border-sky-100 bg-sky-50/60 shadow-sm dark:border-sky-900/50 dark:bg-sky-950/20">
+          <div class="flex items-start gap-3 px-4 py-3">
+            <div class="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-white text-sky-600 shadow-sm ring-1 ring-sky-100 dark:bg-dark-800 dark:text-sky-300 dark:ring-sky-900/60">
+              <Icon name="sparkles" size="sm" />
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="flex flex-wrap items-center gap-2">
+                <label class="input-label mb-0">{{ t('admin.accounts.openai.codexImageGenerationBridge') }}</label>
+                <span
+                  class="rounded-full px-2 py-0.5 text-[11px] font-medium"
+                  :class="codexImageGenerationBridgeBadgeClass"
+                >
+                  {{ codexImageGenerationBridgeBadgeLabel }}
+                </span>
+              </div>
+              <p class="mt-1 text-xs leading-5 text-slate-600 dark:text-slate-300">
+                {{ t('admin.accounts.openai.codexImageGenerationBridgeDesc') }}
+              </p>
+            </div>
+          </div>
+          <div class="border-t border-sky-100 bg-white/70 p-2 dark:border-sky-900/50 dark:bg-dark-800/70">
+            <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <button
+                v-for="option in codexImageGenerationBridgeOptions"
+                :key="option.value"
+                type="button"
+                :data-testid="`codex-image-bridge-${option.value}`"
+                @click="codexImageGenerationBridgeMode = option.value"
+                :class="[
+                  'group flex min-h-[68px] items-start gap-2 rounded-md border px-3 py-2 text-left transition-all',
+                  codexImageGenerationBridgeMode === option.value
+                    ? 'border-sky-300 bg-sky-50 text-sky-900 shadow-sm ring-1 ring-sky-200 dark:border-sky-700 dark:bg-sky-900/25 dark:text-sky-100 dark:ring-sky-800'
+                    : 'border-transparent bg-transparent text-slate-600 hover:border-gray-200 hover:bg-gray-50 dark:text-slate-300 dark:hover:border-dark-500 dark:hover:bg-dark-700'
+                ]"
+              >
+                <span
+                  :class="[
+                    'mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors',
+                    codexImageGenerationBridgeMode === option.value
+                      ? 'border-sky-500 bg-sky-500 text-white'
+                      : 'border-gray-300 text-transparent group-hover:border-gray-400 dark:border-dark-500'
+                  ]"
+                >
+                  <Icon name="check" size="xs" :stroke-width="2" />
+                </span>
+                <span class="min-w-0">
+                  <span class="block text-sm font-medium">{{ option.label }}</span>
+                  <span class="mt-0.5 block text-xs leading-4 text-slate-500 dark:text-slate-400">{{ option.description }}</span>
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- OpenAI WS Mode 三态（off/ctx_pool/passthrough） -->
       <div
         v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'apikey')"
@@ -1179,6 +1250,31 @@
           <div class="w-52">
             <Select v-model="openaiResponsesWebSocketV2Mode" :options="openAIWSModeOptions" />
           </div>
+        </div>
+      </div>
+
+      <!-- OpenAI APIKey Responses API support mode -->
+      <div
+        v-if="account?.platform === 'openai' && account?.type === 'apikey'"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-3"
+      >
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <label class="input-label mb-0">{{ t('admin.accounts.openai.responsesMode') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.responsesModeDesc') }}
+            </p>
+          </div>
+          <div class="w-56">
+            <Select
+              v-model="openAIResponsesMode"
+              :options="openAIResponsesModeOptions"
+              data-testid="openai-responses-mode-select"
+            />
+          </div>
+        </div>
+        <div class="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:bg-dark-700 dark:text-gray-300">
+          <span class="font-medium">{{ t(openAIResponsesStatusKey) }}</span>
         </div>
       </div>
 
@@ -1972,7 +2068,8 @@ import type {
   AdminGroup,
   CheckMixedChannelResponse,
   AccountPlatform,
-  OpenAICompactMode
+  OpenAICompactMode,
+  OpenAIResponsesMode
 } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
@@ -1998,6 +2095,7 @@ import {
   getPresetMappingsByPlatform,
   commonErrorCodes,
   buildModelMappingObject,
+  splitModelMappingObject,
   isValidWildcardPattern
 } from '@/composables/useModelWhitelist'
 
@@ -2205,6 +2303,7 @@ const allowOverages = ref(false) // For antigravity accounts: enable AI Credits 
 const antigravityModelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist')
 const antigravityWhitelistModels = ref<string[]>([])
 const antigravityModelMappings = ref<ModelMapping[]>([])
+const isSyncingAntigravityUpstream = ref(false)
 const tempUnschedEnabled = ref(false)
 const tempUnschedRules = ref<TempUnschedRuleForm[]>([])
 const getModelMappingKey = createStableObjectKeyResolver<ModelMapping>('edit-model-mapping')
@@ -2249,9 +2348,12 @@ const customBaseUrl = ref('')
 // OpenAI 自动透传开关（OAuth/API Key）
 const openaiPassthroughEnabled = ref(false)
 const openAICompactMode = ref<OpenAICompactMode>('auto')
+const openAIResponsesMode = ref<OpenAIResponsesMode>('auto')
 const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const codexCLIOnlyEnabled = ref(false)
+type CodexImageGenerationBridgeMode = 'inherit' | 'enabled' | 'disabled'
+const codexImageGenerationBridgeMode = ref<CodexImageGenerationBridgeMode>('inherit')
 const anthropicPassthroughEnabled = ref(false)
 const webSearchEmulationMode = ref('default')
 const webSearchGlobalEnabled = ref(false)
@@ -2302,14 +2404,82 @@ const openaiResponsesWebSocketV2Mode = computed({
 const openAIWSModeConcurrencyHintKey = computed(() =>
   resolveOpenAIWSModeConcurrencyHintKey(openaiResponsesWebSocketV2Mode.value)
 )
+const codexImageGenerationBridgeOptions = computed<Array<{
+  value: CodexImageGenerationBridgeMode
+  label: string
+  description: string
+}>>(() => [
+  {
+    value: 'inherit',
+    label: t('admin.accounts.openai.codexImageGenerationBridgeInherit'),
+    description: t('admin.accounts.openai.codexImageGenerationBridgeInheritDesc')
+  },
+  {
+    value: 'enabled',
+    label: t('admin.accounts.openai.codexImageGenerationBridgeEnabled'),
+    description: t('admin.accounts.openai.codexImageGenerationBridgeEnabledDesc')
+  },
+  {
+    value: 'disabled',
+    label: t('admin.accounts.openai.codexImageGenerationBridgeDisabled'),
+    description: t('admin.accounts.openai.codexImageGenerationBridgeDisabledDesc')
+  }
+])
+const codexImageGenerationBridgeBadgeLabel = computed(() => {
+  switch (codexImageGenerationBridgeMode.value) {
+    case 'enabled':
+      return t('admin.accounts.openai.codexImageGenerationBridgeBadgeEnabled')
+    case 'disabled':
+      return t('admin.accounts.openai.codexImageGenerationBridgeBadgeDisabled')
+    default:
+      return t('admin.accounts.openai.codexImageGenerationBridgeBadgeInherit')
+  }
+})
+const codexImageGenerationBridgeBadgeClass = computed(() => {
+  switch (codexImageGenerationBridgeMode.value) {
+    case 'enabled':
+      return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+    case 'disabled':
+      return 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300'
+    default:
+      return 'bg-slate-100 text-slate-600 dark:bg-dark-600 dark:text-slate-300'
+  }
+})
 const openAICompactModeOptions = computed(() => [
   { value: 'auto', label: t('admin.accounts.openai.compactModeAuto') },
   { value: 'force_on', label: t('admin.accounts.openai.compactModeForceOn') },
   { value: 'force_off', label: t('admin.accounts.openai.compactModeForceOff') }
 ])
+const openAIResponsesModeOptions = computed(() => [
+  { value: 'auto', label: t('admin.accounts.openai.responsesModeAuto') },
+  { value: 'force_responses', label: t('admin.accounts.openai.responsesModeForceResponses') },
+  { value: 'force_chat_completions', label: t('admin.accounts.openai.responsesModeForceChatCompletions') }
+])
+const normalizeOpenAIResponsesMode = (mode: unknown): OpenAIResponsesMode => {
+  if (mode === 'force_responses' || mode === 'force_chat_completions') {
+    return mode
+  }
+  return 'auto'
+}
 const isOpenAIModelRestrictionDisabled = computed(() =>
   props.account?.platform === 'openai' && openaiPassthroughEnabled.value
 )
+const openAIResponsesStatusKey = computed(() => {
+  if (openAIResponsesMode.value === 'force_responses') {
+    return 'admin.accounts.openai.responsesStatusForcedResponses'
+  }
+  if (openAIResponsesMode.value === 'force_chat_completions') {
+    return 'admin.accounts.openai.responsesStatusForcedChatCompletions'
+  }
+  const extra = props.account?.extra as Record<string, unknown> | undefined
+  if (extra?.openai_responses_supported === true) {
+    return 'admin.accounts.openai.responsesStatusAutoSupported'
+  }
+  if (extra?.openai_responses_supported === false) {
+    return 'admin.accounts.openai.responsesStatusAutoUnsupported'
+  }
+  return 'admin.accounts.openai.responsesStatusAutoUnknown'
+})
 const openAICompactStatusKey = computed(() => {
   const extra = props.account?.extra as Record<string, unknown> | undefined
   if (!props.account || props.account.platform !== 'openai') return ''
@@ -2321,7 +2491,7 @@ const openAICompactStatusKey = computed(() => {
       ? 'admin.accounts.openai.compactSupported'
       : 'admin.accounts.openai.compactUnsupported'
   }
-  return 'admin.accounts.openai.compactUnknown'
+  return 'admin.accounts.openai.compactAuto'
 })
 
 // Computed: current preset mappings based on platform
@@ -2416,6 +2586,19 @@ const normalizePoolModeRetryCount = (value: number) => {
   return normalized
 }
 
+const loadModelRestrictionFromMapping = (rawMapping?: Record<string, unknown>) => {
+  const parsed = splitModelMappingObject(rawMapping)
+  allowedModels.value = parsed.allowedModels
+  modelMappings.value = parsed.modelMappings
+  modelRestrictionMode.value =
+    parsed.modelMappings.length > 0 && parsed.allowedModels.length === 0
+      ? 'mapping'
+      : 'whitelist'
+}
+
+const buildModelRestrictionMapping = () =>
+  buildModelMappingObject('combined', allowedModels.value, modelMappings.value)
+
 const syncFormFromAccount = (newAccount: Account | null) => {
   if (!newAccount) {
     return
@@ -2459,15 +2642,28 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   // Load OpenAI passthrough toggle (OpenAI OAuth/API Key)
   openaiPassthroughEnabled.value = false
   openAICompactMode.value = 'auto'
+  openAIResponsesMode.value = 'auto'
   openAICompactModelMappings.value = []
   openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   codexCLIOnlyEnabled.value = false
+  codexImageGenerationBridgeMode.value = 'inherit'
   anthropicPassthroughEnabled.value = false
   webSearchEmulationMode.value = 'default'
   if (newAccount.platform === 'openai' && (newAccount.type === 'oauth' || newAccount.type === 'apikey')) {
     openaiPassthroughEnabled.value = extra?.openai_passthrough === true || extra?.openai_oauth_passthrough === true
     openAICompactMode.value = (extra?.openai_compact_mode as OpenAICompactMode) || 'auto'
+    if (newAccount.type === 'apikey') {
+      openAIResponsesMode.value = normalizeOpenAIResponsesMode(extra?.openai_responses_mode)
+    }
+    const codexImageGenerationBridgeValue = typeof extra?.codex_image_generation_bridge === 'boolean'
+      ? extra.codex_image_generation_bridge
+      : extra?.codex_image_generation_bridge_enabled
+    if (codexImageGenerationBridgeValue === true) {
+      codexImageGenerationBridgeMode.value = 'enabled'
+    } else if (codexImageGenerationBridgeValue === false) {
+      codexImageGenerationBridgeMode.value = 'disabled'
+    }
     openaiOAuthResponsesWebSocketV2Mode.value = resolveOpenAIWSModeFromExtra(extra, {
       modeKey: 'openai_oauth_responses_websockets_v2_mode',
       enabledKey: 'openai_oauth_responses_websockets_v2_enabled',
@@ -2576,30 +2772,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     editBaseUrl.value = (credentials.base_url as string) || platformDefaultUrl
 
     // Load model mappings and detect mode
-    const existingMappings = credentials.model_mapping as Record<string, string> | undefined
-    if (existingMappings && typeof existingMappings === 'object') {
-      const entries = Object.entries(existingMappings)
-
-      // Detect if this is whitelist mode (all from === to) or mapping mode
-      const isWhitelistMode = entries.length > 0 && entries.every(([from, to]) => from === to)
-
-      if (isWhitelistMode) {
-        // Whitelist mode: populate allowedModels
-        modelRestrictionMode.value = 'whitelist'
-        allowedModels.value = entries.map(([from]) => from)
-        modelMappings.value = []
-      } else {
-        // Mapping mode: populate modelMappings
-        modelRestrictionMode.value = 'mapping'
-        modelMappings.value = entries.map(([from, to]) => ({ from, to }))
-        allowedModels.value = []
-      }
-    } else {
-      // No mappings: default to whitelist mode with empty selection (allow all)
-      modelRestrictionMode.value = 'whitelist'
-      modelMappings.value = []
-      allowedModels.value = []
-    }
+    loadModelRestrictionFromMapping(credentials.model_mapping as Record<string, unknown> | undefined)
 
     // Load pool mode
     poolModeEnabled.value = credentials.pool_mode === true
@@ -2643,24 +2816,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     loadQuotaNotifyFromExtra(bedrockExtra)
 
     // Load model mappings for bedrock
-    const existingMappings = bedrockCreds.model_mapping as Record<string, string> | undefined
-    if (existingMappings && typeof existingMappings === 'object') {
-      const entries = Object.entries(existingMappings)
-      const isWhitelistMode = entries.length > 0 && entries.every(([from, to]) => from === to)
-      if (isWhitelistMode) {
-        modelRestrictionMode.value = 'whitelist'
-        allowedModels.value = entries.map(([from]) => from)
-        modelMappings.value = []
-      } else {
-        modelRestrictionMode.value = 'mapping'
-        modelMappings.value = entries.map(([from, to]) => ({ from, to }))
-        allowedModels.value = []
-      }
-    } else {
-      modelRestrictionMode.value = 'whitelist'
-      modelMappings.value = []
-      allowedModels.value = []
-    }
+    loadModelRestrictionFromMapping(bedrockCreds.model_mapping as Record<string, unknown> | undefined)
   } else if (newAccount.type === 'upstream' && newAccount.credentials) {
     const credentials = newAccount.credentials as Record<string, unknown>
     editBaseUrl.value = (credentials.base_url as string) || ''
@@ -2676,24 +2832,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     // Load model mappings for OpenAI OAuth accounts
     if (newAccount.platform === 'openai' && newAccount.credentials) {
       const oauthCredentials = newAccount.credentials as Record<string, unknown>
-      const existingMappings = oauthCredentials.model_mapping as Record<string, string> | undefined
-      if (existingMappings && typeof existingMappings === 'object') {
-        const entries = Object.entries(existingMappings)
-        const isWhitelistMode = entries.length > 0 && entries.every(([from, to]) => from === to)
-        if (isWhitelistMode) {
-          modelRestrictionMode.value = 'whitelist'
-          allowedModels.value = entries.map(([from]) => from)
-          modelMappings.value = []
-        } else {
-          modelRestrictionMode.value = 'mapping'
-          modelMappings.value = entries.map(([from, to]) => ({ from, to }))
-          allowedModels.value = []
-        }
-      } else {
-        modelRestrictionMode.value = 'whitelist'
-        modelMappings.value = []
-        allowedModels.value = []
-      }
+      loadModelRestrictionFromMapping(oauthCredentials.model_mapping as Record<string, unknown> | undefined)
     } else {
       modelRestrictionMode.value = 'whitelist'
       modelMappings.value = []
@@ -2771,6 +2910,40 @@ const addAntigravityPresetMapping = (from: string, to: string) => {
     return
   }
   antigravityModelMappings.value.push({ from, to })
+}
+
+const syncAntigravityUpstreamModels = async () => {
+  if (!props.account?.id || isSyncingAntigravityUpstream.value) return
+
+  isSyncingAntigravityUpstream.value = true
+  try {
+    const result = await adminAPI.accounts.syncUpstreamModels(props.account.id)
+    const upstreamModels = result.models.map((model) => model.trim()).filter(Boolean)
+    if (upstreamModels.length === 0) {
+      appStore.showInfo(t('admin.accounts.syncUpstreamModelsEmpty'))
+      return
+    }
+
+    let addedCount = 0
+    for (const model of upstreamModels) {
+      const exists = antigravityModelMappings.value.some((mapping) => mapping.from === model)
+      if (!exists) {
+        antigravityModelMappings.value.push({ from: model, to: model })
+        addedCount += 1
+      }
+    }
+
+    if (addedCount > 0) {
+      appStore.showSuccess(t('admin.accounts.syncUpstreamModelsSuccess', { count: addedCount, total: upstreamModels.length }))
+    } else {
+      appStore.showInfo(t('admin.accounts.syncUpstreamModelsNoChanges', { count: upstreamModels.length }))
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : t('admin.accounts.syncUpstreamModelsFailed')
+    appStore.showError(t('admin.accounts.syncUpstreamModelsError', { message }))
+  } finally {
+    isSyncingAntigravityUpstream.value = false
+  }
 }
 
 // Error code toggle helper
@@ -3181,20 +3354,22 @@ const handleSubmit = async () => {
       }
 
       // Handle API key
+      // 后端响应已脱敏：currentCredentials 不会再包含 api_key 原文。
+      // 用户填入新值则覆盖；留空时优先看 credentials_status.has_api_key；
+      // 若后端尚未升级（无 credentials_status），回退读旧结构 currentCredentials.api_key。
+      // 两者都无才报错。
+      const hasExistingApiKey =
+        props.account.credentials_status?.has_api_key ?? Boolean(currentCredentials.api_key)
       if (editApiKey.value.trim()) {
-        // User provided a new API key
         newCredentials.api_key = editApiKey.value.trim()
-      } else if (currentCredentials.api_key) {
-        // Preserve existing api_key
-        newCredentials.api_key = currentCredentials.api_key
-      } else {
+      } else if (!hasExistingApiKey) {
         appStore.showError(t('admin.accounts.apiKeyIsRequired'))
         return
       }
 
       // Add model mapping if configured（OpenAI 开启自动透传时保留现有映射，不再编辑）
       if (shouldApplyModelMapping) {
-        const modelMapping = buildModelMappingObject(modelRestrictionMode.value, allowedModels.value, modelMappings.value)
+        const modelMapping = buildModelRestrictionMapping()
         if (modelMapping) {
           newCredentials.model_mapping = modelMapping
         } else {
@@ -3324,7 +3499,7 @@ const handleSubmit = async () => {
       }
 
       // Model mapping
-      const modelMapping = buildModelMappingObject(modelRestrictionMode.value, allowedModels.value, modelMappings.value)
+      const modelMapping = buildModelRestrictionMapping()
       if (modelMapping) {
         newCredentials.model_mapping = modelMapping
       } else {
@@ -3358,7 +3533,7 @@ const handleSubmit = async () => {
       const shouldApplyModelMapping = !openaiPassthroughEnabled.value
 
       if (shouldApplyModelMapping) {
-        const modelMapping = buildModelMappingObject(modelRestrictionMode.value, allowedModels.value, modelMappings.value)
+        const modelMapping = buildModelRestrictionMapping()
         if (modelMapping) {
           newCredentials.model_mapping = modelMapping
         } else {
@@ -3550,6 +3725,20 @@ const handleSubmit = async () => {
         delete newExtra.openai_compact_mode
       } else {
         newExtra.openai_compact_mode = openAICompactMode.value
+      }
+      if (props.account.type === 'apikey') {
+        if (openAIResponsesMode.value === 'auto') {
+          delete newExtra.openai_responses_mode
+        } else {
+          newExtra.openai_responses_mode = openAIResponsesMode.value
+        }
+      }
+
+      delete newExtra.codex_image_generation_bridge_enabled
+      if (codexImageGenerationBridgeMode.value === 'inherit') {
+        delete newExtra.codex_image_generation_bridge
+      } else {
+        newExtra.codex_image_generation_bridge = codexImageGenerationBridgeMode.value === 'enabled'
       }
 
       if (props.account.type === 'oauth') {

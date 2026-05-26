@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"testing"
@@ -138,10 +139,72 @@ func TestPrepareUsageLogInsert_ArgCountMatchesTypes(t *testing.T) {
 	require.Len(t, prepared.args, len(usageLogInsertArgTypes))
 }
 
+func TestPrepareUsageLogInsert_PersistsImageSizeMetadata(t *testing.T) {
+	imageSize := "4K"
+	inputSize := "1024x1024"
+	outputSize := "3840x2160"
+	source := "output"
+	prepared := prepareUsageLogInsert(&service.UsageLog{
+		UserID:             1,
+		APIKeyID:           2,
+		AccountID:          3,
+		RequestID:          "req-image-metadata",
+		Model:              "gpt-image-2",
+		RequestedModel:     "gpt-image-2",
+		ImageCount:         2,
+		ImageSize:          &imageSize,
+		ImageInputSize:     &inputSize,
+		ImageOutputSize:    &outputSize,
+		ImageSizeSource:    &source,
+		ImageSizeBreakdown: map[string]int{"1K": 1, "4K": 1},
+		CreatedAt:          time.Date(2025, 1, 6, 12, 0, 0, 0, time.UTC),
+	})
+
+	require.Equal(t, sql.NullString{String: imageSize, Valid: true}, prepared.args[36])
+	require.Equal(t, sql.NullString{String: inputSize, Valid: true}, prepared.args[37])
+	require.Equal(t, sql.NullString{String: outputSize, Valid: true}, prepared.args[38])
+	require.Equal(t, sql.NullString{String: source, Valid: true}, prepared.args[39])
+	breakdownJSON, ok := prepared.args[40].(string)
+	require.True(t, ok)
+	require.JSONEq(t, `{"1K":1,"4K":1}`, breakdownJSON)
+}
+
 func TestCoalesceTrimmedString(t *testing.T) {
 	require.Equal(t, "fallback", coalesceTrimmedString(sql.NullString{}, "fallback"))
 	require.Equal(t, "fallback", coalesceTrimmedString(sql.NullString{Valid: true, String: "   "}, "fallback"))
 	require.Equal(t, "value", coalesceTrimmedString(sql.NullString{Valid: true, String: "value"}, "fallback"))
+}
+
+func TestAppendUsageLogBillingModeWhereCondition(t *testing.T) {
+	tests := []struct {
+		name          string
+		billingMode   string
+		wantCondition string
+	}{
+		{
+			name:          "image includes legacy image rows",
+			billingMode:   string(service.BillingModeImage),
+			wantCondition: "(billing_mode = $1 OR COALESCE(image_count, 0) > 0)",
+		},
+		{
+			name:          "token includes legacy non-image rows",
+			billingMode:   string(service.BillingModeToken),
+			wantCondition: "(billing_mode = $1 OR ((billing_mode IS NULL OR billing_mode = '') AND COALESCE(image_count, 0) <= 0))",
+		},
+		{
+			name:          "per request remains exact",
+			billingMode:   string(service.BillingModePerRequest),
+			wantCondition: "billing_mode = $1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conditions, args := appendUsageLogBillingModeWhereCondition(nil, nil, tt.billingMode)
+			require.Equal(t, []string{tt.wantCondition}, conditions)
+			require.Equal(t, []any{tt.billingMode}, args)
+		})
+	}
 }
 
 func anySliceToDriverValues(values []any) []driver.Value {
@@ -438,19 +501,25 @@ func (s usageLogScannerStub) Scan(dest ...any) error {
 }
 
 type usageLogScanRowOptions struct {
-	ID             int64
-	UserID         int64
-	APIKeyID       int64
-	AccountID      int64
-	RequestID      string
-	Model          string
-	RequestedModel string
-	BillingType    int16
-	RequestType    int16
-	LegacyStream   bool
-	LegacyWS       bool
-	ServiceTier    *string
-	CreatedAt      time.Time
+	ID                 int64
+	UserID             int64
+	APIKeyID           int64
+	AccountID          int64
+	RequestID          string
+	Model              string
+	RequestedModel     string
+	BillingType        int16
+	RequestType        int16
+	LegacyStream       bool
+	LegacyWS           bool
+	ImageCount         int
+	ImageSize          *string
+	ImageInputSize     *string
+	ImageOutputSize    *string
+	ImageSizeSource    *string
+	ImageSizeBreakdown map[string]int
+	ServiceTier        *string
+	CreatedAt          time.Time
 }
 
 func usageLogInsertExpectationArgs(log *service.UsageLog) []driver.Value {
@@ -502,8 +571,12 @@ func buildUsageLogScanValues(opts usageLogScanRowOptions) []any {
 		sql.NullInt64{},  // first_token_ms
 		sql.NullString{}, // user_agent
 		sql.NullString{}, // ip_address
-		0,                // image_count
-		sql.NullString{}, // image_size
+		opts.ImageCount,
+		nullString(opts.ImageSize),
+		nullString(opts.ImageInputSize),
+		nullString(opts.ImageOutputSize),
+		nullString(opts.ImageSizeSource),
+		nullStringIntMapJSONForScan(opts.ImageSizeBreakdown),
 		0,                // request_count
 		0,                // task_count
 		false,            // usage_estimated
@@ -526,7 +599,55 @@ func buildUsageLogScanValues(opts usageLogScanRowOptions) []any {
 	}
 }
 
+func nullStringIntMapJSONForScan(v map[string]int) sql.NullString {
+	if len(v) == 0 {
+		return sql.NullString{}
+	}
+	payload, err := json.Marshal(v)
+	if err != nil {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: string(payload), Valid: true}
+}
+
 func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
+	t.Run("image_size_metadata_is_scanned", func(t *testing.T) {
+		now := time.Now().UTC()
+		imageSize := "4K"
+		inputSize := "1024x1024"
+		outputSize := "3840x2160"
+		source := "output"
+		log, err := scanUsageLog(usageLogScannerStub{values: buildUsageLogScanValues(usageLogScanRowOptions{
+			ID:                 4,
+			UserID:             13,
+			APIKeyID:           23,
+			AccountID:          33,
+			RequestID:          "req-image-metadata",
+			Model:              "gpt-image-2",
+			RequestedModel:     "gpt-image-2",
+			BillingType:        int16(service.BillingTypeBalance),
+			RequestType:        int16(service.RequestTypeSync),
+			ImageCount:         2,
+			ImageSize:          &imageSize,
+			ImageInputSize:     &inputSize,
+			ImageOutputSize:    &outputSize,
+			ImageSizeSource:    &source,
+			ImageSizeBreakdown: map[string]int{"4K": 2},
+			CreatedAt:          now,
+		})})
+		require.NoError(t, err)
+		require.Equal(t, 2, log.ImageCount)
+		require.NotNil(t, log.ImageSize)
+		require.Equal(t, "4K", *log.ImageSize)
+		require.NotNil(t, log.ImageInputSize)
+		require.Equal(t, "1024x1024", *log.ImageInputSize)
+		require.NotNil(t, log.ImageOutputSize)
+		require.Equal(t, "3840x2160", *log.ImageOutputSize)
+		require.NotNil(t, log.ImageSizeSource)
+		require.Equal(t, "output", *log.ImageSizeSource)
+		require.Equal(t, map[string]int{"4K": 2}, log.ImageSizeBreakdown)
+	})
+
 	t.Run("request_type_ws_v2_overrides_legacy", func(t *testing.T) {
 		now := time.Now().UTC()
 		serviceTier := "priority"

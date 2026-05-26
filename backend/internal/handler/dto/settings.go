@@ -51,11 +51,29 @@ type SystemSettings struct {
 	TurnstileEnabled             bool   `json:"turnstile_enabled"`
 	TurnstileSiteKey             string `json:"turnstile_site_key"`
 	TurnstileSecretKeyConfigured bool   `json:"turnstile_secret_key_configured"`
+	APIKeyACLTrustForwardedIP    bool   `json:"api_key_acl_trust_forwarded_ip"`
 
 	LinuxDoConnectEnabled                bool   `json:"linuxdo_connect_enabled"`
 	LinuxDoConnectClientID               string `json:"linuxdo_connect_client_id"`
 	LinuxDoConnectClientSecretConfigured bool   `json:"linuxdo_connect_client_secret_configured"`
 	LinuxDoConnectRedirectURL            string `json:"linuxdo_connect_redirect_url"`
+
+	DingTalkConnectEnabled                 bool   `json:"dingtalk_connect_enabled"`
+	DingTalkConnectClientID                string `json:"dingtalk_connect_client_id"`
+	DingTalkConnectClientSecretConfigured  bool   `json:"dingtalk_connect_client_secret_configured"`
+	DingTalkConnectRedirectURL             string `json:"dingtalk_connect_redirect_url"`
+	DingTalkConnectCorpRestrictionPolicy   string `json:"dingtalk_connect_corp_restriction_policy"`
+	DingTalkConnectInternalCorpID          string `json:"dingtalk_connect_internal_corp_id"`
+	DingTalkConnectBypassRegistration      bool   `json:"dingtalk_connect_bypass_registration"`
+	DingTalkConnectSyncCorpEmail           bool   `json:"dingtalk_connect_sync_corp_email"`
+	DingTalkConnectSyncDisplayName         bool   `json:"dingtalk_connect_sync_display_name"`
+	DingTalkConnectSyncDept                bool   `json:"dingtalk_connect_sync_dept"`
+	DingTalkConnectSyncCorpEmailAttrKey    string `json:"dingtalk_connect_sync_corp_email_attr_key"`
+	DingTalkConnectSyncDisplayNameAttrKey  string `json:"dingtalk_connect_sync_display_name_attr_key"`
+	DingTalkConnectSyncDeptAttrKey         string `json:"dingtalk_connect_sync_dept_attr_key"`
+	DingTalkConnectSyncCorpEmailAttrName   string `json:"dingtalk_connect_sync_corp_email_attr_name"`
+	DingTalkConnectSyncDisplayNameAttrName string `json:"dingtalk_connect_sync_display_name_attr_name"`
+	DingTalkConnectSyncDeptAttrName        string `json:"dingtalk_connect_sync_dept_attr_name"`
 
 	WeChatConnectEnabled                   bool   `json:"wechat_connect_enabled"`
 	WeChatConnectAppID                     string `json:"wechat_connect_app_id"`
@@ -157,10 +175,12 @@ type SystemSettings struct {
 	BackendModeEnabled bool `json:"backend_mode_enabled"`
 
 	// Gateway forwarding behavior
-	EnableFingerprintUnification       bool `json:"enable_fingerprint_unification"`
-	EnableMetadataPassthrough          bool `json:"enable_metadata_passthrough"`
-	EnableCCHSigning                   bool `json:"enable_cch_signing"`
-	EnableAnthropicCacheTTL1hInjection bool `json:"enable_anthropic_cache_ttl_1h_injection"`
+	EnableFingerprintUnification       bool   `json:"enable_fingerprint_unification"`
+	EnableMetadataPassthrough          bool   `json:"enable_metadata_passthrough"`
+	EnableCCHSigning                   bool   `json:"enable_cch_signing"`
+	EnableAnthropicCacheTTL1hInjection bool   `json:"enable_anthropic_cache_ttl_1h_injection"`
+	AntigravityUserAgentVersion        string `json:"antigravity_user_agent_version"`
+	OpenAICodexUserAgent               string `json:"openai_codex_user_agent"`
 
 	// Web Search Emulation
 	WebSearchEmulationEnabled bool `json:"web_search_emulation_enabled"`
@@ -172,7 +192,8 @@ type SystemSettings struct {
 	PaymentVisibleMethodWxpayEnabled  bool   `json:"payment_visible_method_wxpay_enabled"`
 
 	// OpenAI account scheduling
-	OpenAIAdvancedSchedulerEnabled bool `json:"openai_advanced_scheduler_enabled"`
+	OpenAIAdvancedSchedulerEnabled bool                      `json:"openai_advanced_scheduler_enabled"`
+	OpenAIFastPolicySettings       *OpenAIFastPolicySettings `json:"openai_fast_policy_settings,omitempty"`
 
 	// Payment configuration
 	PaymentEnabled                   bool     `json:"payment_enabled"`
@@ -198,12 +219,16 @@ type SystemSettings struct {
 	PaymentCancelRateLimitUnit    string `json:"payment_cancel_rate_limit_unit"`
 	PaymentCancelRateLimitMode    string `json:"payment_cancel_rate_limit_window_mode"`
 
-	// Balance low notification
-	BalanceLowNotifyEnabled     bool               `json:"balance_low_notify_enabled"`
-	BalanceLowNotifyThreshold   float64            `json:"balance_low_notify_threshold"`
-	BalanceLowNotifyRechargeURL string             `json:"balance_low_notify_recharge_url"`
-	AccountQuotaNotifyEnabled   bool               `json:"account_quota_notify_enabled"`
-	AccountQuotaNotifyEmails    []NotifyEmailEntry `json:"account_quota_notify_emails"`
+	// Force Alipay mobile clients to use QR code payment instead of mobile redirect
+	PaymentAlipayForceQRCode bool `json:"payment_alipay_force_qrcode"`
+
+	// 余额、订阅到期与账号限额通知
+	BalanceLowNotifyEnabled         bool               `json:"balance_low_notify_enabled"`
+	BalanceLowNotifyThreshold       float64            `json:"balance_low_notify_threshold"`
+	BalanceLowNotifyRechargeURL     string             `json:"balance_low_notify_recharge_url"`
+	SubscriptionExpiryNotifyEnabled bool               `json:"subscription_expiry_notify_enabled"`
+	AccountQuotaNotifyEnabled       bool               `json:"account_quota_notify_enabled"`
+	AccountQuotaNotifyEmails        []NotifyEmailEntry `json:"account_quota_notify_emails"`
 
 	// Channel Monitor feature switch
 	ChannelMonitorEnabled                bool `json:"channel_monitor_enabled"`
@@ -219,20 +244,6 @@ type SystemSettings struct {
 type DefaultSubscriptionSetting struct {
 	GroupID      int64 `json:"group_id"`
 	ValidityDays int   `json:"validity_days"`
-}
-
-type OpenAIFastPolicyRule struct {
-	ServiceTier          string   `json:"service_tier"`
-	Action               string   `json:"action"`
-	Scope                string   `json:"scope"`
-	ErrorMessage         string   `json:"error_message,omitempty"`
-	ModelWhitelist       []string `json:"model_whitelist,omitempty"`
-	FallbackAction       string   `json:"fallback_action,omitempty"`
-	FallbackErrorMessage string   `json:"fallback_error_message,omitempty"`
-}
-
-type OpenAIFastPolicySettings struct {
-	Rules []OpenAIFastPolicyRule `json:"rules"`
 }
 
 type PublicSettings struct {
@@ -268,6 +279,7 @@ type PublicSettings struct {
 	CustomMenuItems                  []CustomMenuItem         `json:"custom_menu_items"`
 	CustomEndpoints                  []CustomEndpoint         `json:"custom_endpoints"`
 	LinuxDoOAuthEnabled              bool                     `json:"linuxdo_oauth_enabled"`
+	DingTalkOAuthEnabled             bool                     `json:"dingtalk_oauth_enabled"`
 	WeChatOAuthEnabled               bool                     `json:"wechat_oauth_enabled"`
 	WeChatOAuthOpenEnabled           bool                     `json:"wechat_oauth_open_enabled"`
 	WeChatOAuthMPEnabled             bool                     `json:"wechat_oauth_mp_enabled"`
@@ -305,6 +317,12 @@ type OverloadCooldownSettings struct {
 	CooldownMinutes int  `json:"cooldown_minutes"`
 }
 
+// RateLimit429CooldownSettings 429默认回避配置 DTO
+type RateLimit429CooldownSettings struct {
+	Enabled         bool `json:"enabled"`
+	CooldownSeconds int  `json:"cooldown_seconds"`
+}
+
 // StreamTimeoutSettings 流超时处理配置 DTO
 type StreamTimeoutSettings struct {
 	Enabled                bool   `json:"enabled"`
@@ -337,6 +355,80 @@ type BetaPolicyRule struct {
 // BetaPolicySettings Beta 策略配置 DTO
 type BetaPolicySettings struct {
 	Rules []BetaPolicyRule `json:"rules"`
+}
+
+// OpenAIFastPolicyRule OpenAI fast/flex 策略规则 DTO
+type OpenAIFastPolicyRule struct {
+	ServiceTier          string   `json:"service_tier"`
+	Action               string   `json:"action"`
+	Scope                string   `json:"scope"`
+	ErrorMessage         string   `json:"error_message,omitempty"`
+	ModelWhitelist       []string `json:"model_whitelist,omitempty"`
+	FallbackAction       string   `json:"fallback_action,omitempty"`
+	FallbackErrorMessage string   `json:"fallback_error_message,omitempty"`
+}
+
+// OpenAIFastPolicySettings OpenAI fast 策略配置 DTO
+type OpenAIFastPolicySettings struct {
+	Rules []OpenAIFastPolicyRule `json:"rules"`
+}
+
+// EmailTemplateEventOption 描述可编辑的通知邮件事件。
+type EmailTemplateEventOption struct {
+	Value       string `json:"value"`
+	Label       string `json:"label,omitempty"`
+	Description string `json:"description,omitempty"`
+	Category    string `json:"category,omitempty"`
+	Optional    bool   `json:"optional,omitempty"`
+}
+
+// EmailTemplateSummary is shown in the admin email template list.
+type EmailTemplateSummary struct {
+	Event     string `json:"event"`
+	Locale    string `json:"locale"`
+	Subject   string `json:"subject"`
+	IsCustom  bool   `json:"is_custom,omitempty"`
+	UpdatedAt string `json:"updated_at,omitempty"`
+}
+
+// EmailTemplateListResponse is returned by GET /admin/settings/email-templates.
+type EmailTemplateListResponse struct {
+	Events       []EmailTemplateEventOption `json:"events"`
+	Locales      []string                   `json:"locales"`
+	Templates    []EmailTemplateSummary     `json:"templates,omitempty"`
+	Placeholders []string                   `json:"placeholders,omitempty"`
+}
+
+// EmailTemplateDetail is returned for a specific event/locale template.
+type EmailTemplateDetail struct {
+	Event        string   `json:"event"`
+	Locale       string   `json:"locale"`
+	Subject      string   `json:"subject"`
+	HTML         string   `json:"html"`
+	IsCustom     bool     `json:"is_custom,omitempty"`
+	UpdatedAt    string   `json:"updated_at,omitempty"`
+	Placeholders []string `json:"placeholders,omitempty"`
+}
+
+// UpdateEmailTemplateRequest updates a template override.
+type UpdateEmailTemplateRequest struct {
+	Subject string `json:"subject"`
+	HTML    string `json:"html"`
+}
+
+// PreviewEmailTemplateRequest previews a template without saving it.
+type PreviewEmailTemplateRequest struct {
+	Event     string            `json:"event"`
+	Locale    string            `json:"locale"`
+	Subject   string            `json:"subject"`
+	HTML      string            `json:"html"`
+	Variables map[string]string `json:"variables,omitempty"`
+}
+
+// EmailTemplatePreviewResponse is the rendered preview payload.
+type EmailTemplatePreviewResponse struct {
+	Subject string `json:"subject"`
+	HTML    string `json:"html"`
 }
 
 // ParseCustomMenuItems parses a JSON string into a slice of CustomMenuItem.

@@ -109,6 +109,11 @@ export const FeatureFlags = {
     mode: 'opt-out',
     label: 'Payment',
   }),
+  riskControl: defineFlag({
+    key: 'risk_control_enabled',
+    mode: 'opt-in',
+    label: 'Risk Control',
+  }),
 } as const
 
 export type RegisteredFeatureFlag = keyof typeof FeatureFlags

@@ -96,6 +96,8 @@ type UserRepository interface {
 	UpdateBalance(ctx context.Context, id int64, amount float64) error
 	DeductBalance(ctx context.Context, id int64, amount float64) error
 	UpdateConcurrency(ctx context.Context, id int64, amount int) error
+	BatchSetConcurrency(ctx context.Context, userIDs []int64, value int) (int, error)
+	BatchAddConcurrency(ctx context.Context, userIDs []int64, delta int) (int, error)
 	ExistsByEmail(ctx context.Context, email string) (bool, error)
 	RemoveGroupFromAllowedGroups(ctx context.Context, groupID int64) (int64, error)
 	// AddGroupToAllowedGroups 将指定分组增量添加到用户的 allowed_groups（幂等，冲突忽略）
@@ -139,12 +141,13 @@ type UserIdentitySummary struct {
 }
 
 type UserIdentitySummarySet struct {
-	Email   UserIdentitySummary `json:"email"`
-	LinuxDo UserIdentitySummary `json:"linuxdo"`
-	OIDC    UserIdentitySummary `json:"oidc"`
-	WeChat  UserIdentitySummary `json:"wechat"`
-	GitHub  UserIdentitySummary `json:"github"`
-	Google  UserIdentitySummary `json:"google"`
+	Email    UserIdentitySummary `json:"email"`
+	LinuxDo  UserIdentitySummary `json:"linuxdo"`
+	DingTalk UserIdentitySummary `json:"dingtalk"`
+	OIDC     UserIdentitySummary `json:"oidc"`
+	WeChat   UserIdentitySummary `json:"wechat"`
+	GitHub   UserIdentitySummary `json:"github"`
+	Google   UserIdentitySummary `json:"google"`
 }
 
 type StartUserIdentityBindingRequest struct {
@@ -260,12 +263,13 @@ func (s *UserService) GetProfileIdentitySummaries(ctx context.Context, userID in
 	}
 
 	summaries := UserIdentitySummarySet{
-		Email:   s.buildEmailIdentitySummary(user, records),
-		LinuxDo: s.buildProviderIdentitySummary("linuxdo", user, records),
-		OIDC:    s.buildProviderIdentitySummary("oidc", user, records),
-		WeChat:  s.buildProviderIdentitySummary("wechat", user, records),
-		GitHub:  s.buildProviderIdentitySummary("github", user, records),
-		Google:  s.buildProviderIdentitySummary("google", user, records),
+		Email:    s.buildEmailIdentitySummary(user, records),
+		LinuxDo:  s.buildProviderIdentitySummary("linuxdo", user, records),
+		DingTalk: s.buildProviderIdentitySummary("dingtalk", user, records),
+		OIDC:     s.buildProviderIdentitySummary("oidc", user, records),
+		WeChat:   s.buildProviderIdentitySummary("wechat", user, records),
+		GitHub:   s.buildProviderIdentitySummary("github", user, records),
+		Google:   s.buildProviderIdentitySummary("google", user, records),
 	}
 
 	s.applyExplicitProviderAvailability(ctx, &summaries)
@@ -298,6 +302,9 @@ func (s *UserService) applyExplicitProviderAvailability(ctx context.Context, sum
 
 	if raw, ok := settings[SettingKeyLinuxDoConnectEnabled]; ok && strings.TrimSpace(raw) != "" && raw != "true" {
 		disableIdentityBindAction(&summaries.LinuxDo)
+	}
+	if raw, ok := settings[SettingKeyDingTalkConnectEnabled]; ok && strings.TrimSpace(raw) != "" && raw != "true" {
+		disableIdentityBindAction(&summaries.DingTalk)
 	}
 	if raw, ok := settings[SettingKeyOIDCConnectEnabled]; ok && strings.TrimSpace(raw) != "" && raw != "true" {
 		disableIdentityBindAction(&summaries.OIDC)
@@ -716,7 +723,7 @@ func (s *UserService) canUnbindProvider(provider string, user *User, records []U
 		return true
 	}
 
-	for _, candidate := range []string{"linuxdo", "oidc", "wechat", "github", "google"} {
+	for _, candidate := range []string{"linuxdo", "oidc", "wechat", "github", "google", "dingtalk"} {
 		if candidate == provider {
 			continue
 		}
@@ -1139,7 +1146,7 @@ func (s *UserService) Delete(ctx context.Context, userID int64) error {
 }
 
 // SendNotifyEmailCode sends a verification code to the extra notification email.
-func (s *UserService) SendNotifyEmailCode(ctx context.Context, userID int64, email string, emailService *EmailService, cache EmailCache) error {
+func (s *UserService) SendNotifyEmailCode(ctx context.Context, userID int64, email string, emailService *EmailService, cache EmailCache, locale ...string) error {
 	if err := checkNotifyCodeRateLimit(ctx, cache, userID, email); err != nil {
 		return err
 	}
@@ -1151,7 +1158,7 @@ func (s *UserService) SendNotifyEmailCode(ctx context.Context, userID int64, ema
 
 	// Send email first — if SMTP fails, don't write cache or increment counters,
 	// so the user is not locked out by cooldown/rate-limit for a code they never received.
-	if err := s.sendNotifyVerifyEmail(ctx, emailService, email, code); err != nil {
+	if err := s.sendNotifyVerifyEmail(ctx, emailService, userID, email, code, firstEmailLocale(locale)); err != nil {
 		return err
 	}
 
@@ -1197,11 +1204,31 @@ func saveNotifyVerifyCode(ctx context.Context, cache EmailCache, email, code str
 }
 
 // sendNotifyVerifyEmail builds and sends the verification email.
-func (s *UserService) sendNotifyVerifyEmail(ctx context.Context, emailService *EmailService, email, code string) error {
+func (s *UserService) sendNotifyVerifyEmail(ctx context.Context, emailService *EmailService, userID int64, email, code, locale string) error {
 	siteName := "Sub2API"
 	if s.settingRepo != nil {
 		if name, err := s.settingRepo.GetValue(ctx, SettingKeySiteName); err == nil && name != "" {
 			siteName = name
+		}
+	}
+	if emailService.notificationEmailService != nil {
+		if err := emailService.notificationEmailService.Send(ctx, NotificationEmailSendInput{
+			Event:          NotificationEmailEventNotificationEmailVerifyCode,
+			Locale:         locale,
+			RecipientEmail: email,
+			RecipientName:  emailRecipientName(email),
+			UserID:         userID,
+			Variables: map[string]string{
+				"verification_code":  code,
+				"expires_in_minutes": strconv.Itoa(int(verifyCodeTTL / time.Minute)),
+			},
+		}); err == nil {
+			return nil
+		} else {
+			if !shouldFallbackNotificationEmail(err) {
+				return err
+			}
+			slog.Warn("template notification email verification failed; falling back to built-in body", "recipient_hash", notificationEmailHash(email), "err", err.Error())
 		}
 	}
 	subject := fmt.Sprintf("[%s] 通知邮箱验证码 / Notification Email Verification", siteName)

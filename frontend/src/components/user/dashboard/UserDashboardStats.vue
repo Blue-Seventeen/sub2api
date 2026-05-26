@@ -131,15 +131,65 @@
       </div>
     </div>
   </div>
+
+  <!-- Row 3: Per-platform breakdown -->
+  <div v-if="!isSimple && platformCards.length > 0" class="card p-4">
+    <div class="mb-3 flex items-center justify-between">
+      <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('dashboard.platformBreakdown') }}</h3>
+      <span class="text-xs text-gray-500 dark:text-gray-400">
+        {{ t('dashboard.platformCount', { count: sortedPlatforms.length }) }}
+      </span>
+    </div>
+    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div
+        v-for="item in platformCards"
+        :key="item.platform"
+        :class="[
+          'rounded-lg border p-3',
+          item.isOther
+            ? 'border-dashed border-gray-300 bg-gray-50 dark:border-dark-500 dark:bg-dark-700/30'
+            : 'border-gray-200 dark:border-dark-600'
+        ]"
+      >
+        <div class="flex items-center justify-between">
+          <span class="text-sm font-semibold text-gray-900 dark:text-white">
+            {{ item.isOther ? t('dashboard.platformOther') : platformLabel(item.platform) }}
+          </span>
+          <span class="font-mono text-sm text-purple-600 dark:text-purple-400" :title="t('dashboard.actual')">
+            ${{ formatCost(item.total_actual_cost) }}
+          </span>
+        </div>
+        <div class="mt-2 space-y-1 text-xs">
+          <div class="flex items-center justify-between">
+            <span class="text-gray-500 dark:text-gray-400">{{ t('dashboard.todayCost') }}</span>
+            <span class="font-mono text-gray-900 dark:text-white">${{ formatCost(item.today_actual_cost) }}</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-gray-500 dark:text-gray-400">{{ t('dashboard.requests') }}</span>
+            <span class="font-mono text-gray-700 dark:text-gray-300">
+              {{ item.total_requests > 0 ? formatNumber(item.total_requests) : '-' }}
+            </span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-gray-500 dark:text-gray-400">{{ t('dashboard.tokens') }}</span>
+            <span class="font-mono text-gray-700 dark:text-gray-300">
+              {{ item.total_tokens > 0 ? formatTokens(item.total_tokens) : '-' }}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
-import type { UserDashboardStats as UserStatsType } from '@/api/usage'
+import type { PlatformDashboardStats, UserDashboardStats as UserStatsType } from '@/api/usage'
 import { formatCostAmount, formatCurrencyAmount } from '@/utils/format'
 
-defineProps<{
+const props = defineProps<{
   stats: UserStatsType
   balance: number
   isSimple: boolean
@@ -156,4 +206,47 @@ const formatTokens = (t: number) => {
   return t.toString()
 }
 const formatDuration = (ms: number) => ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${ms.toFixed(0)}ms`
+
+interface PlatformCard extends PlatformDashboardStats {
+  isOther?: boolean
+}
+
+const OTHER_THRESHOLD = 0.0001
+
+const sortedPlatforms = computed<PlatformDashboardStats[]>(() =>
+  [...(props.stats?.by_platform ?? [])].sort((a, b) => b.total_actual_cost - a.total_actual_cost)
+)
+
+const platformCards = computed<PlatformCard[]>(() => {
+  const rows: PlatformCard[] = sortedPlatforms.value.map((item) => ({ ...item }))
+  const sumTotalCost = rows.reduce((sum, item) => sum + item.total_actual_cost, 0)
+  const sumTodayCost = rows.reduce((sum, item) => sum + item.today_actual_cost, 0)
+  const otherTotalCost = Math.max(0, (props.stats?.total_actual_cost ?? 0) - sumTotalCost)
+  const otherTodayCost = Math.max(0, (props.stats?.today_actual_cost ?? 0) - sumTodayCost)
+
+  if (otherTotalCost > OTHER_THRESHOLD || otherTodayCost > OTHER_THRESHOLD) {
+    rows.push({
+      platform: '__other__',
+      total_requests: 0,
+      total_tokens: 0,
+      total_actual_cost: otherTotalCost,
+      today_requests: 0,
+      today_tokens: 0,
+      today_actual_cost: otherTodayCost,
+      isOther: true
+    })
+  }
+  return rows
+})
+
+const PLATFORM_LABELS: Record<string, string> = {
+  anthropic: 'Claude',
+  openai: 'OpenAI',
+  gemini: 'Gemini',
+  antigravity: 'Antigravity'
+}
+
+function platformLabel(platform: string): string {
+  return PLATFORM_LABELS[platform] ?? platform
+}
 </script>

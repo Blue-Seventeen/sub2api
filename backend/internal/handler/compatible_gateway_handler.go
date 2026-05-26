@@ -170,7 +170,7 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 	}
 	setCompatibilityForCompatibleRoute(c, route, body, parsed)
 
-	setOpsRequestContext(c, parsed.Model, parsed.Stream, body)
+	setOpsRequestContext(c, parsed.Model, parsed.Stream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(parsed.Stream, false)))
 	if decision := h.base.checkContentModeration(c, reqLog, apiKey, subject, contentModerationProtocolForCompatibleRoute(route), parsed.Model, body); decision != nil && decision.Blocked {
 		h.writeRouteError(c, route, contentModerationStatus(decision), contentModerationErrorCode(decision), decision.Message, false)

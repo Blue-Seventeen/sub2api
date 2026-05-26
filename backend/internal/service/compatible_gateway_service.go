@@ -1280,8 +1280,7 @@ func (s *CompatibleGatewayService) handleChatAsResponses(resp *http.Response, c 
 	c.Status(resp.StatusCode)
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), defaultMaxLineSize)
-	state := apicompat.NewChatCompletionsToResponsesState()
-	state.Model = prepared.UpstreamModel
+	state := apicompat.NewChatCompletionsToResponsesStreamState(prepared.UpstreamModel)
 	usage := ClaudeUsage{}
 	var firstTokenMs *int
 	finalFinishReason := "stop"
@@ -1296,7 +1295,7 @@ func (s *CompatibleGatewayService) handleChatAsResponses(resp *http.Response, c 
 		if payload == "[DONE]" {
 			if pendingFinishReason != "" {
 				var finalBatch bytes.Buffer
-				for _, event := range apicompat.FinalizeChatCompletionsResponsesStream(state, pendingFinishReason) {
+				for _, event := range finalizeCompatibleChatResponsesStream(state, pendingFinishReason) {
 					sse, err := apicompat.ChatResponsesEventToSSE(event)
 					if err != nil {
 						continue
@@ -1351,7 +1350,7 @@ func (s *CompatibleGatewayService) handleChatAsResponses(resp *http.Response, c 
 		flushCompatibleSSEBuffer(c, &sseBatch)
 		if pendingFinishReason != "" && chunk.Usage != nil && len(chunk.Choices) == 0 {
 			var finalBatch bytes.Buffer
-			for _, event := range apicompat.FinalizeChatCompletionsResponsesStream(state, pendingFinishReason) {
+			for _, event := range finalizeCompatibleChatResponsesStream(state, pendingFinishReason) {
 				sse, err := apicompat.ChatResponsesEventToSSE(event)
 				if err != nil {
 					continue
@@ -1368,6 +1367,16 @@ func (s *CompatibleGatewayService) handleChatAsResponses(resp *http.Response, c 
 		}
 		if finishReasonReady {
 			var finalBatch bytes.Buffer
+			for _, event := range finalizeCompatibleChatResponsesStream(state, finalFinishReason) {
+				sse, err := apicompat.ChatResponsesEventToSSE(event)
+				if err != nil {
+					continue
+				}
+				_, _ = finalBatch.WriteString(sse)
+				if event.Response != nil && event.Response.Usage != nil {
+					usage = responsesUsageToClaudeUsage(event.Response.Usage)
+				}
+			}
 			_, _ = finalBatch.WriteString("data: [DONE]\n\n")
 			flushCompatibleSSEBuffer(c, &finalBatch)
 			_ = resp.Body.Close()
@@ -1382,7 +1391,7 @@ func (s *CompatibleGatewayService) handleChatAsResponses(resp *http.Response, c 
 		finalFinishReason = "stop"
 	}
 	var finalBatch bytes.Buffer
-	for _, event := range apicompat.FinalizeChatCompletionsResponsesStream(state, finalFinishReason) {
+	for _, event := range finalizeCompatibleChatResponsesStream(state, finalFinishReason) {
 		sse, err := apicompat.ChatResponsesEventToSSE(event)
 		if err != nil {
 			continue
@@ -1427,8 +1436,7 @@ func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *
 	c.Status(resp.StatusCode)
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), defaultMaxLineSize)
-	respState := apicompat.NewChatCompletionsToResponsesState()
-	respState.Model = prepared.OriginalModel
+	respState := apicompat.NewChatCompletionsToResponsesStreamState(prepared.OriginalModel)
 	anthropicState := apicompat.NewResponsesEventToAnthropicState()
 	anthropicState.Model = prepared.OriginalModel
 	usage := ClaudeUsage{}
@@ -1446,7 +1454,7 @@ func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *
 		if payload == "[DONE]" {
 			if pendingFinishReason != "" {
 				var finalBatch bytes.Buffer
-				for _, event := range apicompat.FinalizeChatCompletionsResponsesStream(respState, pendingFinishReason) {
+				for _, event := range finalizeCompatibleChatResponsesStream(respState, pendingFinishReason) {
 					for _, anthropicEvent := range apicompat.ResponsesEventToAnthropicEvents(&event, anthropicState) {
 						sse, err := apicompat.ResponsesAnthropicEventToSSE(anthropicEvent)
 						if err != nil {
@@ -1520,7 +1528,7 @@ func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *
 		flushCompatibleSSEBuffer(c, &sseBatch)
 		if pendingFinishReason != "" && chunk.Usage != nil && len(chunk.Choices) == 0 {
 			var finalBatch bytes.Buffer
-			for _, event := range apicompat.FinalizeChatCompletionsResponsesStream(respState, pendingFinishReason) {
+			for _, event := range finalizeCompatibleChatResponsesStream(respState, pendingFinishReason) {
 				for _, anthropicEvent := range apicompat.ResponsesEventToAnthropicEvents(&event, anthropicState) {
 					sse, err := apicompat.ResponsesAnthropicEventToSSE(anthropicEvent)
 					if err != nil {
@@ -1551,6 +1559,34 @@ func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *
 			return buildCompatibleForwardResult(resp, prepared, usage, true, startTime, firstTokenMs)
 		}
 		if finishReasonReady {
+			var finalBatch bytes.Buffer
+			for _, event := range finalizeCompatibleChatResponsesStream(respState, finalFinishReason) {
+				for _, anthropicEvent := range apicompat.ResponsesEventToAnthropicEvents(&event, anthropicState) {
+					sse, err := apicompat.ResponsesAnthropicEventToSSE(anthropicEvent)
+					if err != nil {
+						continue
+					}
+					_, _ = finalBatch.WriteString(sse)
+					if anthropicEvent.Usage != nil {
+						usage.InputTokens = anthropicEvent.Usage.InputTokens
+						usage.OutputTokens = anthropicEvent.Usage.OutputTokens
+						usage.CacheReadInputTokens = anthropicEvent.Usage.CacheReadInputTokens
+					}
+				}
+			}
+			for _, anthropicEvent := range apicompat.FinalizeResponsesAnthropicStream(anthropicState) {
+				sse, err := apicompat.ResponsesAnthropicEventToSSE(anthropicEvent)
+				if err != nil {
+					continue
+				}
+				_, _ = finalBatch.WriteString(sse)
+				if anthropicEvent.Usage != nil {
+					usage.InputTokens = anthropicEvent.Usage.InputTokens
+					usage.OutputTokens = anthropicEvent.Usage.OutputTokens
+					usage.CacheReadInputTokens = anthropicEvent.Usage.CacheReadInputTokens
+				}
+			}
+			flushCompatibleSSEBuffer(c, &finalBatch)
 			_ = resp.Body.Close()
 			return buildCompatibleForwardResult(resp, prepared, usage, true, startTime, firstTokenMs)
 		}
@@ -1563,7 +1599,7 @@ func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *
 		finalFinishReason = "stop"
 	}
 	var finalBatch bytes.Buffer
-	for _, event := range apicompat.FinalizeChatCompletionsResponsesStream(respState, finalFinishReason) {
+	for _, event := range finalizeCompatibleChatResponsesStream(respState, finalFinishReason) {
 		for _, anthropicEvent := range apicompat.ResponsesEventToAnthropicEvents(&event, anthropicState) {
 			sse, err := apicompat.ResponsesAnthropicEventToSSE(anthropicEvent)
 			if err != nil {
@@ -1591,6 +1627,13 @@ func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *
 	}
 	flushCompatibleSSEBuffer(c, &finalBatch)
 	return buildCompatibleForwardResult(resp, prepared, usage, true, startTime, firstTokenMs)
+}
+
+func finalizeCompatibleChatResponsesStream(state *apicompat.ChatCompletionsToResponsesStreamState, finishReason string) []apicompat.ResponsesStreamEvent {
+	if state != nil && finishReason != "" {
+		state.FinishReason = finishReason
+	}
+	return apicompat.FinalizeChatCompletionsResponsesStream(state)
 }
 
 func buildCompatibleForwardResult(

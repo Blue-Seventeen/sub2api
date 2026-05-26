@@ -95,6 +95,15 @@ func TestResolveOpenAIForwardModel(t *testing.T) {
 			expectedModel:      "gpt-5.5",
 		},
 		{
+			name: "preserves compact-spelled gpt5.5 instead of group default",
+			account: &Account{
+				Credentials: map[string]any{},
+			},
+			requestedModel:     "gpt5.5",
+			defaultMappedModel: "gpt-5.4",
+			expectedModel:      "gpt5.5",
+		},
+		{
 			name: "preserves openai namespaced gpt-5.5 instead of group default",
 			account: &Account{
 				Credentials: map[string]any{},
@@ -253,6 +262,12 @@ func TestNormalizeOpenAIModelForUpstream(t *testing.T) {
 			want:    "gpt-5.4",
 		},
 		{
+			name:    "oauth preserves codex auto review model",
+			account: &Account{Type: AccountTypeOAuth},
+			model:   "codex-auto-review",
+			want:    "codex-auto-review",
+		},
+		{
 			name:    "apikey preserves custom compatible model",
 			account: &Account{Type: AccountTypeAPIKey},
 			model:   "gemini-3-flash-preview",
@@ -272,5 +287,19 @@ func TestNormalizeOpenAIModelForUpstream(t *testing.T) {
 				t.Fatalf("normalizeOpenAIModelForUpstream(...) = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestUsageBillingModelCandidatesPreserveCodexAutoReviewModel(t *testing.T) {
+	candidates := usageBillingModelCandidates("codex-auto-review")
+
+	expected := []string{"codex-auto-review"}
+	if len(candidates) != len(expected) {
+		t.Fatalf("usageBillingModelCandidates(codex-auto-review) = %#v, want %#v", candidates, expected)
+	}
+	for i := range expected {
+		if candidates[i] != expected[i] {
+			t.Fatalf("usageBillingModelCandidates(codex-auto-review) = %#v, want %#v", candidates, expected)
+		}
 	}
 }

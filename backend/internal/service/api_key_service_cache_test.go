@@ -243,6 +243,7 @@ func TestAPIKeyService_SnapshotRoundTrip_PreservesMessagesDispatchModelConfig(t 
 		UserID:  2,
 		GroupID: &groupID,
 		Key:     "k-roundtrip",
+		Name:    "Audit Key",
 		Status:  StatusActive,
 		User: &User{
 			ID:                    2,

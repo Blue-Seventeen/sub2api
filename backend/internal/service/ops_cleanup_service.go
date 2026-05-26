@@ -85,6 +85,8 @@ func NewOpsCleanupService(
 	}
 }
 
+// Start 首次启动 cron 调度。Enabled / Schedule 由 effective 配置决定（settings 优先 cfg）。
+// 重复调用幂等。
 func (s *OpsCleanupService) Start() {
 	if s == nil {
 		return
@@ -108,6 +110,7 @@ func (s *OpsCleanupService) Start() {
 	}
 }
 
+// Stop 关闭 cron。幂等。
 func (s *OpsCleanupService) Stop() {
 	if s == nil {
 		return
@@ -275,7 +278,6 @@ func (s *OpsCleanupService) runScheduled() {
 
 type opsCleanupDeletedCounts struct {
 	errorLogs     int64
-	retryAttempts int64
 	alertEvents   int64
 	systemLogs    int64
 	logAudits     int64
@@ -286,9 +288,8 @@ type opsCleanupDeletedCounts struct {
 
 func (c opsCleanupDeletedCounts) String() string {
 	return fmt.Sprintf(
-		"error_logs=%d retry_attempts=%d alert_events=%d system_logs=%d log_audits=%d system_metrics=%d hourly_preagg=%d daily_preagg=%d",
+		"error_logs=%d alert_events=%d system_logs=%d log_audits=%d system_metrics=%d hourly_preagg=%d daily_preagg=%d",
 		c.errorLogs,
-		c.retryAttempts,
 		c.alertEvents,
 		c.systemLogs,
 		c.logAudits,
@@ -337,19 +338,13 @@ func (s *OpsCleanupService) runCleanupOnce(ctx context.Context) (opsCleanupDelet
 		return deleteOldRowsByID(ctx, s.db, table, timeCol, cutoff, batchSize, castDate)
 	}
 
-	// Error-like tables: error logs / retry attempts / alert events / system logs / cleanup audits.
+	// Error-like tables: error logs / alert events / system logs / cleanup audits.
 	if cutoff, truncate, ok := opsCleanupPlan(now, effective.ErrorLogRetentionDays); ok {
 		n, err := runOne(truncate, cutoff, "ops_error_logs", "created_at", false)
 		if err != nil {
 			return out, err
 		}
 		out.errorLogs = n
-
-		n, err = runOne(truncate, cutoff, "ops_retry_attempts", "created_at", false)
-		if err != nil {
-			return out, err
-		}
-		out.retryAttempts = n
 
 		n, err = runOne(truncate, cutoff, "ops_alert_events", "created_at", false)
 		if err != nil {

@@ -109,16 +109,19 @@ import {
 import { usePaymentStore } from '@/stores/payment'
 import { paymentAPI } from '@/api/payment'
 import type { PaymentOrder } from '@/types/payment'
+import { normalizePaymentCurrency } from '@/components/payment/currency'
 import { normalizePaymentMethodForDisplay, paymentMethodI18nKey } from './paymentUx'
 import { formatCurrencyAmount } from '@/utils/format'
 
-const { t } = useI18n()
+const i18n = useI18n()
+const { t } = i18n
 const route = useRoute()
 const router = useRouter()
 const paymentStore = usePaymentStore()
 
 const order = ref<PaymentOrder | null>(null)
 const loading = ref(true)
+const currency = ref('CNY')
 
 interface ReturnInfo {
   outTradeNo: string
@@ -138,13 +141,17 @@ const refreshAttempts = ref(0)
 
 /** 充值金额 = pay_amount / (1 + fee_rate/100)，fee_rate=0 时等于 pay_amount */
 const baseAmount = computed(() => {
-  if (!order.value || order.value.fee_rate <= 0) return order.value?.pay_amount ?? 0
-  return Math.round((order.value.pay_amount / (1 + order.value.fee_rate / 100)) * 100) / 100
+  if (!order.value) return 0
+  const feeRate = Number(order.value.fee_rate) || 0
+  if (feeRate <= 0) return order.value.pay_amount ?? 0
+  return Math.round((order.value.pay_amount / (1 + feeRate / 100)) * 100) / 100
 })
 
 /** 手续费 = pay_amount - baseAmount */
 const feeAmount = computed(() => {
-  if (!order.value || order.value.fee_rate <= 0) return 0
+  if (!order.value) return 0
+  const feeRate = Number(order.value.fee_rate) || 0
+  if (feeRate <= 0) return 0
   return Math.round((order.value.pay_amount - baseAmount.value) * 100) / 100
 })
 
@@ -168,6 +175,13 @@ const statusTitle = computed(() => {
 
 function normalizedOrderPaymentType(paymentType: string): string {
   return normalizePaymentMethodForDisplay(paymentType) || paymentType
+}
+
+function setResolvedOrder(nextOrder: PaymentOrder | null): void {
+  order.value = nextOrder
+  if (nextOrder?.currency) {
+    currency.value = normalizePaymentCurrency(nextOrder.currency)
+  }
 }
 
 function normalizeOrderStatus(status: string | null | undefined): string {
@@ -241,10 +255,15 @@ async function resolveOrderFromResumeToken(resumeToken: string): Promise<Payment
 
 async function resolveOrderFromOutTradeNo(outTradeNo: string): Promise<PaymentOrder | null> {
   try {
-    const result = await paymentAPI.verifyOrderPublic(outTradeNo)
+    const result = await paymentAPI.verifyOrder(outTradeNo)
     return result.data
   } catch (_err: unknown) {
-    return null
+    try {
+      const result = await paymentAPI.verifyOrderPublic(outTradeNo)
+      return result.data
+    } catch (_innerErr: unknown) {
+      return null
+    }
   }
 }
 
@@ -277,7 +296,7 @@ function scheduleStatusRefresh(refreshOrder: (() => Promise<PaymentOrder | null>
     refreshAttempts.value += 1
     const refreshedOrder = await refreshOrder()
     if (refreshedOrder) {
-      order.value = refreshedOrder
+      setResolvedOrder(refreshedOrder)
       clearRecoverySnapshotForTerminalStatus(refreshedOrder.status)
     }
 
@@ -302,6 +321,9 @@ onMounted(async () => {
   if (restored?.orderId) {
     orderId = restored.orderId
   }
+  if (restored?.currency) {
+    currency.value = normalizePaymentCurrency(restored.currency)
+  }
   if (!outTradeNo && restored?.outTradeNo) {
     outTradeNo = restored.outTradeNo
   }
@@ -309,7 +331,7 @@ onMounted(async () => {
   if (resumeToken) {
     const resolvedOrder = await resolveOrderFromResumeToken(resumeToken)
     if (resolvedOrder) {
-      order.value = resolvedOrder
+      setResolvedOrder(resolvedOrder)
       if (!orderId) {
         orderId = resolvedOrder.id
       }
@@ -328,7 +350,7 @@ onMounted(async () => {
 
   if (!order.value && orderId && (!resumeToken || routeOrderId > 0)) {
     try {
-      order.value = await paymentStore.pollOrderStatus(orderId)
+      setResolvedOrder(await paymentStore.pollOrderStatus(orderId))
     } catch (_err: unknown) {
       // Order lookup failed, will try legacy fallback below when possible.
     }
@@ -337,7 +359,7 @@ onMounted(async () => {
   if (!order.value && shouldUsePublicOutTradeNo && (!resumeToken || resumeTokenLookupFailed)) {
     const legacyOrder = await resolveOrderFromOutTradeNo(outTradeNo)
     if (legacyOrder) {
-      order.value = legacyOrder
+      setResolvedOrder(legacyOrder)
       if (!orderId) {
         orderId = legacyOrder.id
       }

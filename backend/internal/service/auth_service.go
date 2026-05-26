@@ -154,7 +154,7 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 			return "", nil, ErrInvitationCodeInvalid
 		}
 		// 检查类型和状态
-		if redeemCode.Type != RedeemTypeInvitation || redeemCode.Status != StatusUnused {
+		if redeemCode.Type != RedeemTypeInvitation || !redeemCode.CanUse() {
 			logger.LegacyPrintf("service.auth", "[Auth] Invitation code invalid: type=%s, status=%s", redeemCode.Type, redeemCode.Status)
 			return "", nil, ErrInvitationCodeInvalid
 		}
@@ -259,7 +259,7 @@ type SendVerifyCodeResult struct {
 }
 
 // SendVerifyCode 发送邮箱验证码（同步方式）
-func (s *AuthService) SendVerifyCode(ctx context.Context, email string) error {
+func (s *AuthService) SendVerifyCode(ctx context.Context, email string, locale ...string) error {
 	// 检查是否开放注册（默认关闭）
 	if s.settingService == nil || !s.settingService.IsRegistrationEnabled(ctx) {
 		return ErrRegDisabled
@@ -293,11 +293,11 @@ func (s *AuthService) SendVerifyCode(ctx context.Context, email string) error {
 		siteName = s.settingService.GetSiteName(ctx)
 	}
 
-	return s.emailService.SendVerifyCode(ctx, email, siteName)
+	return s.emailService.SendVerifyCode(ctx, email, siteName, firstEmailLocale(locale))
 }
 
 // SendVerifyCodeAsync 异步发送邮箱验证码并返回倒计时
-func (s *AuthService) SendVerifyCodeAsync(ctx context.Context, email string) (*SendVerifyCodeResult, error) {
+func (s *AuthService) SendVerifyCodeAsync(ctx context.Context, email string, locale ...string) (*SendVerifyCodeResult, error) {
 	logger.LegacyPrintf("service.auth", "[Auth] SendVerifyCodeAsync called for email: %s", email)
 
 	// 检查是否开放注册（默认关闭）
@@ -338,7 +338,7 @@ func (s *AuthService) SendVerifyCodeAsync(ctx context.Context, email string) (*S
 
 	// 异步发送
 	logger.LegacyPrintf("service.auth", "[Auth] Enqueueing verify code for: %s", email)
-	if err := s.emailQueueService.EnqueueVerifyCode(email, siteName); err != nil {
+	if err := s.emailQueueService.EnqueueVerifyCode(email, siteName, firstEmailLocale(locale)); err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Failed to enqueue: %v", err)
 		return nil, fmt.Errorf("enqueue verify code: %w", err)
 	}
@@ -546,10 +546,25 @@ func (s *AuthService) LoginOrRegisterOAuth(ctx context.Context, email, username 
 	return token, user, nil
 }
 
+// canBypassRegistrationDisabledForOAuth 在钉钉企业模式（internal_only）且
+// dingtalk_connect_bypass_registration=true 时，允许跳过全局 registration_enabled 检查。
+func (s *AuthService) canBypassRegistrationDisabledForOAuth(ctx context.Context, signupSource string) bool {
+	if signupSource != "dingtalk" {
+		return false
+	}
+	cfg, err := s.settingService.GetDingTalkConnectOAuthConfig(ctx)
+	if err != nil || !cfg.Enabled || !cfg.BypassRegistration {
+		return false
+	}
+	return cfg.CorpRestrictionPolicy == "internal_only"
+}
+
 // LoginOrRegisterOAuthWithTokenPair 用于第三方 OAuth/SSO 登录，返回完整的 TokenPair。
 // 与 LoginOrRegisterOAuth 功能相同，但返回 TokenPair 而非单个 token。
 // invitationCode 仅在邀请码注册模式下新用户注册时使用；已有账号登录时忽略。
-func (s *AuthService) LoginOrRegisterOAuthWithTokenPair(ctx context.Context, email, username, invitationCode string) (*TokenPair, *User, error) {
+// affiliateCode 用于邀请返利绑定，仅在新用户注册时使用。
+// signupSource 标识来源渠道（"dingtalk"/"linuxdo"/"wechat"/"oidc" 等），仅用于豁免检查。
+func (s *AuthService) LoginOrRegisterOAuthWithTokenPair(ctx context.Context, email, username, invitationCode, affiliateCode, signupSource string) (*TokenPair, *User, error) {
 	// 检查 refreshTokenCache 是否可用
 	if s.refreshTokenCache == nil {
 		return nil, nil, errors.New("refresh token cache not configured")
@@ -572,7 +587,7 @@ func (s *AuthService) LoginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 	if err != nil {
 		if errors.Is(err, ErrUserNotFound) {
 			// OAuth 首次登录视为注册
-			if s.settingService == nil || !s.settingService.IsRegistrationEnabled(ctx) {
+			if s.settingService == nil || (!s.settingService.IsRegistrationEnabled(ctx) && !s.canBypassRegistrationDisabledForOAuth(ctx, signupSource)) {
 				return nil, nil, ErrRegDisabled
 			}
 
@@ -586,7 +601,7 @@ func (s *AuthService) LoginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 				if err != nil {
 					return nil, nil, ErrInvitationCodeInvalid
 				}
-				if redeemCode.Type != RedeemTypeInvitation || redeemCode.Status != StatusUnused {
+				if redeemCode.Type != RedeemTypeInvitation || !redeemCode.CanUse() {
 					return nil, nil, ErrInvitationCodeInvalid
 				}
 				invitationRedeemCode = redeemCode
@@ -602,7 +617,11 @@ func (s *AuthService) LoginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 				return nil, nil, fmt.Errorf("hash password: %w", err)
 			}
 
-			signupSource := inferLegacySignupSource(email)
+			// 优先用 caller 显式传入的 signupSource（如 "dingtalk" / "linuxdo" / "oidc" / "wechat"），
+			// 否则才按邮箱后缀推断——避免有真实邮箱的 OAuth 用户被推断为 "email" 渠道，导致渠道授权错读。
+			if strings.TrimSpace(signupSource) == "" {
+				signupSource = inferLegacySignupSource(email)
+			}
 			grantPlan := s.resolveSignupGrantPlan(ctx, signupSource)
 			var defaultRPMLimit int
 			if s.settingService != nil {
@@ -652,6 +671,7 @@ func (s *AuthService) LoginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 					user = newUser
 					s.postAuthUserBootstrap(ctx, user, signupSource, false)
 					s.assignSubscriptions(ctx, user.ID, grantPlan.Subscriptions, "auto assigned by signup defaults")
+					s.bindOAuthAffiliate(ctx, user.ID, affiliateCode)
 				}
 			} else {
 				if err := s.userRepo.Create(ctx, newUser); err != nil {
@@ -669,6 +689,7 @@ func (s *AuthService) LoginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 					user = newUser
 					s.postAuthUserBootstrap(ctx, user, signupSource, false)
 					s.assignSubscriptions(ctx, user.ID, grantPlan.Subscriptions, "auto assigned by signup defaults")
+					s.bindOAuthAffiliate(ctx, user.ID, affiliateCode)
 					if invitationRedeemCode != nil {
 						if err := s.redeemRepo.Use(ctx, invitationRedeemCode.ID, user.ID); err != nil {
 							return nil, nil, ErrInvitationCodeInvalid
@@ -762,9 +783,15 @@ func authSourceSignupSettings(defaults *AuthSourceDefaultSettings, signupSource 
 		return defaults.GitHub, true
 	case "google":
 		return defaults.Google, true
+	case "dingtalk":
+		return defaults.DingTalk, true
 	default:
 		return ProviderDefaultGrantSettings{}, false
 	}
+}
+
+func (s *AuthService) bindOAuthAffiliate(ctx context.Context, userID int64, affiliateCode string) {
+	// Upstream Affiliate is intentionally disabled in this fork.
 }
 
 func (s *AuthService) postAuthUserBootstrap(ctx context.Context, user *User, signupSource string, touchLogin bool) {
@@ -959,6 +986,8 @@ func (s *AuthService) ensureEmailAuthIdentity(ctx context.Context, user *User, s
 func inferLegacySignupSource(email string) string {
 	normalized := strings.ToLower(strings.TrimSpace(email))
 	switch {
+	case strings.HasSuffix(normalized, DingTalkConnectSyntheticEmailDomain):
+		return "dingtalk"
 	case strings.HasSuffix(normalized, LinuxDoConnectSyntheticEmailDomain):
 		return "linuxdo"
 	case strings.HasSuffix(normalized, OIDCConnectSyntheticEmailDomain):
@@ -1053,7 +1082,8 @@ func isReservedEmail(email string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(email))
 	return strings.HasSuffix(normalized, LinuxDoConnectSyntheticEmailDomain) ||
 		strings.HasSuffix(normalized, OIDCConnectSyntheticEmailDomain) ||
-		strings.HasSuffix(normalized, WeChatConnectSyntheticEmailDomain)
+		strings.HasSuffix(normalized, WeChatConnectSyntheticEmailDomain) ||
+		strings.HasSuffix(normalized, DingTalkConnectSyntheticEmailDomain)
 }
 
 // GenerateToken 生成JWT access token
@@ -1195,7 +1225,7 @@ func (s *AuthService) preparePasswordReset(ctx context.Context, email, frontendB
 
 // RequestPasswordReset 请求密码重置（同步发送）
 // Security: Returns the same response regardless of whether the email exists (prevent user enumeration)
-func (s *AuthService) RequestPasswordReset(ctx context.Context, email, frontendBaseURL string) error {
+func (s *AuthService) RequestPasswordReset(ctx context.Context, email, frontendBaseURL string, locale ...string) error {
 	if !s.IsPasswordResetEnabled(ctx) {
 		return infraerrors.Forbidden("PASSWORD_RESET_DISABLED", "password reset is not enabled")
 	}
@@ -1208,7 +1238,7 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, email, frontendB
 		return nil // Silent success to prevent enumeration
 	}
 
-	if err := s.emailService.SendPasswordResetEmail(ctx, email, siteName, resetURL); err != nil {
+	if err := s.emailService.SendPasswordResetEmail(ctx, email, siteName, resetURL, firstEmailLocale(locale)); err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Failed to send password reset email to %s: %v", email, err)
 		return nil // Silent success to prevent enumeration
 	}
@@ -1219,7 +1249,7 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, email, frontendB
 
 // RequestPasswordResetAsync 异步请求密码重置（队列发送）
 // Security: Returns the same response regardless of whether the email exists (prevent user enumeration)
-func (s *AuthService) RequestPasswordResetAsync(ctx context.Context, email, frontendBaseURL string) error {
+func (s *AuthService) RequestPasswordResetAsync(ctx context.Context, email, frontendBaseURL string, locale ...string) error {
 	if !s.IsPasswordResetEnabled(ctx) {
 		return infraerrors.Forbidden("PASSWORD_RESET_DISABLED", "password reset is not enabled")
 	}
@@ -1232,7 +1262,7 @@ func (s *AuthService) RequestPasswordResetAsync(ctx context.Context, email, fron
 		return nil // Silent success to prevent enumeration
 	}
 
-	if err := s.emailQueueService.EnqueuePasswordReset(email, siteName, resetURL); err != nil {
+	if err := s.emailQueueService.EnqueuePasswordReset(email, siteName, resetURL, firstEmailLocale(locale)); err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Failed to enqueue password reset email for %s: %v", email, err)
 		return nil // Silent success to prevent enumeration
 	}

@@ -199,7 +199,7 @@ func TestNewAPIStyleAudioTokenChannelPricingWinsOverRequestGuardrail(t *testing.
 		Usage:            ClaudeUsage{InputTokens: 119, OutputTokens: 11},
 		RequestCount:     1,
 		BillableUnitType: BillableUnitTypeRequest,
-	}, &APIKey{GroupID: &groupID}, "glm-asr-2512", 1, &recordUsageOpts{})
+	}, &APIKey{GroupID: &groupID}, "glm-asr-2512", 1, 1, &recordUsageOpts{})
 
 	if cost == nil {
 		t.Fatalf("cost is nil")
@@ -228,7 +228,7 @@ func TestNewAPIStyleAudioPerRequestChannelPricingStillUsesRequestCount(t *testin
 		Usage:            ClaudeUsage{InputTokens: 32},
 		RequestCount:     1,
 		BillableUnitType: BillableUnitTypeRequest,
-	}, &APIKey{GroupID: &groupID}, "glm-tts", 1, &recordUsageOpts{})
+	}, &APIKey{GroupID: &groupID}, "glm-tts", 1, 1, &recordUsageOpts{})
 
 	if cost == nil {
 		t.Fatalf("cost is nil")
@@ -258,7 +258,7 @@ func TestNewAPIStyleAudioTokenChannelPricingWithoutUsageStaysZero(t *testing.T) 
 				Model:            model,
 				RequestCount:     1,
 				BillableUnitType: BillableUnitTypeRequest,
-			}, &APIKey{GroupID: &groupID}, model, 1, &recordUsageOpts{})
+			}, &APIKey{GroupID: &groupID}, model, 1, 1, &recordUsageOpts{})
 
 			if cost == nil {
 				t.Fatalf("cost is nil")

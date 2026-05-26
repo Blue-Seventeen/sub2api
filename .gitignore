@@ -1,4 +1,5 @@
 docs/claude-relay-service/
+.codex
 
 # ===================
 # Go 后端
@@ -128,7 +129,7 @@ scripts
 .code-review-state
 #openspec/
 code-reviews/
-#AGENTS.md
+AGENTS.md
 backend/cmd/server/server
 deploy/docker-compose.override.yml
 .gocache/

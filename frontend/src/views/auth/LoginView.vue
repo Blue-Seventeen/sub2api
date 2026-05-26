@@ -206,6 +206,8 @@ import Icon from '@/components/icons/Icon.vue'
 import TurnstileWidget from '@/components/TurnstileWidget.vue'
 import { useAuthStore, useAppStore } from '@/stores'
 import { getPublicSettings, isTotp2FARequired, isWeChatWebOAuthEnabled } from '@/api/auth'
+import { extractI18nErrorMessage } from '@/utils/apiError'
+import { clearAllAffiliateReferralCodes } from '@/utils/oauthAffiliate'
 import type { LoginAgreementDocument, TotpLoginResponse } from '@/types'
 
 const { t } = useI18n()
@@ -314,7 +316,6 @@ onMounted(async () => {
     backendModeEnabled.value = settings.backend_mode_enabled
     oidcOAuthEnabled.value = settings.oidc_oauth_enabled
     oidcOAuthProviderName.value = settings.oidc_oauth_provider_name || 'OIDC'
-    backendModeEnabled.value = settings.backend_mode_enabled
     passwordResetEnabled.value = settings.password_reset_enabled
     applyLoginAgreementSettings(settings)
   } catch (error) {
@@ -482,6 +483,7 @@ async function handleLogin(): Promise<void> {
     }
 
     // Show success toast
+    clearAllAffiliateReferralCodes()
     appStore.showSuccess(t('auth.loginSuccess'))
 
     // Redirect to dashboard or intended route
@@ -494,16 +496,7 @@ async function handleLogin(): Promise<void> {
       turnstileToken.value = ''
     }
 
-    // Handle login error
-    const err = error as { message?: string; response?: { data?: { detail?: string } } }
-
-    if (err.response?.data?.detail) {
-      errorMessage.value = err.response.data.detail
-    } else if (err.message) {
-      errorMessage.value = err.message
-    } else {
-      errorMessage.value = t('auth.loginFailed')
-    }
+    errorMessage.value = extractI18nErrorMessage(error, t, 'auth.errors', t('auth.loginFailed'))
 
     // Also show error toast
     appStore.showError(errorMessage.value)
@@ -524,6 +517,7 @@ async function handle2FAVerify(code: string): Promise<void> {
 
     // Close modal and show success
     show2FAModal.value = false
+    clearAllAffiliateReferralCodes()
     appStore.showSuccess(t('auth.loginSuccess'))
 
     // Redirect to dashboard or intended route

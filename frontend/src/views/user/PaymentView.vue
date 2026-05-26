@@ -21,6 +21,7 @@
             :payment-type="paymentState.paymentType"
             :pay-url="paymentState.payUrl"
             :order-type="paymentState.orderType"
+            :currency="paymentState.currency || selectedCurrency"
             @done="onPaymentDone"
             @success="onPaymentSuccess"
             @settled="onPaymentSettled"
@@ -274,12 +275,14 @@ import { platformAccentBarClass, platformBadgeLightClass, platformBadgeClass, pl
 import SubscriptionPlanCard from '@/components/payment/SubscriptionPlanCard.vue'
 import PaymentStatusPanel from '@/components/payment/PaymentStatusPanel.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { formatPaymentAmount, normalizePaymentCurrency } from '@/components/payment/currency'
 import type { PaymentMethodOption } from '@/components/payment/PaymentMethodSelector.vue'
 import { buildPaymentErrorToastMessage, describePaymentScenarioError } from './paymentUx'
 import { hasWechatResumeQuery, parseWechatResumeRoute, stripWechatResumeQuery } from './paymentWechatResume'
 import { formatCurrencyAmount } from '@/utils/format'
 
-const { t } = useI18n()
+const i18n = useI18n()
+const { t } = i18n
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
@@ -333,6 +336,10 @@ function emptyPaymentState(): PaymentRecoverySnapshot {
     payUrl: '',
     outTradeNo: '',
     clientSecret: '',
+    intentId: '',
+    currency: '',
+    countryCode: '',
+    paymentEnv: '',
     payAmount: 0,
     orderType: '',
     paymentMode: '',
@@ -524,6 +531,19 @@ const globalMaxAmount = computed(() => {
 
 // Selected method's limits (for validation and error messages)
 const selectedLimit = computed(() => visibleMethods.value[selectedMethod.value])
+const selectedCurrency = computed(() => normalizePaymentCurrency(selectedLimit.value?.currency))
+const localeCode = computed(() => {
+  const raw = i18n.locale as unknown
+  if (typeof raw === 'string') return raw
+  if (raw && typeof raw === 'object' && 'value' in raw) {
+    return String((raw as { value?: string }).value || '')
+  }
+  return undefined
+})
+
+function formatSelectedPaymentAmount(value: number): string {
+  return formatPaymentAmount(value, selectedCurrency.value, localeCode.value)
+}
 
 const methodOptions = computed<PaymentMethodOption[]>(() =>
   enabledMethods.value.map((type) => {
@@ -557,8 +577,8 @@ const amountError = computed(() => {
   // Selected method can't handle this amount (but others can)
   const ml = selectedLimit.value
   if (ml) {
-    if (ml.single_min > 0 && validAmount.value < ml.single_min) return t('payment.amountTooLow', { min: ml.single_min })
-    if (ml.single_max > 0 && validAmount.value > ml.single_max) return t('payment.amountTooHigh', { max: ml.single_max })
+    if (ml.single_min > 0 && validAmount.value < ml.single_min) return t('payment.amountTooLow', { min: formatSelectedPaymentAmount(ml.single_min) })
+    if (ml.single_max > 0 && validAmount.value > ml.single_max) return t('payment.amountTooHigh', { max: formatSelectedPaymentAmount(ml.single_max) })
   }
   return ''
 })
@@ -614,6 +634,7 @@ const paymentButtonClass = computed(() => {
   if (m.includes('alipay')) return 'btn-alipay'
   if (m.includes('wxpay')) return 'btn-wxpay'
   if (m === 'stripe') return 'btn-stripe'
+  if (m === 'airwallex') return 'btn-airwallex'
   return 'btn-primary'
 })
 
@@ -678,6 +699,7 @@ async function createOrder(orderAmount: number, orderType: OrderType, planId?: n
       origin: typeof window !== 'undefined' ? window.location.origin : '',
       isMobile: isMobileDevice(),
       isWechatBrowser: typeof window !== 'undefined' && /MicroMessenger/i.test(window.navigator.userAgent),
+      forceQRCode: !!(checkout.value.alipay_force_qrcode && normalizeVisibleMethod(requestType) === 'alipay'),
     })
     if (options.openid) {
       payload.openid = options.openid
@@ -700,7 +722,7 @@ async function createOrder(orderAmount: number, orderType: OrderType, planId?: n
     const stripeMethod = visibleMethod === 'stripe'
       ? ''
       : visibleMethod === 'wxpay' ? 'wechat_pay' : 'alipay'
-    const stripeRouteUrl = result.client_secret
+    const stripeRouteUrl = result.client_secret && visibleMethod !== 'airwallex'
       ? router.resolve({
         path: '/payment/stripe',
         query: {
@@ -711,13 +733,25 @@ async function createOrder(orderAmount: number, orderType: OrderType, planId?: n
         },
       }).href
       : ''
+    const airwallexRouteUrl = result.client_secret && result.intent_id
+      ? router.resolve({
+        path: '/payment/airwallex',
+        query: {
+          order_id: String(result.order_id),
+          out_trade_no: result.out_trade_no || undefined,
+          resume_token: result.resume_token || undefined,
+        },
+      }).href
+      : ''
     const decision = decidePaymentLaunch(result, {
       visibleMethod,
       orderType,
       isMobile: isMobileDevice(),
       isWechatBrowser: typeof window !== 'undefined' && /MicroMessenger/i.test(window.navigator.userAgent),
+      forceQRCode: !!(checkout.value.alipay_force_qrcode && visibleMethod === 'alipay'),
       stripePopupUrl: stripeRouteUrl,
       stripeRouteUrl,
+      airwallexRouteUrl,
     })
 
     if (decision.kind === 'wechat_oauth' && decision.oauth?.authorize_url) {
@@ -744,6 +778,10 @@ async function createOrder(orderAmount: number, orderType: OrderType, planId?: n
       return
     }
     if (decision.kind === 'stripe_route') {
+      window.location.href = decision.paymentState.payUrl
+      return
+    }
+    if (decision.kind === 'airwallex_route') {
       window.location.href = decision.paymentState.payUrl
       return
     }

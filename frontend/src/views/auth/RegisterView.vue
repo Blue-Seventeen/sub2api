@@ -272,7 +272,46 @@
                 : t('auth.createAccount')
           }}
         </button>
+
       </form>
+
+      <div v-if="showOAuthLogin" class="space-y-3 pt-1">
+        <div class="flex items-center gap-3">
+          <div class="h-px flex-1 bg-gray-200 dark:bg-dark-700"></div>
+          <span class="text-xs text-gray-500 dark:text-dark-400">
+            {{ t('auth.oauthOrContinue') }}
+          </span>
+          <div class="h-px flex-1 bg-gray-200 dark:bg-dark-700"></div>
+        </div>
+
+        <EmailOAuthButtons
+          :disabled="registrationActionDisabled"
+          :aff-code="formData.aff_code"
+          :github-enabled="githubOAuthEnabled"
+          :google-enabled="googleOAuthEnabled"
+          :show-divider="false"
+        />
+
+        <LinuxDoOAuthSection
+          v-if="linuxdoOAuthEnabled"
+          :disabled="registrationActionDisabled"
+          :aff-code="formData.aff_code"
+          :show-divider="false"
+        />
+        <WechatOAuthSection
+          v-if="wechatOAuthEnabled"
+          :disabled="registrationActionDisabled"
+          :aff-code="formData.aff_code"
+          :show-divider="false"
+        />
+        <OidcOAuthSection
+          v-if="oidcOAuthEnabled"
+          :disabled="registrationActionDisabled"
+          :provider-name="oidcOAuthProviderName"
+          :aff-code="formData.aff_code"
+          :show-divider="false"
+        />
+      </div>
     </div>
 
     <!-- Footer -->
@@ -342,9 +381,15 @@ import {
 import { buildAuthErrorMessage } from '@/utils/authError'
 import { formatCurrencyAmount } from '@/utils/format'
 import {
+  formatRegistrationEmailSuffixWhitelistForMessage,
   isRegistrationEmailSuffixAllowed,
   normalizeRegistrationEmailSuffixWhitelist
 } from '@/utils/registrationEmailPolicy'
+import {
+  clearAffiliateReferralCode,
+  loadAffiliateReferralCode,
+  resolveAffiliateReferralCode
+} from '@/utils/oauthAffiliate'
 import type { LoginAgreementDocument } from '@/types'
 
 const { t, locale } = useI18n()
@@ -416,7 +461,8 @@ const formData = reactive({
   email: '',
   password: '',
   promo_code: '',
-  invitation_code: ''
+  invitation_code: '',
+  aff_code: ''
 })
 
 const errors = reactive({
@@ -462,9 +508,19 @@ watch(validationToastMessage, (value, previousValue) => {
   }
 })
 
+function syncAffiliateReferralCode(): string {
+  const code = resolveAffiliateReferralCode(route.query.aff, route.query.aff_code)
+  if (code) {
+    formData.aff_code = code
+  }
+  return code
+}
+
 // ==================== Lifecycle ====================
 
 onMounted(async () => {
+  syncAffiliateReferralCode()
+
   try {
     const settings = await getPublicSettings()
     registrationEnabled.value = settings.registration_enabled
@@ -482,6 +538,8 @@ onMounted(async () => {
     wechatOAuthEnabled.value = isWeChatWebOAuthEnabled(settings)
     oidcOAuthEnabled.value = settings.oidc_oauth_enabled
     oidcOAuthProviderName.value = settings.oidc_oauth_provider_name || 'OIDC'
+    githubOAuthEnabled.value = settings.github_oauth_enabled
+    googleOAuthEnabled.value = settings.google_oauth_enabled
     registrationEmailSuffixWhitelist.value = normalizeRegistrationEmailSuffixWhitelist(
       settings.registration_email_suffix_whitelist || []
     )
@@ -504,6 +562,13 @@ onMounted(async () => {
     settingsLoaded.value = true
   }
 })
+
+watch(
+  () => [route.query.aff, route.query.aff_code],
+  () => {
+    syncAffiliateReferralCode()
+  }
+)
 
 onUnmounted(() => {
   if (promoValidateTimeout) {
@@ -746,7 +811,10 @@ function buildEmailSuffixNotAllowedMessage(): string {
   }
   const separator = String(locale.value || '').toLowerCase().startsWith('zh') ? '、' : ', '
   return t('auth.emailSuffixNotAllowedWithAllowed', {
-    suffixes: normalizedWhitelist.join(separator)
+    suffixes: formatRegistrationEmailSuffixWhitelistForMessage(normalizedWhitelist, {
+      separator,
+      more: (count) => t('auth.emailSuffixAllowedMore', { count })
+    })
   })
 }
 
@@ -870,6 +938,11 @@ async function handleRegister(): Promise<void> {
   isLoading.value = true
 
   try {
+    const affCode = formData.aff_code.trim() || loadAffiliateReferralCode()
+    if (affCode) {
+      formData.aff_code = affCode
+    }
+
     // If email verification is enabled, redirect to verification page
     if (emailVerifyEnabled.value) {
       // Store registration data in sessionStorage
@@ -897,6 +970,7 @@ async function handleRegister(): Promise<void> {
       promo_code: formData.promo_code || undefined,
       invitation_code: formData.invitation_code || undefined
     })
+    clearAffiliateReferralCode()
 
     // Show success toast
     appStore.showSuccess(t('auth.accountCreatedSuccess', { siteName: siteName.value }))

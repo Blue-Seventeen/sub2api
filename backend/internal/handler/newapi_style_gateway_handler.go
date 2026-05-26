@@ -97,7 +97,7 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 	model := service.ExtractNewAPIStyleModel(body, c.GetHeader("Content-Type"))
 	channelMapping, _ := h.base.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, model)
 	stream := gjson.GetBytes(body, "stream").Bool()
-	setOpsRequestContext(c, model, stream, body)
+	setOpsRequestContext(c, model, stream)
 	setOpsEndpointContext(c, model, int16(service.RequestTypeFromLegacy(stream, false)))
 	if decision := h.base.checkContentModeration(c, reqLog, apiKey, subject, contentModerationProtocolForNewAPIStyleRoute(route), model, body); decision != nil && decision.Blocked {
 		h.writeError(c, contentModerationStatus(decision), contentModerationErrorCode(decision), decision.Message)

@@ -22,6 +22,26 @@ const messages: Record<string, string> = {
   'usage.original': 'Original',
   'usage.userBilled': 'User billed',
   'usage.accountBilled': 'Account billed',
+  'usage.imageUnit': ' images',
+  'usage.imageCount': 'Image count',
+  'usage.imageBillingSize': 'Billing size',
+  'usage.imageInputSize': 'Input size',
+  'usage.imageOutputSize': 'Output size',
+  'usage.imageSizeSource': 'Size source',
+  'usage.imageSizeBreakdown': 'Size breakdown',
+  'usage.imageSizeSourceOutput': 'Upstream output',
+  'usage.imageSizeSourceInput': 'Request input',
+  'usage.imageSizeSourceDefault': 'Default billing tier',
+  'usage.imageSizeSourceLegacy': 'Legacy record',
+  'usage.imageSizeSourceMissing': 'Not recorded',
+  'usage.imageSizeNotRecorded': 'not recorded',
+  'usage.imageSizeLegacyUnstandardized': 'legacy unstandardized',
+  'usage.imageSizeUnknown': 'unknown',
+  'usage.imageUnitPrice': 'Per-image price',
+  'usage.imageTotalPrice': 'Image total price',
+  'admin.usage.billingModeToken': 'Token',
+  'admin.usage.billingModePerRequest': 'Per request',
+  'admin.usage.billingModeImage': 'Image',
 }
 
 vi.mock('vue-i18n', async () => {
@@ -40,10 +60,40 @@ const DataTableStub = {
     <div>
       <div v-for="row in data" :key="row.request_id">
         <slot name="cell-model" :row="row" :value="row.model" />
+        <slot name="cell-billing_mode" :row="row" />
+        <slot name="cell-tokens" :row="row" />
         <slot name="cell-cost" :row="row" />
       </div>
     </div>
   `,
+}
+
+const baseImageRow = {
+  request_id: 'req-admin-image',
+  model: 'gpt-image-2',
+  actual_cost: 0.4,
+  total_cost: 0.4,
+  account_rate_multiplier: 1,
+  rate_multiplier: 1,
+  service_tier: null,
+  input_cost: 0,
+  output_cost: 0,
+  cache_creation_cost: 0,
+  cache_read_cost: 0,
+  input_tokens: 0,
+  output_tokens: 0,
+  cache_creation_tokens: 0,
+  cache_read_tokens: 0,
+  cache_creation_5m_tokens: 0,
+  cache_creation_1h_tokens: 0,
+  cache_ttl_overridden: false,
+  billing_mode: 'image',
+  image_count: 2,
+  image_size: '2K',
+  image_input_size: null,
+  image_output_size: null,
+  image_size_source: null,
+  image_size_breakdown: null,
 }
 
 describe('admin UsageTable tooltip', () => {
@@ -94,7 +144,8 @@ describe('admin UsageTable tooltip', () => {
       },
     })
 
-    await wrapper.find('.group.relative').trigger('mouseenter')
+    const tooltipTriggers = wrapper.findAll('.group.relative')
+    await tooltipTriggers[tooltipTriggers.length - 1].trigger('mouseenter')
     await nextTick()
 
     const text = wrapper.text()

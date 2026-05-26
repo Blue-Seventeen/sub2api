@@ -120,13 +120,22 @@ func responsesStatusToAnthropicStopReason(status string, details *ResponsesIncom
 		}
 		return "end_turn"
 	case "completed":
-		if len(blocks) > 0 && blocks[len(blocks)-1].Type == "tool_use" {
+		if containsAnthropicToolUseBlock(blocks) {
 			return "tool_use"
 		}
 		return "end_turn"
 	default:
 		return "end_turn"
 	}
+}
+
+func containsAnthropicToolUseBlock(blocks []AnthropicContentBlock) bool {
+	for _, block := range blocks {
+		if block.Type == "tool_use" {
+			return true
+		}
+	}
+	return false
 }
 
 func sanitizeAnthropicToolUseInput(name string, raw string) json.RawMessage {
@@ -161,11 +170,13 @@ type ResponsesEventToAnthropicState struct {
 	MessageStartSent bool
 	MessageStopSent  bool
 
-	ContentBlockIndex int
-	ContentBlockOpen  bool
-	CurrentBlockType  string // "text" | "thinking" | "tool_use"
-	CurrentToolName   string
-	CurrentToolArgs   string
+	ContentBlockIndex   int
+	ContentBlockOpen    bool
+	CurrentBlockType    string // "text" | "thinking" | "tool_use"
+	CurrentToolName     string
+	CurrentToolArgs     string
+	CurrentToolHadDelta bool
+	HasToolCall         bool
 
 	// OutputIndexToBlockIdx maps Responses output_index → Anthropic content block index.
 	OutputIndexToBlockIdx map[int]int
@@ -231,11 +242,16 @@ func FinalizeResponsesAnthropicStream(state *ResponsesEventToAnthropicState) []A
 	var events []AnthropicStreamEvent
 	events = append(events, closeCurrentBlock(state)...)
 
+	stopReason := "end_turn"
+	if state.HasToolCall {
+		stopReason = "tool_use"
+	}
+
 	events = append(events,
 		AnthropicStreamEvent{
 			Type: "message_delta",
 			Delta: &AnthropicDelta{
-				StopReason: "end_turn",
+				StopReason: stopReason,
 			},
 			Usage: &AnthropicUsage{
 				InputTokens:          state.InputTokens,
@@ -306,6 +322,8 @@ func resToAnthHandleOutputItemAdded(evt *ResponsesStreamEvent, state *ResponsesE
 		state.CurrentBlockType = "tool_use"
 		state.CurrentToolName = evt.Item.Name
 		state.CurrentToolArgs = ""
+		state.CurrentToolHadDelta = false
+		state.HasToolCall = true
 
 		events = append(events, AnthropicStreamEvent{
 			Type:  "content_block_start",
@@ -393,6 +411,9 @@ func resToAnthHandleFuncArgsDelta(evt *ResponsesStreamEvent, state *ResponsesEve
 	if state.CurrentBlockType == "tool_use" && state.CurrentToolName == "Read" {
 		state.CurrentToolArgs += evt.Delta
 		return nil
+	}
+	if state.CurrentBlockType == "tool_use" {
+		state.CurrentToolHadDelta = true
 	}
 
 	blockIdx, ok := state.OutputIndexToBlockIdx[evt.OutputIndex]
@@ -557,7 +578,7 @@ func resToAnthHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventTo
 				stopReason = "max_tokens"
 			}
 		case "completed":
-			if state.ContentBlockIndex > 0 && state.CurrentBlockType == "tool_use" {
+			if state.HasToolCall {
 				stopReason = "tool_use"
 			}
 		}

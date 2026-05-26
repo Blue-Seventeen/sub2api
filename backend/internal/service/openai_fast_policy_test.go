@@ -7,11 +7,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
 
 type openAIFastPolicyRepoStub struct {
+	values   map[string]string
 	getValue func(ctx context.Context, key string) (string, error)
 	setValue func(ctx context.Context, key, value string) error
 }
@@ -21,6 +23,13 @@ func (s *openAIFastPolicyRepoStub) Get(ctx context.Context, key string) (*Settin
 }
 
 func (s *openAIFastPolicyRepoStub) GetValue(ctx context.Context, key string) (string, error) {
+	if s.values != nil {
+		value, ok := s.values[key]
+		if !ok {
+			return "", ErrSettingNotFound
+		}
+		return value, nil
+	}
 	if s.getValue == nil {
 		panic("unexpected GetValue call")
 	}
@@ -28,6 +37,10 @@ func (s *openAIFastPolicyRepoStub) GetValue(ctx context.Context, key string) (st
 }
 
 func (s *openAIFastPolicyRepoStub) Set(ctx context.Context, key, value string) error {
+	if s.values != nil {
+		s.values[key] = value
+		return nil
+	}
 	if s.setValue == nil {
 		panic("unexpected Set call")
 	}
@@ -48,6 +61,32 @@ func (s *openAIFastPolicyRepoStub) GetAll(ctx context.Context) (map[string]strin
 
 func (s *openAIFastPolicyRepoStub) Delete(ctx context.Context, key string) error {
 	panic("unexpected Delete call")
+}
+
+func newOpenAIGatewayServiceWithSettings(t *testing.T, settings *OpenAIFastPolicySettings) *OpenAIGatewayService {
+	t.Helper()
+	resetOpenAIFastPolicySettingsCache(t)
+	repo := &openAIFastPolicyRepoStub{values: map[string]string{}}
+	if settings != nil {
+		raw, err := json.Marshal(settings)
+		require.NoError(t, err)
+		repo.values[SettingKeyOpenAIFastPolicySettings] = string(raw)
+	}
+	return &OpenAIGatewayService{
+		settingService: NewSettingService(repo, &config.Config{}),
+	}
+}
+
+func openAIFastFilterPriorityPolicy() *OpenAIFastPolicySettings {
+	return &OpenAIFastPolicySettings{
+		Rules: []OpenAIFastPolicyRule{{
+			ServiceTier:    OpenAIFastTierPriority,
+			Action:         BetaPolicyActionFilter,
+			Scope:          BetaPolicyScopeAll,
+			ModelWhitelist: []string{},
+			FallbackAction: BetaPolicyActionPass,
+		}},
+	}
 }
 
 func resetOpenAIFastPolicySettingsCache(t *testing.T) {
@@ -156,7 +195,7 @@ func TestOpenAIFastPolicyAdminRuleDoesNotOverrideFlexDowngrade(t *testing.T) {
 	require.False(t, gjson.GetBytes(updated, "service_tier").Exists())
 }
 
-func TestOpenAIFastPolicyStripsUnknownTier(t *testing.T) {
+func TestOpenAIFastPolicyPreservesUnknownTier(t *testing.T) {
 	svc := &OpenAIGatewayService{}
 	body := []byte(`{"model":"gpt-5.1","service_tier":"turbo"}`)
 
@@ -164,7 +203,7 @@ func TestOpenAIFastPolicyStripsUnknownTier(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Nil(t, tier)
-	require.False(t, gjson.GetBytes(updated, "service_tier").Exists())
+	require.Equal(t, string(body), string(updated))
 }
 
 func TestNormalizeOpenAIFastPolicySettingsRejectsFlexRules(t *testing.T) {

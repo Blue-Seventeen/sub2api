@@ -95,7 +95,7 @@ func TestHandleOpenAIImagesNonStreamingResponse_NormalizesLegacyPayload(t *testi
 
 	svc := &OpenAIGatewayService{}
 	before := time.Now().Unix()
-	usage, imageCount, err := svc.handleOpenAIImagesNonStreamingResponse(resp, c)
+	usage, imageCount, _, err := svc.handleOpenAIImagesNonStreamingResponse(resp, c)
 	after := time.Now().Unix()
 
 	require.NoError(t, err)
