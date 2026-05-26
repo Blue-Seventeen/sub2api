@@ -3,6 +3,8 @@ package dto
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
 // CustomMenuItem represents a user-configured custom menu entry.
@@ -239,6 +241,9 @@ type SystemSettings struct {
 
 	RiskControlEnabled   bool `json:"risk_control_enabled"`
 	MarkdownPagesEnabled bool `json:"markdown_pages_enabled"`
+
+	// System-wide default platform quota settings.
+	DefaultPlatformQuotas map[string]*service.DefaultPlatformQuotaSetting `json:"default_platform_quotas,omitempty"`
 }
 
 type DefaultSubscriptionSetting struct {

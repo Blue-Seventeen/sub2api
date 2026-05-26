@@ -105,7 +105,7 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 	}
 
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
-	if err := h.base.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription); err != nil {
+	if err := h.base.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
 		status, code, message, retryAfter := billingErrorDetails(err)
 		if retryAfter > 0 {
 			c.Header("Retry-After", fmt.Sprintf("%d", retryAfter))
@@ -163,7 +163,7 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 		defer userReleaseFunc()
 	}
 
-	if err := h.base.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription); err != nil {
+	if err := h.base.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
 		status, code, message, retryAfter := billingErrorDetails(err)
 		if retryAfter > 0 {
 			c.Header("Retry-After", fmt.Sprintf("%d", retryAfter))

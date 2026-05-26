@@ -62,17 +62,18 @@ type JWTClaims struct {
 
 // AuthService 认证服务
 type AuthService struct {
-	entClient          *dbent.Client
-	userRepo           UserRepository
-	redeemRepo         RedeemCodeRepository
-	refreshTokenCache  RefreshTokenCache
-	cfg                *config.Config
-	settingService     *SettingService
-	emailService       *EmailService
-	turnstileService   *TurnstileService
-	emailQueueService  *EmailQueueService
-	promoService       *PromoService
-	defaultSubAssigner DefaultSubscriptionAssigner
+	entClient             *dbent.Client
+	userRepo              UserRepository
+	redeemRepo            RedeemCodeRepository
+	refreshTokenCache     RefreshTokenCache
+	cfg                   *config.Config
+	settingService        *SettingService
+	emailService          *EmailService
+	turnstileService      *TurnstileService
+	emailQueueService     *EmailQueueService
+	promoService          *PromoService
+	defaultSubAssigner    DefaultSubscriptionAssigner
+	userPlatformQuotaRepo UserPlatformQuotaRepository
 }
 
 type DefaultSubscriptionAssigner interface {
@@ -80,9 +81,10 @@ type DefaultSubscriptionAssigner interface {
 }
 
 type signupGrantPlan struct {
-	Balance       float64
-	Concurrency   int
-	Subscriptions []DefaultSubscriptionSetting
+	Balance        float64
+	Concurrency    int
+	Subscriptions  []DefaultSubscriptionSetting
+	PlatformQuotas map[string]*DefaultPlatformQuotaSetting
 }
 
 // NewAuthService 创建认证服务实例
@@ -98,19 +100,21 @@ func NewAuthService(
 	emailQueueService *EmailQueueService,
 	promoService *PromoService,
 	defaultSubAssigner DefaultSubscriptionAssigner,
+	userPlatformQuotaRepo UserPlatformQuotaRepository,
 ) *AuthService {
 	return &AuthService{
-		entClient:          entClient,
-		userRepo:           userRepo,
-		redeemRepo:         redeemRepo,
-		refreshTokenCache:  refreshTokenCache,
-		cfg:                cfg,
-		settingService:     settingService,
-		emailService:       emailService,
-		turnstileService:   turnstileService,
-		emailQueueService:  emailQueueService,
-		promoService:       promoService,
-		defaultSubAssigner: defaultSubAssigner,
+		entClient:             entClient,
+		userRepo:              userRepo,
+		redeemRepo:            redeemRepo,
+		refreshTokenCache:     refreshTokenCache,
+		cfg:                   cfg,
+		settingService:        settingService,
+		emailService:          emailService,
+		turnstileService:      turnstileService,
+		emailQueueService:     emailQueueService,
+		promoService:          promoService,
+		defaultSubAssigner:    defaultSubAssigner,
+		userPlatformQuotaRepo: userPlatformQuotaRepo,
 	}
 }
 
@@ -223,6 +227,8 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 	}
 	s.postAuthUserBootstrap(ctx, user, "email", true)
 	s.assignSubscriptions(ctx, user.ID, grantPlan.Subscriptions, "auto assigned by signup defaults")
+	// Snapshot user-platform quota defaults without affecting registration success.
+	_ = s.snapshotPlatformQuotaDefaults(ctx, user.ID, &grantPlan)
 
 	// 标记邀请码为已使用（如果使用了邀请码）
 	if invitationRedeemCode != nil {
@@ -521,6 +527,8 @@ func (s *AuthService) LoginOrRegisterOAuth(ctx context.Context, email, username 
 				user = newUser
 				s.postAuthUserBootstrap(ctx, user, signupSource, false)
 				s.assignSubscriptions(ctx, user.ID, grantPlan.Subscriptions, "auto assigned by signup defaults")
+				// snapshot user × platform quota（fail-open）
+				_ = s.snapshotPlatformQuotaDefaults(ctx, user.ID, &grantPlan)
 			}
 		} else {
 			logger.LegacyPrintf("service.auth", "[Auth] Database error during oauth login: %v", err)
@@ -671,6 +679,8 @@ func (s *AuthService) LoginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 					user = newUser
 					s.postAuthUserBootstrap(ctx, user, signupSource, false)
 					s.assignSubscriptions(ctx, user.ID, grantPlan.Subscriptions, "auto assigned by signup defaults")
+					// snapshot user × platform quota（fail-open）
+					_ = s.snapshotPlatformQuotaDefaults(ctx, user.ID, &grantPlan)
 					s.bindOAuthAffiliate(ctx, user.ID, affiliateCode)
 				}
 			} else {
@@ -689,6 +699,8 @@ func (s *AuthService) LoginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 					user = newUser
 					s.postAuthUserBootstrap(ctx, user, signupSource, false)
 					s.assignSubscriptions(ctx, user.ID, grantPlan.Subscriptions, "auto assigned by signup defaults")
+					// snapshot user × platform quota（fail-open）
+					_ = s.snapshotPlatformQuotaDefaults(ctx, user.ID, &grantPlan)
 					s.bindOAuthAffiliate(ctx, user.ID, affiliateCode)
 					if invitationRedeemCode != nil {
 						if err := s.redeemRepo.Use(ctx, invitationRedeemCode.ID, user.ID); err != nil {
@@ -750,18 +762,39 @@ func (s *AuthService) resolveSignupGrantPlan(ctx context.Context, signupSource s
 	plan.Concurrency = s.settingService.GetDefaultConcurrency(ctx)
 	plan.Subscriptions = s.settingService.GetDefaultSubscriptions(ctx)
 
+	// ============ 全局 quota 装载（必须在 ResolveAuthSourceGrantSettings 之前） ============
+	// 无论 auth source 是否 enabled，全局层都要先装载，确保 !enabled 早退路径也携带全局 quota。
+	if quotas, err := s.settingService.GetDefaultPlatformQuotas(ctx); err == nil {
+		plan.PlatformQuotas = quotas
+	} else {
+		logger.LegacyPrintf("service.auth", "[Auth] Warning: load default platform quotas failed: %v (fail-open)", err)
+	}
+	// ============================================================================================
+
 	resolved, enabled, err := s.settingService.ResolveAuthSourceGrantSettings(ctx, signupSource, false)
 	if err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Failed to load auth source signup defaults for %s: %v", signupSource, err)
 		return plan
 	}
 	if !enabled {
-		return plan
+		return plan // plan.PlatformQuotas 已含全局层
 	}
 
 	plan.Balance = resolved.Balance
 	plan.Concurrency = resolved.Concurrency
 	plan.Subscriptions = resolved.Subscriptions
+
+	// ============ auth source quota merge（仅在 enabled 分支内） ============
+	asQuotas := s.settingService.GetAuthSourcePlatformQuotas(ctx, signupSource)
+	if plan.PlatformQuotas != nil {
+		for platform, patch := range asQuotas {
+			if dst := plan.PlatformQuotas[platform]; dst != nil {
+				mergePlatformQuotaDefaults(dst, patch)
+			}
+		}
+	}
+	// ==============================================================================
+
 	return plan
 }
 
@@ -1559,4 +1592,30 @@ func resolvedTokenVersion(user *User) int64 {
 	sum := sha256.Sum256([]byte(material))
 	fingerprint := int64(binary.BigEndian.Uint64(sum[:8]) & 0x7fffffffffffffff)
 	return user.TokenVersion ^ fingerprint
+}
+
+// snapshotPlatformQuotaDefaults 把 plan.PlatformQuotas（4 platform × 3 window）以
+// BulkInsertInitial 形式写入 user_platform_quotas 表。失败 fail-open（仅 warn log）。
+func (s *AuthService) snapshotPlatformQuotaDefaults(ctx context.Context, userID int64, plan *signupGrantPlan) error {
+	if s.userPlatformQuotaRepo == nil || plan == nil || len(plan.PlatformQuotas) == 0 {
+		return nil
+	}
+	records := make([]UserPlatformQuotaRecord, 0, len(plan.PlatformQuotas))
+	for platform, q := range plan.PlatformQuotas {
+		rec := UserPlatformQuotaRecord{
+			UserID:   userID,
+			Platform: platform,
+		}
+		if q != nil {
+			rec.DailyLimitUSD = q.DailyLimitUSD
+			rec.WeeklyLimitUSD = q.WeeklyLimitUSD
+			rec.MonthlyLimitUSD = q.MonthlyLimitUSD
+		}
+		records = append(records, rec)
+	}
+	if err := s.userPlatformQuotaRepo.BulkInsertInitial(ctx, records); err != nil {
+		logger.LegacyPrintf("service.auth", "[Auth] Warning: snapshot platform quota failed user=%d: %v (fail-open)", userID, err)
+		return nil // fail-open：返回 nil，让调用方继续
+	}
+	return nil
 }

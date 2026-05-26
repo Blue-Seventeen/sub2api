@@ -177,6 +177,7 @@ type ContentModerationConfigView struct {
 	AllGroups            bool                            `json:"all_groups"`
 	GroupIDs             []int64                         `json:"group_ids"`
 	RecordNonHits        bool                            `json:"record_non_hits"`
+	Thresholds           map[string]float64              `json:"thresholds"`
 	WorkerCount          int                             `json:"worker_count"`
 	QueueSize            int                             `json:"queue_size"`
 	BlockStatus          int                             `json:"block_status"`
@@ -249,6 +250,7 @@ type UpdateContentModerationConfigInput struct {
 	AllGroups            *bool                         `json:"all_groups"`
 	GroupIDs             *[]int64                      `json:"group_ids"`
 	RecordNonHits        *bool                         `json:"record_non_hits"`
+	Thresholds           *map[string]float64           `json:"thresholds"`
 	WorkerCount          *int                          `json:"worker_count"`
 	QueueSize            *int                          `json:"queue_size"`
 	BlockStatus          *int                          `json:"block_status"`
@@ -602,6 +604,9 @@ func (s *ContentModerationService) UpdateConfig(ctx context.Context, input Updat
 	}
 	if input.RecordNonHits != nil {
 		cfg.RecordNonHits = *input.RecordNonHits
+	}
+	if input.Thresholds != nil {
+		cfg.Thresholds = mergeContentModerationThresholds(ContentModerationDefaultThresholds(), *input.Thresholds)
 	}
 	if input.ClearAPIKey {
 		cfg.APIKey = ""
@@ -1865,6 +1870,7 @@ func (s *ContentModerationService) configView(cfg *ContentModerationConfig) *Con
 		AllGroups:            cfg.AllGroups,
 		GroupIDs:             append([]int64(nil), cfg.GroupIDs...),
 		RecordNonHits:        cfg.RecordNonHits,
+		Thresholds:           cloneFloatMap(cfg.Thresholds),
 		WorkerCount:          cfg.WorkerCount,
 		QueueSize:            cfg.QueueSize,
 		BlockStatus:          cfg.BlockStatus,

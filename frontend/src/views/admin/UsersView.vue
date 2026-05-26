@@ -426,6 +426,96 @@
             </span>
           </template>
 
+          <template #cell-balance_platform_quota="{ row }">
+            <button
+              type="button"
+              class="block text-left underline decoration-dashed decoration-gray-300 underline-offset-4 transition-colors hover:decoration-primary-400 dark:decoration-dark-500"
+              :title="t('admin.users.platformQuota.cellColumnTooltip')"
+              @click="handlePlatformQuota(row)"
+            >
+              <UserPlatformQuotaCell :quotas="platformQuotaStats[row.id]" />
+            </button>
+          </template>
+
+          <!-- 用量列自定义表头：列名 + 单个排序图标按钮，点击展开"今日/近30天"菜单。
+               column.sortable=false，DataTable 内置点击逻辑不会触发；
+               菜单项三态循环：desc → asc → off。 -->
+          <template
+            v-for="usageKey in USAGE_COLUMN_KEYS"
+            :key="usageKey"
+            #[`header-${usageKey}`]="{ column }"
+          >
+            <div class="flex items-center gap-1.5">
+              <span>{{ column.label }}</span>
+              <div class="usage-sort-trigger relative">
+                <button
+                  type="button"
+                  class="flex items-center gap-1 rounded px-1 py-0.5 transition-colors hover:bg-gray-200 dark:hover:bg-dark-700"
+                  :class="usageSort && usageSort.key === usageKey
+                    ? 'text-primary-600 dark:text-primary-400'
+                    : 'text-gray-400 dark:text-dark-500'"
+                  :title="t('admin.users.sortBy')"
+                  @click.stop="toggleUsageSortMenu(usageKey)"
+                >
+                  <span
+                    v-if="usageSort && usageSort.key === usageKey"
+                    class="text-[10px] normal-case font-medium tracking-normal"
+                  >{{ usageSort.metric === 'today' ? t('admin.users.today') : t('admin.users.total') }}</span>
+                  <svg
+                    v-if="usageSort && usageSort.key === usageKey"
+                    class="h-3.5 w-3.5"
+                    :class="{ 'rotate-180': usageSort.order === 'desc' }"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                  >
+                    <path
+                      fill-rule="evenodd"
+                      d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z"
+                      clip-rule="evenodd"
+                    />
+                  </svg>
+                  <svg v-else class="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M10 3l-4 5h8l-4-5zM10 17l4-5H6l4 5z" />
+                  </svg>
+                </button>
+                <!-- 弹出菜单：今日 / 近30天，点击进行三态循环切换。 -->
+                <div
+                  v-if="openUsageSortMenu === usageKey"
+                  class="absolute right-0 top-full z-50 mt-1 min-w-[120px] rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
+                >
+                  <button
+                    v-for="metric in (['today', 'total'] as const)"
+                    :key="metric"
+                    type="button"
+                    class="flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left text-xs normal-case tracking-normal hover:bg-gray-100 dark:hover:bg-dark-700"
+                    :class="isUsageSortActive(usageKey, metric)
+                      ? 'font-medium text-primary-600 dark:text-primary-400'
+                      : 'text-gray-700 dark:text-gray-300'"
+                    @click.stop="toggleUsageSort(usageKey, metric)"
+                  >
+                    <span>{{ metric === 'today' ? t('admin.users.today') : t('admin.users.total') }}</span>
+                    <svg
+                      v-if="getUsageSortOrder(usageKey, metric)"
+                      class="h-3 w-3"
+                      :class="{ 'rotate-180': getUsageSortOrder(usageKey, metric) === 'desc' }"
+                      fill="currentColor"
+                      viewBox="0 0 20 20"
+                    >
+                      <path
+                        fill-rule="evenodd"
+                        d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z"
+                        clip-rule="evenodd"
+                      />
+                    </svg>
+                  </button>
+                  <div class="mt-1 border-t border-gray-100 px-3 py-1 text-[10px] normal-case tracking-normal text-gray-400 dark:border-dark-700 dark:text-dark-500">
+                    {{ t('admin.users.sortCurrentPageOnly') }}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </template>
+
           <template #cell-usage="{ row }">
             <PlatformUsageBreakdown
               :today="getBatchRealTodayCost(row.id)"
@@ -600,6 +690,15 @@
                 {{ t('admin.users.withdraw') }}
               </button>
 
+              <!-- Platform Quotas -->
+              <button
+                @click="handlePlatformQuota(user); closeActionMenu()"
+                class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+              >
+                <Icon name="chartBar" size="sm" class="text-gray-400" :stroke-width="2" />
+                {{ t('admin.users.platformQuota.menuItem') }}
+              </button>
+
               <!-- Balance History -->
               <button
                 @click="handleBalanceHistory(user); closeActionMenu()"
@@ -629,6 +728,12 @@
     <ConfirmDialog :show="showDeleteDialog" :title="t('admin.users.deleteUser')" :message="t('admin.users.deleteConfirm', { email: deletingUser?.email })" :danger="true" @confirm="confirmDelete" @cancel="showDeleteDialog = false" />
     <UserCreateModal :show="showCreateModal" @close="showCreateModal = false" @success="loadUsers" />
     <UserEditModal :show="showEditModal" :user="editingUser" @close="closeEditModal" @success="loadUsers" />
+    <UserPlatformQuotaModal
+      :show="showPlatformQuotaModal"
+      :user="platformQuotaUser"
+      @close="closePlatformQuotaModal"
+      @success="loadUsers"
+    />
     <UserApiKeysModal :show="showApiKeysModal" :user="viewingUser" @close="closeApiKeysModal" />
     <UserAllowedGroupsModal :show="showAllowedGroupsModal" :user="allowedGroupsUser" @close="closeAllowedGroupsModal" @success="loadUsers" />
     <UserBalanceModal :show="showBalanceModal" :user="balanceUser" :operation="balanceOperation" @close="closeBalanceModal" @success="loadUsers" />
@@ -650,6 +755,7 @@ const { t } = useI18n()
 import { adminAPI } from '@/api/admin'
 import type { AdminUser, AdminGroup, UserAttributeDefinition } from '@/types'
 import type { BatchUserUsageStats, PlatformUsage } from '@/api/admin/dashboard'
+import type { PlatformQuotaItem } from '@/api/admin/users'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
@@ -663,8 +769,10 @@ import UserAttributesConfigModal from '@/components/user/UserAttributesConfigMod
 import UserConcurrencyCell from '@/components/user/UserConcurrencyCell.vue'
 import PlatformUsageBreakdown from '@/components/user/PlatformUsageBreakdown.vue'
 import PlatformCostCell from '@/components/user/PlatformCostCell.vue'
+import UserPlatformQuotaCell from '@/components/user/UserPlatformQuotaCell.vue'
 import UserCreateModal from '@/components/admin/user/UserCreateModal.vue'
 import UserEditModal from '@/components/admin/user/UserEditModal.vue'
+import UserPlatformQuotaModal from '@/components/admin/user/UserPlatformQuotaModal.vue'
 import UserApiKeysModal from '@/components/admin/user/UserApiKeysModal.vue'
 import UserAllowedGroupsModal from '@/components/admin/user/UserAllowedGroupsModal.vue'
 import UserBalanceModal from '@/components/admin/user/UserBalanceModal.vue'
@@ -732,6 +840,7 @@ const allColumns = computed<Column[]>(() => [
   { key: 'subscriptions', label: t('admin.users.columns.subscriptions'), sortable: false },
   { key: 'real_balance', label: t('admin.users.columns.realBalance'), sortable: true },
   { key: 'balance', label: t('admin.users.columns.displayBalance'), sortable: true },
+  { key: 'balance_platform_quota', label: t('admin.users.columns.balancePlatformQuota'), sortable: false },
   { key: 'usage', label: t('admin.users.columns.usage'), sortable: false },
   { key: 'usage_anthropic', label: t('admin.users.columns.usageAnthropic'), sortable: false },
   { key: 'usage_openai', label: t('admin.users.columns.usageOpenAI'), sortable: false },
@@ -757,7 +866,8 @@ const hiddenColumns = reactive<Set<string>>(new Set())
 // Default hidden columns (columns hidden by default on first load)
 const DEFAULT_HIDDEN_COLUMNS = [
   'notes', 'groups', 'subscriptions', 'usage', 'concurrency',
-  'usage_anthropic', 'usage_openai', 'usage_gemini', 'usage_antigravity'
+  'usage_anthropic', 'usage_openai', 'usage_gemini', 'usage_antigravity',
+  'balance_platform_quota'
 ]
 const REMOVED_COLUMNS = new Set(['last_login_at'])
 // 强制可见列：加载时会被强制移出 hiddenColumns，并在列设置 UI 上 disabled。
@@ -770,9 +880,10 @@ const HIDDEN_COLUMNS_KEY = 'user-hidden-columns'
 // 并在 VERSION_NEW_HIDDEN_COLUMNS 中登记该版本新增的 key。
 // 这样老用户升级后这些新列会被自动隐藏一次，而不会影响他们对其它老列的偏好。
 const COLUMN_SETTINGS_VERSION_KEY = 'user-column-settings-version'
-const COLUMN_SETTINGS_VERSION = 2
+const COLUMN_SETTINGS_VERSION = 3
 const VERSION_NEW_HIDDEN_COLUMNS: Record<number, string[]> = {
-  2: ['usage_anthropic', 'usage_openai', 'usage_gemini', 'usage_antigravity']
+  2: ['usage_anthropic', 'usage_openai', 'usage_gemini', 'usage_antigravity'],
+  3: ['balance_platform_quota']
 }
 
 // Load saved column settings
@@ -841,7 +952,7 @@ const toggleColumn = (key: string) => {
     hiddenColumns.add(key)
   }
   saveColumnsToStorage()
-  if (wasHidden && (key === 'usage' || key.startsWith('usage_') || key.startsWith('attr_'))) {
+  if (wasHidden && (key === 'usage' || key.startsWith('usage_') || key.startsWith('attr_') || key === 'balance_platform_quota')) {
     refreshCurrentPageSecondaryData()
   }
   if (key === 'subscriptions') {
@@ -870,8 +981,8 @@ const PLATFORM_USAGE_COLUMNS = USAGE_COLUMN_KEYS.filter((k) => k !== 'usage')
 const hasVisibleUsageColumn = computed(
   () => !hiddenColumns.has('usage') || PLATFORM_USAGE_COLUMNS.some((k) => !hiddenColumns.has(k))
 )
-const hasVisibleSubscriptionsColumn = computed(() => !hiddenColumns.has('subscriptions'))
 const hasVisibleGroupsColumn = computed(() => !hiddenColumns.has('groups'))
+const hasVisiblePlatformQuotaColumn = computed(() => !hiddenColumns.has('balance_platform_quota'))
 const hasVisibleAttributeColumns = computed(() =>
   attributeDefinitions.value.some((def) => def.enabled && !hiddenColumns.has(`attr_${def.id}`))
 )
@@ -884,7 +995,16 @@ const columns = computed<Column[]>(() =>
 )
 
 const users = ref<AdminUser[]>([])
-const sortedUsers = computed(() => users.value)
+const sortedUsers = computed(() => {
+  if (!usageSort.value) return users.value
+  const direction = usageSort.value.order === 'asc' ? 1 : -1
+  return [...users.value].sort((a, b) => {
+    const av = getUsageSortValue(a.id, usageSort.value!)
+    const bv = getUsageSortValue(b.id, usageSort.value!)
+    if (av === bv) return a.id - b.id
+    return (av - bv) * direction
+  })
+})
 const loading = ref(false)
 const searchQuery = ref('')
 const USER_SORT_STORAGE_KEY = 'admin-users-table-sort'
@@ -1038,6 +1158,7 @@ const getAttributeDefinition = (attrId: number): UserAttributeDefinition | undef
   return attributeDefinitions.value.find(d => d.id === attrId)
 }
 const usageStats = ref<Record<string, BatchUserUsageStats>>({})
+const platformQuotaStats = ref<Record<number, PlatformQuotaItem[]>>({})
 // v0.1.114_Beta 增量兼容说明：
 // 管理员表格中“真实余额”列使用新增 real_balance；
 // “显示余额”列继续优先复用旧字段 balance，以减少升级改动。
@@ -1050,6 +1171,87 @@ const getPlatformUsage = (userId: number, platform: string): PlatformUsage | und
   const platformKey = Object.entries(USAGE_COLUMN_PLATFORMS).find(([, value]) => value === platform)?.[1]
   if (!platformKey) return undefined
   return usageStats.value[userId]?.by_platform?.find((item) => item.platform === platformKey)
+}
+
+// 用量列前端排序：DataTable 工作在 server-side-sort 模式，所有 sortable
+// 字段都会触发后端查询，而用量列数据是异步批量拉取后再合并到当前页，
+// 因此采用独立的前端排序状态对当前页 users 做本地排序。
+// 排序状态独立于后端 sortState 持久化；缺失数据按 0 处理（desc 沉底、asc 置顶）。
+type UsageMetric = 'today' | 'total'
+type UsageSortState = { key: string; metric: UsageMetric; order: 'asc' | 'desc' } | null
+const USAGE_SORT_STORAGE_KEY = 'admin-users-usage-sort'
+
+const loadInitialUsageSort = (): UsageSortState => {
+  try {
+    const raw = localStorage.getItem(USAGE_SORT_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<{ key: string; metric: string; order: string }>
+    if (!parsed.key || !USAGE_COLUMN_KEYS.includes(parsed.key)) return null
+    const metric: UsageMetric = parsed.metric === 'total' ? 'total' : 'today'
+    const order: 'asc' | 'desc' = parsed.order === 'asc' ? 'asc' : 'desc'
+    return { key: parsed.key, metric, order }
+  } catch {
+    return null
+  }
+}
+const usageSort = ref<UsageSortState>(loadInitialUsageSort())
+
+const persistUsageSort = () => {
+  try {
+    if (usageSort.value) {
+      localStorage.setItem(USAGE_SORT_STORAGE_KEY, JSON.stringify(usageSort.value))
+    } else {
+      localStorage.removeItem(USAGE_SORT_STORAGE_KEY)
+    }
+  } catch {
+    // localStorage may be unavailable in restricted browser contexts.
+  }
+}
+
+const getUsageSortOrder = (
+  key: string,
+  metric: UsageMetric
+): 'asc' | 'desc' | null => {
+  if (!usageSort.value || usageSort.value.key !== key || usageSort.value.metric !== metric) {
+    return null
+  }
+  return usageSort.value.order
+}
+
+const isUsageSortActive = (key: string, metric: UsageMetric) =>
+  getUsageSortOrder(key, metric) !== null
+
+const toggleUsageSortMenu = (key: string) => {
+  openUsageSortMenu.value = openUsageSortMenu.value === key ? null : key
+}
+
+const toggleUsageSort = (key: string, metric: UsageMetric) => {
+  const current = getUsageSortOrder(key, metric)
+  if (!current) {
+    usageSort.value = { key, metric, order: 'desc' }
+  } else if (current === 'desc') {
+    usageSort.value = { key, metric, order: 'asc' }
+  } else {
+    usageSort.value = null
+  }
+  persistUsageSort()
+  openUsageSortMenu.value = null
+}
+
+const getUsageSortValue = (userId: number, state: NonNullable<UsageSortState>) => {
+  const stats = usageStats.value[userId]
+  if (!stats) return 0
+  if (state.key === 'usage') {
+    return state.metric === 'today'
+      ? getBatchRealTodayCost(userId)
+      : getBatchRealTotalCost(userId)
+  }
+  const platform = USAGE_COLUMN_PLATFORMS[state.key]
+  if (!platform) return 0
+  const usage = stats.by_platform?.find((item) => item.platform === platform)
+  return state.metric === 'today'
+    ? usage?.today_actual_cost ?? 0
+    : usage?.total_actual_cost ?? 0
 }
 // User attribute definitions and values
 const attributeDefinitions = ref<UserAttributeDefinition[]>([])
@@ -1066,9 +1268,21 @@ const showEditModal = ref(false)
 const showDeleteDialog = ref(false)
 const showApiKeysModal = ref(false)
 const showAttributesModal = ref(false)
+const showPlatformQuotaModal = ref(false)
 const editingUser = ref<AdminUser | null>(null)
 const deletingUser = ref<AdminUser | null>(null)
 const viewingUser = ref<AdminUser | null>(null)
+const platformQuotaUser = ref<AdminUser | null>(null)
+
+const handlePlatformQuota = (user: AdminUser) => {
+  platformQuotaUser.value = user
+  showPlatformQuotaModal.value = true
+}
+
+const closePlatformQuotaModal = () => {
+  showPlatformQuotaModal.value = false
+  platformQuotaUser.value = null
+}
 let abortController: AbortController | null = null
 let secondaryDataSeq = 0
 
@@ -1108,6 +1322,37 @@ const loadUsersSecondaryData = async (
         } catch (e) {
           if (signal?.aborted) return
           console.error('Failed to load user attribute values:', e)
+        }
+      })()
+    )
+  }
+
+  if (hasVisiblePlatformQuotaColumn.value) {
+    tasks.push(
+      (async () => {
+        try {
+          // 无批量端点：对当前页用户逐个拉取，分块并发（每批 6），批间检查中止条件，避免大 pageSize 时请求洪峰
+          const CHUNK = 6
+          for (let i = 0; i < userIds.length; i += CHUNK) {
+            if (signal?.aborted) return
+            if (typeof expectedSeq === 'number' && expectedSeq !== secondaryDataSeq) return
+            const chunk = userIds.slice(i, i + CHUNK)
+            const results = await Promise.allSettled(
+              chunk.map((id) => adminAPI.users.getPlatformQuotas(id))
+            )
+            if (signal?.aborted) return
+            if (typeof expectedSeq === 'number' && expectedSeq !== secondaryDataSeq) return
+            const merged = { ...platformQuotaStats.value }
+            results.forEach((r, idx) => {
+              if (r.status === 'fulfilled') {
+                merged[chunk[idx]] = r.value.platform_quotas || []
+              }
+            })
+            platformQuotaStats.value = merged
+          }
+        } catch (e) {
+          if (signal?.aborted) return
+          console.error('Failed to load platform quotas:', e)
         }
       })()
     )
@@ -1283,7 +1528,8 @@ const loadUsers = async () => {
         search: searchQuery.value || undefined,
         group_name: filters.group || undefined,
         attributes: Object.keys(attrFilters).length > 0 ? attrFilters : undefined,
-        include_subscriptions: hasVisibleSubscriptionsColumn.value,
+        // 始终请求 subscriptions：列隐藏时仍需用于 UserPlatformQuotaModal 的 active-subscription 警示 banner
+        include_subscriptions: true,
         sort_by: sortState.sort_by,
         sort_order: sortState.sort_order
       },
@@ -1297,6 +1543,7 @@ const loadUsers = async () => {
     pagination.pages = response.pages
     usageStats.value = {}
     userAttributeValues.value = {}
+    platformQuotaStats.value = {}
 
     // Defer heavy secondary data so table can render first.
     if (response.items.length > 0) {

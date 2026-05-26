@@ -9,7 +9,13 @@ import {
   prepareOAuthBindAccessTokenCookie,
   type WeChatOAuthPublicSettings,
 } from './auth'
-import type { User, ChangePasswordRequest, NotifyEmailEntry, UserAuthProvider } from '@/types'
+import type {
+  User,
+  ChangePasswordRequest,
+  NotifyEmailEntry,
+  UserAuthProvider,
+  PlatformQuotasResponse,
+} from '@/types'
 
 /**
  * Get current user profile
@@ -172,6 +178,14 @@ export async function startOAuthBinding(
   window.location.href = startURL
 }
 
+/**
+ * 获取当前用户的平台限额 + 用量。
+ */
+export async function getMyPlatformQuotas(): Promise<PlatformQuotasResponse> {
+  const { data } = await apiClient.get<PlatformQuotasResponse>('/user/platform-quotas')
+  return data
+}
+
 export const userAPI = {
   getProfile,
   updateProfile,
@@ -184,7 +198,8 @@ export const userAPI = {
   bindEmailIdentity,
   unbindAuthIdentity,
   buildOAuthBindingStartURL,
-  startOAuthBinding
+  startOAuthBinding,
+  getMyPlatformQuotas,
 }
 
 export default userAPI

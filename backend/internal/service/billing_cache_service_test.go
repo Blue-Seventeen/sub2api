@@ -101,9 +101,25 @@ func (b *billingCacheWorkerStub) InvalidateAPIKeyRateLimit(ctx context.Context, 
 	return nil
 }
 
+func (b *billingCacheWorkerStub) GetUserPlatformQuotaCache(ctx context.Context, userID int64, platform string) (*UserPlatformQuotaCacheEntry, bool, error) {
+	return nil, false, nil
+}
+
+func (b *billingCacheWorkerStub) SetUserPlatformQuotaCache(ctx context.Context, userID int64, platform string, entry *UserPlatformQuotaCacheEntry, ttl time.Duration) error {
+	return nil
+}
+
+func (b *billingCacheWorkerStub) DeleteUserPlatformQuotaCache(ctx context.Context, userID int64, platform string) error {
+	return nil
+}
+
+func (b *billingCacheWorkerStub) IncrUserPlatformQuotaUsageCache(ctx context.Context, userID int64, platform string, cost float64, ttl time.Duration) error {
+	return nil
+}
+
 func TestBillingCacheServiceQueueHighLoad(t *testing.T) {
 	cache := &billingCacheWorkerStub{}
-	svc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, &config.Config{})
+	svc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, &config.Config{}, nil)
 	t.Cleanup(svc.Stop)
 
 	start := time.Now()
@@ -125,7 +141,7 @@ func TestBillingCacheServiceQueueHighLoad(t *testing.T) {
 
 func TestBillingCacheServiceEnqueueAfterStopReturnsFalse(t *testing.T) {
 	cache := &billingCacheWorkerStub{}
-	svc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, &config.Config{})
+	svc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, &config.Config{}, nil)
 	svc.Stop()
 
 	enqueued := svc.enqueueCacheWrite(cacheWriteTask{
@@ -137,7 +153,7 @@ func TestBillingCacheServiceEnqueueAfterStopReturnsFalse(t *testing.T) {
 }
 
 func TestBillingCacheServiceCheckBillingEligibility_FreeGroupSkipsBalanceCheck(t *testing.T) {
-	svc := NewBillingCacheService(nil, nil, nil, nil, nil, nil, &config.Config{})
+	svc := NewBillingCacheService(nil, nil, nil, nil, nil, nil, &config.Config{}, nil)
 	t.Cleanup(svc.Stop)
 
 	err := svc.CheckBillingEligibility(
@@ -146,12 +162,13 @@ func TestBillingCacheServiceCheckBillingEligibility_FreeGroupSkipsBalanceCheck(t
 		&APIKey{},
 		&Group{ID: 2, RateMultiplier: 0},
 		nil,
+		"",
 	)
 	require.NoError(t, err)
 }
 
 func TestBillingCacheServiceCheckBillingEligibility_FreeUserRateSkipsBalanceCheck(t *testing.T) {
-	svc := NewBillingCacheService(nil, nil, nil, nil, nil, nil, &config.Config{})
+	svc := NewBillingCacheService(nil, nil, nil, nil, nil, nil, &config.Config{}, nil)
 	svc.SetUserGroupRateRepository(&billingCacheUserGroupRateRepoStub{rate: func() *float64 {
 		v := 0.0
 		return &v
@@ -164,6 +181,7 @@ func TestBillingCacheServiceCheckBillingEligibility_FreeUserRateSkipsBalanceChec
 		&APIKey{},
 		&Group{ID: 2, RateMultiplier: 1.5},
 		nil,
+		"",
 	)
 	require.NoError(t, err)
 }
@@ -173,7 +191,7 @@ func TestBillingCacheServiceRateLimitReset_DeduplicatesConcurrentExpiredWindow(t
 		started: make(chan struct{}, 1),
 		release: make(chan struct{}),
 	}
-	svc := NewBillingCacheService(&billingCacheWorkerStub{}, nil, nil, repo, nil, nil, &config.Config{})
+	svc := NewBillingCacheService(&billingCacheWorkerStub{}, nil, nil, repo, nil, nil, &config.Config{}, nil)
 	t.Cleanup(svc.Stop)
 
 	expiredWindow := time.Now().Add(-RateLimitWindow5h - time.Minute)

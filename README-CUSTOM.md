@@ -754,3 +754,15 @@ Protect files:
 - 图片计费语义为按实际生成图片数计费，OpenAI / Gateway 路径中 `RequestCount` 使用 `ImageCount` 属于正确行为，不得改回“每个请求一次”。
 - v0.1.130 兼容修复要求保持中转热路径轻量：OpenAI ChatCompletions SSE 必须先写 `text/event-stream` header；usage 成功统计不能只依赖 `actual_cost > 0`；sticky 调试日志不得使用默认 `Info`；OpenAI 抢槽失败后不得同步 fresh-load Redis 兜底。
 - 发布前至少验证：`go test ./internal/config ./internal/service ./internal/repository ./internal/handler ./internal/handler/admin ./internal/server ./cmd/server -count=1`、`go test ./internal/pkg/apicompat ./internal/pkg/openai_compat ./internal/service -run "Test.*(OpenAI|Compatible|Gateway|Image|Proxy|Sticky|Usage|Billing)" -count=1`、`npm run typecheck`、`npm run build`、`git diff --check`。
+
+## 15. v0.1.131 升级兼容说明
+
+- 当前 `codex/sync-v0.1.131` 以 `codex/sync-v0.1.130` 为基线合入 upstream `v0.1.131`，不应回退 v0.1.130 已保留的 Promotion、CompatibleGateway、usage fallback、统一倍率、AccountAutoOps、备份、本机货币符号和 `/admin/proxies` 自定义体系。
+- 已吸收 upstream 用户按平台余额限额能力：新增 `user_platform_quotas` ent schema、repository/service/handler、管理端用户平台限额弹窗、用户侧平台配额展示和默认平台限额设置；迁移编号在本 fork 中使用 `144_user_platform_quotas.sql`，避免与本地 142/143 兼容迁移冲突。
+- 用户按平台余额限额只约束余额标准模式下的上游平台消费窗口（日/周/月），不得替代现有订阅额度、分组倍率、渠道定价、统一倍率或真实余额/显示余额语义；平台限额失败也不得改变 usage log 已有字段含义。
+- 已吸收 upstream 风控阈值扩展：`/admin/risk-control` 可配置 Moderations 分类阈值；风控仍受现有 `risk_control_enabled` 开关控制，默认关闭时不得读取/记录请求体或影响中转热路径。
+- 已吸收 upstream OpenAI Responses 流式失败事件与 HTTP/2 超时/代理 fallback 修复；这些只用于增强错误透传、网络兼容和上游代理可用性，不得改变 Codex/Claude Code/Kimi/GLM/NewAPI 的模型映射、usage 估算、计费或 failover 语义。
+- upstream Affiliate 仍不吸收；本 fork 只保留必要 OAuth 兼容 shim，不允许引入 upstream Affiliate 页面、路由、转账 API、repository/service 或 migration。推广返佣继续以自研 Promotion 为唯一权威体系。
+- `/admin/proxies` 仍以本 fork 为准；v0.1.131 合并不得改写代理 CRUD、托管订阅拆分、mihomo runtime、stats、active usage、sticky、auto-probe 或 gateway 代理解析链路。
+- 已同步 upstream 部署配置与赞助商资源更新时，必须保留本 fork 的 managed proxy/mihomo、图片并发、Docker tag 和本地部署配置；资源类图片可随 upstream 更新，但不能引入新的业务入口覆盖现有菜单。
+- 发布前至少验证：`go test ./internal/config ./internal/service ./internal/repository ./internal/handler ./internal/handler/admin ./internal/server ./cmd/server -count=1`、`go test ./internal/pkg/apicompat ./internal/pkg/openai_compat ./internal/service -run "Test.*(OpenAI|Compatible|Gateway|Image|Proxy|Sticky|Usage|Billing)" -count=1`、`go test ./internal/service -run "TestProxyAutoProbe|TestProxyActiveUsage|TestProxyStats|TestProxySticky|TestManagedProxy" -count=1`、`npm run typecheck`、`npm run build`、`git diff --check`。
