@@ -11,5 +11,6 @@ type SubscriptionCacheData struct {
 	DailyUsage   float64
 	WeeklyUsage  float64
 	MonthlyUsage float64
+	CustomUsage  float64
 	Version      int64
 }

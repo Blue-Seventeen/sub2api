@@ -123,9 +123,10 @@ func TestUsageBillingRepositoryApply_DeduplicatesSubscriptionBilling(t *testing.
 	require.NoError(t, err)
 	require.False(t, result2.Applied)
 
-	var dailyUsage float64
-	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT daily_usage_usd FROM user_subscriptions WHERE id = $1", subscription.ID).Scan(&dailyUsage))
+	var dailyUsage, customUsage float64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT daily_usage_usd, custom_usage_usd FROM user_subscriptions WHERE id = $1", subscription.ID).Scan(&dailyUsage, &customUsage))
 	require.InDelta(t, 2.5, dailyUsage, 0.000001)
+	require.InDelta(t, 2.5, customUsage, 0.000001)
 }
 
 func TestUsageBillingRepositoryApply_RequestFingerprintConflict(t *testing.T) {

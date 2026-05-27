@@ -190,6 +190,27 @@ func TestAdminService_CreateGroup_AllowsZeroRateMultiplier(t *testing.T) {
 	require.Equal(t, 0.0, repo.created.RateMultiplier)
 }
 
+func TestAdminService_CreateGroup_CapsCustomLimitHours(t *testing.T) {
+	repo := &groupRepoStubForAdmin{}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	limit := 100.0
+	group, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
+		Name:             "custom-window-group",
+		Description:      "custom",
+		Platform:         PlatformAnthropic,
+		RateMultiplier:   1,
+		SubscriptionType: SubscriptionTypeSubscription,
+		CustomLimitHours: maxCustomLimitHours + 1,
+		CustomLimitUSD:   &limit,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, group)
+	require.NotNil(t, repo.created)
+	require.Equal(t, maxCustomLimitHours, repo.created.CustomLimitHours)
+}
+
 func TestAdminService_CreateGroup_RejectsNegativeRateMultiplier(t *testing.T) {
 	repo := &groupRepoStubForAdmin{}
 	svc := &adminServiceImpl{groupRepo: repo}
@@ -360,6 +381,54 @@ func TestAdminService_UpdateGroup_PreservesImageGenerationControlsWhenOmitted(t 
 	require.True(t, repo.updated.AllowImageGeneration)
 	require.True(t, repo.updated.ImageRateIndependent)
 	require.InDelta(t, 0.5, repo.updated.ImageRateMultiplier, 1e-12)
+}
+
+func TestAdminService_UpdateGroup_PreservesCustomLimitWhenOmitted(t *testing.T) {
+	customLimit := 100.0
+	existingGroup := &Group{
+		ID:               1,
+		Name:             "existing-group",
+		Platform:         PlatformOpenAI,
+		Status:           StatusActive,
+		CustomLimitHours: 72,
+		CustomLimitUSD:   &customLimit,
+	}
+	repo := &groupRepoStubForAdmin{getByID: existingGroup}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	group, err := svc.UpdateGroup(context.Background(), 1, &UpdateGroupInput{
+		Description: "updated",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, group)
+	require.NotNil(t, repo.updated)
+	require.Equal(t, 72, repo.updated.CustomLimitHours)
+	require.NotNil(t, repo.updated.CustomLimitUSD)
+	require.InDelta(t, 100.0, *repo.updated.CustomLimitUSD, 1e-12)
+}
+
+func TestAdminService_UpdateGroup_ClearsCustomLimitWhenExplicitlySetEmpty(t *testing.T) {
+	customLimit := 100.0
+	existingGroup := &Group{
+		ID:               1,
+		Name:             "existing-group",
+		Platform:         PlatformOpenAI,
+		Status:           StatusActive,
+		CustomLimitHours: 72,
+		CustomLimitUSD:   &customLimit,
+	}
+	repo := &groupRepoStubForAdmin{getByID: existingGroup}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	group, err := svc.UpdateGroup(context.Background(), 1, &UpdateGroupInput{
+		CustomLimitUSDSet: true,
+		CustomLimitUSD:    nil,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, group)
+	require.NotNil(t, repo.updated)
+	require.Equal(t, 72, repo.updated.CustomLimitHours)
+	require.Nil(t, repo.updated.CustomLimitUSD)
 }
 
 func TestAdminService_UpdateGroup_RejectsNegativeImageRateMultiplier(t *testing.T) {

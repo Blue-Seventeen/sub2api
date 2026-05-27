@@ -120,6 +120,16 @@ func MonthlyLimitUsd(v float64) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldMonthlyLimitUsd, v))
 }
 
+// CustomLimitHours applies equality check predicate on the "custom_limit_hours" field. It's identical to CustomLimitHoursEQ.
+func CustomLimitHours(v int) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldCustomLimitHours, v))
+}
+
+// CustomLimitUsd applies equality check predicate on the "custom_limit_usd" field. It's identical to CustomLimitUsdEQ.
+func CustomLimitUsd(v float64) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldCustomLimitUsd, v))
+}
+
 // DefaultValidityDays applies equality check predicate on the "default_validity_days" field. It's identical to DefaultValidityDaysEQ.
 func DefaultValidityDays(v int) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldDefaultValidityDays, v))
@@ -878,6 +888,96 @@ func MonthlyLimitUsdIsNil() predicate.Group {
 // MonthlyLimitUsdNotNil applies the NotNil predicate on the "monthly_limit_usd" field.
 func MonthlyLimitUsdNotNil() predicate.Group {
 	return predicate.Group(sql.FieldNotNull(FieldMonthlyLimitUsd))
+}
+
+// CustomLimitHoursEQ applies the EQ predicate on the "custom_limit_hours" field.
+func CustomLimitHoursEQ(v int) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldCustomLimitHours, v))
+}
+
+// CustomLimitHoursNEQ applies the NEQ predicate on the "custom_limit_hours" field.
+func CustomLimitHoursNEQ(v int) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldCustomLimitHours, v))
+}
+
+// CustomLimitHoursIn applies the In predicate on the "custom_limit_hours" field.
+func CustomLimitHoursIn(vs ...int) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldCustomLimitHours, vs...))
+}
+
+// CustomLimitHoursNotIn applies the NotIn predicate on the "custom_limit_hours" field.
+func CustomLimitHoursNotIn(vs ...int) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldCustomLimitHours, vs...))
+}
+
+// CustomLimitHoursGT applies the GT predicate on the "custom_limit_hours" field.
+func CustomLimitHoursGT(v int) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldCustomLimitHours, v))
+}
+
+// CustomLimitHoursGTE applies the GTE predicate on the "custom_limit_hours" field.
+func CustomLimitHoursGTE(v int) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldCustomLimitHours, v))
+}
+
+// CustomLimitHoursLT applies the LT predicate on the "custom_limit_hours" field.
+func CustomLimitHoursLT(v int) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldCustomLimitHours, v))
+}
+
+// CustomLimitHoursLTE applies the LTE predicate on the "custom_limit_hours" field.
+func CustomLimitHoursLTE(v int) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldCustomLimitHours, v))
+}
+
+// CustomLimitUsdEQ applies the EQ predicate on the "custom_limit_usd" field.
+func CustomLimitUsdEQ(v float64) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldCustomLimitUsd, v))
+}
+
+// CustomLimitUsdNEQ applies the NEQ predicate on the "custom_limit_usd" field.
+func CustomLimitUsdNEQ(v float64) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldCustomLimitUsd, v))
+}
+
+// CustomLimitUsdIn applies the In predicate on the "custom_limit_usd" field.
+func CustomLimitUsdIn(vs ...float64) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldCustomLimitUsd, vs...))
+}
+
+// CustomLimitUsdNotIn applies the NotIn predicate on the "custom_limit_usd" field.
+func CustomLimitUsdNotIn(vs ...float64) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldCustomLimitUsd, vs...))
+}
+
+// CustomLimitUsdGT applies the GT predicate on the "custom_limit_usd" field.
+func CustomLimitUsdGT(v float64) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldCustomLimitUsd, v))
+}
+
+// CustomLimitUsdGTE applies the GTE predicate on the "custom_limit_usd" field.
+func CustomLimitUsdGTE(v float64) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldCustomLimitUsd, v))
+}
+
+// CustomLimitUsdLT applies the LT predicate on the "custom_limit_usd" field.
+func CustomLimitUsdLT(v float64) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldCustomLimitUsd, v))
+}
+
+// CustomLimitUsdLTE applies the LTE predicate on the "custom_limit_usd" field.
+func CustomLimitUsdLTE(v float64) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldCustomLimitUsd, v))
+}
+
+// CustomLimitUsdIsNil applies the IsNil predicate on the "custom_limit_usd" field.
+func CustomLimitUsdIsNil() predicate.Group {
+	return predicate.Group(sql.FieldIsNull(FieldCustomLimitUsd))
+}
+
+// CustomLimitUsdNotNil applies the NotNil predicate on the "custom_limit_usd" field.
+func CustomLimitUsdNotNil() predicate.Group {
+	return predicate.Group(sql.FieldNotNull(FieldCustomLimitUsd))
 }
 
 // DefaultValidityDaysEQ applies the EQ predicate on the "default_validity_days" field.

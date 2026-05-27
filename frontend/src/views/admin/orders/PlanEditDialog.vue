@@ -30,6 +30,7 @@
           <div><span class="text-gray-500">{{ t('payment.admin.dailyLimit') }}:</span> <span class="ml-1 font-medium text-gray-700 dark:text-gray-300">{{ selectedGroupInfo.daily_limit_usd != null ? formatCurrencyAmount(selectedGroupInfo.daily_limit_usd) : t('payment.admin.unlimited') }}</span></div>
           <div><span class="text-gray-500">{{ t('payment.admin.weeklyLimit') }}:</span> <span class="ml-1 font-medium text-gray-700 dark:text-gray-300">{{ selectedGroupInfo.weekly_limit_usd != null ? formatCurrencyAmount(selectedGroupInfo.weekly_limit_usd) : t('payment.admin.unlimited') }}</span></div>
           <div><span class="text-gray-500">{{ t('payment.admin.monthlyLimit') }}:</span> <span class="ml-1 font-medium text-gray-700 dark:text-gray-300">{{ selectedGroupInfo.monthly_limit_usd != null ? formatCurrencyAmount(selectedGroupInfo.monthly_limit_usd) : t('payment.admin.unlimited') }}</span></div>
+          <div><span class="text-gray-500">{{ t('payment.admin.customLimit') }}:</span> <span class="ml-1 font-medium text-gray-700 dark:text-gray-300">{{ selectedGroupInfo.custom_limit_hours && selectedGroupInfo.custom_limit_usd != null ? `${formatCurrencyAmount(selectedGroupInfo.custom_limit_usd)} / ${selectedGroupInfo.custom_limit_hours}H` : t('payment.admin.unlimited') }}</span></div>
         </div>
       </div>
 

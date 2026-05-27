@@ -70,6 +70,12 @@ func (Group) Fields() []ent.Field {
 			Optional().
 			Nillable().
 			SchemaType(map[string]string{dialect.Postgres: "decimal(20,8)"}),
+		field.Int("custom_limit_hours").
+			Default(0),
+		field.Float("custom_limit_usd").
+			Optional().
+			Nillable().
+			SchemaType(map[string]string{dialect.Postgres: "decimal(20,8)"}),
 		field.Int("default_validity_days").
 			Default(30),
 

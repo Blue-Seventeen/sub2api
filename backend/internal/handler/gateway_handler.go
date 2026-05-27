@@ -1342,13 +1342,17 @@ func (h *GatewayHandler) usageUnrestricted(c *gin.Context, ctx context.Context, 
 			remaining := h.calculateSubscriptionRemaining(apiKey.Group, subscription)
 			resp["remaining"] = remaining
 			resp["subscription"] = gin.H{
-				"daily_usage_usd":   subscription.DailyUsageUSD,
-				"weekly_usage_usd":  subscription.WeeklyUsageUSD,
-				"monthly_usage_usd": subscription.MonthlyUsageUSD,
-				"daily_limit_usd":   apiKey.Group.DailyLimitUSD,
-				"weekly_limit_usd":  apiKey.Group.WeeklyLimitUSD,
-				"monthly_limit_usd": apiKey.Group.MonthlyLimitUSD,
-				"expires_at":        subscription.ExpiresAt,
+				"daily_usage_usd":    subscription.DailyUsageUSD,
+				"weekly_usage_usd":   subscription.WeeklyUsageUSD,
+				"monthly_usage_usd":  subscription.MonthlyUsageUSD,
+				"custom_usage_usd":   subscription.CustomUsageUSD,
+				"custom_used_usd":    subscription.CustomUsageUSD,
+				"daily_limit_usd":    apiKey.Group.DailyLimitUSD,
+				"weekly_limit_usd":   apiKey.Group.WeeklyLimitUSD,
+				"monthly_limit_usd":  apiKey.Group.MonthlyLimitUSD,
+				"custom_limit_hours": apiKey.Group.CustomLimitHours,
+				"custom_limit_usd":   apiKey.Group.CustomLimitUSD,
+				"expires_at":         subscription.ExpiresAt,
 			}
 		}
 
@@ -1418,6 +1422,14 @@ func (h *GatewayHandler) calculateSubscriptionRemaining(group *service.Group, su
 	// 检查月限额
 	if group.HasMonthlyLimit() {
 		remaining := *group.MonthlyLimitUSD - sub.MonthlyUsageUSD
+		if remaining <= 0 {
+			return 0
+		}
+		remainingValues = append(remainingValues, remaining)
+	}
+
+	if group.HasCustomLimit() {
+		remaining := *group.CustomLimitUSD - sub.CustomUsageUSD
 		if remaining <= 0 {
 			return 0
 		}
@@ -1978,6 +1990,13 @@ func billingErrorDetails(err error) (status int, code, message string, retryAfte
 		// 错误码用 rate_limit_exceeded 与 OpenAI 兼容客户端一致；细分类型由 ErrCode + window_resets_at metadata 区分。
 		msg := pkgerrors.Message(err)
 		return http.StatusTooManyRequests, "rate_limit_exceeded", msg, extractQuotaResetSeconds(err)
+	}
+	if errors.Is(err, service.ErrDailyLimitExceeded) ||
+		errors.Is(err, service.ErrWeeklyLimitExceeded) ||
+		errors.Is(err, service.ErrMonthlyLimitExceeded) ||
+		errors.Is(err, service.ErrCustomLimitExceeded) {
+		msg := pkgerrors.Message(err)
+		return http.StatusTooManyRequests, "rate_limit_exceeded", msg, 0
 	}
 	msg := pkgerrors.Message(err)
 	if msg == "" {

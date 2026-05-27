@@ -2,6 +2,12 @@ package service
 
 import "time"
 
+const (
+	subscriptionDailyWindow   = 24 * time.Hour
+	subscriptionWeeklyWindow  = 7 * 24 * time.Hour
+	subscriptionMonthlyWindow = 30 * 24 * time.Hour
+)
+
 type UserSubscription struct {
 	ID      int64
 	UserID  int64
@@ -14,10 +20,12 @@ type UserSubscription struct {
 	DailyWindowStart   *time.Time
 	WeeklyWindowStart  *time.Time
 	MonthlyWindowStart *time.Time
+	CustomWindowStart  *time.Time
 
 	DailyUsageUSD   float64
 	WeeklyUsageUSD  float64
 	MonthlyUsageUSD float64
+	CustomUsageUSD  float64
 
 	AssignedBy *int64
 	AssignedAt time.Time
@@ -47,7 +55,7 @@ func (s *UserSubscription) DaysRemaining() int {
 }
 
 func (s *UserSubscription) IsWindowActivated() bool {
-	return s.DailyWindowStart != nil || s.WeeklyWindowStart != nil || s.MonthlyWindowStart != nil
+	return s.DailyWindowStart != nil || s.WeeklyWindowStart != nil || s.MonthlyWindowStart != nil || s.CustomWindowStart != nil
 }
 
 func (s *UserSubscription) HasOneTimeDailyQuota() bool {
@@ -68,21 +76,36 @@ func (s *UserSubscription) NeedsDailyResetAt(now time.Time) bool {
 	if s.HasOneTimeDailyQuota() {
 		return false
 	}
-	return !now.Before(s.DailyWindowStart.Add(24 * time.Hour))
+	return subscriptionWindowExpired(s.DailyWindowStart, subscriptionDailyWindow, now)
 }
 
 func (s *UserSubscription) NeedsWeeklyReset() bool {
+	return s.NeedsWeeklyResetAt(time.Now())
+}
+
+func (s *UserSubscription) NeedsWeeklyResetAt(now time.Time) bool {
 	if s.WeeklyWindowStart == nil {
 		return false
 	}
-	return time.Since(*s.WeeklyWindowStart) >= 7*24*time.Hour
+	return subscriptionWindowExpired(s.WeeklyWindowStart, subscriptionWeeklyWindow, now)
 }
 
 func (s *UserSubscription) NeedsMonthlyReset() bool {
+	return s.NeedsMonthlyResetAt(time.Now())
+}
+
+func (s *UserSubscription) NeedsMonthlyResetAt(now time.Time) bool {
 	if s.MonthlyWindowStart == nil {
 		return false
 	}
-	return time.Since(*s.MonthlyWindowStart) >= 30*24*time.Hour
+	return subscriptionWindowExpired(s.MonthlyWindowStart, subscriptionMonthlyWindow, now)
+}
+
+func (s *UserSubscription) NeedsCustomResetAt(group *Group, now time.Time) bool {
+	if s.CustomWindowStart == nil || group == nil || !group.HasCustomLimit() {
+		return false
+	}
+	return subscriptionWindowExpired(s.CustomWindowStart, customSubscriptionWindow(group), now)
 }
 
 func (s *UserSubscription) DailyResetTime() *time.Time {
@@ -93,7 +116,7 @@ func (s *UserSubscription) DailyResetTime() *time.Time {
 		t := s.ExpiresAt
 		return &t
 	}
-	t := s.DailyWindowStart.Add(24 * time.Hour)
+	t := s.DailyWindowStart.Add(subscriptionDailyWindow)
 	return &t
 }
 
@@ -101,7 +124,7 @@ func (s *UserSubscription) WeeklyResetTime() *time.Time {
 	if s.WeeklyWindowStart == nil {
 		return nil
 	}
-	t := s.WeeklyWindowStart.Add(7 * 24 * time.Hour)
+	t := s.WeeklyWindowStart.Add(subscriptionWeeklyWindow)
 	return &t
 }
 
@@ -109,8 +132,34 @@ func (s *UserSubscription) MonthlyResetTime() *time.Time {
 	if s.MonthlyWindowStart == nil {
 		return nil
 	}
-	t := s.MonthlyWindowStart.Add(30 * 24 * time.Hour)
+	t := s.MonthlyWindowStart.Add(subscriptionMonthlyWindow)
 	return &t
+}
+
+func (s *UserSubscription) CustomResetTime(group *Group) *time.Time {
+	if s.CustomWindowStart == nil || group == nil || !group.HasCustomLimit() {
+		return nil
+	}
+	t := s.CustomWindowStart.Add(customSubscriptionWindow(group))
+	return &t
+}
+
+func customSubscriptionWindow(group *Group) time.Duration {
+	if group == nil || group.CustomLimitHours <= 0 {
+		return 0
+	}
+	hours := group.CustomLimitHours
+	if hours > maxCustomLimitHours {
+		hours = maxCustomLimitHours
+	}
+	return time.Duration(hours) * time.Hour
+}
+
+func subscriptionWindowExpired(start *time.Time, period time.Duration, now time.Time) bool {
+	if start == nil {
+		return false
+	}
+	return !now.Before(start.Add(period))
 }
 
 func (s *UserSubscription) CheckDailyLimit(group *Group, additionalCost float64) bool {
@@ -134,9 +183,17 @@ func (s *UserSubscription) CheckMonthlyLimit(group *Group, additionalCost float6
 	return s.MonthlyUsageUSD+additionalCost <= *group.MonthlyLimitUSD
 }
 
-func (s *UserSubscription) CheckAllLimits(group *Group, additionalCost float64) (daily, weekly, monthly bool) {
+func (s *UserSubscription) CheckCustomLimit(group *Group, additionalCost float64) bool {
+	if !group.HasCustomLimit() {
+		return true
+	}
+	return s.CustomUsageUSD+additionalCost <= *group.CustomLimitUSD
+}
+
+func (s *UserSubscription) CheckAllLimits(group *Group, additionalCost float64) (daily, weekly, monthly, custom bool) {
 	daily = s.CheckDailyLimit(group, additionalCost)
 	weekly = s.CheckWeeklyLimit(group, additionalCost)
 	monthly = s.CheckMonthlyLimit(group, additionalCost)
+	custom = s.CheckCustomLimit(group, additionalCost)
 	return
 }

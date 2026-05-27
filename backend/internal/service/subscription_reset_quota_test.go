@@ -21,9 +21,15 @@ type resetQuotaUserSubRepoStub struct {
 	resetDailyCalled   bool
 	resetWeeklyCalled  bool
 	resetMonthlyCalled bool
+	resetCustomCalled  bool
+	dailyWindowStart   *time.Time
+	weeklyWindowStart  *time.Time
+	monthlyWindowStart *time.Time
+	customWindowStart  *time.Time
 	resetDailyErr      error
 	resetWeeklyErr     error
 	resetMonthlyErr    error
+	resetCustomErr     error
 }
 
 func (r *resetQuotaUserSubRepoStub) GetByID(_ context.Context, id int64) (*UserSubscription, error) {
@@ -36,6 +42,7 @@ func (r *resetQuotaUserSubRepoStub) GetByID(_ context.Context, id int64) (*UserS
 
 func (r *resetQuotaUserSubRepoStub) ResetDailyUsage(_ context.Context, _ int64, windowStart time.Time) error {
 	r.resetDailyCalled = true
+	r.dailyWindowStart = &windowStart
 	if r.resetDailyErr == nil && r.sub != nil {
 		r.sub.DailyUsageUSD = 0
 		r.sub.DailyWindowStart = &windowStart
@@ -43,14 +50,34 @@ func (r *resetQuotaUserSubRepoStub) ResetDailyUsage(_ context.Context, _ int64, 
 	return r.resetDailyErr
 }
 
-func (r *resetQuotaUserSubRepoStub) ResetWeeklyUsage(_ context.Context, _ int64, _ time.Time) error {
+func (r *resetQuotaUserSubRepoStub) ResetWeeklyUsage(_ context.Context, _ int64, windowStart time.Time) error {
 	r.resetWeeklyCalled = true
+	r.weeklyWindowStart = &windowStart
+	if r.resetWeeklyErr == nil && r.sub != nil {
+		r.sub.WeeklyUsageUSD = 0
+		r.sub.WeeklyWindowStart = &windowStart
+	}
 	return r.resetWeeklyErr
 }
 
-func (r *resetQuotaUserSubRepoStub) ResetMonthlyUsage(_ context.Context, _ int64, _ time.Time) error {
+func (r *resetQuotaUserSubRepoStub) ResetMonthlyUsage(_ context.Context, _ int64, windowStart time.Time) error {
 	r.resetMonthlyCalled = true
+	r.monthlyWindowStart = &windowStart
+	if r.resetMonthlyErr == nil && r.sub != nil {
+		r.sub.MonthlyUsageUSD = 0
+		r.sub.MonthlyWindowStart = &windowStart
+	}
 	return r.resetMonthlyErr
+}
+
+func (r *resetQuotaUserSubRepoStub) ResetCustomUsage(_ context.Context, _ int64, windowStart time.Time) error {
+	r.resetCustomCalled = true
+	r.customWindowStart = &windowStart
+	if r.resetCustomErr == nil && r.sub != nil {
+		r.sub.CustomUsageUSD = 0
+		r.sub.CustomWindowStart = &windowStart
+	}
+	return r.resetCustomErr
 }
 
 func newResetQuotaSvc(stub *resetQuotaUserSubRepoStub) *SubscriptionService {
@@ -70,6 +97,27 @@ func TestAdminResetQuota_ResetBoth(t *testing.T) {
 	require.True(t, stub.resetDailyCalled, "应调用 ResetDailyUsage")
 	require.True(t, stub.resetWeeklyCalled, "应调用 ResetWeeklyUsage")
 	require.False(t, stub.resetMonthlyCalled, "不应调用 ResetMonthlyUsage")
+}
+
+func TestAdminResetQuota_UsesResetTimestampAsWindowStart(t *testing.T) {
+	stub := &resetQuotaUserSubRepoStub{
+		sub: &UserSubscription{ID: 10, UserID: 10, GroupID: 20},
+	}
+	svc := newResetQuotaSvc(stub)
+	before := time.Now()
+
+	result, err := svc.AdminResetQuota(context.Background(), 10, true, true, true)
+
+	after := time.Now()
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, stub.dailyWindowStart)
+	require.False(t, stub.dailyWindowStart.Before(before))
+	require.False(t, stub.dailyWindowStart.After(after))
+	require.NotNil(t, stub.weeklyWindowStart)
+	require.Equal(t, *stub.dailyWindowStart, *stub.weeklyWindowStart)
+	require.NotNil(t, stub.monthlyWindowStart)
+	require.Equal(t, *stub.dailyWindowStart, *stub.monthlyWindowStart)
 }
 
 func TestAdminResetQuota_ResetDailyOnly(t *testing.T) {

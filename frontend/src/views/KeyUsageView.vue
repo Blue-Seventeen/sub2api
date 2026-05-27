@@ -638,6 +638,7 @@ const ringItems = computed<RingItem[]>(() => {
         { label: t('keyUsage.limitDaily'), usage: sub.daily_usage_usd, limit: sub.daily_limit_usd },
         { label: t('keyUsage.limitWeekly'), usage: sub.weekly_usage_usd, limit: sub.weekly_limit_usd },
         { label: t('keyUsage.limitMonthly'), usage: sub.monthly_usage_usd, limit: sub.monthly_limit_usd },
+        { label: sub.custom_limit_hours ? `${sub.custom_limit_hours}H` : t('keyUsage.limitCustom'), usage: sub.custom_used_usd || 0, limit: sub.custom_limit_usd },
       ]
       for (const l of limits) {
         if (l.limit != null && l.limit > 0) {
@@ -751,6 +752,13 @@ const detailRows = computed<DetailRow[]>(() => {
         rows.push({
           iconBg: 'bg-emerald-500/10', iconColor: 'text-emerald-500', iconSvg: ICON_DOLLAR,
           label: `${t('keyUsage.usedQuota')} (${locale.value === 'zh' ? '月' : 'M'})`, value: `${usd(sub.monthly_usage_usd)} / ${usd(sub.monthly_limit_usd)}`, valueClass: getUsageColor(pct),
+        })
+      }
+      if (sub.custom_limit_usd > 0) {
+        const pct = ((sub.custom_used_usd || 0) / sub.custom_limit_usd) * 100
+        rows.push({
+          iconBg: 'bg-cyan-500/10', iconColor: 'text-cyan-500', iconSvg: ICON_DOLLAR,
+          label: `${t('keyUsage.usedQuota')} (${sub.custom_limit_hours || '-'}H)`, value: `${usd(sub.custom_used_usd || 0)} / ${usd(sub.custom_limit_usd)}`, valueClass: getUsageColor(pct),
         })
       }
       if (sub.expires_at) {

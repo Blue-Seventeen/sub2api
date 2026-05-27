@@ -277,6 +277,34 @@ func (s *UserSubscriptionRepoSuite) TestList_NoFilters() {
 	s.Require().Equal(int64(1), page.Total)
 }
 
+func (s *UserSubscriptionRepoSuite) TestList_SortByStartsAt() {
+	user := s.mustCreateUser("sort-start@test.com", service.RoleUser)
+	g1 := s.mustCreateGroup("g-sort-start-1")
+	g2 := s.mustCreateGroup("g-sort-start-2")
+	g3 := s.mustCreateGroup("g-sort-start-3")
+	base := time.Date(2026, 5, 27, 16, 0, 0, 0, time.UTC)
+
+	oldest := s.mustCreateSubscription(user.ID, g1.ID, func(c *dbent.UserSubscriptionCreate) {
+		c.SetStartsAt(base)
+	})
+	middle := s.mustCreateSubscription(user.ID, g2.ID, func(c *dbent.UserSubscriptionCreate) {
+		c.SetStartsAt(base.Add(1 * time.Hour))
+	})
+	newest := s.mustCreateSubscription(user.ID, g3.ID, func(c *dbent.UserSubscriptionCreate) {
+		c.SetStartsAt(base.Add(2 * time.Hour))
+	})
+
+	asc, _, err := s.repo.List(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, nil, nil, "", "", "starts_at", "asc")
+	s.Require().NoError(err)
+	s.Require().Len(asc, 3)
+	s.Require().Equal([]int64{oldest.ID, middle.ID, newest.ID}, []int64{asc[0].ID, asc[1].ID, asc[2].ID})
+
+	desc, _, err := s.repo.List(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, nil, nil, "", "", "starts_at", "desc")
+	s.Require().NoError(err)
+	s.Require().Len(desc, 3)
+	s.Require().Equal([]int64{newest.ID, middle.ID, oldest.ID}, []int64{desc[0].ID, desc[1].ID, desc[2].ID})
+}
+
 func (s *UserSubscriptionRepoSuite) TestList_FilterByUserID() {
 	user1 := s.mustCreateUser("filter1@test.com", service.RoleUser)
 	user2 := s.mustCreateUser("filter2@test.com", service.RoleUser)

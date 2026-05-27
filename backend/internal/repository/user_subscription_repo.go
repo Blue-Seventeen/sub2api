@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -32,9 +33,11 @@ func (r *userSubscriptionRepository) Create(ctx context.Context, sub *service.Us
 		SetNillableDailyWindowStart(sub.DailyWindowStart).
 		SetNillableWeeklyWindowStart(sub.WeeklyWindowStart).
 		SetNillableMonthlyWindowStart(sub.MonthlyWindowStart).
+		SetNillableCustomWindowStart(sub.CustomWindowStart).
 		SetDailyUsageUsd(sub.DailyUsageUSD).
 		SetWeeklyUsageUsd(sub.WeeklyUsageUSD).
 		SetMonthlyUsageUsd(sub.MonthlyUsageUSD).
+		SetCustomUsageUsd(sub.CustomUsageUSD).
 		SetNillableAssignedBy(sub.AssignedBy)
 
 	if sub.StartsAt.IsZero() {
@@ -116,9 +119,11 @@ func (r *userSubscriptionRepository) Update(ctx context.Context, sub *service.Us
 		SetNillableDailyWindowStart(sub.DailyWindowStart).
 		SetNillableWeeklyWindowStart(sub.WeeklyWindowStart).
 		SetNillableMonthlyWindowStart(sub.MonthlyWindowStart).
+		SetNillableCustomWindowStart(sub.CustomWindowStart).
 		SetDailyUsageUsd(sub.DailyUsageUSD).
 		SetWeeklyUsageUsd(sub.WeeklyUsageUSD).
 		SetMonthlyUsageUsd(sub.MonthlyUsageUSD).
+		SetCustomUsageUsd(sub.CustomUsageUSD).
 		SetNillableAssignedBy(sub.AssignedBy).
 		SetAssignedAt(sub.AssignedAt).
 		SetNotes(sub.Notes)
@@ -242,6 +247,8 @@ func (r *userSubscriptionRepository) List(ctx context.Context, params pagination
 	// Determine sort field
 	var field string
 	switch sortBy {
+	case "starts_at":
+		field = usersubscription.FieldStartsAt
 	case "expires_at":
 		field = usersubscription.FieldExpiresAt
 	case "status":
@@ -305,6 +312,7 @@ func (r *userSubscriptionRepository) ActivateWindows(ctx context.Context, id int
 		SetDailyWindowStart(start).
 		SetWeeklyWindowStart(start).
 		SetMonthlyWindowStart(start).
+		SetCustomWindowStart(start).
 		Save(ctx)
 	return translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
 }
@@ -336,6 +344,57 @@ func (r *userSubscriptionRepository) ResetMonthlyUsage(ctx context.Context, id i
 	return translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
 }
 
+func (r *userSubscriptionRepository) ResetCustomUsage(ctx context.Context, id int64, newWindowStart time.Time) error {
+	client := clientFromContext(ctx, r.client)
+	_, err := client.UserSubscription.UpdateOneID(id).
+		SetCustomUsageUsd(0).
+		SetCustomWindowStart(newWindowStart).
+		Save(ctx)
+	return translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
+}
+
+func (r *userSubscriptionRepository) RollDailyUsageWindow(ctx context.Context, id int64, oldWindowStart, newWindowStart time.Time, previousUsage float64, expectedUpdatedAt time.Time) (bool, error) {
+	return r.rollUsageWindow(ctx, id, "daily_usage_usd", "daily_window_start", oldWindowStart, newWindowStart, previousUsage, expectedUpdatedAt)
+}
+
+func (r *userSubscriptionRepository) RollWeeklyUsageWindow(ctx context.Context, id int64, oldWindowStart, newWindowStart time.Time, previousUsage float64, expectedUpdatedAt time.Time) (bool, error) {
+	return r.rollUsageWindow(ctx, id, "weekly_usage_usd", "weekly_window_start", oldWindowStart, newWindowStart, previousUsage, expectedUpdatedAt)
+}
+
+func (r *userSubscriptionRepository) RollMonthlyUsageWindow(ctx context.Context, id int64, oldWindowStart, newWindowStart time.Time, previousUsage float64, expectedUpdatedAt time.Time) (bool, error) {
+	return r.rollUsageWindow(ctx, id, "monthly_usage_usd", "monthly_window_start", oldWindowStart, newWindowStart, previousUsage, expectedUpdatedAt)
+}
+
+func (r *userSubscriptionRepository) RollCustomUsageWindow(ctx context.Context, id int64, oldWindowStart, newWindowStart time.Time, previousUsage float64, expectedUpdatedAt time.Time) (bool, error) {
+	return r.rollUsageWindow(ctx, id, "custom_usage_usd", "custom_window_start", oldWindowStart, newWindowStart, previousUsage, expectedUpdatedAt)
+}
+
+func (r *userSubscriptionRepository) rollUsageWindow(ctx context.Context, id int64, usageColumn, windowColumn string, oldWindowStart, newWindowStart time.Time, previousUsage float64, expectedUpdatedAt time.Time) (bool, error) {
+	updateSQL := fmt.Sprintf(`
+		UPDATE user_subscriptions
+		SET
+			%s = CASE
+				WHEN updated_at > $5 THEN GREATEST(%s - $4, 0)
+				ELSE 0
+			END,
+			%s = $2,
+			updated_at = NOW()
+		WHERE id = $1
+			AND deleted_at IS NULL
+			AND %s = $3
+	`, usageColumn, usageColumn, windowColumn, windowColumn)
+	client := clientFromContext(ctx, r.client)
+	result, err := client.ExecContext(ctx, updateSQL, id, newWindowStart, oldWindowStart, previousUsage, expectedUpdatedAt)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return affected > 0, nil
+}
+
 // IncrementUsage 原子性地累加订阅用量。
 // 限额检查已在请求前由 BillingCacheService.CheckBillingEligibility 完成，
 // 此处仅负责记录实际消费，确保消费数据的完整性。
@@ -346,6 +405,7 @@ func (r *userSubscriptionRepository) IncrementUsage(ctx context.Context, id int6
 			daily_usage_usd = us.daily_usage_usd + $1,
 			weekly_usage_usd = us.weekly_usage_usd + $1,
 			monthly_usage_usd = us.monthly_usage_usd + $1,
+			custom_usage_usd = us.custom_usage_usd + $1,
 			updated_at = NOW()
 		FROM groups g
 		WHERE us.id = $2
@@ -439,9 +499,11 @@ func userSubscriptionEntityToService(m *dbent.UserSubscription) *service.UserSub
 		DailyWindowStart:   m.DailyWindowStart,
 		WeeklyWindowStart:  m.WeeklyWindowStart,
 		MonthlyWindowStart: m.MonthlyWindowStart,
+		CustomWindowStart:  m.CustomWindowStart,
 		DailyUsageUSD:      m.DailyUsageUsd,
 		WeeklyUsageUSD:     m.WeeklyUsageUsd,
 		MonthlyUsageUSD:    m.MonthlyUsageUsd,
+		CustomUsageUSD:     m.CustomUsageUsd,
 		AssignedBy:         m.AssignedBy,
 		AssignedAt:         m.AssignedAt,
 		Notes:              derefString(m.Notes),

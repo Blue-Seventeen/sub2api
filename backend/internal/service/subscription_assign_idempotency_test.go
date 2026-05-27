@@ -119,6 +119,9 @@ func (userSubRepoNoop) ResetWeeklyUsage(context.Context, int64, time.Time) error
 func (userSubRepoNoop) ResetMonthlyUsage(context.Context, int64, time.Time) error {
 	panic("unexpected ResetMonthlyUsage call")
 }
+func (userSubRepoNoop) ResetCustomUsage(context.Context, int64, time.Time) error {
+	panic("unexpected ResetCustomUsage call")
+}
 func (userSubRepoNoop) IncrementUsage(context.Context, int64, float64) error {
 	panic("unexpected IncrementUsage call")
 }
@@ -335,6 +338,30 @@ func TestAssignSubscriptionKeepsWorkingWhenIdempotencyStoreUnavailable(t *testin
 	require.NoError(t, err)
 	require.NotNil(t, sub)
 	require.Equal(t, 1, subRepo.createCalls, "semantic idempotent endpoint should not depend on idempotency store availability")
+}
+
+func TestAssignSubscription_NewSubscriptionWindowsStartAtRedeemTime(t *testing.T) {
+	groupRepo := &subscriptionGroupRepoStub{
+		group: &Group{ID: 1, SubscriptionType: SubscriptionTypeSubscription},
+	}
+	subRepo := newSubscriptionUserSubRepoStub()
+	svc := NewSubscriptionService(groupRepo, subRepo, nil, nil, nil)
+
+	sub, err := svc.AssignSubscription(context.Background(), &AssignSubscriptionInput{
+		UserID:       9101,
+		GroupID:      1,
+		ValidityDays: 2,
+		Notes:        "new",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, sub)
+	require.NotNil(t, sub.DailyWindowStart)
+	require.Equal(t, sub.StartsAt, *sub.DailyWindowStart)
+	require.NotNil(t, sub.WeeklyWindowStart)
+	require.Equal(t, sub.StartsAt, *sub.WeeklyWindowStart)
+	require.NotNil(t, sub.MonthlyWindowStart)
+	require.Equal(t, sub.StartsAt, *sub.MonthlyWindowStart)
 }
 
 func TestNormalizeAssignValidityDays(t *testing.T) {

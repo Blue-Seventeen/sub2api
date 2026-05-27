@@ -493,6 +493,8 @@ export interface Group {
   daily_limit_usd: number | null
   weekly_limit_usd: number | null
   monthly_limit_usd: number | null
+  custom_limit_hours: number
+  custom_limit_usd: number | null
   // 图片生成计费配置
   allow_image_generation: boolean
   image_rate_independent: boolean
@@ -606,6 +608,8 @@ export interface CreateGroupRequest {
   daily_limit_usd?: number | null
   weekly_limit_usd?: number | null
   monthly_limit_usd?: number | null
+  custom_limit_hours?: number
+  custom_limit_usd?: number | null
   allow_image_generation?: boolean
   image_rate_independent?: boolean
   image_rate_multiplier?: number
@@ -634,6 +638,8 @@ export interface UpdateGroupRequest {
   daily_limit_usd?: number | null
   weekly_limit_usd?: number | null
   monthly_limit_usd?: number | null
+  custom_limit_hours?: number
+  custom_limit_usd?: number | null
   allow_image_generation?: boolean
   image_rate_independent?: boolean
   image_rate_multiplier?: number
@@ -1620,9 +1626,11 @@ export interface UserSubscription {
   daily_usage_usd: number
   weekly_usage_usd: number
   monthly_usage_usd: number
+  custom_usage_usd: number
   daily_window_start: string | null
   weekly_window_start: string | null
   monthly_window_start: string | null
+  custom_window_start: string | null
   created_at: string
   updated_at: string
   expires_at: string | null
@@ -1631,27 +1639,24 @@ export interface UserSubscription {
 }
 
 export interface SubscriptionProgress {
-  subscription_id: number
-  daily: {
-    used: number
-    limit: number | null
-    percentage: number
-    reset_in_seconds: number | null
-  } | null
-  weekly: {
-    used: number
-    limit: number | null
-    percentage: number
-    reset_in_seconds: number | null
-  } | null
-  monthly: {
-    used: number
-    limit: number | null
-    percentage: number
-    reset_in_seconds: number | null
-  } | null
-  expires_at: string | null
-  days_remaining: number | null
+  id: number
+  group_name: string
+  expires_at: string
+  expires_in_days: number
+  daily?: SubscriptionUsageWindowProgress | null
+  weekly?: SubscriptionUsageWindowProgress | null
+  monthly?: SubscriptionUsageWindowProgress | null
+  custom?: SubscriptionUsageWindowProgress | null
+}
+
+export interface SubscriptionUsageWindowProgress {
+  limit_usd: number
+  used_usd: number
+  remaining_usd: number
+  percentage: number
+  window_start: string
+  resets_at: string
+  resets_in_seconds: number
 }
 
 export interface AssignSubscriptionRequest {

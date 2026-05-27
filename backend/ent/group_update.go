@@ -254,6 +254,54 @@ func (_u *GroupUpdate) ClearMonthlyLimitUsd() *GroupUpdate {
 	return _u
 }
 
+// SetCustomLimitHours sets the "custom_limit_hours" field.
+func (_u *GroupUpdate) SetCustomLimitHours(v int) *GroupUpdate {
+	_u.mutation.ResetCustomLimitHours()
+	_u.mutation.SetCustomLimitHours(v)
+	return _u
+}
+
+// SetNillableCustomLimitHours sets the "custom_limit_hours" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableCustomLimitHours(v *int) *GroupUpdate {
+	if v != nil {
+		_u.SetCustomLimitHours(*v)
+	}
+	return _u
+}
+
+// AddCustomLimitHours adds value to the "custom_limit_hours" field.
+func (_u *GroupUpdate) AddCustomLimitHours(v int) *GroupUpdate {
+	_u.mutation.AddCustomLimitHours(v)
+	return _u
+}
+
+// SetCustomLimitUsd sets the "custom_limit_usd" field.
+func (_u *GroupUpdate) SetCustomLimitUsd(v float64) *GroupUpdate {
+	_u.mutation.ResetCustomLimitUsd()
+	_u.mutation.SetCustomLimitUsd(v)
+	return _u
+}
+
+// SetNillableCustomLimitUsd sets the "custom_limit_usd" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableCustomLimitUsd(v *float64) *GroupUpdate {
+	if v != nil {
+		_u.SetCustomLimitUsd(*v)
+	}
+	return _u
+}
+
+// AddCustomLimitUsd adds value to the "custom_limit_usd" field.
+func (_u *GroupUpdate) AddCustomLimitUsd(v float64) *GroupUpdate {
+	_u.mutation.AddCustomLimitUsd(v)
+	return _u
+}
+
+// ClearCustomLimitUsd clears the value of the "custom_limit_usd" field.
+func (_u *GroupUpdate) ClearCustomLimitUsd() *GroupUpdate {
+	_u.mutation.ClearCustomLimitUsd()
+	return _u
+}
+
 // SetDefaultValidityDays sets the "default_validity_days" field.
 func (_u *GroupUpdate) SetDefaultValidityDays(v int) *GroupUpdate {
 	_u.mutation.ResetDefaultValidityDays()
@@ -1019,6 +1067,21 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if _u.mutation.MonthlyLimitUsdCleared() {
 		_spec.ClearField(group.FieldMonthlyLimitUsd, field.TypeFloat64)
 	}
+	if value, ok := _u.mutation.CustomLimitHours(); ok {
+		_spec.SetField(group.FieldCustomLimitHours, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedCustomLimitHours(); ok {
+		_spec.AddField(group.FieldCustomLimitHours, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.CustomLimitUsd(); ok {
+		_spec.SetField(group.FieldCustomLimitUsd, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedCustomLimitUsd(); ok {
+		_spec.AddField(group.FieldCustomLimitUsd, field.TypeFloat64, value)
+	}
+	if _u.mutation.CustomLimitUsdCleared() {
+		_spec.ClearField(group.FieldCustomLimitUsd, field.TypeFloat64)
+	}
 	if value, ok := _u.mutation.DefaultValidityDays(); ok {
 		_spec.SetField(group.FieldDefaultValidityDays, field.TypeInt, value)
 	}
@@ -1664,6 +1727,54 @@ func (_u *GroupUpdateOne) AddMonthlyLimitUsd(v float64) *GroupUpdateOne {
 // ClearMonthlyLimitUsd clears the value of the "monthly_limit_usd" field.
 func (_u *GroupUpdateOne) ClearMonthlyLimitUsd() *GroupUpdateOne {
 	_u.mutation.ClearMonthlyLimitUsd()
+	return _u
+}
+
+// SetCustomLimitHours sets the "custom_limit_hours" field.
+func (_u *GroupUpdateOne) SetCustomLimitHours(v int) *GroupUpdateOne {
+	_u.mutation.ResetCustomLimitHours()
+	_u.mutation.SetCustomLimitHours(v)
+	return _u
+}
+
+// SetNillableCustomLimitHours sets the "custom_limit_hours" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableCustomLimitHours(v *int) *GroupUpdateOne {
+	if v != nil {
+		_u.SetCustomLimitHours(*v)
+	}
+	return _u
+}
+
+// AddCustomLimitHours adds value to the "custom_limit_hours" field.
+func (_u *GroupUpdateOne) AddCustomLimitHours(v int) *GroupUpdateOne {
+	_u.mutation.AddCustomLimitHours(v)
+	return _u
+}
+
+// SetCustomLimitUsd sets the "custom_limit_usd" field.
+func (_u *GroupUpdateOne) SetCustomLimitUsd(v float64) *GroupUpdateOne {
+	_u.mutation.ResetCustomLimitUsd()
+	_u.mutation.SetCustomLimitUsd(v)
+	return _u
+}
+
+// SetNillableCustomLimitUsd sets the "custom_limit_usd" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableCustomLimitUsd(v *float64) *GroupUpdateOne {
+	if v != nil {
+		_u.SetCustomLimitUsd(*v)
+	}
+	return _u
+}
+
+// AddCustomLimitUsd adds value to the "custom_limit_usd" field.
+func (_u *GroupUpdateOne) AddCustomLimitUsd(v float64) *GroupUpdateOne {
+	_u.mutation.AddCustomLimitUsd(v)
+	return _u
+}
+
+// ClearCustomLimitUsd clears the value of the "custom_limit_usd" field.
+func (_u *GroupUpdateOne) ClearCustomLimitUsd() *GroupUpdateOne {
+	_u.mutation.ClearCustomLimitUsd()
 	return _u
 }
 
@@ -2461,6 +2572,21 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if _u.mutation.MonthlyLimitUsdCleared() {
 		_spec.ClearField(group.FieldMonthlyLimitUsd, field.TypeFloat64)
+	}
+	if value, ok := _u.mutation.CustomLimitHours(); ok {
+		_spec.SetField(group.FieldCustomLimitHours, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedCustomLimitHours(); ok {
+		_spec.AddField(group.FieldCustomLimitHours, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.CustomLimitUsd(); ok {
+		_spec.SetField(group.FieldCustomLimitUsd, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedCustomLimitUsd(); ok {
+		_spec.AddField(group.FieldCustomLimitUsd, field.TypeFloat64, value)
+	}
+	if _u.mutation.CustomLimitUsdCleared() {
+		_spec.ClearField(group.FieldCustomLimitUsd, field.TypeFloat64)
 	}
 	if value, ok := _u.mutation.DefaultValidityDays(); ok {
 		_spec.SetField(group.FieldDefaultValidityDays, field.TypeInt, value)

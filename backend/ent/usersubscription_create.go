@@ -147,6 +147,20 @@ func (_c *UserSubscriptionCreate) SetNillableMonthlyWindowStart(v *time.Time) *U
 	return _c
 }
 
+// SetCustomWindowStart sets the "custom_window_start" field.
+func (_c *UserSubscriptionCreate) SetCustomWindowStart(v time.Time) *UserSubscriptionCreate {
+	_c.mutation.SetCustomWindowStart(v)
+	return _c
+}
+
+// SetNillableCustomWindowStart sets the "custom_window_start" field if the given value is not nil.
+func (_c *UserSubscriptionCreate) SetNillableCustomWindowStart(v *time.Time) *UserSubscriptionCreate {
+	if v != nil {
+		_c.SetCustomWindowStart(*v)
+	}
+	return _c
+}
+
 // SetDailyUsageUsd sets the "daily_usage_usd" field.
 func (_c *UserSubscriptionCreate) SetDailyUsageUsd(v float64) *UserSubscriptionCreate {
 	_c.mutation.SetDailyUsageUsd(v)
@@ -185,6 +199,20 @@ func (_c *UserSubscriptionCreate) SetMonthlyUsageUsd(v float64) *UserSubscriptio
 func (_c *UserSubscriptionCreate) SetNillableMonthlyUsageUsd(v *float64) *UserSubscriptionCreate {
 	if v != nil {
 		_c.SetMonthlyUsageUsd(*v)
+	}
+	return _c
+}
+
+// SetCustomUsageUsd sets the "custom_usage_usd" field.
+func (_c *UserSubscriptionCreate) SetCustomUsageUsd(v float64) *UserSubscriptionCreate {
+	_c.mutation.SetCustomUsageUsd(v)
+	return _c
+}
+
+// SetNillableCustomUsageUsd sets the "custom_usage_usd" field if the given value is not nil.
+func (_c *UserSubscriptionCreate) SetNillableCustomUsageUsd(v *float64) *UserSubscriptionCreate {
+	if v != nil {
+		_c.SetCustomUsageUsd(*v)
 	}
 	return _c
 }
@@ -342,6 +370,10 @@ func (_c *UserSubscriptionCreate) defaults() error {
 		v := usersubscription.DefaultMonthlyUsageUsd
 		_c.mutation.SetMonthlyUsageUsd(v)
 	}
+	if _, ok := _c.mutation.CustomUsageUsd(); !ok {
+		v := usersubscription.DefaultCustomUsageUsd
+		_c.mutation.SetCustomUsageUsd(v)
+	}
 	if _, ok := _c.mutation.AssignedAt(); !ok {
 		if usersubscription.DefaultAssignedAt == nil {
 			return fmt.Errorf("ent: uninitialized usersubscription.DefaultAssignedAt (forgotten import ent/runtime?)")
@@ -388,6 +420,9 @@ func (_c *UserSubscriptionCreate) check() error {
 	}
 	if _, ok := _c.mutation.MonthlyUsageUsd(); !ok {
 		return &ValidationError{Name: "monthly_usage_usd", err: errors.New(`ent: missing required field "UserSubscription.monthly_usage_usd"`)}
+	}
+	if _, ok := _c.mutation.CustomUsageUsd(); !ok {
+		return &ValidationError{Name: "custom_usage_usd", err: errors.New(`ent: missing required field "UserSubscription.custom_usage_usd"`)}
 	}
 	if _, ok := _c.mutation.AssignedAt(); !ok {
 		return &ValidationError{Name: "assigned_at", err: errors.New(`ent: missing required field "UserSubscription.assigned_at"`)}
@@ -461,6 +496,10 @@ func (_c *UserSubscriptionCreate) createSpec() (*UserSubscription, *sqlgraph.Cre
 		_spec.SetField(usersubscription.FieldMonthlyWindowStart, field.TypeTime, value)
 		_node.MonthlyWindowStart = &value
 	}
+	if value, ok := _c.mutation.CustomWindowStart(); ok {
+		_spec.SetField(usersubscription.FieldCustomWindowStart, field.TypeTime, value)
+		_node.CustomWindowStart = &value
+	}
 	if value, ok := _c.mutation.DailyUsageUsd(); ok {
 		_spec.SetField(usersubscription.FieldDailyUsageUsd, field.TypeFloat64, value)
 		_node.DailyUsageUsd = value
@@ -472,6 +511,10 @@ func (_c *UserSubscriptionCreate) createSpec() (*UserSubscription, *sqlgraph.Cre
 	if value, ok := _c.mutation.MonthlyUsageUsd(); ok {
 		_spec.SetField(usersubscription.FieldMonthlyUsageUsd, field.TypeFloat64, value)
 		_node.MonthlyUsageUsd = value
+	}
+	if value, ok := _c.mutation.CustomUsageUsd(); ok {
+		_spec.SetField(usersubscription.FieldCustomUsageUsd, field.TypeFloat64, value)
+		_node.CustomUsageUsd = value
 	}
 	if value, ok := _c.mutation.AssignedAt(); ok {
 		_spec.SetField(usersubscription.FieldAssignedAt, field.TypeTime, value)
@@ -744,6 +787,24 @@ func (u *UserSubscriptionUpsert) ClearMonthlyWindowStart() *UserSubscriptionUpse
 	return u
 }
 
+// SetCustomWindowStart sets the "custom_window_start" field.
+func (u *UserSubscriptionUpsert) SetCustomWindowStart(v time.Time) *UserSubscriptionUpsert {
+	u.Set(usersubscription.FieldCustomWindowStart, v)
+	return u
+}
+
+// UpdateCustomWindowStart sets the "custom_window_start" field to the value that was provided on create.
+func (u *UserSubscriptionUpsert) UpdateCustomWindowStart() *UserSubscriptionUpsert {
+	u.SetExcluded(usersubscription.FieldCustomWindowStart)
+	return u
+}
+
+// ClearCustomWindowStart clears the value of the "custom_window_start" field.
+func (u *UserSubscriptionUpsert) ClearCustomWindowStart() *UserSubscriptionUpsert {
+	u.SetNull(usersubscription.FieldCustomWindowStart)
+	return u
+}
+
 // SetDailyUsageUsd sets the "daily_usage_usd" field.
 func (u *UserSubscriptionUpsert) SetDailyUsageUsd(v float64) *UserSubscriptionUpsert {
 	u.Set(usersubscription.FieldDailyUsageUsd, v)
@@ -795,6 +856,24 @@ func (u *UserSubscriptionUpsert) UpdateMonthlyUsageUsd() *UserSubscriptionUpsert
 // AddMonthlyUsageUsd adds v to the "monthly_usage_usd" field.
 func (u *UserSubscriptionUpsert) AddMonthlyUsageUsd(v float64) *UserSubscriptionUpsert {
 	u.Add(usersubscription.FieldMonthlyUsageUsd, v)
+	return u
+}
+
+// SetCustomUsageUsd sets the "custom_usage_usd" field.
+func (u *UserSubscriptionUpsert) SetCustomUsageUsd(v float64) *UserSubscriptionUpsert {
+	u.Set(usersubscription.FieldCustomUsageUsd, v)
+	return u
+}
+
+// UpdateCustomUsageUsd sets the "custom_usage_usd" field to the value that was provided on create.
+func (u *UserSubscriptionUpsert) UpdateCustomUsageUsd() *UserSubscriptionUpsert {
+	u.SetExcluded(usersubscription.FieldCustomUsageUsd)
+	return u
+}
+
+// AddCustomUsageUsd adds v to the "custom_usage_usd" field.
+func (u *UserSubscriptionUpsert) AddCustomUsageUsd(v float64) *UserSubscriptionUpsert {
+	u.Add(usersubscription.FieldCustomUsageUsd, v)
 	return u
 }
 
@@ -1059,6 +1138,27 @@ func (u *UserSubscriptionUpsertOne) ClearMonthlyWindowStart() *UserSubscriptionU
 	})
 }
 
+// SetCustomWindowStart sets the "custom_window_start" field.
+func (u *UserSubscriptionUpsertOne) SetCustomWindowStart(v time.Time) *UserSubscriptionUpsertOne {
+	return u.Update(func(s *UserSubscriptionUpsert) {
+		s.SetCustomWindowStart(v)
+	})
+}
+
+// UpdateCustomWindowStart sets the "custom_window_start" field to the value that was provided on create.
+func (u *UserSubscriptionUpsertOne) UpdateCustomWindowStart() *UserSubscriptionUpsertOne {
+	return u.Update(func(s *UserSubscriptionUpsert) {
+		s.UpdateCustomWindowStart()
+	})
+}
+
+// ClearCustomWindowStart clears the value of the "custom_window_start" field.
+func (u *UserSubscriptionUpsertOne) ClearCustomWindowStart() *UserSubscriptionUpsertOne {
+	return u.Update(func(s *UserSubscriptionUpsert) {
+		s.ClearCustomWindowStart()
+	})
+}
+
 // SetDailyUsageUsd sets the "daily_usage_usd" field.
 func (u *UserSubscriptionUpsertOne) SetDailyUsageUsd(v float64) *UserSubscriptionUpsertOne {
 	return u.Update(func(s *UserSubscriptionUpsert) {
@@ -1119,6 +1219,27 @@ func (u *UserSubscriptionUpsertOne) AddMonthlyUsageUsd(v float64) *UserSubscript
 func (u *UserSubscriptionUpsertOne) UpdateMonthlyUsageUsd() *UserSubscriptionUpsertOne {
 	return u.Update(func(s *UserSubscriptionUpsert) {
 		s.UpdateMonthlyUsageUsd()
+	})
+}
+
+// SetCustomUsageUsd sets the "custom_usage_usd" field.
+func (u *UserSubscriptionUpsertOne) SetCustomUsageUsd(v float64) *UserSubscriptionUpsertOne {
+	return u.Update(func(s *UserSubscriptionUpsert) {
+		s.SetCustomUsageUsd(v)
+	})
+}
+
+// AddCustomUsageUsd adds v to the "custom_usage_usd" field.
+func (u *UserSubscriptionUpsertOne) AddCustomUsageUsd(v float64) *UserSubscriptionUpsertOne {
+	return u.Update(func(s *UserSubscriptionUpsert) {
+		s.AddCustomUsageUsd(v)
+	})
+}
+
+// UpdateCustomUsageUsd sets the "custom_usage_usd" field to the value that was provided on create.
+func (u *UserSubscriptionUpsertOne) UpdateCustomUsageUsd() *UserSubscriptionUpsertOne {
+	return u.Update(func(s *UserSubscriptionUpsert) {
+		s.UpdateCustomUsageUsd()
 	})
 }
 
@@ -1557,6 +1678,27 @@ func (u *UserSubscriptionUpsertBulk) ClearMonthlyWindowStart() *UserSubscription
 	})
 }
 
+// SetCustomWindowStart sets the "custom_window_start" field.
+func (u *UserSubscriptionUpsertBulk) SetCustomWindowStart(v time.Time) *UserSubscriptionUpsertBulk {
+	return u.Update(func(s *UserSubscriptionUpsert) {
+		s.SetCustomWindowStart(v)
+	})
+}
+
+// UpdateCustomWindowStart sets the "custom_window_start" field to the value that was provided on create.
+func (u *UserSubscriptionUpsertBulk) UpdateCustomWindowStart() *UserSubscriptionUpsertBulk {
+	return u.Update(func(s *UserSubscriptionUpsert) {
+		s.UpdateCustomWindowStart()
+	})
+}
+
+// ClearCustomWindowStart clears the value of the "custom_window_start" field.
+func (u *UserSubscriptionUpsertBulk) ClearCustomWindowStart() *UserSubscriptionUpsertBulk {
+	return u.Update(func(s *UserSubscriptionUpsert) {
+		s.ClearCustomWindowStart()
+	})
+}
+
 // SetDailyUsageUsd sets the "daily_usage_usd" field.
 func (u *UserSubscriptionUpsertBulk) SetDailyUsageUsd(v float64) *UserSubscriptionUpsertBulk {
 	return u.Update(func(s *UserSubscriptionUpsert) {
@@ -1617,6 +1759,27 @@ func (u *UserSubscriptionUpsertBulk) AddMonthlyUsageUsd(v float64) *UserSubscrip
 func (u *UserSubscriptionUpsertBulk) UpdateMonthlyUsageUsd() *UserSubscriptionUpsertBulk {
 	return u.Update(func(s *UserSubscriptionUpsert) {
 		s.UpdateMonthlyUsageUsd()
+	})
+}
+
+// SetCustomUsageUsd sets the "custom_usage_usd" field.
+func (u *UserSubscriptionUpsertBulk) SetCustomUsageUsd(v float64) *UserSubscriptionUpsertBulk {
+	return u.Update(func(s *UserSubscriptionUpsert) {
+		s.SetCustomUsageUsd(v)
+	})
+}
+
+// AddCustomUsageUsd adds v to the "custom_usage_usd" field.
+func (u *UserSubscriptionUpsertBulk) AddCustomUsageUsd(v float64) *UserSubscriptionUpsertBulk {
+	return u.Update(func(s *UserSubscriptionUpsert) {
+		s.AddCustomUsageUsd(v)
+	})
+}
+
+// UpdateCustomUsageUsd sets the "custom_usage_usd" field to the value that was provided on create.
+func (u *UserSubscriptionUpsertBulk) UpdateCustomUsageUsd() *UserSubscriptionUpsertBulk {
+	return u.Update(func(s *UserSubscriptionUpsert) {
+		s.UpdateCustomUsageUsd()
 	})
 }
 

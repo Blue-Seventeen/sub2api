@@ -46,6 +46,7 @@ type subscriptionCacheData struct {
 	DailyUsage   float64
 	WeeklyUsage  float64
 	MonthlyUsage float64
+	CustomUsage  float64
 	Version      int64
 }
 
@@ -463,6 +464,7 @@ func (s *BillingCacheService) convertFromPortsData(data *SubscriptionCacheData) 
 		DailyUsage:   data.DailyUsage,
 		WeeklyUsage:  data.WeeklyUsage,
 		MonthlyUsage: data.MonthlyUsage,
+		CustomUsage:  data.CustomUsage,
 		Version:      data.Version,
 	}
 }
@@ -474,6 +476,7 @@ func (s *BillingCacheService) convertToPortsData(data *subscriptionCacheData) *S
 		DailyUsage:   data.DailyUsage,
 		WeeklyUsage:  data.WeeklyUsage,
 		MonthlyUsage: data.MonthlyUsage,
+		CustomUsage:  data.CustomUsage,
 		Version:      data.Version,
 	}
 }
@@ -491,6 +494,7 @@ func (s *BillingCacheService) getSubscriptionFromDB(ctx context.Context, userID,
 		DailyUsage:   sub.DailyUsageUSD,
 		WeeklyUsage:  sub.WeeklyUsageUSD,
 		MonthlyUsage: sub.MonthlyUsageUSD,
+		CustomUsage:  sub.CustomUsageUSD,
 		Version:      sub.UpdatedAt.Unix(),
 	}, nil
 }
@@ -924,22 +928,36 @@ func (s *BillingCacheService) checkSubscriptionEligibility(ctx context.Context, 
 		return ErrSubscriptionInvalid
 	}
 
+	now := time.Now()
 	// 检查是否过期
-	if time.Now().After(subData.ExpiresAt) {
+	if now.After(subData.ExpiresAt) {
 		return ErrSubscriptionInvalid
 	}
 
-	// 检查限额（使用传入的Group限额配置）
+	// 检查限额（使用传入的Group限额配置）。如果中间件中的订阅快照已经判断
+	// 某个窗口过期，则允许本次请求通过，实际 DB/Redis 窗口维护由异步任务完成。
 	if group.HasDailyLimit() && subData.DailyUsage >= *group.DailyLimitUSD {
-		return ErrDailyLimitExceeded
+		if subscription == nil || !subscription.NeedsDailyResetAt(now) {
+			return ErrDailyLimitExceeded
+		}
 	}
 
 	if group.HasWeeklyLimit() && subData.WeeklyUsage >= *group.WeeklyLimitUSD {
-		return ErrWeeklyLimitExceeded
+		if subscription == nil || !subscription.NeedsWeeklyResetAt(now) {
+			return ErrWeeklyLimitExceeded
+		}
 	}
 
 	if group.HasMonthlyLimit() && subData.MonthlyUsage >= *group.MonthlyLimitUSD {
-		return ErrMonthlyLimitExceeded
+		if subscription == nil || !subscription.NeedsMonthlyResetAt(now) {
+			return ErrMonthlyLimitExceeded
+		}
+	}
+
+	if group.HasCustomLimit() && subData.CustomUsage >= *group.CustomLimitUSD {
+		if subscription == nil || !subscription.NeedsCustomResetAt(group, now) {
+			return ErrCustomLimitExceeded
+		}
 	}
 
 	return nil

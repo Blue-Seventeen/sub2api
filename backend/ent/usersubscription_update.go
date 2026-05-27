@@ -187,6 +187,26 @@ func (_u *UserSubscriptionUpdate) ClearMonthlyWindowStart() *UserSubscriptionUpd
 	return _u
 }
 
+// SetCustomWindowStart sets the "custom_window_start" field.
+func (_u *UserSubscriptionUpdate) SetCustomWindowStart(v time.Time) *UserSubscriptionUpdate {
+	_u.mutation.SetCustomWindowStart(v)
+	return _u
+}
+
+// SetNillableCustomWindowStart sets the "custom_window_start" field if the given value is not nil.
+func (_u *UserSubscriptionUpdate) SetNillableCustomWindowStart(v *time.Time) *UserSubscriptionUpdate {
+	if v != nil {
+		_u.SetCustomWindowStart(*v)
+	}
+	return _u
+}
+
+// ClearCustomWindowStart clears the value of the "custom_window_start" field.
+func (_u *UserSubscriptionUpdate) ClearCustomWindowStart() *UserSubscriptionUpdate {
+	_u.mutation.ClearCustomWindowStart()
+	return _u
+}
+
 // SetDailyUsageUsd sets the "daily_usage_usd" field.
 func (_u *UserSubscriptionUpdate) SetDailyUsageUsd(v float64) *UserSubscriptionUpdate {
 	_u.mutation.ResetDailyUsageUsd()
@@ -247,6 +267,27 @@ func (_u *UserSubscriptionUpdate) SetNillableMonthlyUsageUsd(v *float64) *UserSu
 // AddMonthlyUsageUsd adds value to the "monthly_usage_usd" field.
 func (_u *UserSubscriptionUpdate) AddMonthlyUsageUsd(v float64) *UserSubscriptionUpdate {
 	_u.mutation.AddMonthlyUsageUsd(v)
+	return _u
+}
+
+// SetCustomUsageUsd sets the "custom_usage_usd" field.
+func (_u *UserSubscriptionUpdate) SetCustomUsageUsd(v float64) *UserSubscriptionUpdate {
+	_u.mutation.ResetCustomUsageUsd()
+	_u.mutation.SetCustomUsageUsd(v)
+	return _u
+}
+
+// SetNillableCustomUsageUsd sets the "custom_usage_usd" field if the given value is not nil.
+func (_u *UserSubscriptionUpdate) SetNillableCustomUsageUsd(v *float64) *UserSubscriptionUpdate {
+	if v != nil {
+		_u.SetCustomUsageUsd(*v)
+	}
+	return _u
+}
+
+// AddCustomUsageUsd adds value to the "custom_usage_usd" field.
+func (_u *UserSubscriptionUpdate) AddCustomUsageUsd(v float64) *UserSubscriptionUpdate {
+	_u.mutation.AddCustomUsageUsd(v)
 	return _u
 }
 
@@ -498,6 +539,12 @@ func (_u *UserSubscriptionUpdate) sqlSave(ctx context.Context) (_node int, err e
 	if _u.mutation.MonthlyWindowStartCleared() {
 		_spec.ClearField(usersubscription.FieldMonthlyWindowStart, field.TypeTime)
 	}
+	if value, ok := _u.mutation.CustomWindowStart(); ok {
+		_spec.SetField(usersubscription.FieldCustomWindowStart, field.TypeTime, value)
+	}
+	if _u.mutation.CustomWindowStartCleared() {
+		_spec.ClearField(usersubscription.FieldCustomWindowStart, field.TypeTime)
+	}
 	if value, ok := _u.mutation.DailyUsageUsd(); ok {
 		_spec.SetField(usersubscription.FieldDailyUsageUsd, field.TypeFloat64, value)
 	}
@@ -515,6 +562,12 @@ func (_u *UserSubscriptionUpdate) sqlSave(ctx context.Context) (_node int, err e
 	}
 	if value, ok := _u.mutation.AddedMonthlyUsageUsd(); ok {
 		_spec.AddField(usersubscription.FieldMonthlyUsageUsd, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.CustomUsageUsd(); ok {
+		_spec.SetField(usersubscription.FieldCustomUsageUsd, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedCustomUsageUsd(); ok {
+		_spec.AddField(usersubscription.FieldCustomUsageUsd, field.TypeFloat64, value)
 	}
 	if value, ok := _u.mutation.AssignedAt(); ok {
 		_spec.SetField(usersubscription.FieldAssignedAt, field.TypeTime, value)
@@ -833,6 +886,26 @@ func (_u *UserSubscriptionUpdateOne) ClearMonthlyWindowStart() *UserSubscription
 	return _u
 }
 
+// SetCustomWindowStart sets the "custom_window_start" field.
+func (_u *UserSubscriptionUpdateOne) SetCustomWindowStart(v time.Time) *UserSubscriptionUpdateOne {
+	_u.mutation.SetCustomWindowStart(v)
+	return _u
+}
+
+// SetNillableCustomWindowStart sets the "custom_window_start" field if the given value is not nil.
+func (_u *UserSubscriptionUpdateOne) SetNillableCustomWindowStart(v *time.Time) *UserSubscriptionUpdateOne {
+	if v != nil {
+		_u.SetCustomWindowStart(*v)
+	}
+	return _u
+}
+
+// ClearCustomWindowStart clears the value of the "custom_window_start" field.
+func (_u *UserSubscriptionUpdateOne) ClearCustomWindowStart() *UserSubscriptionUpdateOne {
+	_u.mutation.ClearCustomWindowStart()
+	return _u
+}
+
 // SetDailyUsageUsd sets the "daily_usage_usd" field.
 func (_u *UserSubscriptionUpdateOne) SetDailyUsageUsd(v float64) *UserSubscriptionUpdateOne {
 	_u.mutation.ResetDailyUsageUsd()
@@ -893,6 +966,27 @@ func (_u *UserSubscriptionUpdateOne) SetNillableMonthlyUsageUsd(v *float64) *Use
 // AddMonthlyUsageUsd adds value to the "monthly_usage_usd" field.
 func (_u *UserSubscriptionUpdateOne) AddMonthlyUsageUsd(v float64) *UserSubscriptionUpdateOne {
 	_u.mutation.AddMonthlyUsageUsd(v)
+	return _u
+}
+
+// SetCustomUsageUsd sets the "custom_usage_usd" field.
+func (_u *UserSubscriptionUpdateOne) SetCustomUsageUsd(v float64) *UserSubscriptionUpdateOne {
+	_u.mutation.ResetCustomUsageUsd()
+	_u.mutation.SetCustomUsageUsd(v)
+	return _u
+}
+
+// SetNillableCustomUsageUsd sets the "custom_usage_usd" field if the given value is not nil.
+func (_u *UserSubscriptionUpdateOne) SetNillableCustomUsageUsd(v *float64) *UserSubscriptionUpdateOne {
+	if v != nil {
+		_u.SetCustomUsageUsd(*v)
+	}
+	return _u
+}
+
+// AddCustomUsageUsd adds value to the "custom_usage_usd" field.
+func (_u *UserSubscriptionUpdateOne) AddCustomUsageUsd(v float64) *UserSubscriptionUpdateOne {
+	_u.mutation.AddCustomUsageUsd(v)
 	return _u
 }
 
@@ -1174,6 +1268,12 @@ func (_u *UserSubscriptionUpdateOne) sqlSave(ctx context.Context) (_node *UserSu
 	if _u.mutation.MonthlyWindowStartCleared() {
 		_spec.ClearField(usersubscription.FieldMonthlyWindowStart, field.TypeTime)
 	}
+	if value, ok := _u.mutation.CustomWindowStart(); ok {
+		_spec.SetField(usersubscription.FieldCustomWindowStart, field.TypeTime, value)
+	}
+	if _u.mutation.CustomWindowStartCleared() {
+		_spec.ClearField(usersubscription.FieldCustomWindowStart, field.TypeTime)
+	}
 	if value, ok := _u.mutation.DailyUsageUsd(); ok {
 		_spec.SetField(usersubscription.FieldDailyUsageUsd, field.TypeFloat64, value)
 	}
@@ -1191,6 +1291,12 @@ func (_u *UserSubscriptionUpdateOne) sqlSave(ctx context.Context) (_node *UserSu
 	}
 	if value, ok := _u.mutation.AddedMonthlyUsageUsd(); ok {
 		_spec.AddField(usersubscription.FieldMonthlyUsageUsd, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.CustomUsageUsd(); ok {
+		_spec.SetField(usersubscription.FieldCustomUsageUsd, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedCustomUsageUsd(); ok {
+		_spec.AddField(usersubscription.FieldCustomUsageUsd, field.TypeFloat64, value)
 	}
 	if value, ok := _u.mutation.AssignedAt(); ok {
 		_spec.SetField(usersubscription.FieldAssignedAt, field.TypeTime, value)

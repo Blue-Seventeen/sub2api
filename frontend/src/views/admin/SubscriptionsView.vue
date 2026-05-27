@@ -174,14 +174,16 @@
           :data="subscriptions"
           :loading="loading"
           :server-side-sort="true"
+          :sticky-first-column="true"
+          :sticky-actions-column="true"
           default-sort-key="created_at"
           default-sort-order="desc"
           @sort="handleSort"
         >
           <template #cell-user="{ row }">
-            <div class="flex items-center gap-2">
+            <div class="flex min-w-0 items-center gap-2">
               <div
-                class="flex h-8 w-8 items-center justify-center rounded-full bg-primary-100 dark:bg-primary-900/30"
+                class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-100 dark:bg-primary-900/30"
               >
                 <span class="text-sm font-medium text-primary-700 dark:text-primary-300">
                   {{ userColumnMode === 'email'
@@ -190,7 +192,7 @@
                   }}
                 </span>
               </div>
-              <span class="font-medium text-gray-900 dark:text-white">
+              <span class="truncate font-medium text-gray-900 dark:text-white">
                 {{ userColumnMode === 'email'
                   ? (row.user?.email || t('admin.redeem.userPrefix', { id: row.user_id }))
                   : (row.user?.username || '-')
@@ -324,12 +326,50 @@
                 </div>
               </div>
 
+              <!-- Custom Usage -->
+              <div v-if="row.group?.custom_limit_hours && row.group?.custom_limit_usd" class="usage-row">
+                <div class="flex items-center gap-2">
+                  <span class="usage-label">{{ t('admin.subscriptions.custom', { hours: row.group.custom_limit_hours }) }}</span>
+                  <div class="h-1.5 flex-1 rounded-full bg-gray-200 dark:bg-dark-600">
+                    <div
+                      class="h-1.5 rounded-full transition-all"
+                      :class="getProgressClass(row.custom_usage_usd, row.group?.custom_limit_usd)"
+                      :style="{
+                        width: getProgressWidth(row.custom_usage_usd, row.group?.custom_limit_usd)
+                      }"
+                    ></div>
+                  </div>
+                  <span class="usage-amount">
+                    {{ formatCurrencyAmount(row.custom_usage_usd ?? 0) }}
+                    <span class="text-gray-400">/</span>
+                    {{ formatCurrencyAmount(row.group?.custom_limit_usd ?? 0) }}
+                  </span>
+                </div>
+                <div class="reset-info" v-if="row.custom_window_start">
+                  <svg
+                    class="h-3 w-3"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  </svg>
+                  <span>{{ formatResetTime(row.custom_window_start, 'custom', row.group.custom_limit_hours) }}</span>
+                </div>
+              </div>
+
               <!-- No Limits - Unlimited badge -->
               <div
                 v-if="
                   !row.group?.daily_limit_usd &&
                   !row.group?.weekly_limit_usd &&
-                  !row.group?.monthly_limit_usd
+                  !row.group?.monthly_limit_usd &&
+                  !(row.group?.custom_limit_hours && row.group?.custom_limit_usd)
                 "
                 class="flex items-center gap-2 rounded-lg bg-gradient-to-r from-emerald-50 to-teal-50 px-3 py-2 dark:from-emerald-900/20 dark:to-teal-900/20"
               >
@@ -339,6 +379,12 @@
                 </span>
               </div>
             </div>
+          </template>
+
+          <template #cell-starts_at="{ value }">
+            <span class="text-sm text-gray-700 dark:text-gray-300">
+              {{ formatSubscriptionDateTime(value) || '-' }}
+            </span>
           </template>
 
           <template #cell-expires_at="{ value }">
@@ -351,7 +397,7 @@
                     : 'text-gray-700 dark:text-gray-300'
                 "
               >
-                {{ formatDateOnly(value) }}
+                {{ formatSubscriptionDateTime(value) }}
               </span>
               <div v-if="getDaysRemaining(value) !== null" class="text-xs text-gray-500">
                 {{ getDaysRemaining(value) }} {{ t('admin.subscriptions.daysRemaining') }}
@@ -816,13 +862,15 @@ const allColumns = computed<Column[]>(() => [
     label: userColumnMode.value === 'email'
       ? t('admin.subscriptions.columns.user')
       : t('admin.users.columns.username'),
-    sortable: false
+    sortable: false,
+    class: 'w-[260px] min-w-[220px] max-w-[320px]'
   },
-  { key: 'group', label: t('admin.subscriptions.columns.group'), sortable: false },
-  { key: 'usage', label: t('admin.subscriptions.columns.usage'), sortable: false },
-  { key: 'expires_at', label: t('admin.subscriptions.columns.expires'), sortable: true },
-  { key: 'status', label: t('admin.subscriptions.columns.status'), sortable: true },
-  { key: 'actions', label: t('admin.subscriptions.columns.actions'), sortable: false }
+  { key: 'group', label: t('admin.subscriptions.columns.group'), sortable: false, class: 'min-w-[160px]' },
+  { key: 'usage', label: t('admin.subscriptions.columns.usage'), sortable: false, class: 'min-w-[320px]' },
+  { key: 'starts_at', label: t('admin.subscriptions.columns.starts'), sortable: true, class: 'min-w-[180px]' },
+  { key: 'expires_at', label: t('admin.subscriptions.columns.expires'), sortable: true, class: 'min-w-[180px]' },
+  { key: 'status', label: t('admin.subscriptions.columns.status'), sortable: true, class: 'min-w-[110px]' },
+  { key: 'actions', label: t('admin.subscriptions.columns.actions'), sortable: false, class: 'min-w-[170px]' }
 ])
 
 // Columns that can be toggled (exclude user and actions which are always visible)
@@ -834,10 +882,12 @@ const toggleableColumns = computed(() =>
 const hiddenColumns = reactive<Set<string>>(new Set())
 
 // Default hidden columns
-const DEFAULT_HIDDEN_COLUMNS: string[] = []
+const DEFAULT_HIDDEN_COLUMNS: string[] = ['starts_at']
 
 // localStorage key
 const HIDDEN_COLUMNS_KEY = 'subscription-hidden-columns'
+const HIDDEN_COLUMNS_VERSION_KEY = 'subscription-hidden-columns-version'
+const HIDDEN_COLUMNS_VERSION = '2'
 
 // Load saved column settings
 const loadSavedColumns = () => {
@@ -846,9 +896,15 @@ const loadSavedColumns = () => {
     if (saved) {
       const parsed = JSON.parse(saved) as string[]
       parsed.forEach(key => hiddenColumns.add(key))
+      if (localStorage.getItem(HIDDEN_COLUMNS_VERSION_KEY) !== HIDDEN_COLUMNS_VERSION) {
+        DEFAULT_HIDDEN_COLUMNS.forEach(key => hiddenColumns.add(key))
+        saveColumnsToStorage()
+      }
     } else {
       DEFAULT_HIDDEN_COLUMNS.forEach(key => hiddenColumns.add(key))
+      saveColumnsToStorage()
     }
+    localStorage.setItem(HIDDEN_COLUMNS_VERSION_KEY, HIDDEN_COLUMNS_VERSION)
   } catch (e) {
     console.error('Failed to load saved columns:', e)
     DEFAULT_HIDDEN_COLUMNS.forEach(key => hiddenColumns.add(key))
@@ -1276,7 +1332,7 @@ const confirmResetQuota = async () => {
   if (resettingQuota.value) return
   resettingQuota.value = true
   try {
-    await adminAPI.subscriptions.resetQuota(resettingSubscription.value.id, { daily: true, weekly: true, monthly: true })
+    await adminAPI.subscriptions.resetQuota(resettingSubscription.value.id, { daily: true, weekly: true, monthly: true, custom: true })
     appStore.showSuccess(t('admin.subscriptions.quotaResetSuccess'))
     showResetQuotaConfirm.value = false
     resettingSubscription.value = null
@@ -1301,6 +1357,21 @@ const getDaysRemaining = (expiresAt: string): number | null => {
 const isExpiringSoon = (expiresAt: string): boolean => {
   const days = getDaysRemaining(expiresAt)
   return days !== null && days <= 7
+}
+
+const formatSubscriptionDateTime = (value: string | Date | null | undefined): string => {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  const seconds = String(date.getSeconds()).padStart(2, '0')
+
+  return `${year}/${month}/${day} ${hours}:${minutes}:${seconds}`
 }
 
 const getProgressWidth = (used: number | null | undefined, limit: number | null): string => {
@@ -1353,7 +1424,7 @@ const formatDailyUsageWindow = (subscription: UserSubscription): string => {
 }
 
 // Format reset time based on window start and period type
-const formatResetTime = (windowStart: string | null, period: 'daily' | 'weekly' | 'monthly'): string => {
+const formatResetTime = (windowStart: string | null, period: 'daily' | 'weekly' | 'monthly' | 'custom', customHours?: number): string => {
   if (!windowStart) return t('admin.subscriptions.windowNotActive')
 
   const start = new Date(windowStart)
@@ -1370,6 +1441,9 @@ const formatResetTime = (windowStart: string | null, period: 'daily' | 'weekly' 
       break
     case 'monthly':
       resetTime = new Date(start.getTime() + 30 * 24 * 60 * 60 * 1000)
+      break
+    case 'custom':
+      resetTime = new Date(start.getTime() + (customHours || 0) * 60 * 60 * 1000)
       break
   }
 

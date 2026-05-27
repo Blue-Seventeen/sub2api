@@ -110,6 +110,11 @@ func MonthlyWindowStart(v time.Time) predicate.UserSubscription {
 	return predicate.UserSubscription(sql.FieldEQ(FieldMonthlyWindowStart, v))
 }
 
+// CustomWindowStart applies equality check predicate on the "custom_window_start" field. It's identical to CustomWindowStartEQ.
+func CustomWindowStart(v time.Time) predicate.UserSubscription {
+	return predicate.UserSubscription(sql.FieldEQ(FieldCustomWindowStart, v))
+}
+
 // DailyUsageUsd applies equality check predicate on the "daily_usage_usd" field. It's identical to DailyUsageUsdEQ.
 func DailyUsageUsd(v float64) predicate.UserSubscription {
 	return predicate.UserSubscription(sql.FieldEQ(FieldDailyUsageUsd, v))
@@ -123,6 +128,11 @@ func WeeklyUsageUsd(v float64) predicate.UserSubscription {
 // MonthlyUsageUsd applies equality check predicate on the "monthly_usage_usd" field. It's identical to MonthlyUsageUsdEQ.
 func MonthlyUsageUsd(v float64) predicate.UserSubscription {
 	return predicate.UserSubscription(sql.FieldEQ(FieldMonthlyUsageUsd, v))
+}
+
+// CustomUsageUsd applies equality check predicate on the "custom_usage_usd" field. It's identical to CustomUsageUsdEQ.
+func CustomUsageUsd(v float64) predicate.UserSubscription {
+	return predicate.UserSubscription(sql.FieldEQ(FieldCustomUsageUsd, v))
 }
 
 // AssignedBy applies equality check predicate on the "assigned_by" field. It's identical to AssignedByEQ.
@@ -605,6 +615,56 @@ func MonthlyWindowStartNotNil() predicate.UserSubscription {
 	return predicate.UserSubscription(sql.FieldNotNull(FieldMonthlyWindowStart))
 }
 
+// CustomWindowStartEQ applies the EQ predicate on the "custom_window_start" field.
+func CustomWindowStartEQ(v time.Time) predicate.UserSubscription {
+	return predicate.UserSubscription(sql.FieldEQ(FieldCustomWindowStart, v))
+}
+
+// CustomWindowStartNEQ applies the NEQ predicate on the "custom_window_start" field.
+func CustomWindowStartNEQ(v time.Time) predicate.UserSubscription {
+	return predicate.UserSubscription(sql.FieldNEQ(FieldCustomWindowStart, v))
+}
+
+// CustomWindowStartIn applies the In predicate on the "custom_window_start" field.
+func CustomWindowStartIn(vs ...time.Time) predicate.UserSubscription {
+	return predicate.UserSubscription(sql.FieldIn(FieldCustomWindowStart, vs...))
+}
+
+// CustomWindowStartNotIn applies the NotIn predicate on the "custom_window_start" field.
+func CustomWindowStartNotIn(vs ...time.Time) predicate.UserSubscription {
+	return predicate.UserSubscription(sql.FieldNotIn(FieldCustomWindowStart, vs...))
+}
+
+// CustomWindowStartGT applies the GT predicate on the "custom_window_start" field.
+func CustomWindowStartGT(v time.Time) predicate.UserSubscription {
+	return predicate.UserSubscription(sql.FieldGT(FieldCustomWindowStart, v))
+}
+
+// CustomWindowStartGTE applies the GTE predicate on the "custom_window_start" field.
+func CustomWindowStartGTE(v time.Time) predicate.UserSubscription {
+	return predicate.UserSubscription(sql.FieldGTE(FieldCustomWindowStart, v))
+}
+
+// CustomWindowStartLT applies the LT predicate on the "custom_window_start" field.
+func CustomWindowStartLT(v time.Time) predicate.UserSubscription {
+	return predicate.UserSubscription(sql.FieldLT(FieldCustomWindowStart, v))
+}
+
+// CustomWindowStartLTE applies the LTE predicate on the "custom_window_start" field.
+func CustomWindowStartLTE(v time.Time) predicate.UserSubscription {
+	return predicate.UserSubscription(sql.FieldLTE(FieldCustomWindowStart, v))
+}
+
+// CustomWindowStartIsNil applies the IsNil predicate on the "custom_window_start" field.
+func CustomWindowStartIsNil() predicate.UserSubscription {
+	return predicate.UserSubscription(sql.FieldIsNull(FieldCustomWindowStart))
+}
+
+// CustomWindowStartNotNil applies the NotNil predicate on the "custom_window_start" field.
+func CustomWindowStartNotNil() predicate.UserSubscription {
+	return predicate.UserSubscription(sql.FieldNotNull(FieldCustomWindowStart))
+}
+
 // DailyUsageUsdEQ applies the EQ predicate on the "daily_usage_usd" field.
 func DailyUsageUsdEQ(v float64) predicate.UserSubscription {
 	return predicate.UserSubscription(sql.FieldEQ(FieldDailyUsageUsd, v))
@@ -723,6 +783,46 @@ func MonthlyUsageUsdLT(v float64) predicate.UserSubscription {
 // MonthlyUsageUsdLTE applies the LTE predicate on the "monthly_usage_usd" field.
 func MonthlyUsageUsdLTE(v float64) predicate.UserSubscription {
 	return predicate.UserSubscription(sql.FieldLTE(FieldMonthlyUsageUsd, v))
+}
+
+// CustomUsageUsdEQ applies the EQ predicate on the "custom_usage_usd" field.
+func CustomUsageUsdEQ(v float64) predicate.UserSubscription {
+	return predicate.UserSubscription(sql.FieldEQ(FieldCustomUsageUsd, v))
+}
+
+// CustomUsageUsdNEQ applies the NEQ predicate on the "custom_usage_usd" field.
+func CustomUsageUsdNEQ(v float64) predicate.UserSubscription {
+	return predicate.UserSubscription(sql.FieldNEQ(FieldCustomUsageUsd, v))
+}
+
+// CustomUsageUsdIn applies the In predicate on the "custom_usage_usd" field.
+func CustomUsageUsdIn(vs ...float64) predicate.UserSubscription {
+	return predicate.UserSubscription(sql.FieldIn(FieldCustomUsageUsd, vs...))
+}
+
+// CustomUsageUsdNotIn applies the NotIn predicate on the "custom_usage_usd" field.
+func CustomUsageUsdNotIn(vs ...float64) predicate.UserSubscription {
+	return predicate.UserSubscription(sql.FieldNotIn(FieldCustomUsageUsd, vs...))
+}
+
+// CustomUsageUsdGT applies the GT predicate on the "custom_usage_usd" field.
+func CustomUsageUsdGT(v float64) predicate.UserSubscription {
+	return predicate.UserSubscription(sql.FieldGT(FieldCustomUsageUsd, v))
+}
+
+// CustomUsageUsdGTE applies the GTE predicate on the "custom_usage_usd" field.
+func CustomUsageUsdGTE(v float64) predicate.UserSubscription {
+	return predicate.UserSubscription(sql.FieldGTE(FieldCustomUsageUsd, v))
+}
+
+// CustomUsageUsdLT applies the LT predicate on the "custom_usage_usd" field.
+func CustomUsageUsdLT(v float64) predicate.UserSubscription {
+	return predicate.UserSubscription(sql.FieldLT(FieldCustomUsageUsd, v))
+}
+
+// CustomUsageUsdLTE applies the LTE predicate on the "custom_usage_usd" field.
+func CustomUsageUsdLTE(v float64) predicate.UserSubscription {
+	return predicate.UserSubscription(sql.FieldLTE(FieldCustomUsageUsd, v))
 }
 
 // AssignedByEQ applies the EQ predicate on the "assigned_by" field.

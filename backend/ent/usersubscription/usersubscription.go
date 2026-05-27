@@ -37,12 +37,16 @@ const (
 	FieldWeeklyWindowStart = "weekly_window_start"
 	// FieldMonthlyWindowStart holds the string denoting the monthly_window_start field in the database.
 	FieldMonthlyWindowStart = "monthly_window_start"
+	// FieldCustomWindowStart holds the string denoting the custom_window_start field in the database.
+	FieldCustomWindowStart = "custom_window_start"
 	// FieldDailyUsageUsd holds the string denoting the daily_usage_usd field in the database.
 	FieldDailyUsageUsd = "daily_usage_usd"
 	// FieldWeeklyUsageUsd holds the string denoting the weekly_usage_usd field in the database.
 	FieldWeeklyUsageUsd = "weekly_usage_usd"
 	// FieldMonthlyUsageUsd holds the string denoting the monthly_usage_usd field in the database.
 	FieldMonthlyUsageUsd = "monthly_usage_usd"
+	// FieldCustomUsageUsd holds the string denoting the custom_usage_usd field in the database.
+	FieldCustomUsageUsd = "custom_usage_usd"
 	// FieldAssignedBy holds the string denoting the assigned_by field in the database.
 	FieldAssignedBy = "assigned_by"
 	// FieldAssignedAt holds the string denoting the assigned_at field in the database.
@@ -103,9 +107,11 @@ var Columns = []string{
 	FieldDailyWindowStart,
 	FieldWeeklyWindowStart,
 	FieldMonthlyWindowStart,
+	FieldCustomWindowStart,
 	FieldDailyUsageUsd,
 	FieldWeeklyUsageUsd,
 	FieldMonthlyUsageUsd,
+	FieldCustomUsageUsd,
 	FieldAssignedBy,
 	FieldAssignedAt,
 	FieldNotes,
@@ -145,6 +151,8 @@ var (
 	DefaultWeeklyUsageUsd float64
 	// DefaultMonthlyUsageUsd holds the default value on creation for the "monthly_usage_usd" field.
 	DefaultMonthlyUsageUsd float64
+	// DefaultCustomUsageUsd holds the default value on creation for the "custom_usage_usd" field.
+	DefaultCustomUsageUsd float64
 	// DefaultAssignedAt holds the default value on creation for the "assigned_at" field.
 	DefaultAssignedAt func() time.Time
 )
@@ -212,6 +220,11 @@ func ByMonthlyWindowStart(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldMonthlyWindowStart, opts...).ToFunc()
 }
 
+// ByCustomWindowStart orders the results by the custom_window_start field.
+func ByCustomWindowStart(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCustomWindowStart, opts...).ToFunc()
+}
+
 // ByDailyUsageUsd orders the results by the daily_usage_usd field.
 func ByDailyUsageUsd(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldDailyUsageUsd, opts...).ToFunc()
@@ -225,6 +238,11 @@ func ByWeeklyUsageUsd(opts ...sql.OrderTermOption) OrderOption {
 // ByMonthlyUsageUsd orders the results by the monthly_usage_usd field.
 func ByMonthlyUsageUsd(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldMonthlyUsageUsd, opts...).ToFunc()
+}
+
+// ByCustomUsageUsd orders the results by the custom_usage_usd field.
+func ByCustomUsageUsd(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCustomUsageUsd, opts...).ToFunc()
 }
 
 // ByAssignedBy orders the results by the assigned_by field.

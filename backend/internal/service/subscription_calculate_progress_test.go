@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -64,12 +65,13 @@ func TestCalculateProgress_DailyUsage(t *testing.T) {
 	assert.Equal(t, 7.0, progress.Daily.RemainingUSD)
 	assert.Equal(t, 30.0, progress.Daily.Percentage)
 	assert.Equal(t, dailyStart, progress.Daily.WindowStart)
+	assert.Equal(t, dailyStart.Add(subscriptionDailyWindow), progress.Daily.ResetsAt)
 }
 
 func TestCalculateProgress_DailyCardUsesExpiryAsDailyResetTime(t *testing.T) {
 	svc := newTestSubscriptionService()
 	startsAt := time.Now().Add(-12 * time.Hour)
-	dailyStart := time.Date(startsAt.Year(), startsAt.Month(), startsAt.Day(), 0, 0, 0, 0, startsAt.Location())
+	dailyStart := startsAt
 	expiresAt := startsAt.Add(24 * time.Hour)
 
 	sub := &UserSubscription{
@@ -88,6 +90,72 @@ func TestCalculateProgress_DailyCardUsesExpiryAsDailyResetTime(t *testing.T) {
 
 	require.NotNil(t, progress.Daily, "日卡有日限额和窗口时 Daily 不应为 nil")
 	assert.Equal(t, expiresAt, progress.Daily.ResetsAt, "日卡的一次性日额度结束时间应为订阅过期时间")
+}
+
+func TestGetByID_NormalizesExpiredWindowSnapshot(t *testing.T) {
+	now := time.Now()
+	dailyStart := now.Add(-25 * time.Hour)
+	weeklyStart := now.Add(-8 * 24 * time.Hour)
+	monthlyStart := now.Add(-31 * 24 * time.Hour)
+	subRepo := newSubscriptionUserSubRepoStub()
+	subRepo.seed(&UserSubscription{
+		ID:                 3001,
+		UserID:             10,
+		GroupID:            20,
+		Status:             SubscriptionStatusActive,
+		StartsAt:           now.Add(-60 * 24 * time.Hour),
+		ExpiresAt:          now.Add(24 * time.Hour),
+		DailyWindowStart:   &dailyStart,
+		WeeklyWindowStart:  &weeklyStart,
+		MonthlyWindowStart: &monthlyStart,
+		DailyUsageUSD:      3,
+		WeeklyUsageUSD:     9,
+		MonthlyUsageUSD:    27,
+	})
+	svc := NewSubscriptionService(groupRepoNoop{}, subRepo, nil, nil, nil)
+
+	sub, err := svc.GetByID(context.Background(), 3001)
+
+	require.NoError(t, err)
+	require.Equal(t, 0.0, sub.DailyUsageUSD)
+	require.WithinDuration(t, dailyStart.Add(subscriptionDailyWindow), *sub.DailyWindowStart, time.Second)
+	require.Equal(t, 0.0, sub.WeeklyUsageUSD)
+	require.WithinDuration(t, weeklyStart.Add(subscriptionWeeklyWindow), *sub.WeeklyWindowStart, time.Second)
+	require.Equal(t, 0.0, sub.MonthlyUsageUSD)
+	require.WithinDuration(t, monthlyStart.Add(subscriptionMonthlyWindow), *sub.MonthlyWindowStart, time.Second)
+}
+
+func TestGetSubscriptionProgress_NormalizesExpiredWindowSnapshot(t *testing.T) {
+	now := time.Now()
+	dailyStart := now.Add(-25 * time.Hour)
+	dailyLimit := 10.0
+	group := &Group{
+		ID:               20,
+		Name:             "Rolling",
+		DailyLimitUSD:    &dailyLimit,
+		SubscriptionType: SubscriptionTypeSubscription,
+	}
+	subRepo := newSubscriptionUserSubRepoStub()
+	subRepo.seed(&UserSubscription{
+		ID:               3002,
+		UserID:           10,
+		GroupID:          20,
+		Status:           SubscriptionStatusActive,
+		StartsAt:         now.Add(-10 * 24 * time.Hour),
+		ExpiresAt:        now.Add(24 * time.Hour),
+		Group:            group,
+		DailyWindowStart: &dailyStart,
+		DailyUsageUSD:    9,
+	})
+	svc := NewSubscriptionService(groupRepoNoop{}, subRepo, nil, nil, nil)
+
+	progress, err := svc.GetSubscriptionProgress(context.Background(), 3002)
+
+	require.NoError(t, err)
+	require.NotNil(t, progress.Daily)
+	require.Equal(t, 0.0, progress.Daily.UsedUSD)
+	require.WithinDuration(t, dailyStart.Add(subscriptionDailyWindow), progress.Daily.WindowStart, time.Second)
+	require.Equal(t, dailyStart.Add(2*subscriptionDailyWindow), progress.Daily.ResetsAt)
 }
 
 func TestCalculateProgress_WeeklyUsage(t *testing.T) {
@@ -113,6 +181,7 @@ func TestCalculateProgress_WeeklyUsage(t *testing.T) {
 	assert.Equal(t, 25.0, progress.Weekly.UsedUSD)
 	assert.Equal(t, 25.0, progress.Weekly.RemainingUSD)
 	assert.Equal(t, 50.0, progress.Weekly.Percentage)
+	assert.Equal(t, weeklyStart.Add(subscriptionWeeklyWindow), progress.Weekly.ResetsAt)
 }
 
 func TestCalculateProgress_MonthlyUsage(t *testing.T) {
@@ -138,6 +207,7 @@ func TestCalculateProgress_MonthlyUsage(t *testing.T) {
 	assert.Equal(t, 80.0, progress.Monthly.UsedUSD)
 	assert.Equal(t, 20.0, progress.Monthly.RemainingUSD)
 	assert.Equal(t, 80.0, progress.Monthly.Percentage)
+	assert.Equal(t, monthlyStart.Add(subscriptionMonthlyWindow), progress.Monthly.ResetsAt)
 }
 
 func TestCalculateProgress_OverLimit_ClampedTo100Percent(t *testing.T) {

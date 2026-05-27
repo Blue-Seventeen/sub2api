@@ -31,6 +31,7 @@ type fakeGoogleSubscriptionRepo struct {
 	resetDaily     func(ctx context.Context, id int64, start time.Time) error
 	resetWeekly    func(ctx context.Context, id int64, start time.Time) error
 	resetMonthly   func(ctx context.Context, id int64, start time.Time) error
+	resetCustom    func(ctx context.Context, id int64, start time.Time) error
 }
 
 func (f fakeAPIKeyRepo) Create(ctx context.Context, key *service.APIKey) error {
@@ -181,6 +182,12 @@ func (f fakeGoogleSubscriptionRepo) ResetWeeklyUsage(ctx context.Context, id int
 func (f fakeGoogleSubscriptionRepo) ResetMonthlyUsage(ctx context.Context, id int64, start time.Time) error {
 	if f.resetMonthly != nil {
 		return f.resetMonthly(ctx, id, start)
+	}
+	return errors.New("not implemented")
+}
+func (f fakeGoogleSubscriptionRepo) ResetCustomUsage(ctx context.Context, id int64, start time.Time) error {
+	if f.resetCustom != nil {
+		return f.resetCustom(ctx, id, start)
 	}
 	return errors.New("not implemented")
 }

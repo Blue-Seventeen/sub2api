@@ -152,6 +152,7 @@ func incrementUsageBillingSubscription(ctx context.Context, tx *sql.Tx, subscrip
 			daily_usage_usd = us.daily_usage_usd + $1,
 			weekly_usage_usd = us.weekly_usage_usd + $1,
 			monthly_usage_usd = us.monthly_usage_usd + $1,
+			custom_usage_usd = us.custom_usage_usd + $1,
 			updated_at = NOW()
 		FROM groups g
 		WHERE us.id = $2

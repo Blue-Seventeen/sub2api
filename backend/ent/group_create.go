@@ -203,6 +203,34 @@ func (_c *GroupCreate) SetNillableMonthlyLimitUsd(v *float64) *GroupCreate {
 	return _c
 }
 
+// SetCustomLimitHours sets the "custom_limit_hours" field.
+func (_c *GroupCreate) SetCustomLimitHours(v int) *GroupCreate {
+	_c.mutation.SetCustomLimitHours(v)
+	return _c
+}
+
+// SetNillableCustomLimitHours sets the "custom_limit_hours" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableCustomLimitHours(v *int) *GroupCreate {
+	if v != nil {
+		_c.SetCustomLimitHours(*v)
+	}
+	return _c
+}
+
+// SetCustomLimitUsd sets the "custom_limit_usd" field.
+func (_c *GroupCreate) SetCustomLimitUsd(v float64) *GroupCreate {
+	_c.mutation.SetCustomLimitUsd(v)
+	return _c
+}
+
+// SetNillableCustomLimitUsd sets the "custom_limit_usd" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableCustomLimitUsd(v *float64) *GroupCreate {
+	if v != nil {
+		_c.SetCustomLimitUsd(*v)
+	}
+	return _c
+}
+
 // SetDefaultValidityDays sets the "default_validity_days" field.
 func (_c *GroupCreate) SetDefaultValidityDays(v int) *GroupCreate {
 	_c.mutation.SetDefaultValidityDays(v)
@@ -656,6 +684,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultSubscriptionType
 		_c.mutation.SetSubscriptionType(v)
 	}
+	if _, ok := _c.mutation.CustomLimitHours(); !ok {
+		v := group.DefaultCustomLimitHours
+		_c.mutation.SetCustomLimitHours(v)
+	}
 	if _, ok := _c.mutation.DefaultValidityDays(); !ok {
 		v := group.DefaultDefaultValidityDays
 		_c.mutation.SetDefaultValidityDays(v)
@@ -768,6 +800,9 @@ func (_c *GroupCreate) check() error {
 		if err := group.SubscriptionTypeValidator(v); err != nil {
 			return &ValidationError{Name: "subscription_type", err: fmt.Errorf(`ent: validator failed for field "Group.subscription_type": %w`, err)}
 		}
+	}
+	if _, ok := _c.mutation.CustomLimitHours(); !ok {
+		return &ValidationError{Name: "custom_limit_hours", err: errors.New(`ent: missing required field "Group.custom_limit_hours"`)}
 	}
 	if _, ok := _c.mutation.DefaultValidityDays(); !ok {
 		return &ValidationError{Name: "default_validity_days", err: errors.New(`ent: missing required field "Group.default_validity_days"`)}
@@ -900,6 +935,14 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.MonthlyLimitUsd(); ok {
 		_spec.SetField(group.FieldMonthlyLimitUsd, field.TypeFloat64, value)
 		_node.MonthlyLimitUsd = &value
+	}
+	if value, ok := _c.mutation.CustomLimitHours(); ok {
+		_spec.SetField(group.FieldCustomLimitHours, field.TypeInt, value)
+		_node.CustomLimitHours = value
+	}
+	if value, ok := _c.mutation.CustomLimitUsd(); ok {
+		_spec.SetField(group.FieldCustomLimitUsd, field.TypeFloat64, value)
+		_node.CustomLimitUsd = &value
 	}
 	if value, ok := _c.mutation.DefaultValidityDays(); ok {
 		_spec.SetField(group.FieldDefaultValidityDays, field.TypeInt, value)
@@ -1340,6 +1383,48 @@ func (u *GroupUpsert) AddMonthlyLimitUsd(v float64) *GroupUpsert {
 // ClearMonthlyLimitUsd clears the value of the "monthly_limit_usd" field.
 func (u *GroupUpsert) ClearMonthlyLimitUsd() *GroupUpsert {
 	u.SetNull(group.FieldMonthlyLimitUsd)
+	return u
+}
+
+// SetCustomLimitHours sets the "custom_limit_hours" field.
+func (u *GroupUpsert) SetCustomLimitHours(v int) *GroupUpsert {
+	u.Set(group.FieldCustomLimitHours, v)
+	return u
+}
+
+// UpdateCustomLimitHours sets the "custom_limit_hours" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateCustomLimitHours() *GroupUpsert {
+	u.SetExcluded(group.FieldCustomLimitHours)
+	return u
+}
+
+// AddCustomLimitHours adds v to the "custom_limit_hours" field.
+func (u *GroupUpsert) AddCustomLimitHours(v int) *GroupUpsert {
+	u.Add(group.FieldCustomLimitHours, v)
+	return u
+}
+
+// SetCustomLimitUsd sets the "custom_limit_usd" field.
+func (u *GroupUpsert) SetCustomLimitUsd(v float64) *GroupUpsert {
+	u.Set(group.FieldCustomLimitUsd, v)
+	return u
+}
+
+// UpdateCustomLimitUsd sets the "custom_limit_usd" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateCustomLimitUsd() *GroupUpsert {
+	u.SetExcluded(group.FieldCustomLimitUsd)
+	return u
+}
+
+// AddCustomLimitUsd adds v to the "custom_limit_usd" field.
+func (u *GroupUpsert) AddCustomLimitUsd(v float64) *GroupUpsert {
+	u.Add(group.FieldCustomLimitUsd, v)
+	return u
+}
+
+// ClearCustomLimitUsd clears the value of the "custom_limit_usd" field.
+func (u *GroupUpsert) ClearCustomLimitUsd() *GroupUpsert {
+	u.SetNull(group.FieldCustomLimitUsd)
 	return u
 }
 
@@ -1970,6 +2055,55 @@ func (u *GroupUpsertOne) UpdateMonthlyLimitUsd() *GroupUpsertOne {
 func (u *GroupUpsertOne) ClearMonthlyLimitUsd() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.ClearMonthlyLimitUsd()
+	})
+}
+
+// SetCustomLimitHours sets the "custom_limit_hours" field.
+func (u *GroupUpsertOne) SetCustomLimitHours(v int) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetCustomLimitHours(v)
+	})
+}
+
+// AddCustomLimitHours adds v to the "custom_limit_hours" field.
+func (u *GroupUpsertOne) AddCustomLimitHours(v int) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddCustomLimitHours(v)
+	})
+}
+
+// UpdateCustomLimitHours sets the "custom_limit_hours" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateCustomLimitHours() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateCustomLimitHours()
+	})
+}
+
+// SetCustomLimitUsd sets the "custom_limit_usd" field.
+func (u *GroupUpsertOne) SetCustomLimitUsd(v float64) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetCustomLimitUsd(v)
+	})
+}
+
+// AddCustomLimitUsd adds v to the "custom_limit_usd" field.
+func (u *GroupUpsertOne) AddCustomLimitUsd(v float64) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddCustomLimitUsd(v)
+	})
+}
+
+// UpdateCustomLimitUsd sets the "custom_limit_usd" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateCustomLimitUsd() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateCustomLimitUsd()
+	})
+}
+
+// ClearCustomLimitUsd clears the value of the "custom_limit_usd" field.
+func (u *GroupUpsertOne) ClearCustomLimitUsd() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.ClearCustomLimitUsd()
 	})
 }
 
@@ -2825,6 +2959,55 @@ func (u *GroupUpsertBulk) UpdateMonthlyLimitUsd() *GroupUpsertBulk {
 func (u *GroupUpsertBulk) ClearMonthlyLimitUsd() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.ClearMonthlyLimitUsd()
+	})
+}
+
+// SetCustomLimitHours sets the "custom_limit_hours" field.
+func (u *GroupUpsertBulk) SetCustomLimitHours(v int) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetCustomLimitHours(v)
+	})
+}
+
+// AddCustomLimitHours adds v to the "custom_limit_hours" field.
+func (u *GroupUpsertBulk) AddCustomLimitHours(v int) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddCustomLimitHours(v)
+	})
+}
+
+// UpdateCustomLimitHours sets the "custom_limit_hours" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateCustomLimitHours() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateCustomLimitHours()
+	})
+}
+
+// SetCustomLimitUsd sets the "custom_limit_usd" field.
+func (u *GroupUpsertBulk) SetCustomLimitUsd(v float64) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetCustomLimitUsd(v)
+	})
+}
+
+// AddCustomLimitUsd adds v to the "custom_limit_usd" field.
+func (u *GroupUpsertBulk) AddCustomLimitUsd(v float64) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddCustomLimitUsd(v)
+	})
+}
+
+// UpdateCustomLimitUsd sets the "custom_limit_usd" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateCustomLimitUsd() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateCustomLimitUsd()
+	})
+}
+
+// ClearCustomLimitUsd clears the value of the "custom_limit_usd" field.
+func (u *GroupUpsertBulk) ClearCustomLimitUsd() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.ClearCustomLimitUsd()
 	})
 }
 

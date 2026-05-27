@@ -109,6 +109,96 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 		}
 	})
 
+	t.Run("standard_mode_maintenance_uses_pre_validation_snapshot", func(t *testing.T) {
+		cfg := &config.Config{RunMode: config.RunModeStandard}
+		cfg.SubscriptionMaintenance.WorkerCount = 1
+		cfg.SubscriptionMaintenance.QueueSize = 1
+
+		customLimit := 100.0
+		customGroup := &service.Group{
+			ID:                  43,
+			Name:                "custom-sub",
+			Status:              service.StatusActive,
+			Hydrated:            true,
+			SubscriptionType:    service.SubscriptionTypeSubscription,
+			CustomLimitHours:    1,
+			CustomLimitUSD:      &customLimit,
+			DefaultValidityDays: 7,
+		}
+		customAPIKey := &service.APIKey{
+			ID:      101,
+			UserID:  user.ID,
+			GroupID: &customGroup.ID,
+			Key:     "custom-test-key",
+			Status:  service.StatusActive,
+			User:    user,
+			Group:   customGroup,
+		}
+		customAPIKeyRepo := &stubApiKeyRepo{
+			getByKey: func(ctx context.Context, key string) (*service.APIKey, error) {
+				if key != customAPIKey.Key {
+					return nil, service.ErrAPIKeyNotFound
+				}
+				clone := *customAPIKey
+				return &clone, nil
+			},
+		}
+		apiKeyService := service.NewAPIKeyService(customAPIKeyRepo, nil, nil, nil, nil, nil, cfg)
+
+		now := time.Now()
+		customWindowStart := now.Add(-2 * time.Hour)
+		updatedAt := now.Add(-time.Minute)
+		sub := &service.UserSubscription{
+			ID:                56,
+			UserID:            user.ID,
+			GroupID:           customGroup.ID,
+			Status:            service.SubscriptionStatusActive,
+			StartsAt:          now.Add(-24 * time.Hour),
+			ExpiresAt:         now.Add(24 * time.Hour),
+			UpdatedAt:         updatedAt,
+			Group:             customGroup,
+			CustomWindowStart: &customWindowStart,
+			CustomUsageUSD:    95,
+		}
+		previousUsageCh := make(chan float64, 1)
+		expectedUpdatedAtCh := make(chan time.Time, 1)
+		subscriptionRepo := &stubUserSubscriptionRepo{
+			getActive: func(ctx context.Context, userID, groupID int64) (*service.UserSubscription, error) {
+				clone := *sub
+				return &clone, nil
+			},
+			updateStatus: func(ctx context.Context, subscriptionID int64, status string) error { return nil },
+			rollCustom: func(ctx context.Context, id int64, oldWindowStart, newWindowStart time.Time, previousUsage float64, expectedUpdatedAt time.Time) (bool, error) {
+				previousUsageCh <- previousUsage
+				expectedUpdatedAtCh <- expectedUpdatedAt
+				return true, nil
+			},
+		}
+		subscriptionService := service.NewSubscriptionService(nil, subscriptionRepo, nil, nil, cfg)
+		t.Cleanup(subscriptionService.Stop)
+
+		router := newAuthTestRouter(apiKeyService, subscriptionService, cfg)
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/t", nil)
+		req.Header.Set("x-api-key", customAPIKey.Key)
+		router.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		select {
+		case previousUsage := <-previousUsageCh:
+			require.Equal(t, 95.0, previousUsage)
+		case <-time.After(time.Second):
+			t.Fatalf("expected custom window maintenance to be scheduled")
+		}
+		select {
+		case got := <-expectedUpdatedAtCh:
+			require.Equal(t, updatedAt, got)
+		case <-time.After(time.Second):
+			t.Fatalf("expected custom window maintenance expectedUpdatedAt")
+		}
+	})
+
 	t.Run("simple_mode_bypasses_quota_check", func(t *testing.T) {
 		cfg := &config.Config{RunMode: config.RunModeSimple}
 		apiKeyService := service.NewAPIKeyService(apiKeyRepo, nil, nil, nil, nil, nil, cfg)
@@ -807,6 +897,8 @@ type stubUserSubscriptionRepo struct {
 	resetDaily     func(ctx context.Context, id int64, start time.Time) error
 	resetWeekly    func(ctx context.Context, id int64, start time.Time) error
 	resetMonthly   func(ctx context.Context, id int64, start time.Time) error
+	resetCustom    func(ctx context.Context, id int64, start time.Time) error
+	rollCustom     func(ctx context.Context, id int64, oldWindowStart, newWindowStart time.Time, previousUsage float64, expectedUpdatedAt time.Time) (bool, error)
 }
 
 func (r *stubUserSubscriptionRepo) Create(ctx context.Context, sub *service.UserSubscription) error {
@@ -897,6 +989,20 @@ func (r *stubUserSubscriptionRepo) ResetMonthlyUsage(ctx context.Context, id int
 		return r.resetMonthly(ctx, id, newWindowStart)
 	}
 	return errors.New("not implemented")
+}
+
+func (r *stubUserSubscriptionRepo) ResetCustomUsage(ctx context.Context, id int64, newWindowStart time.Time) error {
+	if r.resetCustom != nil {
+		return r.resetCustom(ctx, id, newWindowStart)
+	}
+	return errors.New("not implemented")
+}
+
+func (r *stubUserSubscriptionRepo) RollCustomUsageWindow(ctx context.Context, id int64, oldWindowStart, newWindowStart time.Time, previousUsage float64, expectedUpdatedAt time.Time) (bool, error) {
+	if r.rollCustom != nil {
+		return r.rollCustom(ctx, id, oldWindowStart, newWindowStart, previousUsage, expectedUpdatedAt)
+	}
+	return false, errors.New("not implemented")
 }
 
 func (r *stubUserSubscriptionRepo) IncrementUsage(ctx context.Context, id int64, costUSD float64) error {

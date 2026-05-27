@@ -22,6 +22,15 @@ type billingCacheUserGroupRateRepoStub struct {
 	rate *float64
 }
 
+type billingSubscriptionCacheStub struct {
+	billingCacheWorkerStub
+	data *SubscriptionCacheData
+}
+
+func (b *billingSubscriptionCacheStub) GetSubscriptionCache(ctx context.Context, userID, groupID int64) (*SubscriptionCacheData, error) {
+	return b.data, nil
+}
+
 type billingRateLimitResetRepoStub struct {
 	APIKeyRepository
 	calls   atomic.Int64
@@ -184,6 +193,76 @@ func TestBillingCacheServiceCheckBillingEligibility_FreeUserRateSkipsBalanceChec
 		"",
 	)
 	require.NoError(t, err)
+}
+
+func TestBillingCacheServiceCheckBillingEligibility_AllowsStaleCustomCacheWhenWindowExpired(t *testing.T) {
+	now := time.Now()
+	customLimit := 100.0
+	customStart := now.Add(-73 * time.Hour)
+	cache := &billingSubscriptionCacheStub{
+		data: &SubscriptionCacheData{
+			Status:      SubscriptionStatusActive,
+			ExpiresAt:   now.Add(24 * time.Hour),
+			CustomUsage: 100,
+		},
+	}
+	svc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, &config.Config{}, nil)
+	t.Cleanup(svc.Stop)
+
+	err := svc.CheckBillingEligibility(
+		context.Background(),
+		&User{ID: 1},
+		&APIKey{},
+		&Group{
+			ID:               2,
+			SubscriptionType: SubscriptionTypeSubscription,
+			CustomLimitHours: 72,
+			CustomLimitUSD:   &customLimit,
+		},
+		&UserSubscription{
+			Status:            SubscriptionStatusActive,
+			ExpiresAt:         now.Add(24 * time.Hour),
+			CustomWindowStart: &customStart,
+			CustomUsageUSD:    100,
+		},
+		"",
+	)
+	require.NoError(t, err)
+}
+
+func TestBillingCacheServiceCheckBillingEligibility_BlocksActiveCustomLimit(t *testing.T) {
+	now := time.Now()
+	customLimit := 100.0
+	customStart := now.Add(-2 * time.Hour)
+	cache := &billingSubscriptionCacheStub{
+		data: &SubscriptionCacheData{
+			Status:      SubscriptionStatusActive,
+			ExpiresAt:   now.Add(24 * time.Hour),
+			CustomUsage: 100,
+		},
+	}
+	svc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, &config.Config{}, nil)
+	t.Cleanup(svc.Stop)
+
+	err := svc.CheckBillingEligibility(
+		context.Background(),
+		&User{ID: 1},
+		&APIKey{},
+		&Group{
+			ID:               2,
+			SubscriptionType: SubscriptionTypeSubscription,
+			CustomLimitHours: 72,
+			CustomLimitUSD:   &customLimit,
+		},
+		&UserSubscription{
+			Status:            SubscriptionStatusActive,
+			ExpiresAt:         now.Add(24 * time.Hour),
+			CustomWindowStart: &customStart,
+			CustomUsageUSD:    100,
+		},
+		"",
+	)
+	require.ErrorIs(t, err, ErrCustomLimitExceeded)
 }
 
 func TestBillingCacheServiceRateLimitReset_DeduplicatesConcurrentExpiredWindow(t *testing.T) {
