@@ -498,6 +498,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
 		requestPayloadHash := service.HashUsageRequestPayload(body)
+		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 		compat := compatibilityLogFields(c)
 		if upstreamEndpoint == "" {
 			upstreamEndpoint = GetUpstreamEndpoint(c, account.Platform)
@@ -521,6 +522,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				FallbackChain:      compat.FallbackChain,
 				UpstreamTransport:  compat.UpstreamTransport,
 				APIKeyService:      h.apiKeyService,
+				QuotaPlatform:      quotaPlatform,
 				ChannelUsageFields: channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
 			}); err != nil {
 				logger.L().With(
@@ -947,6 +949,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
 		requestPayloadHash := service.HashUsageRequestPayload(body)
+		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 		compat := compatibilityLogFields(c)
 		if upstreamEndpoint == "" {
 			upstreamEndpoint = GetUpstreamEndpoint(c, account.Platform)
@@ -969,6 +972,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 				FallbackChain:      compat.FallbackChain,
 				UpstreamTransport:  compat.UpstreamTransport,
 				APIKeyService:      h.apiKeyService,
+				QuotaPlatform:      quotaPlatform,
 				ChannelUsageFields: channelMappingMsg.ToUsageFields(reqModel, result.UpstreamModel),
 			}); err != nil {
 				logger.L().With(
@@ -1522,6 +1526,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, true, result.FirstTokenMs)
 			inboundEndpoint := GetInboundEndpoint(c)
 			upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
+			quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
+			compat := compatibilityLogFields(c)
 			h.submitOpenAIUsageRecordTask(result, func(taskCtx context.Context) {
 				if err := h.gatewayService.RecordUsage(taskCtx, &service.OpenAIRecordUsageInput{
 					Result:             result,
@@ -1534,11 +1540,12 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					UserAgent:          userAgent,
 					IPAddress:          clientIP,
 					RequestPayloadHash: service.HashUsageRequestPayload(firstMessage),
-					ClientProfile:      compatibilityLogFields(c).ClientProfile,
-					CompatibilityRoute: compatibilityLogFields(c).CompatibilityRoute,
-					FallbackChain:      compatibilityLogFields(c).FallbackChain,
-					UpstreamTransport:  compatibilityLogFields(c).UpstreamTransport,
+					ClientProfile:      compat.ClientProfile,
+					CompatibilityRoute: compat.CompatibilityRoute,
+					FallbackChain:      compat.FallbackChain,
+					UpstreamTransport:  compat.UpstreamTransport,
 					APIKeyService:      h.apiKeyService,
+					QuotaPlatform:      quotaPlatform,
 					ChannelUsageFields: channelMappingWS.ToUsageFields(reqModel, result.UpstreamModel),
 				}); err != nil {
 					reqLog.Error("openai.websocket_record_usage_failed",

@@ -284,6 +284,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
+		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 		compat := compatibilityLogFields(c)
 		if upstreamEndpoint == "" {
 			upstreamEndpoint = resolveRawCCUpstreamEndpoint(c, account)
@@ -305,6 +306,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 				FallbackChain:      compat.FallbackChain,
 				UpstreamTransport:  compat.UpstreamTransport,
 				APIKeyService:      h.apiKeyService,
+				QuotaPlatform:      quotaPlatform,
 				ChannelUsageFields: channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
 			}); err != nil {
 				logger.L().With(

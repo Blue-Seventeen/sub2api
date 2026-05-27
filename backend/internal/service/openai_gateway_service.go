@@ -5491,6 +5491,7 @@ type OpenAIRecordUsageInput struct {
 	IPAddress          string // 请求的客户端 IP 地址
 	RequestPayloadHash string
 	APIKeyService      APIKeyQuotaUpdater
+	QuotaPlatform      string
 	ClientProfile      string
 	CompatibilityRoute string
 	FallbackChain      string
@@ -5722,6 +5723,10 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}
 
 	billingErr := func() error {
+		quotaPlatform := strings.TrimSpace(input.QuotaPlatform)
+		if quotaPlatform == "" {
+			quotaPlatform = PlatformFromAPIKey(apiKey)
+		}
 		_, err := applyUsageBilling(ctx, requestID, usageLog, &postUsageBillingParams{
 			Cost:                  cost,
 			User:                  user,
@@ -5732,7 +5737,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 			IsSubscriptionBill:    isSubscriptionBilling,
 			AccountRateMultiplier: accountRateMultiplier,
 			APIKeyService:         input.APIKeyService,
-			Platform:              PlatformFromAPIKey(apiKey),
+			Platform:              quotaPlatform,
 		}, s.billingDeps(), s.usageBillingRepo)
 		return err
 	}()

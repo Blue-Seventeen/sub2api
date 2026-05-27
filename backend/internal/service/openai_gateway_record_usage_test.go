@@ -112,6 +112,30 @@ func (s *openAIRecordUsageAPIKeyQuotaStub) UpdateRateLimitUsage(ctx context.Cont
 	return s.err
 }
 
+type openAIRecordUsagePlatformQuotaRepoStub struct {
+	UserPlatformQuotaRepository
+
+	ch           chan string
+	incrCalls    int
+	lastUserID   int64
+	lastPlatform string
+	lastCost     float64
+}
+
+func (s *openAIRecordUsagePlatformQuotaRepoStub) IncrementUsageWithReset(ctx context.Context, userID int64, platform string, cost float64, now time.Time) error {
+	s.incrCalls++
+	s.lastUserID = userID
+	s.lastPlatform = platform
+	s.lastCost = cost
+	if s.ch != nil {
+		select {
+		case s.ch <- platform:
+		default:
+		}
+	}
+	return nil
+}
+
 type openAIUserGroupRateRepoStub struct {
 	UserGroupRateRepository
 
@@ -173,6 +197,83 @@ func newOpenAIRecordUsageServiceWithBillingRepoForTest(usageRepo UsageLogReposit
 	svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, subRepo, rateRepo)
 	svc.usageBillingRepo = billingRepo
 	return svc
+}
+
+func TestOpenAIGatewayServiceRecordUsage_UsesQuotaPlatformForUserPlatformQuota(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
+	quotaRepo := &openAIRecordUsagePlatformQuotaRepoStub{ch: make(chan string, 1)}
+	svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(
+		usageRepo,
+		billingRepo,
+		&openAIRecordUsageUserRepoStub{},
+		&openAIRecordUsageSubRepoStub{},
+		nil,
+	)
+	svc.userPlatformQuotaRepo = quotaRepo
+
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID: "resp_quota_platform_override",
+			Usage:     OpenAIUsage{InputTokens: 10, OutputTokens: 6},
+			Model:     "gpt-5.1",
+			Duration:  time.Second,
+		},
+		APIKey: &APIKey{
+			ID:      10060,
+			GroupID: i64p(11),
+			Group:   &Group{ID: 11, Platform: PlatformOpenAI, RateMultiplier: 1},
+		},
+		User:          &User{ID: 20060},
+		Account:       &Account{ID: 30060, Type: AccountTypeAPIKey},
+		QuotaPlatform: PlatformAntigravity,
+	})
+	require.NoError(t, err)
+
+	select {
+	case got := <-quotaRepo.ch:
+		require.Equal(t, PlatformAntigravity, got)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for user platform quota increment")
+	}
+}
+
+func TestOpenAIGatewayServiceRecordUsage_QuotaPlatformFallbackUsesAPIKeyGroup(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
+	quotaRepo := &openAIRecordUsagePlatformQuotaRepoStub{ch: make(chan string, 1)}
+	svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(
+		usageRepo,
+		billingRepo,
+		&openAIRecordUsageUserRepoStub{},
+		&openAIRecordUsageSubRepoStub{},
+		nil,
+	)
+	svc.userPlatformQuotaRepo = quotaRepo
+
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID: "resp_quota_platform_fallback",
+			Usage:     OpenAIUsage{InputTokens: 8, OutputTokens: 4},
+			Model:     "gpt-5.1",
+			Duration:  time.Second,
+		},
+		APIKey: &APIKey{
+			ID:      10061,
+			GroupID: i64p(12),
+			Group:   &Group{ID: 12, Platform: PlatformOpenAI, RateMultiplier: 1},
+		},
+		User:    &User{ID: 20061},
+		Account: &Account{ID: 30061, Type: AccountTypeAPIKey},
+	})
+	require.NoError(t, err)
+
+	select {
+	case got := <-quotaRepo.ch:
+		require.Equal(t, PlatformOpenAI, got)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for user platform quota increment")
+	}
 }
 
 func expectedOpenAICost(t *testing.T, svc *OpenAIGatewayService, model string, usage OpenAIUsage, multiplier float64) *CostBreakdown {

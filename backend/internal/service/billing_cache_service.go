@@ -25,6 +25,7 @@ var errBillingCacheUnavailable = fmt.Errorf("billing cache unavailable")
 var (
 	ErrSubscriptionInvalid       = infraerrors.Forbidden("SUBSCRIPTION_INVALID", "subscription is invalid or expired")
 	ErrBillingServiceUnavailable = infraerrors.ServiceUnavailable("BILLING_SERVICE_ERROR", "Billing service temporarily unavailable. Please retry later.")
+	ErrBillingUserInvalid        = infraerrors.Forbidden("BILLING_USER_INVALID", "billing user is invalid")
 	// RPM 超限错误。gateway_handler 负责映射为 HTTP 429。
 	ErrGroupRPMExceeded = infraerrors.TooManyRequests("GROUP_RPM_EXCEEDED", "group requests-per-minute limit exceeded")
 	ErrUserRPMExceeded  = infraerrors.TooManyRequests("USER_RPM_EXCEEDED", "user requests-per-minute limit exceeded")
@@ -745,6 +746,9 @@ func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user 
 	if user != nil {
 		userID = user.ID
 	}
+	if !isSubscriptionMode && userID <= 0 {
+		return ErrBillingUserInvalid
+	}
 	effectiveMultiplier := s.resolveEffectiveGroupRateMultiplier(ctx, userID, group)
 
 	if isSubscriptionMode {
@@ -761,7 +765,7 @@ func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user 
 
 	// user × platform quota 仅在 standard（余额）模式生效；订阅模式豁免
 	if !isSubscriptionMode {
-		if err := s.checkUserPlatformQuotaEligibility(ctx, user.ID, platform); err != nil {
+		if err := s.checkUserPlatformQuotaEligibility(ctx, userID, platform); err != nil {
 			return err
 		}
 	}

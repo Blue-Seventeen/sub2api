@@ -317,6 +317,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
 		requestPayloadHash := service.HashUsageRequestPayload(body)
+		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 		if parsed.Multipart {
 			requestPayloadHash = service.HashUsageRequestPayload([]byte(parsed.StickySessionSeed()))
 		}
@@ -346,6 +347,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 				FallbackChain:      compat.FallbackChain,
 				UpstreamTransport:  compat.UpstreamTransport,
 				APIKeyService:      h.apiKeyService,
+				QuotaPlatform:      quotaPlatform,
 				ChannelUsageFields: channelMapping.ToUsageFields(parsed.Model, upstreamModel),
 			}); err != nil {
 				logger.L().With(
