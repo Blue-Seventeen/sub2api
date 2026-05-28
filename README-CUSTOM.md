@@ -18,7 +18,7 @@
 | 项目 | 当前约定 |
 |---|---|
 | 当前主线 | `dev` |
-| 当前 upstream 基线 | 已同步到 `v0.1.124`，`backend/cmd/server/VERSION` 已对齐 `0.1.124` |
+| 当前 upstream 基线 | 已同步到 `v0.1.132`，`backend/cmd/server/VERSION` 已对齐 `0.1.132` |
 | 早期 fork 保护基线 | `2b72deb8fd45dc3a526bda2299b16df8d471107c` |
 | 部署策略 | `dev` 是真实可部署主线；`sub2api-custom-localtest` 仅用于本地测试 |
 | 架构原则 | 保留 Sub2API 的 Account / Group / Channel / 调度 / sticky / failover / billing，渐进吸收协议优先兼容内核 |
@@ -779,3 +779,16 @@ Protect files:
 - `/admin/proxies` 仍以本 fork 为准；v0.1.131 合并不得改写代理 CRUD、托管订阅拆分、mihomo runtime、stats、active usage、sticky、auto-probe 或 gateway 代理解析链路。
 - 已同步 upstream 部署配置与赞助商资源更新时，必须保留本 fork 的 managed proxy/mihomo、图片并发、Docker tag 和本地部署配置；资源类图片可随 upstream 更新，但不能引入新的业务入口覆盖现有菜单。
 - 发布前至少验证：`go test ./internal/config ./internal/service ./internal/repository ./internal/handler ./internal/handler/admin ./internal/server ./cmd/server -count=1`、`go test ./internal/pkg/apicompat ./internal/pkg/openai_compat ./internal/service -run "Test.*(OpenAI|Compatible|Gateway|Image|Proxy|Sticky|Usage|Billing)" -count=1`、`go test ./internal/service -run "TestProxyAutoProbe|TestProxyActiveUsage|TestProxyStats|TestProxySticky|TestManagedProxy" -count=1`、`npm run typecheck`、`npm run build`、`git diff --check`。
+
+## 16. v0.1.132 升级兼容说明
+
+- 当前 `codex/sync-v0.1.132` 以 `codex/sync-v0.1.131` 为基线合入 upstream `v0.1.132`，`v0.1.132` tag 已是当前分支祖先；后续不得回退 v0.1.131 已保留的 Promotion、CompatibleGateway、usage fallback、统一倍率、AccountAutoOps、订阅管理和 `/admin/proxies` 自定义体系。
+- 已吸收 upstream 分组自定义 `/v1/models` 模型列表：新增 `models_list_config` 字段、管理端配置入口和 API key auth snapshot 版本刷新；该能力只影响模型列表展示，不得改变实际账号调度、模型映射、计费倍率或 compatible fallback 语义。
+- 已吸收 upstream 账号池同账号重试状态码配置；未配置时必须继续回退默认 `[401,403,429]`，不得让该配置覆盖现有 failover、sticky、auto-probe 或代理粘性选择规则。
+- 已吸收 upstream OpenAI WS rate-limit failover、API Key Responses SSE fallback、Chat Responses usage billing 保留、模型 404 按账号+模型冷却、Antigravity `message_start.input_tokens`、Bedrock `context_management` 清理和 Ops local business-limit 分类；这些属于错误处理、计费准确性和观测分类优化，不得引入成功热路径同步 DB/Redis 等待。
+- 已吸收 upstream 长上下文 `cache_read` / `cache_creation` 倍率计费修复；这是计费准确性修复，不得改回未乘倍率，也不得覆盖本 fork 的 `QuotaPlatform`、`ClientProfile`、`CompatibilityRoute`、`FallbackChain`、`ChannelUsageFields` usage 写入字段。
+- upstream Affiliate 仍不吸收；本 fork 继续以自研 Promotion 作为唯一推广返佣体系，只允许保留必要兼容 shim，不允许恢复 upstream Affiliate 页面、路由、转账 API、repository/service 或 migration。
+- `/admin/proxies` 仍以本 fork 为准；v0.1.132 合并不得改写代理 CRUD、Clash/mihomo 托管订阅、订阅节点拆分、proxy stats、active usage、sticky、auto-probe、自动检测增量刷新或 gateway 代理解析链路。
+- 订阅管理仍以本 fork 为准；v0.1.132 合并不得回退兑换时刻滚动窗口、自定义小时限额、`starts_at` 排序、开始时间列、秒级时间展示、列设置持久化或相关迁移。
+- `backend/cmd/server/VERSION` 在本 fork 中主动对齐为 `0.1.132`；后续同步时如 upstream tag 内 VERSION 落后于 tag 号，应由维护者确认是否继续按本 fork 发布版本号手动对齐。
+- 发布前至少验证：`go test ./internal/service -run "Test.*(OpenAI|WS|Pool|ModelNotFound|Billing|Proxy|Sticky|Usage|RateLimit|Compatible|Subscription|Group)" -count=1`、`go test ./internal/handler ./internal/handler/admin ./internal/server -run "Test.*(OpenAI|Gateway|Proxy|Subscription|Account|Group|Ops|Models)" -count=1`、`go test ./internal/repository ./internal/pkg/apicompat ./cmd/server -count=1`、`npm run typecheck`、`npm run build`、`git diff --check`。
