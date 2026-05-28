@@ -39,6 +39,7 @@
 | 推广中心 | 自研 Promotion / 推广中心 / 推广后台 / 返佣统计 | 替代 upstream Affiliate，不可被覆盖 | `backend/internal/service/*promotion*`, `frontend/src/views/**/Promotion*.vue` |
 | 自动运维 | 账号自动刷新、测试、恢复、删除、规则筛选 | 维护账号池稳定性 | `account_auto_ops*`, `proxy_auto_probe*` |
 | 代理池 | 代理检测、成功队列、账号选择最优代理 | 提升上游请求成功率 | `proxy_*`, `account_proxy*`, `frontend` 代理管理页 |
+| 订阅管理 | 兑换时刻滚动窗口、自定义小时限额、开始时间列、秒级时间展示、`starts_at` 排序与列设置持久化 | 订阅额度语义必须跟随兑换/续费生效时刻，且不能因长时间字段影响表格布局或中转链路 | `backend/internal/service/subscription_service.go`, `backend/internal/service/user_subscription.go`, `backend/internal/repository/user_subscription_repo.go`, `backend/migrations/145_subscription_windows_anchor_to_starts_at.sql`, `backend/migrations/146_subscription_custom_hour_limit.sql`, `frontend/src/views/admin/SubscriptionsView.vue`, `frontend/src/views/admin/GroupsView.vue`, `frontend/src/views/user/SubscriptionsView.vue`, `frontend/src/views/user/PaymentView.vue` |
 | 设置增强 | 站点 Logo、自定义菜单、外链新页面打开、邀请码注册 HTML 提示 | 属于运营配置能力 | `setting_service.go`, `SettingsView.vue`, `AppSidebar.vue` |
 | 分组平台搜索 | `/admin/groups` 创建分组平台选择增加与账号表单一致的模糊搜索 | 纯前端交互增强，不改变分组保存、调度、计费或平台语义 | `frontend/src/views/admin/GroupsView.vue` |
 | 多机部署 | 定时备份本机开关 | 多机共库时由每台服务器本地文件决定是否执行定时备份，默认关闭 | `backup_service.go`, `backup_service_schedule_local_test.go` |
@@ -269,6 +270,17 @@ upstream 的 Affiliate / 邀请返利模块属于冗余功能，后续同步 ups
 - `frontend/src/api/admin/proxies.ts`
 - `frontend/src/utils/proxyBatchInput.ts`
 - `frontend/src/components/admin/proxy/ImportDataModal.vue`
+- `backend/internal/service/subscription_service.go`
+- `backend/internal/service/user_subscription.go`
+- `backend/internal/repository/user_subscription_repo.go`
+- `backend/migrations/145_subscription_windows_anchor_to_starts_at.sql`
+- `backend/migrations/146_subscription_custom_hour_limit.sql`
+- `frontend/src/views/admin/SubscriptionsView.vue`
+- `frontend/src/views/admin/GroupsView.vue`
+- `frontend/src/views/user/SubscriptionsView.vue`
+- `frontend/src/views/user/PaymentView.vue`
+- `frontend/src/components/payment/SubscriptionPlanCard.vue`
+- `frontend/src/views/KeyUsageView.vue`
 - `backend/internal/service/channel_monitor_*`
 - `backend/internal/service/channel_available.go`
 - `backend/internal/repository/channel_monitor_*`
@@ -758,6 +770,7 @@ Protect files:
 ## 15. v0.1.131 升级兼容说明
 
 - 当前 `codex/sync-v0.1.131` 以 `codex/sync-v0.1.130` 为基线合入 upstream `v0.1.131`，不应回退 v0.1.130 已保留的 Promotion、CompatibleGateway、usage fallback、统一倍率、AccountAutoOps、备份、本机货币符号和 `/admin/proxies` 自定义体系。
+- 订阅管理继续以本 fork 为准；v0.1.131 合并不得回退兑换时刻滚动窗口、自定义小时限额、`starts_at` 排序、开始时间列、秒级时间展示、列设置持久化或相关迁移。
 - 已吸收 upstream 用户按平台余额限额能力：新增 `user_platform_quotas` ent schema、repository/service/handler、管理端用户平台限额弹窗、用户侧平台配额展示和默认平台限额设置；迁移编号在本 fork 中使用 `144_user_platform_quotas.sql`，避免与本地 142/143 兼容迁移冲突。
 - 用户按平台余额限额只约束余额标准模式下的上游平台消费窗口（日/周/月），不得替代现有订阅额度、分组倍率、渠道定价、统一倍率或真实余额/显示余额语义；平台限额失败也不得改变 usage log 已有字段含义。
 - 已吸收 upstream 风控阈值扩展：`/admin/risk-control` 可配置 Moderations 分类阈值；风控仍受现有 `risk_control_enabled` 开关控制，默认关闭时不得读取/记录请求体或影响中转热路径。
