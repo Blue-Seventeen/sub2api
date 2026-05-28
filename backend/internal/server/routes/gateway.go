@@ -57,6 +57,7 @@ func RegisterGatewayRoutes(
 		gateway.POST("/messages/count_tokens", func(c *gin.Context) {
 			switch getGroupPlatform(c) {
 			case service.PlatformOpenAI:
+				service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 				c.JSON(http.StatusNotFound, gin.H{
 					"type": "error",
 					"error": gin.H{
@@ -126,6 +127,7 @@ func RegisterGatewayRoutes(
 				h.OpenAIGateway.Images(c)
 				return
 			}
+			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 			writeImagesUnsupported(c)
 		})
 		gateway.POST("/images/edits", func(c *gin.Context) {
@@ -133,6 +135,7 @@ func RegisterGatewayRoutes(
 				h.OpenAIGateway.Images(c)
 				return
 			}
+			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 			writeImagesUnsupported(c)
 		})
 		gateway.POST("/audio/*subpath", h.NewAPIStyleGateway.Audio)
@@ -204,6 +207,7 @@ func RegisterGatewayRoutes(
 			h.OpenAIGateway.Images(c)
 			return
 		}
+		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 		writeImagesUnsupported(c)
 	})
 	r.POST("/images/edits", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, func(c *gin.Context) {
@@ -211,6 +215,7 @@ func RegisterGatewayRoutes(
 			h.OpenAIGateway.Images(c)
 			return
 		}
+		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 		writeImagesUnsupported(c)
 	})
 	newAPIOnly := []gin.HandlerFunc{bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic}

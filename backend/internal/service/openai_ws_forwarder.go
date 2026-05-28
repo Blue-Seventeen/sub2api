@@ -2643,7 +2643,18 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", policyErr)
 		}
 		if blocked != nil {
-			if eventBytes := buildOpenAIFastPolicyBlockedWSEvent(blocked); eventBytes != nil {
+			MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
+			// Send a Realtime-style error event to the client first, then
+			// signal the handler to close the connection with PolicyViolation.
+			// We intentionally do NOT forward this frame upstream.
+			//
+			// coder/websocket@v1.8.14 Conn.Write is synchronous and flushes
+			// the underlying bufio writer before returning (write.go:42 →
+			// 307-311), and the subsequent close handshake re-acquires the
+			// same writeFrameMu, so the error event is guaranteed to reach
+			// the kernel send buffer before any close frame is queued.
+			eventBytes := buildOpenAIFastPolicyBlockedWSEvent(blocked)
+			if eventBytes != nil {
 				writeCtx, cancelWrite := context.WithTimeout(ctx, s.openAIWSWriteTimeout())
 				_ = clientConn.Write(writeCtx, coderws.MessageText, eventBytes)
 				cancelWrite()
@@ -2795,6 +2806,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			var dialErr *openAIWSDialError
 			if errors.As(acquireErr, &dialErr) && dialErr != nil && dialErr.StatusCode == http.StatusTooManyRequests {
 				s.persistOpenAIWSRateLimitSignal(ctx, account, dialErr.ResponseHeaders, nil, "rate_limit_exceeded", "rate_limit_error", strings.TrimSpace(acquireErr.Error()))
+				return nil, &UpstreamFailoverError{
+					StatusCode:      http.StatusTooManyRequests,
+					ResponseHeaders: cloneHeader(dialErr.ResponseHeaders),
+				}
 			}
 			if errors.Is(acquireErr, errOpenAIWSPreferredConnUnavailable) {
 				return nil, NewOpenAIWSClientCloseError(
@@ -2989,6 +3004,14 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 						errors.New(errMsg),
 						false,
 					)
+				}
+				if !wroteDownstream && isOpenAIWSRateLimitError(errCodeRaw, errTypeRaw, errMsgRaw) {
+					lease.MarkBroken()
+					return nil, &UpstreamFailoverError{
+						StatusCode:      http.StatusTooManyRequests,
+						ResponseBody:    append([]byte(nil), upstreamMessage...),
+						ResponseHeaders: cloneHeader(lease.HandshakeHeaders()),
+					}
 				}
 			}
 			isTokenEvent := isOpenAIWSTokenEvent(eventType)

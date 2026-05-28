@@ -225,6 +225,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		return fmt.Errorf("apply openai fast policy on first ws frame: %w", policyErr)
 	}
 	if blocked != nil {
+		MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
 		if eventBytes := buildOpenAIFastPolicyBlockedWSEvent(blocked); eventBytes != nil {
 			writeCtx, cancelWrite := context.WithTimeout(ctx, s.openAIWSWriteTimeout())
 			_ = clientConn.Write(writeCtx, coderws.MessageText, eventBytes)
@@ -259,16 +260,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	// omits "model" — Realtime clients are allowed to send response.create
 	// without re-stating the model, in which case the upstream uses the model
 	// negotiated at session.update time. Without this fallback, an empty
-	// model would miss the default ["gpt-5.5","gpt-5.5*"] whitelist and be
-	// silently passed through, defeating the policy on every frame after
-	// the first.
-	// coder/websocket@v1.8.14 Conn.Write is synchronous: it acquires
-	// writeFrameMu, writes the entire frame, and Flushes the underlying
-	// bufio writer before returning (write.go:42 → write.go:307-311).
-	// The subsequent close handshake re-acquires the same writeFrameMu
-	// to send the close frame, so the error event is guaranteed to
-	// reach the kernel send buffer before any close frame is queued.
-	// No explicit flush hop is required here.
+	// model would miss any admin-configured model whitelist and be silently
+	// passed through, defeating that policy on every frame after the first.
 	// 在 policy filter 之后再提取 service_tier / reasoning_effort 用于
 	// usage 上报：filter
 	// 命中时 service_tier 已经从 firstClientMessage 中删除，billing 应当
@@ -330,6 +323,13 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			statusCode,
 			truncateOpenAIWSLogValue(err.Error(), openAIWSLogValueMaxLen),
 		)
+		if statusCode == http.StatusTooManyRequests {
+			s.persistOpenAIWSRateLimitSignal(ctx, account, handshakeHeaders, nil, "rate_limit_exceeded", "rate_limit_error", strings.TrimSpace(err.Error()))
+			return &UpstreamFailoverError{
+				StatusCode:      http.StatusTooManyRequests,
+				ResponseHeaders: cloneHeader(handshakeHeaders),
+			}
+		}
 		return s.mapOpenAIWSPassthroughDialError(err, statusCode, handshakeHeaders)
 	}
 	defer func() {
@@ -389,16 +389,60 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			}
 			return out, blocked, policyErr
 		},
+		onBlock: func(blocked *OpenAIFastBlockedError) {
+			MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
+			// See note above on Conn.Write being synchronous w.r.t. flush;
+			// no explicit flush is required to ensure the error event lands
+			// before the close frame.
+			eventBytes := buildOpenAIFastPolicyBlockedWSEvent(blocked)
+			if eventBytes == nil {
+				return
+			}
+			writeCtx, cancel := context.WithTimeout(ctx, s.openAIWSWriteTimeout())
+			_ = clientConn.Write(writeCtx, coderws.MessageText, eventBytes)
+			cancel()
+		},
 	}
+	upstreamFirstMessageSent := false
+	firstWriteCtx, cancelFirstWrite := context.WithTimeout(ctx, s.openAIWSWriteTimeout())
+	firstWriteErr := upstreamFrameConn.WriteFrame(firstWriteCtx, coderws.MessageText, firstClientMessage)
+	cancelFirstWrite()
+	if firstWriteErr != nil {
+		return wrapOpenAIWSIngressTurnError(
+			"write_upstream",
+			fmt.Errorf("write first upstream websocket request: %w", firstWriteErr),
+			false,
+		)
+	}
+	upstreamFirstMessageSent = true
+
+	readNextClientFrame := func(readCtx context.Context, conn openaiwsv2.FrameConn) (coderws.MessageType, []byte, error) {
+		for {
+			msgType, payload, readErr := conn.ReadFrame(readCtx)
+			if readErr != nil {
+				return msgType, payload, readErr
+			}
+			if msgType == coderws.MessageText && strings.TrimSpace(gjson.GetBytes(payload, "type").String()) == "response.create" {
+				return msgType, payload, nil
+			}
+			if writeErr := upstreamFrameConn.WriteFrame(readCtx, msgType, payload); writeErr != nil {
+				return msgType, payload, writeErr
+			}
+		}
+	}
+
 	relayResult, relayExit := openaiwsv2.RunEntry(openaiwsv2.EntryInput{
 		Ctx:                ctx,
 		ClientConn:         policyClientConn,
 		UpstreamConn:       upstreamFrameConn,
 		FirstClientMessage: firstClientMessage,
 		Options: openaiwsv2.RelayOptions{
-			WriteTimeout:     s.openAIWSWriteTimeout(),
-			IdleTimeout:      s.openAIWSPassthroughIdleTimeout(),
-			FirstMessageType: coderws.MessageText,
+			WriteTimeout:                    s.openAIWSWriteTimeout(),
+			IdleTimeout:                     s.openAIWSPassthroughIdleTimeout(),
+			FirstMessageType:                coderws.MessageText,
+			FirstMessageSent:                upstreamFirstMessageSent,
+			StartClientAfterFirstDownstream: true,
+			ReadClientFrame:                 readNextClientFrame,
 			OnUsageParseFailure: func(eventType string, usageRaw string) {
 				logOpenAIWSV2Passthrough(
 					"usage_parse_failed event_type=%s usage_raw=%s",
@@ -439,6 +483,31 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				)
 				if hooks != nil && hooks.AfterTurn != nil {
 					hooks.AfterTurn(turnNo, turnResult, nil)
+				}
+			},
+			BeforeWriteClient: func(msgType coderws.MessageType, payload []byte, wroteDownstream bool) error {
+				if msgType != coderws.MessageText || wroteDownstream {
+					return nil
+				}
+				if eventType, _, _ := parseOpenAIWSEventEnvelope(payload); eventType != "error" {
+					return nil
+				}
+				errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(payload)
+				if !isOpenAIWSRateLimitError(errCodeRaw, errTypeRaw, errMsgRaw) {
+					return nil
+				}
+				s.persistOpenAIWSRateLimitSignal(ctx, account, handshakeHeaders, payload, errCodeRaw, errTypeRaw, errMsgRaw)
+				logOpenAIWSV2Passthrough(
+					"relay_rate_limit_failover account_id=%d err_code=%s err_type=%s err_message=%s",
+					account.ID,
+					truncateOpenAIWSLogValue(errCodeRaw, openAIWSLogValueMaxLen),
+					truncateOpenAIWSLogValue(errTypeRaw, openAIWSLogValueMaxLen),
+					truncateOpenAIWSLogValue(errMsgRaw, openAIWSLogValueMaxLen),
+				)
+				return &UpstreamFailoverError{
+					StatusCode:      http.StatusTooManyRequests,
+					ResponseBody:    append([]byte(nil), payload...),
+					ResponseHeaders: cloneHeader(handshakeHeaders),
 				}
 			},
 			OnTrace: func(event openaiwsv2.RelayTraceEvent) {
