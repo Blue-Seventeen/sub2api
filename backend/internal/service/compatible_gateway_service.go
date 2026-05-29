@@ -278,6 +278,9 @@ func (s *CompatibleGatewayService) prepareRequest(account *Account, route Compat
 			if err != nil {
 				return nil, err
 			}
+			if account.Platform == PlatformMoonshot {
+				chatBody = normalizeMoonshotResponsesChatTextContent(chatBody)
+			}
 			prepared.UpstreamKind = compatibleUpstreamChat
 			prepared.UpstreamEndpoint = "/v1/chat/completions"
 			prepared.RequestBody = chatBody
@@ -827,6 +830,7 @@ func (s *CompatibleGatewayService) prepareMoonshotAnthropicMessagesChatFallbackR
 	if err != nil {
 		return nil, err
 	}
+	chatBody = prefixMoonshotAnthropicChatFallbackToolIDs(chatBody)
 	chatBody, err = patchMoonshotCompatibleChatBodyForAnthropicFallback(chatBody, account, upstreamModel)
 	if err != nil {
 		return nil, err

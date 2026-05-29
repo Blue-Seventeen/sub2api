@@ -24,7 +24,7 @@ services:
   # Sub2API Application
   # ===========================================================================
   sub2api:
-    image: ${SUB2API_IMAGE:-sub2api-custom:0.1.130}
+    image: ${SUB2API_IMAGE:-sub2api-custom:0.1.132}
     container_name: sub2api
     restart: unless-stopped
     ulimits:
@@ -193,6 +193,19 @@ services:
     volumes:
       # Local directory mapping for easy migration
       - ./postgres_data:/var/lib/postgresql/data
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -e
+        if [ ! -s "$$PGDATA/PG_VERSION" ] && [ -s "$$PGDATA/pgdata/PG_VERSION" ]; then
+          echo "Migrating PostgreSQL data directory from $$PGDATA/pgdata to $$PGDATA"
+          find "$$PGDATA/pgdata" -mindepth 1 -maxdepth 1 -exec mv {} "$$PGDATA"/ \;
+          rmdir "$$PGDATA/pgdata"
+        fi
+        exec docker-entrypoint.sh "$@"
+      - docker-entrypoint-sh
+    command: ["postgres"]
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-sub2api}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}

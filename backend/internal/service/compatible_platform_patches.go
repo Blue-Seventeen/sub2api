@@ -49,6 +49,109 @@ func patchMoonshotCompatibleMessagesBody(body []byte, account *Account, _ string
 	return body, nil
 }
 
+func normalizeMoonshotResponsesChatTextContent(body []byte) []byte {
+	if len(body) == 0 || !bytes.Contains(body, []byte(`"messages"`)) {
+		return body
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return body
+	}
+	messages, ok := payload["messages"].([]any)
+	if !ok || len(messages) == 0 {
+		return body
+	}
+
+	changed := false
+	for _, rawMsg := range messages {
+		msgMap, ok := rawMsg.(map[string]any)
+		if !ok {
+			continue
+		}
+		role, _ := msgMap["role"].(string)
+		if !strings.EqualFold(strings.TrimSpace(role), "user") {
+			continue
+		}
+		content, ok := msgMap["content"].(string)
+		if !ok {
+			continue
+		}
+		msgMap["content"] = []any{map[string]any{
+			"type": "text",
+			"text": content,
+		}}
+		changed = true
+	}
+	if !changed {
+		return body
+	}
+	updated, err := json.Marshal(payload)
+	if err != nil {
+		return body
+	}
+	return updated
+}
+
+func prefixMoonshotAnthropicChatFallbackToolIDs(body []byte) []byte {
+	if len(body) == 0 || !bytes.Contains(body, []byte(`"tool_calls"`)) {
+		return body
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return body
+	}
+	messages, ok := payload["messages"].([]any)
+	if !ok || len(messages) == 0 {
+		return body
+	}
+
+	changed := false
+	for _, rawMsg := range messages {
+		msgMap, ok := rawMsg.(map[string]any)
+		if !ok {
+			continue
+		}
+		if toolCalls, ok := msgMap["tool_calls"].([]any); ok {
+			for _, rawCall := range toolCalls {
+				callMap, ok := rawCall.(map[string]any)
+				if !ok {
+					continue
+				}
+				id, _ := callMap["id"].(string)
+				nextID := moonshotAnthropicChatFallbackToolID(id)
+				if nextID != "" && nextID != id {
+					callMap["id"] = nextID
+					changed = true
+				}
+			}
+		}
+		id, _ := msgMap["tool_call_id"].(string)
+		nextID := moonshotAnthropicChatFallbackToolID(id)
+		if nextID != "" && nextID != id {
+			msgMap["tool_call_id"] = nextID
+			changed = true
+		}
+	}
+	if !changed {
+		return body
+	}
+	updated, err := json.Marshal(payload)
+	if err != nil {
+		return body
+	}
+	return updated
+}
+
+func moonshotAnthropicChatFallbackToolID(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" || strings.HasPrefix(id, "fc_") {
+		return id
+	}
+	return "fc_" + id
+}
+
 func normalizeTopPForCompatibleBodyRaw(body []byte) []byte {
 	topP := gjson.GetBytes(body, "top_p")
 	if !topP.Exists() || topP.Type != gjson.Number {

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { getPaymentPopupFeatures, isolatePopupOpener, PROVIDER_CONFIG_FIELDS } from '@/components/payment/providerConfig'
+import {
+  getPaymentPopupFeatures,
+  isolatePopupOpener,
+  PAYMENT_CURRENCY_OPTIONS,
+  PROVIDER_CONFIG_FIELDS,
+} from '@/components/payment/providerConfig'
 
 function findField(providerKey: string, key: string) {
   const fields = PROVIDER_CONFIG_FIELDS[providerKey] || []
