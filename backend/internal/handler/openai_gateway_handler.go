@@ -205,11 +205,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		return
 	}
 
-	if decision := h.checkContentModeration(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, reqModel, body); decision != nil && decision.Blocked {
-		h.errorResponse(c, contentModerationStatus(decision), contentModerationErrorCode(decision), decision.Message)
-		return
-	}
-
 	imageIntent := service.IsImageGenerationIntent("/v1/responses", reqModel, body)
 	if imageIntent && !service.GroupAllowsImageGeneration(apiKey.Group) {
 		h.errorResponse(c, http.StatusForbidden, "permission_error", service.ImageGenerationPermissionMessage())
@@ -1604,10 +1599,17 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		}
 
 		proxyStart := time.Now()
-		if err := h.gatewayService.ProxyResponsesWebSocketFromClient(ctx, c, wsConn, account, token, wsFirstMessage, hooks); err != nil {
-			recordOpenAIProxyFailureStat(ctx, h.gatewayService, h.proxyStatsWorkerPool, account, apiKey, elapsedMillisSince(proxyStart), "handler.openai_gateway.websocket")
+		activeUsageHandle := beginProxyActiveUsage(h.proxyActiveUsageTracker, account)
+		proxyErr := func() (err error) {
+			defer endProxyActiveUsage(activeUsageHandle)
+			return h.gatewayService.ProxyResponsesWebSocketFromClient(ctx, c, wsConn, account, token, wsFirstMessage, hooks)
+		}()
+		if proxyErr != nil {
+			if shouldRecordOpenAIWSProxyFailureStat(proxyErr) {
+				recordOpenAIProxyFailureStat(ctx, h.gatewayService, h.proxyStatsWorkerPool, account, apiKey, elapsedMillisSince(proxyStart), "handler.openai_gateway.websocket")
+			}
 			var failoverErr *service.UpstreamFailoverError
-			if errors.As(err, &failoverErr) {
+			if errors.As(proxyErr, &failoverErr) {
 				h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
 				releaseAccountSlot()
 				failedAccountIDs[account.ID] = struct{}{}
@@ -1635,15 +1637,15 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			}
 
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
-			closeStatus, closeReason := summarizeWSCloseErrorForLog(err)
+			closeStatus, closeReason := summarizeWSCloseErrorForLog(proxyErr)
 			reqLog.Warn("openai.websocket_proxy_failed",
 				zap.Int64("account_id", account.ID),
-				zap.Error(err),
+				zap.Error(proxyErr),
 				zap.String("close_status", closeStatus),
 				zap.String("close_reason", closeReason),
 			)
 			var closeErr *service.OpenAIWSClientCloseError
-			if errors.As(err, &closeErr) {
+			if errors.As(proxyErr, &closeErr) {
 				closeOpenAIClientWS(wsConn, closeErr.StatusCode(), closeErr.Reason())
 				return
 			}
@@ -1840,11 +1842,7 @@ func (h *OpenAIGatewayHandler) submitUsageRecordTask(task service.UsageRecordTas
 }
 
 func (h *OpenAIGatewayHandler) submitOpenAIUsageRecordTask(result *service.OpenAIForwardResult, task service.UsageRecordTask) {
-	if result != nil && result.ImageCount > 0 {
-		h.submitMandatoryUsageRecordTask(task)
-		return
-	}
-	h.submitUsageRecordTask(task)
+	h.submitMandatoryUsageRecordTask(task)
 }
 
 func (h *OpenAIGatewayHandler) submitMandatoryUsageRecordTask(task service.UsageRecordTask) {
@@ -2140,4 +2138,22 @@ func summarizeWSCloseErrorForLog(err error) (string, string) {
 		}
 	}
 	return closeStatus, closeReason
+}
+
+func shouldRecordOpenAIWSProxyFailureStat(err error) bool {
+	if err == nil {
+		return false
+	}
+	var failoverErr *service.UpstreamFailoverError
+	if errors.As(err, &failoverErr) {
+		return true
+	}
+	var closeErr *service.OpenAIWSClientCloseError
+	if errors.As(err, &closeErr) {
+		return false
+	}
+	if strings.Contains(err.Error(), "read client websocket request") {
+		return false
+	}
+	return true
 }

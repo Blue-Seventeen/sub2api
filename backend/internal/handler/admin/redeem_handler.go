@@ -18,6 +18,18 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func safeCSVCell(value string) string {
+	if value == "" {
+		return value
+	}
+	switch value[0] {
+	case '=', '+', '-', '@', '\t', '\r', '\n':
+		return "'" + value
+	default:
+		return value
+	}
+}
+
 // RedeemHandler handles admin redeem code management
 type RedeemHandler struct {
 	adminService  service.AdminService
@@ -437,12 +449,12 @@ func (h *RedeemHandler) Export(c *gin.Context) {
 		}
 		if err := writer.Write([]string{
 			fmt.Sprintf("%d", code.ID),
-			code.Code,
-			code.Type,
+			safeCSVCell(code.Code),
+			safeCSVCell(code.Type),
 			fmt.Sprintf("%.2f", code.Value),
-			code.Status,
+			safeCSVCell(code.Status),
 			usedBy,
-			usedByEmail,
+			safeCSVCell(usedByEmail),
 			usedAt,
 			expiresAt,
 			code.CreatedAt.Format("2006-01-02 15:04:05"),

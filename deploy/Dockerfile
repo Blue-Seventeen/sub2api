@@ -22,8 +22,9 @@ FROM ${NODE_IMAGE} AS frontend-builder
 
 WORKDIR /app/frontend
 
-# Install pnpm
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# Install pnpm. Keep this pinned to match the root Dockerfile and avoid
+# behavior drift when pnpm changes install defaults.
+RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 
 # Install dependencies first (better caching)
 COPY frontend/package.json frontend/pnpm-lock.yaml ./

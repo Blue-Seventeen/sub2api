@@ -3457,6 +3457,16 @@ func (s *adminServiceImpl) UpdateProxySubscription(ctx context.Context, id int64
 		return nil, err
 	}
 	shouldSyncNodes := input.SubscriptionURL != "" && input.SubscriptionURL != sub.SubscriptionURL
+	var nodes []ProxySubscriptionNode
+	if shouldSyncNodes {
+		nodes, err = FetchProxySubscriptionNodes(ctx, input.SubscriptionURL)
+		if err != nil {
+			return nil, err
+		}
+		if err := prepareProxySubscriptionNodes(nodes); err != nil {
+			return nil, err
+		}
+	}
 	if input.Name != "" {
 		sub.Name = input.Name
 	}
@@ -3472,21 +3482,12 @@ func (s *adminServiceImpl) UpdateProxySubscription(ctx context.Context, id int64
 	if input.TestURL != "" {
 		sub.TestURL = input.TestURL
 	}
-	if err := s.proxySubRepo.Update(ctx, sub); err != nil {
-		return nil, err
-	}
 	if shouldSyncNodes {
-		nodes, err := FetchProxySubscriptionNodes(ctx, sub.SubscriptionURL)
-		if err != nil {
-			_ = s.proxySubRepo.SetLastError(ctx, id, sanitizeManagedProxyError(err))
+		if err := s.proxySubRepo.UpdateWithNodes(ctx, sub, nodes); err != nil {
 			return nil, err
 		}
-		if err := prepareProxySubscriptionNodes(nodes); err != nil {
-			return nil, err
-		}
-		if _, err := s.proxySubRepo.SyncNodes(ctx, id, nodes); err != nil {
-			return nil, err
-		}
+	} else if err := s.proxySubRepo.Update(ctx, sub); err != nil {
+		return nil, err
 	}
 	s.reloadManagedProxy(id)
 	return s.proxySubRepo.Get(ctx, id)
@@ -3530,7 +3531,7 @@ func (s *adminServiceImpl) RefreshProxySubscription(ctx context.Context, id int6
 	if s.proxySubRepo == nil {
 		return nil, ErrProxySubscriptionNotFound
 	}
-	sub, err := s.proxySubRepo.IncrementRevision(ctx, id)
+	sub, err := s.proxySubRepo.Get(ctx, id)
 	if err != nil {
 		return nil, err
 	}

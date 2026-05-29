@@ -645,52 +645,14 @@ func buildMihomoConfigYAML(sub ProxySubscription, opts managedProxyMihomoConfigO
 			HealthCheckURL:   healthURL,
 		})
 	}
-	cfg := map[string]any{
-		"allow-lan":                 false,
-		"bind-address":              bindHost,
-		"external-controller":       net.JoinHostPort(bindHost, strconv.Itoa(controllerPort)),
-		"global-client-fingerprint": "chrome",
-		"log-level":                 "warning",
-		"mixed-port":                opts.MixedPort,
-		"mode":                      "rule",
-		"secret":                    secret,
-		"profile": map[string]any{
-			"store-selected": false,
-			"store-fake-ip":  false,
-		},
-		"proxy-providers": map[string]any{
-			managedProxyProviderName: map[string]any{
-				"type":     "http",
-				"url":      sub.SubscriptionURL,
-				"path":     "./providers/subscription.yaml",
-				"interval": sub.RefreshIntervalSec,
-				"health-check": map[string]any{
-					"enable":   true,
-					"url":      healthURL,
-					"interval": sub.RefreshIntervalSec,
-				},
-			},
-		},
-		"proxy-groups": []map[string]any{
-			{
-				"name":     managedProxyGroupName,
-				"type":     "url-test",
-				"use":      []string{managedProxyProviderName},
-				"url":      healthURL,
-				"interval": sub.RefreshIntervalSec,
-			},
-		},
-		"rules": []string{
-			"MATCH," + managedProxyGroupName,
-		},
-	}
-	return yaml.Marshal(cfg)
+	return nil, fmt.Errorf("managed proxy subscription %d has no active nodes; refresh the subscription before starting runtime", sub.ID)
 }
 
 func buildMihomoNodeConfigYAML(sub ProxySubscription, opts managedProxyMihomoConfigOptions) ([]byte, error) {
 	users := make([]map[string]any, 0, len(sub.Nodes))
 	proxies := make([]map[string]any, 0, len(sub.Nodes))
 	rules := make([]string, 0, len(sub.Nodes)+1)
+	hosts := make(map[string]any)
 	for _, node := range sub.Nodes {
 		if node.Status != "" && node.Status != ProxySubscriptionNodeStatusActive {
 			continue
@@ -700,6 +662,9 @@ func buildMihomoNodeConfigYAML(sub ProxySubscription, opts managedProxyMihomoCon
 		}
 		proxyConfig, err := managedProxyNodeRawConfig(node)
 		if err != nil {
+			return nil, err
+		}
+		if err := addManagedProxyPinnedHost(hosts, proxyConfig); err != nil {
 			return nil, err
 		}
 		users = append(users, map[string]any{
@@ -737,7 +702,32 @@ func buildMihomoNodeConfigYAML(sub ProxySubscription, opts managedProxyMihomoCon
 		"proxies": proxies,
 		"rules":   rules,
 	}
+	if len(hosts) > 0 {
+		cfg["hosts"] = hosts
+	}
 	return yaml.Marshal(cfg)
+}
+
+func addManagedProxyPinnedHost(hosts map[string]any, raw map[string]any) error {
+	if hosts == nil || raw == nil {
+		return nil
+	}
+	server := strings.TrimSpace(proxySubscriptionConfigString(raw["server"]))
+	if server == "" || net.ParseIP(server) != nil {
+		return nil
+	}
+	if _, exists := hosts[server]; exists {
+		return nil
+	}
+	ips, err := resolveManagedProxyNodeServer(context.Background(), server)
+	if err != nil {
+		return err
+	}
+	if len(ips) == 0 {
+		return fmt.Errorf("proxy node server %s resolved no addresses", server)
+	}
+	hosts[server] = ips[0].String()
+	return nil
 }
 
 func managedProxyNodeRawConfig(node ProxySubscriptionNode) (map[string]any, error) {
@@ -747,6 +737,9 @@ func managedProxyNodeRawConfig(node ProxySubscriptionNode) (map[string]any, erro
 	}
 	if len(raw) == 0 {
 		return nil, fmt.Errorf("managed proxy node %s has empty config", node.Name)
+	}
+	if err := validateManagedProxyNodeConfig(context.Background(), node.Name, raw); err != nil {
+		return nil, err
 	}
 	raw["name"] = node.ProviderName
 	return raw, nil

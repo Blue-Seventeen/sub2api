@@ -97,6 +97,7 @@ type ProxySubscriptionRepository interface {
 	Get(ctx context.Context, id int64) (*ProxySubscription, error)
 	GetByProxyID(ctx context.Context, proxyID int64) (*ProxySubscription, error)
 	Update(ctx context.Context, sub *ProxySubscription) error
+	UpdateWithNodes(ctx context.Context, sub *ProxySubscription, nodes []ProxySubscriptionNode) error
 	DeleteWithProxy(ctx context.Context, id int64) error
 	IncrementRevision(ctx context.Context, id int64) (*ProxySubscription, error)
 	SyncNodes(ctx context.Context, subscriptionID int64, nodes []ProxySubscriptionNode) ([]Proxy, error)

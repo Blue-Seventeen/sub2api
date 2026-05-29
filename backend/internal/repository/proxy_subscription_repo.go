@@ -345,7 +345,36 @@ func (r *proxySubscriptionRepository) Update(ctx context.Context, sub *service.P
 	if r == nil || r.sql == nil || sub == nil || sub.ID <= 0 {
 		return service.ErrProxySubscriptionNotFound
 	}
-	res, err := r.sql.ExecContext(ctx, `
+	return r.updateSubscription(ctx, r.sql, sub)
+}
+
+func (r *proxySubscriptionRepository) UpdateWithNodes(ctx context.Context, sub *service.ProxySubscription, nodes []service.ProxySubscriptionNode) error {
+	if r == nil || r.sql == nil || sub == nil || sub.ID <= 0 {
+		return service.ErrProxySubscriptionNotFound
+	}
+	if len(nodes) == 0 {
+		return r.Update(ctx, sub)
+	}
+	return r.withTransaction(ctx, func(q sqlExecutor) error {
+		if err := r.updateSubscription(ctx, q, sub); err != nil {
+			return err
+		}
+		if _, err := r.syncNodes(ctx, q, sub.ID, nodes); err != nil {
+			return err
+		}
+		if _, err := q.ExecContext(ctx, `
+			UPDATE proxy_subscriptions
+			SET last_error = NULL, updated_at = NOW()
+			WHERE id = $1
+		`, sub.ID); err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
+func (r *proxySubscriptionRepository) updateSubscription(ctx context.Context, q sqlExecutor, sub *service.ProxySubscription) error {
+	res, err := q.ExecContext(ctx, `
 		UPDATE proxy_subscriptions
 		SET
 			name = $2,
@@ -363,7 +392,7 @@ func (r *proxySubscriptionRepository) Update(ctx context.Context, sub *service.P
 	if affected, _ := res.RowsAffected(); affected == 0 {
 		return service.ErrProxySubscriptionNotFound
 	}
-	if _, err := r.sql.ExecContext(ctx, `
+	if _, err := q.ExecContext(ctx, `
 		UPDATE proxies
 		SET status = $2, updated_at = NOW()
 		WHERE subscription_id = $1 AND source_type = 'mihomo_subscription' AND deleted_at IS NULL
@@ -421,34 +450,56 @@ func (r *proxySubscriptionRepository) SyncNodes(ctx context.Context, subscriptio
 	if len(nodes) == 0 {
 		return []service.Proxy{}, nil
 	}
-	var subscriptionName string
 	createdProxies := make([]service.Proxy, 0)
 	err := r.withTransaction(ctx, func(q sqlExecutor) error {
-		if err := scanSingleRow(ctx, q, `SELECT name FROM proxy_subscriptions WHERE id = $1`, []any{subscriptionID}, &subscriptionName); err != nil {
-			return err
-		}
-		existing, err := r.listAllNodesForSubscription(ctx, q, subscriptionID)
+		var err error
+		createdProxies, err = r.syncNodes(ctx, q, subscriptionID, nodes)
 		if err != nil {
 			return err
 		}
-		existingByKey := make(map[string]service.ProxySubscriptionNode, len(existing))
-		for _, node := range existing {
-			existingByKey[node.NodeKey] = node
+		if _, err := q.ExecContext(ctx, `
+			UPDATE proxy_subscriptions
+			SET revision = revision + 1, last_error = NULL, updated_at = NOW()
+			WHERE id = $1
+		`, subscriptionID); err != nil {
+			return err
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return createdProxies, nil
+}
 
-		now := time.Now()
-		var firstActiveNodeProxyID *int64
-		for _, node := range nodes {
-			node.SubscriptionID = subscriptionID
-			if node.Status == "" {
-				node.Status = service.ProxySubscriptionNodeStatusActive
+func (r *proxySubscriptionRepository) syncNodes(ctx context.Context, q sqlExecutor, subscriptionID int64, nodes []service.ProxySubscriptionNode) ([]service.Proxy, error) {
+	var subscriptionName string
+	if err := scanSingleRow(ctx, q, `SELECT name FROM proxy_subscriptions WHERE id = $1`, []any{subscriptionID}, &subscriptionName); err != nil {
+		return nil, err
+	}
+	existing, err := r.listAllNodesForSubscription(ctx, q, subscriptionID)
+	if err != nil {
+		return nil, err
+	}
+	existingByKey := make(map[string]service.ProxySubscriptionNode, len(existing))
+	for _, node := range existing {
+		existingByKey[node.NodeKey] = node
+	}
+
+	now := time.Now()
+	createdProxies := make([]service.Proxy, 0)
+	var firstActiveNodeProxyID *int64
+	for _, node := range nodes {
+		node.SubscriptionID = subscriptionID
+		if node.Status == "" {
+			node.Status = service.ProxySubscriptionNodeStatusActive
+		}
+		if current, ok := existingByKey[node.NodeKey]; ok {
+			if firstActiveNodeProxyID == nil && current.ProxyID != nil && current.Status == service.ProxySubscriptionNodeStatusActive {
+				id := *current.ProxyID
+				firstActiveNodeProxyID = &id
 			}
-			if current, ok := existingByKey[node.NodeKey]; ok {
-				if firstActiveNodeProxyID == nil && current.ProxyID != nil && current.Status == service.ProxySubscriptionNodeStatusActive {
-					id := *current.ProxyID
-					firstActiveNodeProxyID = &id
-				}
-				if _, err := q.ExecContext(ctx, `
+			if _, err := q.ExecContext(ctx, `
 				UPDATE proxy_subscription_nodes
 				SET name = $2,
 					provider_name = $3,
@@ -459,41 +510,36 @@ func (r *proxySubscriptionRepository) SyncNodes(ctx context.Context, subscriptio
 					updated_at = NOW()
 				WHERE id = $1
 			`, current.ID, node.Name, node.ProviderName, node.Type, node.Server, node.Port, node.RawConfig); err != nil {
-					return err
-				}
-				if current.ProxyID != nil && current.Status == service.ProxySubscriptionNodeStatusActive {
-					_, err := q.ExecContext(ctx, `
+				return nil, err
+			}
+			if current.ProxyID != nil && current.Status == service.ProxySubscriptionNodeStatusActive {
+				_, err := q.ExecContext(ctx, `
 					UPDATE proxies
 					SET name = $2, updated_at = NOW()
 					WHERE id = $1 AND deleted_at IS NULL
 				`, *current.ProxyID, managedProxyNodeProxyName(subscriptionName, node.Name))
-					if err != nil {
-						return err
-					}
+				if err != nil {
+					return nil, err
 				}
-				continue
 			}
+			continue
+		}
 
-			proxyOut, err := r.createManagedProxyRow(ctx, q, subscriptionID, managedProxyNodeProxyName(subscriptionName, node.Name), node.Username, node.Password, now)
-			if err != nil {
-				return err
-			}
-			node.ProxyID = &proxyOut.ID
-			if _, err := r.insertNode(ctx, q, node, now); err != nil {
-				return err
-			}
-			if firstActiveNodeProxyID == nil {
-				id := proxyOut.ID
-				firstActiveNodeProxyID = &id
-			}
-			createdProxies = append(createdProxies, proxyOut)
+		proxyOut, err := r.createManagedProxyRow(ctx, q, subscriptionID, managedProxyNodeProxyName(subscriptionName, node.Name), node.Username, node.Password, now)
+		if err != nil {
+			return nil, err
 		}
-		if err := r.migrateLegacyManagedProxyRows(ctx, q, subscriptionID, firstActiveNodeProxyID); err != nil {
-			return err
+		node.ProxyID = &proxyOut.ID
+		if _, err := r.insertNode(ctx, q, node, now); err != nil {
+			return nil, err
 		}
-		return nil
-	})
-	if err != nil {
+		if firstActiveNodeProxyID == nil {
+			id := proxyOut.ID
+			firstActiveNodeProxyID = &id
+		}
+		createdProxies = append(createdProxies, proxyOut)
+	}
+	if err := r.migrateLegacyManagedProxyRows(ctx, q, subscriptionID, firstActiveNodeProxyID); err != nil {
 		return nil, err
 	}
 	return createdProxies, nil
@@ -575,18 +621,28 @@ func (r *proxySubscriptionRepository) SetNodeStatusByProxyID(ctx context.Context
 	if status == "" {
 		status = service.ProxySubscriptionNodeStatusInactive
 	}
-	res, err := r.sql.ExecContext(ctx, `
-		UPDATE proxy_subscription_nodes
-		SET status = $2, updated_at = NOW()
-		WHERE proxy_id = $1
-	`, proxyID, status)
-	if err != nil {
-		return err
-	}
-	if affected, _ := res.RowsAffected(); affected == 0 {
-		return service.ErrProxySubscriptionNotFound
-	}
-	return nil
+	return r.withTransaction(ctx, func(q sqlExecutor) error {
+		var subscriptionID int64
+		if err := scanSingleRow(ctx, q, `
+			UPDATE proxy_subscription_nodes
+			SET status = $2, updated_at = NOW()
+			WHERE proxy_id = $1
+			RETURNING subscription_id
+		`, []any{proxyID, status}, &subscriptionID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return service.ErrProxySubscriptionNotFound
+			}
+			return err
+		}
+		if _, err := q.ExecContext(ctx, `
+			UPDATE proxy_subscriptions
+			SET revision = revision + 1, updated_at = NOW()
+			WHERE id = $1
+		`, subscriptionID); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 func (r *proxySubscriptionRepository) ListProxyIDsBySubscriptionID(ctx context.Context, subscriptionID int64) ([]int64, error) {

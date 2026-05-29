@@ -28,6 +28,13 @@ const messages: Record<string, string> = {
   'admin.usage.failedToLoadUser': 'Failed to load user',
 }
 
+const readBlobText = (blob: Blob): Promise<string> => new Promise((resolve, reject) => {
+  const reader = new FileReader()
+  reader.onload = () => resolve(String(reader.result))
+  reader.onerror = () => reject(reader.error)
+  reader.readAsText(blob)
+})
+
 const formatLocalDate = (date: Date): string => {
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -59,16 +66,6 @@ vi.mock('@/api/admin/usage', () => ({
 
 vi.mock('file-saver', () => ({
   saveAs: saveAsMock,
-}))
-
-vi.mock('xlsx', () => ({
-  utils: {
-    aoa_to_sheet: vi.fn(() => ({})),
-    sheet_add_aoa: vi.fn(),
-    book_new: vi.fn(() => ({})),
-    book_append_sheet: vi.fn(),
-  },
-  write: vi.fn(() => new ArrayBuffer(0)),
 }))
 
 vi.mock('@/stores/app', () => ({
@@ -227,7 +224,11 @@ describe('admin UsageView distribution metric toggles', () => {
     const makeLog = (id: number) => ({
       id,
       created_at: `2026-04-29T00:${String(id % 60).padStart(2, '0')}:00Z`,
-      model: 'gpt-test',
+      model: id === 101 ? '=cmd|test' : 'gpt-test',
+      api_key: { name: id === 101 ? '+api-key' : 'key' },
+      account: { name: id === 101 ? '@account' : 'account' },
+      request_id: id === 101 ? '-request' : `req-${id}`,
+      user_agent: id === 101 ? '\tagent' : 'agent',
       input_tokens: 1,
       output_tokens: 2,
       cache_read_tokens: 0,
@@ -299,5 +300,14 @@ describe('admin UsageView distribution metric toggles', () => {
       exact_total: false,
     }))
     expect(saveAsMock).toHaveBeenCalledTimes(1)
+    expect(saveAsMock.mock.calls[0][1]).toMatch(/\.csv$/)
+    expect(saveAsMock.mock.calls[0][0]).toBeInstanceOf(Blob)
+    vi.useRealTimers()
+    const csvText = await readBlobText(saveAsMock.mock.calls[0][0])
+    expect(csvText).toContain("'+api-key")
+    expect(csvText).toContain("'@account")
+    expect(csvText).toContain("'=cmd|test")
+    expect(csvText).toContain("'-request")
+    expect(csvText).toContain("'\tagent")
   })
 })

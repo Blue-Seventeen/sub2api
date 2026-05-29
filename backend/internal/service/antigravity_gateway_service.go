@@ -848,7 +848,7 @@ func shouldAntigravityFallbackToNextURL(err error, statusCode int) bool {
 	return statusCode == http.StatusTooManyRequests
 }
 
-// getSessionID 从 gin.Context 获取 session_id（用于日志追踪）
+// getSessionID 从 gin.Context 获取 session_id（仅用于生成脱敏日志追踪）
 func getSessionID(c *gin.Context) string {
 	if c == nil {
 		return ""
@@ -859,7 +859,7 @@ func getSessionID(c *gin.Context) string {
 // logPrefix 生成统一的日志前缀
 func logPrefix(sessionID, accountName string) string {
 	if sessionID != "" {
-		return fmt.Sprintf("[antigravity-Forward] session=%s account=%s", sessionID, accountName)
+		return fmt.Sprintf("[antigravity-Forward] session_hash=%s account=%s", shortSensitiveHash(sessionID), accountName)
 	}
 	return fmt.Sprintf("[antigravity-Forward] account=%s", accountName)
 }

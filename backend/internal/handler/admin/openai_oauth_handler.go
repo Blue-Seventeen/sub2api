@@ -124,7 +124,7 @@ func (h *OpenAIOAuthHandler) RefreshToken(c *gin.Context) {
 	if req.ProxyID != nil {
 		proxy, err := h.adminService.GetProxy(c.Request.Context(), *req.ProxyID)
 		if err == nil && proxy != nil {
-			proxyURL = proxy.URL()
+			proxyURL = service.ResolveProxyURL(c.Request.Context(), proxy)
 		}
 	}
 

@@ -324,7 +324,7 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 		}
 		compat := compatibilityLogFields(c)
 
-		h.base.submitUsageRecordTask(func(ctx context.Context) {
+		h.base.submitMandatoryUsageRecordTask(func(ctx context.Context) {
 			if err := h.base.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 				Result:             result,
 				ParsedRequest:      parsedReq,

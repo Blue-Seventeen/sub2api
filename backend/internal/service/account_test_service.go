@@ -692,7 +692,7 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+		proxyURL = ResolveProxyURL(ctx, account.Proxy)
 	}
 
 	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))

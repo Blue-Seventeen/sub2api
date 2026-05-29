@@ -858,7 +858,7 @@ const escapeCSVValue = (value: unknown): string => {
   const escaped = str.replace(/"/g, '""')
 
   // Prevent formula injection by prefixing dangerous characters with single quote
-  if (/^[=+\-@\t\r]/.test(str)) {
+  if (/^[=+\-@\t\r\n]/.test(str)) {
     return `"\'${escaped}"`
   }
 

@@ -503,9 +503,15 @@ func normalizeUsageRecordPoolOptions(opts UsageRecordWorkerPoolOptions) UsageRec
 	}
 	switch strings.ToLower(strings.TrimSpace(opts.OverflowPolicy)) {
 	case config.UsageRecordOverflowPolicyDrop,
-		config.UsageRecordOverflowPolicySample,
-		config.UsageRecordOverflowPolicySync:
+		config.UsageRecordOverflowPolicySample:
 		opts.OverflowPolicy = strings.ToLower(strings.TrimSpace(opts.OverflowPolicy))
+	case config.UsageRecordOverflowPolicySync:
+		logger.L().With(
+			zap.String("component", "service.usage_record_worker_pool"),
+			zap.String("configured_policy", opts.OverflowPolicy),
+			zap.String("effective_policy", defaultUsageRecordOverflowPolicy),
+		).Warn("usage_record.sync_overflow_policy_disabled")
+		opts.OverflowPolicy = defaultUsageRecordOverflowPolicy
 	default:
 		opts.OverflowPolicy = defaultUsageRecordOverflowPolicy
 	}

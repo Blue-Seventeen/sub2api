@@ -22,6 +22,14 @@ import (
 	"github.com/tidwall/sjson"
 )
 
+func TestShouldRecordOpenAIWSProxyFailureStat(t *testing.T) {
+	require.True(t, shouldRecordOpenAIWSProxyFailureStat(errors.New("upstream websocket read failed")))
+	require.True(t, shouldRecordOpenAIWSProxyFailureStat(&service.UpstreamFailoverError{StatusCode: http.StatusTooManyRequests}))
+	require.False(t, shouldRecordOpenAIWSProxyFailureStat(nil))
+	require.False(t, shouldRecordOpenAIWSProxyFailureStat(service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid payload", nil)))
+	require.False(t, shouldRecordOpenAIWSProxyFailureStat(errors.New("read client websocket request: client disconnected")))
+}
+
 func TestOpenAIHandleStreamingAwareError_JSONEscaping(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -364,6 +364,9 @@ func (s *proxySubscriptionRepoStub) GetByProxyID(ctx context.Context, proxyID in
 func (s *proxySubscriptionRepoStub) Update(ctx context.Context, sub *ProxySubscription) error {
 	panic("unexpected Update call")
 }
+func (s *proxySubscriptionRepoStub) UpdateWithNodes(ctx context.Context, sub *ProxySubscription, nodes []ProxySubscriptionNode) error {
+	panic("unexpected UpdateWithNodes call")
+}
 func (s *proxySubscriptionRepoStub) DeleteWithProxy(ctx context.Context, id int64) error {
 	s.deletedSubscription = append(s.deletedSubscription, id)
 	return s.deleteErr
