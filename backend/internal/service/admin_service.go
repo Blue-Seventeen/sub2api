@@ -1702,7 +1702,7 @@ func (s *adminServiceImpl) GetGroupModelsListCandidates(ctx context.Context, id 
 
 	seen := make(map[string]struct{}, len(candidates))
 	for _, model := range candidates {
-		seen[model] = struct{}{}
+		seen[normalizeModelsListMatchKey(model)] = struct{}{}
 	}
 	for _, acc := range accounts {
 		if acc.Platform != platform {
@@ -1713,10 +1713,11 @@ func (s *adminServiceImpl) GetGroupModelsListCandidates(ctx context.Context, id 
 			if model == "" {
 				continue
 			}
-			if _, ok := seen[model]; ok {
+			key := normalizeModelsListMatchKey(model)
+			if _, ok := seen[key]; ok {
 				continue
 			}
-			seen[model] = struct{}{}
+			seen[key] = struct{}{}
 			candidates = append(candidates, model)
 		}
 	}
@@ -1741,6 +1742,13 @@ func defaultModelsListCandidateIDs(platform string) []string {
 		}
 		return ids
 	default:
+		if models := CompatibleDefaultModels(platform); len(models) > 0 {
+			ids := make([]string, 0, len(models))
+			for _, model := range models {
+				ids = append(ids, model.ID)
+			}
+			return ids
+		}
 		ids := make([]string, 0, len(claude.DefaultModels))
 		for _, model := range claude.DefaultModels {
 			ids = append(ids, model.ID)

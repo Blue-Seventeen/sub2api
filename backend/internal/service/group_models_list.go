@@ -15,10 +15,11 @@ func normalizeGroupModelsListConfig(cfg GroupModelsListConfig) GroupModelsListCo
 		if model == "" {
 			continue
 		}
-		if _, ok := seen[model]; ok {
+		key := normalizeModelsListMatchKey(model)
+		if _, ok := seen[key]; ok {
 			continue
 		}
-		seen[model] = struct{}{}
+		seen[key] = struct{}{}
 		out.Models = append(out.Models, model)
 	}
 	if len(out.Models) == 0 {
@@ -28,5 +29,40 @@ func normalizeGroupModelsListConfig(cfg GroupModelsListConfig) GroupModelsListCo
 }
 
 func (g *Group) CustomModelsListEnabled() bool {
-	return g != nil && g.ModelsListConfig.Enabled && len(g.ModelsListConfig.Models) > 0
+	return g != nil && g.ModelsListConfig.Enabled
+}
+
+func GroupAllowsRequestedModel(group *Group, model string) bool {
+	if group == nil || !group.CustomModelsListEnabled() {
+		return true
+	}
+	return ModelsListAllowsModel(group.ModelsListConfig.Models, model)
+}
+
+func ModelsListAllowsModel(patterns []string, model string) bool {
+	model = normalizeModelsListMatchKey(model)
+	if model == "" {
+		return false
+	}
+	for _, rawPattern := range patterns {
+		pattern := normalizeModelsListMatchKey(rawPattern)
+		if pattern == "" {
+			continue
+		}
+		if strings.HasSuffix(pattern, "*") {
+			prefix := strings.TrimSuffix(pattern, "*")
+			if strings.HasPrefix(model, prefix) {
+				return true
+			}
+			continue
+		}
+		if pattern == model {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeModelsListMatchKey(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
 }

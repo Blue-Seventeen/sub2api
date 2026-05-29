@@ -2237,9 +2237,14 @@ export default {
       },
       modelsList: {
         title: '自定义 /v1/models 模型列表',
-        hint: '仅影响 /v1/models 展示结果，不影响白名单模型调用和账号调度。',
+        hint: '启用后同时限制 /v1/models 展示结果和该分组可调用模型；支持大小写不敏感匹配和后缀 * 通配。',
         loading: '正在加载模型列表...',
-        empty: '暂无可展示模型'
+        empty: '暂无可展示模型',
+        add: '新增',
+        edit: '编辑',
+        delete: '删除',
+        selectedCount: '已选 {selected} / {total}',
+        modelPlaceholder: '模型名称，例如 kimi-k2.6 或 kimi-*'
       },
       claudeCode: {
         title: 'Claude Code 客户端限制',

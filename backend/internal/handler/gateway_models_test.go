@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -221,7 +222,7 @@ func TestGatewayModels_CustomModelsListFiltersAndOrdersMappedModels(t *testing.T
 
 	var got gatewayModelsResponseForTest
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
-	require.Equal(t, []string{"gpt-5.5", "gpt-5.4"}, modelIDsForTest(got.Data))
+	require.Equal(t, []string{"gpt-5.5", "missing-model", "gpt-5.4"}, modelIDsForTest(got.Data))
 }
 
 func TestGatewayModels_CustomModelsListKeepsConcreteModelAllowedByWildcardMapping(t *testing.T) {
@@ -269,7 +270,7 @@ func TestGatewayModels_CustomModelsListKeepsConcreteModelAllowedByWildcardMappin
 	require.Equal(t, []string{"claude-sonnet-4-6"}, modelIDsForTest(got.Data))
 }
 
-func TestGatewayModels_CustomModelsListCanReturnEmptyWhenSelectionsUnavailable(t *testing.T) {
+func TestGatewayModels_CustomModelsListKeepsManualModelWhenUnavailable(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	groupID := int64(24)
@@ -311,7 +312,7 @@ func TestGatewayModels_CustomModelsListCanReturnEmptyWhenSelectionsUnavailable(t
 
 	var got gatewayModelsResponseForTest
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
-	require.Empty(t, modelIDsForTest(got.Data))
+	require.Equal(t, []string{"gpt-5.5"}, modelIDsForTest(got.Data))
 }
 
 func TestGatewayModels_CustomModelsListFiltersDefaultFallbackModels(t *testing.T) {
@@ -348,7 +349,169 @@ func TestGatewayModels_CustomModelsListFiltersDefaultFallbackModels(t *testing.T
 
 	var got gatewayModelsResponseForTest
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
-	require.Equal(t, []string{"gpt-5.5", "gpt-5.4"}, modelIDsForTest(got.Data))
+	require.Equal(t, []string{"gpt-5.5", "legacy-gpt-2024", "gpt-5.4"}, modelIDsForTest(got.Data))
+}
+
+func TestGatewayModels_CustomModelsListEmptyWhenEnabledAndNoModels(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	groupID := int64(28)
+	h := newGatewayModelsHandlerForTest(
+		&gatewayModelsAccountRepoStub{
+			byGroup: map[int64][]service.Account{
+				groupID: {
+					{ID: 1, Platform: service.PlatformOpenAI},
+				},
+			},
+		},
+	)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+		Group: &service.Group{
+			ID:       groupID,
+			Platform: service.PlatformOpenAI,
+			ModelsListConfig: service.GroupModelsListConfig{
+				Enabled: true,
+				Models:  nil,
+			},
+		},
+	})
+
+	h.Models(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var got gatewayModelsResponseForTest
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.Empty(t, modelIDsForTest(got.Data))
+}
+
+func TestGatewayModels_CustomModelsListWildcardExpandsCaseInsensitiveCandidates(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	groupID := int64(29)
+	h := newGatewayModelsHandlerForTest(
+		&gatewayModelsAccountRepoStub{
+			byGroup: map[int64][]service.Account{
+				groupID: {
+					{ID: 1, Platform: service.PlatformMoonshot},
+				},
+			},
+		},
+	)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+		Group: &service.Group{
+			ID:       groupID,
+			Platform: service.PlatformMoonshot,
+			ModelsListConfig: service.GroupModelsListConfig{
+				Enabled: true,
+				Models:  []string{"KIMI-*"},
+			},
+		},
+	})
+
+	h.Models(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var got gatewayModelsResponseForTest
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	ids := modelIDsForTest(got.Data)
+	require.Contains(t, ids, "kimi-k2.6")
+	require.Contains(t, ids, "kimi-k2.5")
+	require.NotContains(t, ids, "claude-sonnet-4-6")
+}
+
+func TestGatewayModels_DefaultModelIDsForCompatiblePlatformsUseProviderPresets(t *testing.T) {
+	for _, platform := range service.CompatiblePlatforms() {
+		t.Run(platform, func(t *testing.T) {
+			defaultModels := service.CompatibleDefaultModels(platform)
+			require.NotEmpty(t, defaultModels)
+
+			want := make([]string, 0, len(defaultModels))
+			for _, model := range defaultModels {
+				want = append(want, model.ID)
+			}
+
+			require.Equal(t, want, defaultModelIDsForPlatform(platform))
+		})
+	}
+}
+
+func TestCompatibleGatewayModels_CustomModelsListFiltersDefaultModels(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	groupID := int64(30)
+	base := newGatewayModelsHandlerForTest(
+		&gatewayModelsAccountRepoStub{
+			byGroup: map[int64][]service.Account{
+				groupID: {
+					{ID: 1, Platform: service.PlatformMoonshot},
+				},
+			},
+		},
+	)
+	h := NewCompatibleGatewayHandler(service.NewCompatibleGatewayService(base.gatewayService, nil, nil, nil), base)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+		Group: &service.Group{
+			ID:       groupID,
+			Platform: service.PlatformMoonshot,
+			ModelsListConfig: service.GroupModelsListConfig{
+				Enabled: true,
+				Models:  []string{"kimi-k2.6"},
+			},
+		},
+	})
+
+	h.Models(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var got gatewayModelsResponseForTest
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.Equal(t, []string{"kimi-k2.6"}, modelIDsForTest(got.Data))
+}
+
+func TestCompatibleGatewayCountTokens_CustomModelsListRejectsDisallowedModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	base := newGatewayModelsHandlerForTest(&gatewayModelsAccountRepoStub{})
+	h := NewCompatibleGatewayHandler(service.NewCompatibleGatewayService(base.gatewayService, nil, nil, nil), base)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(
+		http.MethodPost,
+		"/v1/messages/count_tokens",
+		strings.NewReader(`{"model":"gpt-5.5","messages":[{"role":"user","content":"hello"}]}`),
+	)
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+		Group: &service.Group{
+			ID:       31,
+			Platform: service.PlatformMoonshot,
+			ModelsListConfig: service.GroupModelsListConfig{
+				Enabled: true,
+				Models:  []string{"kimi-*"},
+			},
+		},
+	})
+
+	h.CountTokens(c)
+
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.Contains(t, rec.Body.String(), "gpt-5.5")
 }
 
 func TestGatewayModels_OpenAICustomModelsListKeepsOpenAIResponseShapeForDefaultFallback(t *testing.T) {

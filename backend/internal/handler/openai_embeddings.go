@@ -73,6 +73,10 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 	reqLog = reqLog.With(zap.String("model", reqModel))
 	setOpsRequestContext(c, reqModel, false)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeSync))
+	if !groupAllowsRequestedModel(apiKey.Group, reqModel) {
+		h.errorResponse(c, http.StatusForbidden, "permission_error", groupModelsListDisallowedMessage(reqModel))
+		return
+	}
 
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, reqModel)
 

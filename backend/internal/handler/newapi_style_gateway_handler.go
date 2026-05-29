@@ -95,14 +95,20 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 	}
 
 	model := service.ExtractNewAPIStyleModel(body, c.GetHeader("Content-Type"))
-	channelMapping, _ := h.base.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, model)
 	stream := gjson.GetBytes(body, "stream").Bool()
 	setOpsRequestContext(c, model, stream)
 	setOpsEndpointContext(c, model, int16(service.RequestTypeFromLegacy(stream, false)))
+	if whitelistModel, ok := newAPIStyleGroupModelsListModel(route, model, c.Request.Method, c.Request.URL.Path); ok {
+		if !groupAllowsRequestedModel(apiKey.Group, whitelistModel) {
+			h.writeError(c, http.StatusForbidden, "permission_error", groupModelsListDisallowedMessage(whitelistModel))
+			return
+		}
+	}
 	if decision := h.base.checkContentModeration(c, reqLog, apiKey, subject, contentModerationProtocolForNewAPIStyleRoute(route), model, body); decision != nil && decision.Blocked {
 		h.writeError(c, contentModerationStatus(decision), contentModerationErrorCode(decision), decision.Message)
 		return
 	}
+	channelMapping, _ := h.base.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, model)
 
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	if err := h.base.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {

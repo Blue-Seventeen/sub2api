@@ -1,15 +1,24 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  addModelsListItem,
   buildModelsListConfig,
+  commitModelsListItemEdit,
   createModelsListState,
   hydrateModelsListState,
-  invertModelsListSelection,
   moveModelsListItem,
-  selectAllModelsListItems,
+  removeModelsListItem,
+  removeSelectedModelsListItems,
   setModelsListCandidates,
+  startEditModelsListItem,
   toggleModelsListItem,
+  type ModelsListItem,
 } from "../groupsModelsList";
+
+const simpleItems = (items: ModelsListItem[]) => items.map(item => ({
+  id: item.id,
+  selected: item.selected,
+}))
 
 describe("groupsModelsList", () => {
   it("selects all default candidates for a new disabled config", () => {
@@ -18,7 +27,7 @@ describe("groupsModelsList", () => {
     setModelsListCandidates(state, ["gpt-5.5", "gpt-5.4"]);
 
     expect(state.enabled).toBe(false);
-    expect(state.items).toEqual([
+    expect(simpleItems(state.items)).toEqual([
       { id: "gpt-5.5", selected: true },
       { id: "gpt-5.4", selected: true },
     ]);
@@ -33,11 +42,29 @@ describe("groupsModelsList", () => {
     setModelsListCandidates(state, ["gpt-5.4", "legacy-gpt", "gpt-5.5"]);
 
     expect(state.enabled).toBe(true);
-    expect(state.items).toEqual([
+    expect(simpleItems(state.items)).toEqual([
       { id: "gpt-5.5", selected: true },
       { id: "gpt-5.4", selected: true },
       { id: "legacy-gpt", selected: false },
     ]);
+  });
+
+  it("keeps an enabled empty saved list empty instead of default-selecting candidates", () => {
+    const state = createModelsListState({
+      enabled: true,
+      models: [],
+    });
+
+    setModelsListCandidates(state, ["gpt-5.5", "gpt-5.4"]);
+
+    expect(simpleItems(state.items)).toEqual([
+      { id: "gpt-5.5", selected: false },
+      { id: "gpt-5.4", selected: false },
+    ]);
+    expect(buildModelsListConfig(state)).toEqual({
+      enabled: true,
+      models: [],
+    });
   });
 
   it("preserves explicitly unselected saved candidates when candidates refresh", () => {
@@ -48,7 +75,7 @@ describe("groupsModelsList", () => {
 
     setModelsListCandidates(state, ["gpt-5.5", "gpt-5.4"]);
 
-    expect(state.items).toEqual([
+    expect(simpleItems(state.items)).toEqual([
       { id: "gpt-5.5", selected: true },
       { id: "gpt-5.4", selected: false },
     ]);
@@ -93,33 +120,81 @@ describe("groupsModelsList", () => {
     });
   });
 
-  it("selects all candidate models from the toolbar action", () => {
+  it("can add and edit a custom model", () => {
     const state = hydrateModelsListState({
       enabled: true,
       models: ["gpt-5.5"],
-    }, ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"]);
+    }, ["gpt-5.5"]);
 
-    selectAllModelsListItems(state);
+    addModelsListItem(state);
+    state.items[0].draft = " KIMI-* ";
+    commitModelsListItemEdit(state, state.items[0]);
 
-    expect(state.items).toEqual([
-      { id: "gpt-5.5", selected: true },
-      { id: "gpt-5.4", selected: true },
-      { id: "gpt-5.4-mini", selected: true },
-    ]);
+    expect(buildModelsListConfig(state)).toEqual({
+      enabled: true,
+      models: ["KIMI-*", "gpt-5.5"],
+    });
   });
 
-  it("inverts selected models from the toolbar action", () => {
+  it("dedupes edited models case-insensitively and keeps the first entry", () => {
+    const state = hydrateModelsListState({
+      enabled: true,
+      models: ["kimi"],
+    }, ["kimi"]);
+
+    addModelsListItem(state);
+    state.items[0].draft = "KIMI";
+    commitModelsListItemEdit(state, state.items[0]);
+
+    expect(buildModelsListConfig(state)).toEqual({
+      enabled: true,
+      models: ["kimi"],
+    });
+  });
+
+  it("rolls back an existing item when editing it to a duplicate model", () => {
+    const state = hydrateModelsListState({
+      enabled: true,
+      models: ["kimi", "gpt-5.5"],
+    }, ["kimi", "gpt-5.5"]);
+
+    startEditModelsListItem(state.items[1]);
+    state.items[1].draft = "KIMI";
+    commitModelsListItemEdit(state, state.items[1]);
+
+    expect(buildModelsListConfig(state)).toEqual({
+      enabled: true,
+      models: ["kimi", "gpt-5.5"],
+    });
+  });
+
+  it("can delete a single model and batch delete selected models", () => {
+    const state = hydrateModelsListState({
+      enabled: true,
+      models: ["gpt-5.5", "gpt-5.4"],
+    }, ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"]);
+
+    removeModelsListItem(state, state.items[1]);
+    removeSelectedModelsListItems(state);
+
+    expect(buildModelsListConfig(state)).toEqual({
+      enabled: true,
+      models: [],
+    });
+  });
+
+  it("commits an active edit when building config", () => {
     const state = hydrateModelsListState({
       enabled: true,
       models: ["gpt-5.5"],
-    }, ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"]);
+    }, ["gpt-5.5"]);
 
-    invertModelsListSelection(state);
+    startEditModelsListItem(state.items[0]);
+    state.items[0].draft = "Kimi";
 
-    expect(state.items).toEqual([
-      { id: "gpt-5.5", selected: false },
-      { id: "gpt-5.4", selected: true },
-      { id: "gpt-5.4-mini", selected: true },
-    ]);
+    expect(buildModelsListConfig(state)).toEqual({
+      enabled: true,
+      models: ["Kimi"],
+    });
   });
 });

@@ -783,7 +783,7 @@ Protect files:
 ## 16. v0.1.132 升级兼容说明
 
 - 当前 `codex/sync-v0.1.132` 以 `codex/sync-v0.1.131` 为基线合入 upstream `v0.1.132`，`v0.1.132` tag 已是当前分支祖先；后续不得回退 v0.1.131 已保留的 Promotion、CompatibleGateway、usage fallback、统一倍率、AccountAutoOps、订阅管理和 `/admin/proxies` 自定义体系。
-- 已吸收 upstream 分组自定义 `/v1/models` 模型列表：新增 `models_list_config` 字段、管理端配置入口和 API key auth snapshot 版本刷新；该能力只影响模型列表展示，不得改变实际账号调度、模型映射、计费倍率或 compatible fallback 语义。
+- 已吸收并增强 upstream 分组自定义 `/v1/models` 模型列表：新增 `models_list_config` 字段、管理端配置入口和 API key auth snapshot 版本刷新；启用后同时作为该分组的请求模型白名单，支持大小写不敏感匹配与后缀 `*` 通配。限制只校验用户请求模型名，不校验映射后的上游模型名，不改变实际账号调度、模型映射、计费倍率或 compatible fallback 语义。
 - 已吸收 upstream 账号池同账号重试状态码配置；未配置时必须继续回退默认 `[401,403,429]`，不得让该配置覆盖现有 failover、sticky、auto-probe 或代理粘性选择规则。
 - 已吸收 upstream OpenAI WS rate-limit failover、API Key Responses SSE fallback、Chat Responses usage billing 保留、模型 404 按账号+模型冷却、Antigravity `message_start.input_tokens`、Bedrock `context_management` 清理和 Ops local business-limit 分类；这些属于错误处理、计费准确性和观测分类优化，不得引入成功热路径同步 DB/Redis 等待。
 - 已吸收 upstream 长上下文 `cache_read` / `cache_creation` 倍率计费修复；这是计费准确性修复，不得改回未乘倍率，也不得覆盖本 fork 的 `QuotaPlatform`、`ClientProfile`、`CompatibilityRoute`、`FallbackChain`、`ChannelUsageFields` usage 写入字段。

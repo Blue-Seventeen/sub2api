@@ -429,7 +429,10 @@ func ExtractNewAPIStyleModel(body []byte, contentType string) string {
 	if isMultipartFormData(contentType) {
 		return extractNewAPIStyleMultipartModel(body, contentType)
 	}
-	return strings.TrimSpace(gjson.GetBytes(body, "model").String())
+	if model := strings.TrimSpace(gjson.GetBytes(body, "model").String()); model != "" {
+		return model
+	}
+	return strings.TrimSpace(gjson.GetBytes(body, "model_name").String())
 }
 
 func extractNewAPIStyleMultipartModel(body []byte, contentType string) string {

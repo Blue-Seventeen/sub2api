@@ -202,6 +202,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "model is required")
 		return
 	}
+	if !groupAllowsRequestedModel(apiKey.Group, reqModel) {
+		h.errorResponse(c, http.StatusForbidden, "permission_error", groupModelsListDisallowedMessage(reqModel))
+		return
+	}
 
 	if decision := h.checkContentModeration(c, reqLog, apiKey, subject, service.ContentModerationProtocolAnthropicMessages, reqModel, body); decision != nil && decision.Blocked {
 		h.errorResponse(c, contentModerationStatus(decision), contentModerationErrorCode(decision), decision.Message)
@@ -1137,53 +1141,58 @@ func writeOpenAIModelsList(c *gin.Context, modelIDs []string) {
 
 func filterModelsByCustomList(availableModels, fallbackModels, selectedModels []string) []string {
 	if len(selectedModels) == 0 {
-		return availableModels
-	}
-	source := availableModels
-	if len(source) == 0 {
-		source = fallbackModels
-	}
-	if len(source) == 0 {
 		return nil
 	}
-
-	allowed := make([]string, 0, len(source))
-	for _, model := range source {
-		model = strings.TrimSpace(model)
-		if model != "" {
-			allowed = append(allowed, model)
-		}
-	}
-
-	seen := make(map[string]struct{}, len(selectedModels))
+	candidates := mergeModelIDsCaseInsensitive(availableModels, fallbackModels)
+	seen := make(map[string]struct{}, len(selectedModels)+len(candidates))
 	filtered := make([]string, 0, len(selectedModels))
 	for _, model := range selectedModels {
 		model = strings.TrimSpace(model)
 		if model == "" {
 			continue
 		}
-		if !customModelsListAllowsModel(allowed, model) {
+		if strings.HasSuffix(model, "*") {
+			for _, candidate := range candidates {
+				if !service.ModelsListAllowsModel([]string{model}, candidate) {
+					continue
+				}
+				key := strings.ToLower(candidate)
+				if _, ok := seen[key]; ok {
+					continue
+				}
+				seen[key] = struct{}{}
+				filtered = append(filtered, candidate)
+			}
 			continue
 		}
-		if _, ok := seen[model]; ok {
+		key := strings.ToLower(model)
+		if _, ok := seen[key]; ok {
 			continue
 		}
-		seen[model] = struct{}{}
+		seen[key] = struct{}{}
 		filtered = append(filtered, model)
 	}
 	return filtered
 }
 
-func customModelsListAllowsModel(availablePatterns []string, model string) bool {
-	for _, pattern := range availablePatterns {
-		if pattern == model {
-			return true
-		}
-		if strings.HasSuffix(pattern, "*") && strings.HasPrefix(model, strings.TrimSuffix(pattern, "*")) {
-			return true
+func mergeModelIDsCaseInsensitive(groups ...[]string) []string {
+	seen := map[string]struct{}{}
+	merged := make([]string, 0)
+	for _, models := range groups {
+		for _, model := range models {
+			model = strings.TrimSpace(model)
+			if model == "" {
+				continue
+			}
+			key := strings.ToLower(model)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			merged = append(merged, model)
 		}
 	}
-	return false
+	return merged
 }
 
 func defaultModelIDsForPlatform(platform string) []string {
@@ -1204,6 +1213,13 @@ func defaultModelIDsForPlatform(platform string) []string {
 		}
 		return ids
 	default:
+		if models := service.CompatibleDefaultModels(platform); len(models) > 0 {
+			ids := make([]string, 0, len(models))
+			for _, model := range models {
+				ids = append(ids, model.ID)
+			}
+			return ids
+		}
 		ids := make([]string, 0, len(claude.DefaultModels))
 		for _, model := range claude.DefaultModels {
 			ids = append(ids, model.ID)
@@ -1795,6 +1811,10 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	// 验证 model 必填
 	if parsedReq.Model == "" {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "model is required")
+		return
+	}
+	if !groupAllowsRequestedModel(apiKey.Group, parsedReq.Model) {
+		h.errorResponse(c, http.StatusForbidden, "permission_error", groupModelsListDisallowedMessage(parsedReq.Model))
 		return
 	}
 

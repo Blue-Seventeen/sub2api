@@ -2156,9 +2156,14 @@ export default {
       },
       modelsList: {
         title: 'Custom /v1/models Model List',
-        hint: 'Only changes the /v1/models response. Whitelist model calls and account routing are unchanged.',
+        hint: 'When enabled, this controls both the /v1/models response and callable models for this group. Matching is case-insensitive and supports suffix * wildcards.',
         loading: 'Loading model list...',
-        empty: 'No displayable models'
+        empty: 'No displayable models',
+        add: 'Add',
+        edit: 'Edit',
+        delete: 'Delete',
+        selectedCount: 'Selected {selected} / {total}',
+        modelPlaceholder: 'Model name, e.g. kimi-k2.6 or kimi-*'
       },
       claudeCode: {
         title: 'Claude Code Client Restriction',

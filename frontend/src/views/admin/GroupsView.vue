@@ -841,27 +841,32 @@
             class="overflow-hidden rounded-lg border border-gray-200 bg-gray-50/50 dark:border-dark-600 dark:bg-dark-800/40"
           >
             <div
-              v-if="!createModelsListLoading && createModelsListState.items.length > 0"
+              v-if="!createModelsListLoading"
               class="flex items-center justify-between gap-2 border-b border-gray-200 bg-gray-50 px-3 py-2 text-xs dark:border-dark-600 dark:bg-dark-800"
             >
               <span class="text-gray-500 dark:text-gray-400">
-                已选 {{ createModelsListSelectedCount }} /
-                {{ createModelsListState.items.length }}
+                {{
+                  t("admin.groups.modelsList.selectedCount", {
+                    selected: createModelsListSelectedCount,
+                    total: createModelsListState.items.length,
+                  })
+                }}
               </span>
               <div class="flex items-center gap-1.5">
                 <button
                   type="button"
                   class="rounded px-2 py-1 font-medium text-primary-600 transition-colors hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-900/20"
-                  @click="selectAllModelsListItems(createModelsListState)"
+                  @click="addModelsListItem(createModelsListState)"
                 >
-                  全选
+                  {{ t("admin.groups.modelsList.add") }}
                 </button>
                 <button
                   type="button"
-                  class="rounded px-2 py-1 font-medium text-gray-600 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
-                  @click="invertModelsListSelection(createModelsListState)"
+                  :disabled="createModelsListSelectedCount === 0"
+                  class="rounded px-2 py-1 font-medium text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-red-400 dark:hover:bg-red-900/20"
+                  @click="removeSelectedModelsListItems(createModelsListState)"
                 >
-                  反选
+                  {{ t("admin.groups.modelsList.delete") }}
                 </button>
               </div>
             </div>
@@ -879,7 +884,7 @@
               </p>
               <div
                 v-for="(item, index) in createModelsListState.items"
-                :key="item.id"
+                :key="item.uid"
                 class="flex items-center gap-2 rounded border border-gray-200 bg-white px-3 py-2 dark:border-dark-600 dark:bg-dark-800"
               >
                 <input
@@ -887,9 +892,33 @@
                   type="checkbox"
                   class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                 />
-                <span class="min-w-0 flex-1 break-all text-sm text-gray-700 dark:text-gray-300">
+                <input
+                  v-if="item.editing"
+                  v-model="item.draft"
+                  type="text"
+                  class="input min-w-0 flex-1 py-1 text-sm"
+                  :placeholder="t('admin.groups.modelsList.modelPlaceholder')"
+                  @keydown.enter.prevent="commitModelsListItemEdit(createModelsListState, item)"
+                  @keydown.esc.prevent="cancelModelsListItemEdit(createModelsListState, item)"
+                  @blur="commitModelsListItemEdit(createModelsListState, item)"
+                />
+                <span v-else class="min-w-0 flex-1 break-all text-sm text-gray-700 dark:text-gray-300">
                   {{ item.id }}
                 </span>
+                <button
+                  type="button"
+                  class="rounded px-2 py-1 text-xs font-medium text-primary-600 hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-900/20"
+                  @click="startEditModelsListItem(item)"
+                >
+                  {{ t("admin.groups.modelsList.edit") }}
+                </button>
+                <button
+                  type="button"
+                  class="rounded px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+                  @click="removeModelsListItem(createModelsListState, item)"
+                >
+                  {{ t("admin.groups.modelsList.delete") }}
+                </button>
                 <button
                   type="button"
                   :disabled="index === 0"
@@ -1765,7 +1794,7 @@
           <button
             type="submit"
             form="create-group-form"
-            :disabled="submitting"
+            :disabled="submitting || (createModelsListState.enabled && createModelsListLoading)"
             class="btn btn-primary"
             data-tour="group-form-submit"
           >
@@ -2194,27 +2223,32 @@
             class="overflow-hidden rounded-lg border border-gray-200 bg-gray-50/50 dark:border-dark-600 dark:bg-dark-800/40"
           >
             <div
-              v-if="!editModelsListLoading && editModelsListState.items.length > 0"
+              v-if="!editModelsListLoading"
               class="flex items-center justify-between gap-2 border-b border-gray-200 bg-gray-50 px-3 py-2 text-xs dark:border-dark-600 dark:bg-dark-800"
             >
               <span class="text-gray-500 dark:text-gray-400">
-                已选 {{ editModelsListSelectedCount }} /
-                {{ editModelsListState.items.length }}
+                {{
+                  t("admin.groups.modelsList.selectedCount", {
+                    selected: editModelsListSelectedCount,
+                    total: editModelsListState.items.length,
+                  })
+                }}
               </span>
               <div class="flex items-center gap-1.5">
                 <button
                   type="button"
                   class="rounded px-2 py-1 font-medium text-primary-600 transition-colors hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-900/20"
-                  @click="selectAllModelsListItems(editModelsListState)"
+                  @click="addModelsListItem(editModelsListState)"
                 >
-                  全选
+                  {{ t("admin.groups.modelsList.add") }}
                 </button>
                 <button
                   type="button"
-                  class="rounded px-2 py-1 font-medium text-gray-600 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
-                  @click="invertModelsListSelection(editModelsListState)"
+                  :disabled="editModelsListSelectedCount === 0"
+                  class="rounded px-2 py-1 font-medium text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-red-400 dark:hover:bg-red-900/20"
+                  @click="removeSelectedModelsListItems(editModelsListState)"
                 >
-                  反选
+                  {{ t("admin.groups.modelsList.delete") }}
                 </button>
               </div>
             </div>
@@ -2232,7 +2266,7 @@
               </p>
               <div
                 v-for="(item, index) in editModelsListState.items"
-                :key="item.id"
+                :key="item.uid"
                 class="flex items-center gap-2 rounded border border-gray-200 bg-white px-3 py-2 dark:border-dark-600 dark:bg-dark-800"
               >
                 <input
@@ -2240,9 +2274,33 @@
                   type="checkbox"
                   class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                 />
-                <span class="min-w-0 flex-1 break-all text-sm text-gray-700 dark:text-gray-300">
+                <input
+                  v-if="item.editing"
+                  v-model="item.draft"
+                  type="text"
+                  class="input min-w-0 flex-1 py-1 text-sm"
+                  :placeholder="t('admin.groups.modelsList.modelPlaceholder')"
+                  @keydown.enter.prevent="commitModelsListItemEdit(editModelsListState, item)"
+                  @keydown.esc.prevent="cancelModelsListItemEdit(editModelsListState, item)"
+                  @blur="commitModelsListItemEdit(editModelsListState, item)"
+                />
+                <span v-else class="min-w-0 flex-1 break-all text-sm text-gray-700 dark:text-gray-300">
                   {{ item.id }}
                 </span>
+                <button
+                  type="button"
+                  class="rounded px-2 py-1 text-xs font-medium text-primary-600 hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-900/20"
+                  @click="startEditModelsListItem(item)"
+                >
+                  {{ t("admin.groups.modelsList.edit") }}
+                </button>
+                <button
+                  type="button"
+                  class="rounded px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+                  @click="removeModelsListItem(editModelsListState, item)"
+                >
+                  {{ t("admin.groups.modelsList.delete") }}
+                </button>
                 <button
                   type="button"
                   :disabled="index === 0"
@@ -3113,7 +3171,7 @@
           <button
             type="submit"
             form="edit-group-form"
-            :disabled="submitting"
+            :disabled="submitting || (editModelsListState.enabled && editModelsListLoading)"
             class="btn btn-primary"
             data-tour="group-form-submit"
           >
@@ -3307,12 +3365,16 @@ import {
   type MessagesDispatchMappingRow,
 } from "./groupsMessagesDispatch";
 import {
+  addModelsListItem,
   buildModelsListConfig,
+  cancelModelsListItemEdit,
+  commitModelsListItemEdit,
   createModelsListState as createInitialModelsListState,
-  invertModelsListSelection,
   moveModelsListItem,
-  selectAllModelsListItems,
+  removeModelsListItem,
+  removeSelectedModelsListItems,
   setModelsListCandidates,
+  startEditModelsListItem,
 } from "./groupsModelsList";
 import { createModelsListCandidatesTracker } from "./groupsModelsListCandidates";
 import { normalizeSupportedModelScopesForPlatform } from "./groupsSupportedModelScopes";
@@ -4052,8 +4114,10 @@ const resetModelsListState = (
 ) => {
   const fresh = createInitialModelsListState(config);
   state.enabled = fresh.enabled;
+  state.savedEnabled = fresh.savedEnabled;
   state.savedModels = fresh.savedModels;
   state.items = fresh.items;
+  state.itemsInitialized = fresh.itemsInitialized;
 };
 
 const loadModelsListCandidates = async (

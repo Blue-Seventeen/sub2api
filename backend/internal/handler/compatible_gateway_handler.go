@@ -60,6 +60,11 @@ func (h *CompatibleGatewayHandler) Models(c *gin.Context) {
 		return
 	}
 	availableModels := h.base.gatewayService.GetAvailableModels(c.Request.Context(), groupID, "")
+	if apiKey != nil && apiKey.Group != nil && apiKey.Group.CustomModelsListEnabled() {
+		availableModels = filterModelsByCustomList(availableModels, defaultModelIDsForPlatform(platform), apiKey.Group.ModelsListConfig.Models)
+		writeCustomModelsList(c, platform, availableModels)
+		return
+	}
 	if len(availableModels) > 0 {
 		models := make([]claude.Model, 0, len(availableModels))
 		for _, modelID := range availableModels {
@@ -119,6 +124,10 @@ func (h *CompatibleGatewayHandler) CountTokens(c *gin.Context) {
 		})
 		return
 	}
+	if !groupAllowsRequestedModel(apiKey.Group, parsed.Model) {
+		h.base.errorResponse(c, http.StatusForbidden, "permission_error", groupModelsListDisallowedMessage(parsed.Model))
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"input_tokens": service.EstimateCompatibleInputTokensForPlatform(apiKey.Group.Platform, parsed),
@@ -172,6 +181,10 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 
 	setOpsRequestContext(c, parsed.Model, parsed.Stream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(parsed.Stream, false)))
+	if !groupAllowsRequestedModel(apiKey.Group, parsed.Model) {
+		h.writeRouteError(c, route, http.StatusForbidden, "permission_error", groupModelsListDisallowedMessage(parsed.Model), false)
+		return
+	}
 	if decision := h.base.checkContentModeration(c, reqLog, apiKey, subject, contentModerationProtocolForCompatibleRoute(route), parsed.Model, body); decision != nil && decision.Blocked {
 		h.writeRouteError(c, route, contentModerationStatus(decision), contentModerationErrorCode(decision), decision.Message, false)
 		return

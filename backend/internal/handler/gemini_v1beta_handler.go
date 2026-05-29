@@ -185,6 +185,10 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 
 	setOpsRequestContext(c, modelName, stream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(stream, false)))
+	if !groupAllowsRequestedModel(apiKey.Group, modelName) {
+		googleError(c, http.StatusForbidden, groupModelsListDisallowedMessage(modelName))
+		return
+	}
 	if decision := h.checkContentModeration(c, reqLog, apiKey, authSubject, service.ContentModerationProtocolGemini, modelName, body); decision != nil && decision.Blocked {
 		googleError(c, contentModerationStatus(decision), decision.Message)
 		return

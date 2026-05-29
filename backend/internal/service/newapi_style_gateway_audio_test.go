@@ -184,6 +184,14 @@ func TestExtractNewAPIStyleModelReadsMultipartFormField(t *testing.T) {
 	}
 }
 
+func TestExtractNewAPIStyleModelReadsModelNameFallback(t *testing.T) {
+	body := []byte(`{"model_name":"kling-v1"}`)
+
+	if got := ExtractNewAPIStyleModel(body, "application/json"); got != "kling-v1" {
+		t.Fatalf("ExtractNewAPIStyleModel() = %q, want kling-v1", got)
+	}
+}
+
 func TestNewAPIStyleAudioTokenChannelPricingWinsOverRequestGuardrail(t *testing.T) {
 	groupID := int64(2)
 	inputPrice := 0.000018
