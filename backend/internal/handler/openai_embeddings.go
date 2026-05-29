@@ -99,6 +99,8 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 
 	failedAccountIDs := make(map[int64]struct{})
 	var lastFailoverErr *service.UpstreamFailoverError
+	var lastFailedAccount *service.Account
+	var lastFailedDurationMs int64
 	switchCount := 0
 	maxAccountSwitches := h.maxAccountSwitches
 	if maxAccountSwitches <= 0 {
@@ -129,6 +131,7 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 				return
 			}
 			if lastFailoverErr != nil {
+				recordOpenAIProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, lastFailedAccount, apiKey, lastFailedDurationMs, "handler.openai_gateway.embeddings")
 				h.handleFailoverExhausted(c, lastFailoverErr, false)
 			} else {
 				h.errorResponse(c, http.StatusBadGateway, "api_error", "Upstream request failed")
@@ -156,8 +159,10 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
 		}
 		writerSizeBeforeForward := c.Writer.Size()
+		activeUsageHandle := beginProxyActiveUsage(h.proxyActiveUsageTracker, account)
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {
+				endProxyActiveUsage(activeUsageHandle)
 				if accountReleaseFunc != nil {
 					accountReleaseFunc()
 				}
@@ -185,6 +190,7 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 				failedAccountIDs[account.ID] = struct{}{}
 				lastFailoverErr = failoverErr
 				if switchCount >= maxAccountSwitches {
+					recordOpenAIProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, account, apiKey, forwardDurationMs, "handler.openai_gateway.embeddings")
 					h.handleFailoverExhausted(c, failoverErr, false)
 					return
 				}
@@ -195,12 +201,15 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 					zap.Int("switch_count", switchCount),
 					zap.Int("max_switches", maxAccountSwitches),
 				)
+				lastFailedAccount = account
+				lastFailedDurationMs = forwardDurationMs
 				continue
 			}
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
 			if c.Writer.Size() == writerSizeBeforeForward {
 				h.errorResponse(c, http.StatusBadGateway, "upstream_error", "Upstream request failed")
 			}
+			recordOpenAIProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, account, apiKey, forwardDurationMs, "handler.openai_gateway.embeddings")
 			reqLog.Warn("openai_embeddings.forward_failed",
 				zap.Int64("account_id", account.ID),
 				zap.Error(err),

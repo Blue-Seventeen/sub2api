@@ -143,6 +143,31 @@ func TestNewAPIStyleGatewaySupportsExplicitCapabilityMatrix(t *testing.T) {
 			expected: true,
 		},
 		{
+			name:     "existing compatible embeddings can use openai compatible path",
+			account:  &Account{Platform: PlatformDeepSeek, Extra: enabledExtra},
+			route:    NewAPIStyleRouteEmbeddings,
+			expected: true,
+		},
+		{
+			name:     "group switch enables compatible embeddings without account extra",
+			account:  &Account{Platform: PlatformDeepSeek},
+			group:    deepSeekGroupEnabled,
+			route:    NewAPIStyleRouteEmbeddings,
+			expected: true,
+		},
+		{
+			name:     "anthropic embeddings are unsupported",
+			account:  &Account{Platform: PlatformAnthropic, Extra: enabledExtra},
+			route:    NewAPIStyleRouteEmbeddings,
+			expected: false,
+		},
+		{
+			name:     "task platforms do not expose embeddings",
+			account:  &Account{Platform: PlatformSuno},
+			route:    NewAPIStyleRouteEmbeddings,
+			expected: false,
+		},
+		{
 			name:     "existing compatible messages falls back to old custom path",
 			account:  &Account{Platform: PlatformMoonshot, Extra: enabledExtra},
 			route:    NewAPIStyleRouteMessages,

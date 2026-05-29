@@ -273,6 +273,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		EnableMetadataPassthrough:              settings.EnableMetadataPassthrough,
 		EnableCCHSigning:                       settings.EnableCCHSigning,
 		EnableAnthropicCacheTTL1hInjection:     settings.EnableAnthropicCacheTTL1hInjection,
+		RewriteMessageCacheControl:             settings.RewriteMessageCacheControl,
 		AntigravityUserAgentVersion:            settings.AntigravityUserAgentVersion,
 		OpenAICodexUserAgent:                   settings.OpenAICodexUserAgent,
 		OpenAIAllowClaudeCodeCodexPlugin:       settings.OpenAIAllowClaudeCodeCodexPlugin,
@@ -601,6 +602,7 @@ type UpdateSettingsRequest struct {
 	EnableMetadataPassthrough          *bool   `json:"enable_metadata_passthrough"`
 	EnableCCHSigning                   *bool   `json:"enable_cch_signing"`
 	EnableAnthropicCacheTTL1hInjection *bool   `json:"enable_anthropic_cache_ttl_1h_injection"`
+	RewriteMessageCacheControl         *bool   `json:"rewrite_message_cache_control"`
 	AntigravityUserAgentVersion        *string `json:"antigravity_user_agent_version"`
 	OpenAICodexUserAgent               *string `json:"openai_codex_user_agent"`
 	OpenAIAllowClaudeCodeCodexPlugin   *bool   `json:"openai_allow_claude_code_codex_plugin"`
@@ -1680,6 +1682,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.EnableAnthropicCacheTTL1hInjection
 		}(),
+		RewriteMessageCacheControl: func() bool {
+			if req.RewriteMessageCacheControl != nil {
+				return *req.RewriteMessageCacheControl
+			}
+			return previousSettings.RewriteMessageCacheControl
+		}(),
 		AntigravityUserAgentVersion: func() string {
 			if req.AntigravityUserAgentVersion != nil {
 				return *req.AntigravityUserAgentVersion
@@ -2072,6 +2080,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		EnableMetadataPassthrough:              updatedSettings.EnableMetadataPassthrough,
 		EnableCCHSigning:                       updatedSettings.EnableCCHSigning,
 		EnableAnthropicCacheTTL1hInjection:     updatedSettings.EnableAnthropicCacheTTL1hInjection,
+		RewriteMessageCacheControl:             updatedSettings.RewriteMessageCacheControl,
 		AntigravityUserAgentVersion:            updatedSettings.AntigravityUserAgentVersion,
 		OpenAICodexUserAgent:                   updatedSettings.OpenAICodexUserAgent,
 		WebSearchEmulationEnabled:              updatedSettings.WebSearchEmulationEnabled,

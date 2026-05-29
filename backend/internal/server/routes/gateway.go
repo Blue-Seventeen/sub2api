@@ -123,17 +123,11 @@ func RegisterGatewayRoutes(
 			}
 		})
 		gateway.POST("/embeddings", func(c *gin.Context) {
-			if getGroupPlatform(c) != service.PlatformOpenAI {
-				service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
-				c.JSON(http.StatusNotFound, gin.H{
-					"error": gin.H{
-						"type":    "not_found_error",
-						"message": "Embeddings API is not supported for this platform",
-					},
-				})
+			if getGroupPlatform(c) == service.PlatformOpenAI {
+				h.OpenAIGateway.Embeddings(c)
 				return
 			}
-			h.OpenAIGateway.Embeddings(c)
+			h.NewAPIStyleGateway.Embeddings(c)
 		})
 		gateway.POST("/images/generations", func(c *gin.Context) {
 			if getGroupPlatform(c) == service.PlatformOpenAI {
@@ -152,7 +146,6 @@ func RegisterGatewayRoutes(
 			writeImagesUnsupported(c)
 		})
 		gateway.POST("/audio/*subpath", h.NewAPIStyleGateway.Audio)
-		gateway.POST("/embeddings", h.NewAPIStyleGateway.Embeddings)
 		gateway.POST("/rerank", h.NewAPIStyleGateway.Rerank)
 		gateway.GET("/videos", h.NewAPIStyleGateway.Videos)
 		gateway.POST("/videos", h.NewAPIStyleGateway.Videos)
@@ -216,17 +209,11 @@ func RegisterGatewayRoutes(
 		}
 	})
 	r.POST("/embeddings", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, func(c *gin.Context) {
-		if getGroupPlatform(c) != service.PlatformOpenAI {
-			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
-			c.JSON(http.StatusNotFound, gin.H{
-				"error": gin.H{
-					"type":    "not_found_error",
-					"message": "Embeddings API is not supported for this platform",
-				},
-			})
+		if getGroupPlatform(c) == service.PlatformOpenAI {
+			h.OpenAIGateway.Embeddings(c)
 			return
 		}
-		h.OpenAIGateway.Embeddings(c)
+		h.NewAPIStyleGateway.Embeddings(c)
 	})
 	r.POST("/images/generations", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, func(c *gin.Context) {
 		if getGroupPlatform(c) == service.PlatformOpenAI {
@@ -247,7 +234,6 @@ func RegisterGatewayRoutes(
 	newAPIOnly := []gin.HandlerFunc{bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic}
 	r.POST("/audio/*subpath", append(newAPIOnly, h.NewAPIStyleGateway.Audio)...)
 	r.POST("/api/paas/v4/audio/*subpath", append(newAPIOnly, h.NewAPIStyleGateway.Audio)...)
-	r.POST("/embeddings", append(newAPIOnly, h.NewAPIStyleGateway.Embeddings)...)
 	r.POST("/rerank", append(newAPIOnly, h.NewAPIStyleGateway.Rerank)...)
 	r.GET("/videos", append(newAPIOnly, h.NewAPIStyleGateway.Videos)...)
 	r.POST("/videos", append(newAPIOnly, h.NewAPIStyleGateway.Videos)...)

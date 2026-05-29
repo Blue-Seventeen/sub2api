@@ -107,8 +107,10 @@ func (s *NewAPIStyleGatewayService) SupportsForGroup(account *Account, group *Gr
 		return account.Platform == PlatformAnthropic
 	case NewAPIStyleRouteResponses:
 		return account.Platform == PlatformOpenAI || account.Platform == PlatformXAI
-	case NewAPIStyleRouteImages, NewAPIStyleRouteEmbeddings, NewAPIStyleRouteVideo:
+	case NewAPIStyleRouteImages, NewAPIStyleRouteVideo:
 		return account.Platform == PlatformOpenAI
+	case NewAPIStyleRouteEmbeddings:
+		return platformSupportsNewAPIStyleEmbeddings(account.Platform)
 	case NewAPIStyleRouteAudio:
 		return account.Platform == PlatformOpenAI || account.Platform == PlatformZhipu
 	case NewAPIStyleRouteRerank:
@@ -121,6 +123,16 @@ func (s *NewAPIStyleGatewayService) SupportsForGroup(account *Account, group *Gr
 		return account.Platform == PlatformMidjourney
 	case NewAPIStyleRouteTask:
 		return account.Platform == PlatformSuno || account.Platform == PlatformKling || account.Platform == PlatformMidjourney
+	default:
+		return false
+	}
+}
+
+func platformSupportsNewAPIStyleEmbeddings(platform string) bool {
+	switch strings.TrimSpace(platform) {
+	case PlatformOpenAI, PlatformZhipu, PlatformDeepSeek, PlatformVolcEngine, PlatformAli, PlatformMoonshot,
+		PlatformPerplexity, PlatformMistral, PlatformSiliconFlow, PlatformXAI, PlatformOpenRouter:
+		return true
 	default:
 		return false
 	}
