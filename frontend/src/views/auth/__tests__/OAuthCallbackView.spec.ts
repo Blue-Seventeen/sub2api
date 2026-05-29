@@ -155,7 +155,7 @@ describe('OAuthCallbackView', () => {
     expect(exchangePendingOAuthCompletionMock).not.toHaveBeenCalled()
   })
 
-  it('submits stored affiliate code when completing invited email oauth registration', async () => {
+  it('completes invited email oauth registration without upstream affiliate payload', async () => {
     routeState.path = '/auth/oauth/callback'
     exchangePendingOAuthCompletionMock.mockResolvedValue({
       error: 'invitation_required',
@@ -183,8 +183,8 @@ describe('OAuthCallbackView', () => {
     expect(apiPostMock).toHaveBeenCalledWith('/auth/oauth/google/complete-registration', {
       password: 'secret-123',
       invitation_code: 'INVITE456',
-      aff_code: 'AFF456',
     })
+    expect(apiPostMock.mock.calls[0][1]).not.toHaveProperty('aff_code')
     expect(setTokenMock).toHaveBeenCalledWith('token-1')
   })
 
