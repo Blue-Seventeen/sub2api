@@ -218,6 +218,26 @@ func (s *RedeemCodeRepoSuite) TestListWithFilters_GroupPreload() {
 	s.Require().Equal(group.ID, codes[0].Group.ID)
 }
 
+func (s *RedeemCodeRepoSuite) TestGetStats() {
+	past := time.Now().UTC().Add(-time.Hour)
+	future := time.Now().UTC().Add(time.Hour)
+	s.Require().NoError(s.repo.Create(s.ctx, &service.RedeemCode{Code: "STATS-ACTIVE", Type: service.RedeemTypeBalance, Value: 10, Status: service.StatusUnused, ExpiresAt: &future}))
+	s.Require().NoError(s.repo.Create(s.ctx, &service.RedeemCode{Code: "STATS-USED", Type: service.RedeemTypeBalance, Value: 12.5, Status: service.StatusUsed}))
+	s.Require().NoError(s.repo.Create(s.ctx, &service.RedeemCode{Code: "STATS-SUB", Type: service.RedeemTypeSubscription, Value: 7.5, Status: service.StatusUsed}))
+	s.Require().NoError(s.repo.Create(s.ctx, &service.RedeemCode{Code: "STATS-EXPIRED", Type: service.RedeemTypeInvitation, Value: 0, Status: service.StatusUnused, ExpiresAt: &past}))
+
+	stats, err := s.repo.GetStats(s.ctx)
+	s.Require().NoError(err)
+	s.Require().Equal(int64(4), stats.TotalCodes)
+	s.Require().Equal(int64(1), stats.ActiveCodes)
+	s.Require().Equal(int64(2), stats.UsedCodes)
+	s.Require().Equal(int64(1), stats.ExpiredCodes)
+	s.Require().InDelta(20.0, stats.TotalValueDistributed, 0.000001)
+	s.Require().Equal(int64(2), stats.ByType[service.RedeemTypeBalance])
+	s.Require().Equal(int64(1), stats.ByType[service.RedeemTypeSubscription])
+	s.Require().Equal(int64(1), stats.ByType[service.RedeemTypeInvitation])
+}
+
 // --- Update ---
 
 func (s *RedeemCodeRepoSuite) TestUpdate() {

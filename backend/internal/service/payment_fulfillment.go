@@ -428,12 +428,36 @@ func (s *PaymentService) doSub(ctx context.Context, o *dbent.PaymentOrder) error
 		slog.Info("subscription already assigned for order, skipping", "orderID", o.ID, "groupID", gid)
 		return s.markCompleted(ctx, o, "SUBSCRIPTION_SUCCESS")
 	}
-	orderNote := fmt.Sprintf("payment order %d", o.ID)
+	orderNote := paymentSubscriptionOrderNote(o.ID)
+	if s.subscriptionOrderAlreadyApplied(ctx, o.UserID, gid, orderNote) {
+		slog.Info("subscription order note already applied, skipping duplicate extension", "orderID", o.ID, "groupID", gid)
+		return s.markCompleted(ctx, o, "SUBSCRIPTION_SUCCESS")
+	}
 	_, _, err = s.subscriptionSvc.AssignOrExtendSubscription(ctx, &AssignSubscriptionInput{UserID: o.UserID, GroupID: gid, ValidityDays: days, AssignedBy: 0, Notes: orderNote})
 	if err != nil {
 		return fmt.Errorf("assign subscription: %w", err)
 	}
 	return s.markCompleted(ctx, o, "SUBSCRIPTION_SUCCESS")
+}
+
+func paymentSubscriptionOrderNote(orderID int64) string {
+	return fmt.Sprintf("payment order %d", orderID)
+}
+
+func (s *PaymentService) subscriptionOrderAlreadyApplied(ctx context.Context, userID, groupID int64, orderNote string) bool {
+	if s == nil || s.subscriptionSvc == nil || s.subscriptionSvc.userSubRepo == nil || strings.TrimSpace(orderNote) == "" {
+		return false
+	}
+	sub, err := s.subscriptionSvc.userSubRepo.GetByUserIDAndGroupID(ctx, userID, groupID)
+	if err != nil || sub == nil {
+		return false
+	}
+	for _, line := range strings.Split(sub.Notes, "\n") {
+		if strings.TrimSpace(line) == orderNote {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *PaymentService) hasAuditLog(ctx context.Context, orderID int64, action string) bool {

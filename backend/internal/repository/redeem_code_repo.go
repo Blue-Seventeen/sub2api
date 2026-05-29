@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"time"
 
@@ -163,6 +164,93 @@ func (r *redeemCodeRepository) ListWithFilters(ctx context.Context, params pagin
 	outCodes := redeemCodeEntitiesToService(codes)
 
 	return outCodes, paginationResultFromTotal(int64(total), params), nil
+}
+
+func (r *redeemCodeRepository) GetStats(ctx context.Context) (*service.RedeemCodeStats, error) {
+	now := time.Now()
+	stats := &service.RedeemCodeStats{
+		ByType: map[string]int64{
+			service.RedeemTypeBalance:      0,
+			service.RedeemTypeConcurrency:  0,
+			service.RedeemTypeSubscription: 0,
+			service.RedeemTypeInvitation:   0,
+		},
+	}
+
+	total, err := r.client.RedeemCode.Query().Count(ctx)
+	if err != nil {
+		return nil, err
+	}
+	stats.TotalCodes = int64(total)
+
+	active, err := r.client.RedeemCode.Query().
+		Where(
+			redeemcode.StatusEQ(service.StatusUnused),
+			redeemcode.Or(
+				redeemcode.ExpiresAtIsNil(),
+				redeemcode.ExpiresAtGT(now),
+			),
+		).
+		Count(ctx)
+	if err != nil {
+		return nil, err
+	}
+	stats.ActiveCodes = int64(active)
+
+	used, err := r.client.RedeemCode.Query().
+		Where(redeemcode.StatusEQ(service.StatusUsed)).
+		Count(ctx)
+	if err != nil {
+		return nil, err
+	}
+	stats.UsedCodes = int64(used)
+
+	expired, err := r.client.RedeemCode.Query().
+		Where(redeemcode.Or(
+			redeemcode.StatusEQ(service.StatusExpired),
+			redeemcode.And(
+				redeemcode.StatusEQ(service.StatusUnused),
+				redeemcode.ExpiresAtNotNil(),
+				redeemcode.ExpiresAtLTE(now),
+			),
+		)).
+		Count(ctx)
+	if err != nil {
+		return nil, err
+	}
+	stats.ExpiredCodes = int64(expired)
+
+	var valueRows []struct {
+		Total sql.NullFloat64 `json:"total"`
+	}
+	if err := r.client.RedeemCode.Query().
+		Where(redeemcode.StatusEQ(service.StatusUsed)).
+		Aggregate(dbent.As(dbent.Sum(redeemcode.FieldValue), "total")).
+		Scan(ctx, &valueRows); err != nil {
+		return nil, err
+	}
+	if len(valueRows) > 0 && valueRows[0].Total.Valid {
+		stats.TotalValueDistributed = valueRows[0].Total.Float64
+	}
+
+	var typeRows []struct {
+		Type  string `json:"type"`
+		Count int    `json:"count"`
+	}
+	if err := r.client.RedeemCode.Query().
+		GroupBy(redeemcode.FieldType).
+		Aggregate(dbent.Count()).
+		Scan(ctx, &typeRows); err != nil {
+		return nil, err
+	}
+	for _, row := range typeRows {
+		if row.Type == "" {
+			continue
+		}
+		stats.ByType[row.Type] = int64(row.Count)
+	}
+
+	return stats, nil
 }
 
 func redeemCodeListOrder(params pagination.PaginationParams) []func(*entsql.Selector) {

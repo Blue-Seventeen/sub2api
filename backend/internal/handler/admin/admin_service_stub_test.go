@@ -76,7 +76,8 @@ type stubAdminService struct {
 		sortOrder string
 		calls     int
 	}
-	mu sync.Mutex
+	redeemStats *service.RedeemCodeStats
+	mu          sync.Mutex
 }
 
 type proxyExistsCall struct {
@@ -666,6 +667,13 @@ func (s *stubAdminService) ListRedeemCodes(ctx context.Context, page, pageSize i
 func (s *stubAdminService) GetRedeemCode(ctx context.Context, id int64) (*service.RedeemCode, error) {
 	code := service.RedeemCode{ID: id, Code: "R-TEST", Status: service.StatusUnused}
 	return &code, nil
+}
+
+func (s *stubAdminService) GetRedeemCodeStats(ctx context.Context) (*service.RedeemCodeStats, error) {
+	if s.redeemStats != nil {
+		return s.redeemStats, nil
+	}
+	return &service.RedeemCodeStats{ByType: map[string]int64{}}, nil
 }
 
 func (s *stubAdminService) GenerateRedeemCodes(ctx context.Context, input *service.GenerateRedeemCodesInput) ([]service.RedeemCode, error) {

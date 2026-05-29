@@ -25,6 +25,15 @@ type RedeemCode struct {
 	Group *Group
 }
 
+type RedeemCodeStats struct {
+	TotalCodes            int64
+	ActiveCodes           int64
+	UsedCodes             int64
+	ExpiredCodes          int64
+	TotalValueDistributed float64
+	ByType                map[string]int64
+}
+
 func (r *RedeemCode) IsUsed() bool {
 	return r.Status == StatusUsed
 }

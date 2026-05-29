@@ -126,6 +126,7 @@ type AdminService interface {
 	// Redeem code management
 	ListRedeemCodes(ctx context.Context, page, pageSize int, codeType, status, search string, sortBy, sortOrder string) ([]RedeemCode, int64, error)
 	GetRedeemCode(ctx context.Context, id int64) (*RedeemCode, error)
+	GetRedeemCodeStats(ctx context.Context) (*RedeemCodeStats, error)
 	GenerateRedeemCodes(ctx context.Context, input *GenerateRedeemCodesInput) ([]RedeemCode, error)
 	DeleteRedeemCode(ctx context.Context, id int64) error
 	BatchDeleteRedeemCodes(ctx context.Context, ids []int64) (int64, error)
@@ -3579,6 +3580,10 @@ func (s *adminServiceImpl) ListRedeemCodes(ctx context.Context, page, pageSize i
 
 func (s *adminServiceImpl) GetRedeemCode(ctx context.Context, id int64) (*RedeemCode, error) {
 	return s.redeemCodeRepo.GetByID(ctx, id)
+}
+
+func (s *adminServiceImpl) GetRedeemCodeStats(ctx context.Context) (*RedeemCodeStats, error) {
+	return s.redeemCodeRepo.GetStats(ctx)
 }
 
 func (s *adminServiceImpl) GenerateRedeemCodes(ctx context.Context, input *GenerateRedeemCodesInput) ([]RedeemCode, error) {

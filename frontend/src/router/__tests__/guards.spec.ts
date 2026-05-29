@@ -84,7 +84,15 @@ function simulateGuard(
       return authState.isAdmin ? '/admin/dashboard' : '/dashboard'
     }
     if (authState.backendModeEnabled && !authState.isAuthenticated) {
-      const allowed = ['/login', '/key-usage', '/setup', '/payment/result']
+      const allowed = [
+        '/login',
+        '/key-usage',
+        '/setup',
+        '/payment/result',
+        '/payment/stripe',
+        '/payment/airwallex',
+        '/payment/stripe-popup',
+      ]
       const callbackPaths = [
         '/auth/callback',
         '/auth/linuxdo/callback',
@@ -94,7 +102,7 @@ function simulateGuard(
       ]
       const pendingAuthPaths = ['/register', '/email-verify']
       const isAllowed =
-        allowed.some((path) => toPath === path || toPath.startsWith(path)) ||
+        allowed.some((path) => toPath === path || toPath.startsWith(`${path}/`)) ||
         callbackPaths.includes(toPath) ||
         (authState.hasPendingAuthSession && pendingAuthPaths.includes(toPath))
       if (!isAllowed) {
@@ -133,7 +141,15 @@ function simulateGuard(
     if (authState.isAuthenticated && authState.isAdmin) {
       return null
     }
-    const allowed = ['/login', '/key-usage', '/setup', '/payment/result']
+    const allowed = [
+      '/login',
+      '/key-usage',
+      '/setup',
+      '/payment/result',
+      '/payment/stripe',
+      '/payment/airwallex',
+      '/payment/stripe-popup',
+    ]
     const callbackPaths = [
       '/auth/callback',
       '/auth/linuxdo/callback',
@@ -143,7 +159,7 @@ function simulateGuard(
     ]
     const pendingAuthPaths = ['/register', '/email-verify']
     const isAllowed =
-      allowed.some((path) => toPath === path || toPath.startsWith(path)) ||
+      allowed.some((path) => toPath === path || toPath.startsWith(`${path}/`)) ||
       callbackPaths.includes(toPath) ||
       (authState.hasPendingAuthSession && pendingAuthPaths.includes(toPath))
     if (!isAllowed) {
@@ -494,7 +510,7 @@ describe('路由守卫逻辑', () => {
       expect(redirect).toBeNull()
     })
 
-    it('unauthenticated: /payment/result is allowed', () => {
+    it('unauthenticated: payment resume routes are allowed', () => {
       const authState: MockAuthState = {
         isAuthenticated: false,
         isAdmin: false,
@@ -502,8 +518,22 @@ describe('路由守卫逻辑', () => {
         backendModeEnabled: true,
         hasPendingAuthSession: false,
       }
-      const redirect = simulateGuard('/payment/result', { requiresAuth: false }, authState)
-      expect(redirect).toBeNull()
+      for (const path of ['/payment/result', '/payment/stripe', '/payment/airwallex', '/payment/stripe-popup']) {
+        const redirect = simulateGuard(path, { requiresAuth: false }, authState)
+        expect(redirect).toBeNull()
+      }
+    })
+
+    it('unauthenticated: similar payment route prefixes are not allowed', () => {
+      const authState: MockAuthState = {
+        isAuthenticated: false,
+        isAdmin: false,
+        isSimpleMode: false,
+        backendModeEnabled: true,
+        hasPendingAuthSession: false,
+      }
+      const redirect = simulateGuard('/payment/stripe-evil', { requiresAuth: false }, authState)
+      expect(redirect).toBe('/login')
     })
 
     it('unauthenticated: /register is allowed when a pending auth session exists', () => {
