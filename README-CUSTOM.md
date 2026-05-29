@@ -18,7 +18,7 @@
 | 项目 | 当前约定 |
 |---|---|
 | 当前主线 | `dev` |
-| 当前 upstream 基线 | 已同步到 `v0.1.132`，`backend/cmd/server/VERSION` 已对齐 `0.1.132` |
+| 当前 upstream 基线 | 已同步到 `v0.1.133`，`backend/cmd/server/VERSION` 已对齐 `0.1.133` |
 | 早期 fork 保护基线 | `2b72deb8fd45dc3a526bda2299b16df8d471107c` |
 | 部署策略 | `dev` 是真实可部署主线；`sub2api-custom-localtest` 仅用于本地测试 |
 | 架构原则 | 保留 Sub2API 的 Account / Group / Channel / 调度 / sticky / failover / billing，渐进吸收协议优先兼容内核 |
@@ -792,3 +792,15 @@ Protect files:
 - 订阅管理仍以本 fork 为准；v0.1.132 合并不得回退兑换时刻滚动窗口、自定义小时限额、`starts_at` 排序、开始时间列、秒级时间展示、列设置持久化或相关迁移。
 - `backend/cmd/server/VERSION` 在本 fork 中主动对齐为 `0.1.132`；后续同步时如 upstream tag 内 VERSION 落后于 tag 号，应由维护者确认是否继续按本 fork 发布版本号手动对齐。
 - 发布前至少验证：`go test ./internal/service -run "Test.*(OpenAI|WS|Pool|ModelNotFound|Billing|Proxy|Sticky|Usage|RateLimit|Compatible|Subscription|Group)" -count=1`、`go test ./internal/handler ./internal/handler/admin ./internal/server -run "Test.*(OpenAI|Gateway|Proxy|Subscription|Account|Group|Ops|Models)" -count=1`、`go test ./internal/repository ./internal/pkg/apicompat ./cmd/server -count=1`、`npm run typecheck`、`npm run build`、`git diff --check`。
+
+## 17. v0.1.133 升级兼容说明
+
+- 当前 `codex/sync-v0.1.133` 以 `codex/sync-v0.1.132` 为基线合入 upstream `v0.1.133`，`backend/cmd/server/VERSION` 对齐为 `0.1.133`；后续不得回退 v0.1.132 已保留的 Promotion、CompatibleGateway、usage fallback、统一倍率、AccountAutoOps、订阅管理和 `/admin/proxies` 自定义体系。
+- 已吸收 upstream OpenAI/Codex 兼容增强：OpenAI embeddings gateway、endpoint capability 路由限制、Claude Code Codex 插件全局放行开关、WS terminal event first-token 修复、Responses/Chat usage 字段透传、concurrency acquire 错误分类和 request context 透传；合并时必须保留本 fork 的 mandatory usage/billing 防漏扣兜底。
+- 已吸收 upstream 账号 quota 自动暂停能力：支持按 5h/7d 用量阈值自动暂停账号调度，并在配置更新后刷新调度热路径缓存；该能力不得替代现有账号状态、AccountAutoOps、sticky proxy、auto-probe 或 proxy stats 语义。
+- 已吸收 upstream 内容审计运行态增强：blocked keywords、pre-block/runtime status、hash block 记录与队列观测需与本 fork 风控开关并存；默认关闭时不得读取/记录请求体或影响中转热路径。
+- 已吸收 upstream Antigravity/Anthropic/Gemini 兼容修复、Claude Opus 4.8 模型映射和模型价格元数据更新；这些仅用于协议适配、usage 准确性和价格表更新，不得覆盖本 fork 的统一倍率、GroupRates、channel pricing 优先级或图片按生成数计费语义。
+- `/admin/proxies` 仍以本 fork 为准；v0.1.133 合并不得改写 Clash/mihomo 托管订阅、订阅节点拆分、proxy stats、active usage、sticky、auto-probe、增量刷新或 gateway 代理解析链路。
+- 订阅管理仍以本 fork 为准；v0.1.133 合并不得回退兑换时刻滚动窗口、自定义小时限额、`starts_at` 排序、开始时间列、秒级时间展示、列设置持久化或相关迁移。
+- upstream Affiliate 仍不吸收；本 fork 继续以自研 Promotion 作为唯一推广返佣体系。
+- 发布前至少验证：`go test ./internal/service -run "Test.*(OpenAI|WS|Pool|ModelNotFound|Billing|Proxy|Sticky|Usage|RateLimit|Compatible|Subscription|Group|ContentModeration)" -count=1`、`go test ./internal/handler ./internal/handler/admin ./internal/server -run "Test.*(OpenAI|Gateway|Proxy|Subscription|Account|Group|Ops|Models|Concurrency)" -count=1`、`go test ./internal/repository ./internal/pkg/apicompat ./cmd/server -count=1`、`npm run typecheck`、`npm run build`、`git diff --check`。

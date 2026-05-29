@@ -303,7 +303,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		compat := compatibilityLogFields(c)
 
 		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
-		h.submitMandatoryUsageRecordTask(func(ctx context.Context) {
+		h.submitMandatoryUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 				Result:             result,
 				QuotaPlatform:      quotaPlatform,

@@ -414,7 +414,7 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 		requestPayloadHash := service.HashUsageRequestPayload(body)
 		inboundEndpoint := GetInboundEndpoint(c)
 		compat := compatibilityLogFields(c)
-		h.base.submitMandatoryUsageRecordTask(func(ctx context.Context) {
+		h.base.submitMandatoryUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 			if err := h.base.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 				Result:             result,
 				ParsedRequest:      parsed,
