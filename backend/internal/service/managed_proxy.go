@@ -80,6 +80,7 @@ type UpdateProxySubscriptionInput struct {
 
 type ManagedProxyRuntimeStatus struct {
 	Enabled        bool       `json:"enabled"`
+	NodeID         string     `json:"node_id,omitempty"`
 	Status         string     `json:"status"`
 	SubscriptionID int64      `json:"subscription_id,omitempty"`
 	LocalURL       string     `json:"local_url,omitempty"`
@@ -122,6 +123,7 @@ func (managedProxyNoopResolver) ResolveProxyURL(context.Context, int64) (string,
 func (managedProxyNoopResolver) GetStatus(subscriptionID int64) ManagedProxyRuntimeStatus {
 	return ManagedProxyRuntimeStatus{
 		Enabled:        false,
+		NodeID:         CurrentNodeID(),
 		Status:         ManagedProxyRuntimeStatusDisabled,
 		SubscriptionID: subscriptionID,
 		UpdatedAt:      time.Now(),

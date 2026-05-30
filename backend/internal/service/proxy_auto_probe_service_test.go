@@ -276,6 +276,37 @@ func TestProxyAutoProbeServiceInitializeEntriesUsesCachedQueues(t *testing.T) {
 	require.Equal(t, warnLatency, *svc.entries[4].LastLatencyMs)
 }
 
+func TestProxyAutoProbeServiceSelectionUsesInjectedNodeLatency(t *testing.T) {
+	nodeAFast := int64(10)
+	nodeASlow := int64(80)
+	nodeBFast := int64(12)
+	nodeBSlow := int64(90)
+	repo := &proxyAutoProbeRepoStub{proxies: []Proxy{
+		{ID: 1, Name: "p1", Status: StatusActive},
+		{ID: 2, Name: "p2", Status: StatusActive},
+	}}
+	svcA := NewProxyAutoProbeService(nil, repo, &proxyAutoProbeSettingRepoStub{}, &proxyAutoProbeLatencyCacheStub{
+		items: map[int64]*ProxyLatencyInfo{
+			1: {Success: true, QualityStatus: "healthy", LatencyMs: &nodeAFast},
+			2: {Success: true, QualityStatus: "healthy", LatencyMs: &nodeASlow},
+		},
+	})
+	svcB := NewProxyAutoProbeService(nil, repo, &proxyAutoProbeSettingRepoStub{}, &proxyAutoProbeLatencyCacheStub{
+		items: map[int64]*ProxyLatencyInfo{
+			1: {Success: true, QualityStatus: "healthy", LatencyMs: &nodeBSlow},
+			2: {Success: true, QualityStatus: "healthy", LatencyMs: &nodeBFast},
+		},
+	})
+	svcA.config = ProxyAutoProbeConfig{Enabled: true, DefaultIntervalSec: 60, RetryIntervalSec: 5}
+	svcB.config = ProxyAutoProbeConfig{Enabled: true, DefaultIntervalSec: 60, RetryIntervalSec: 5}
+
+	require.NoError(t, svcA.initializeEntries(context.Background(), time.Now()))
+	require.NoError(t, svcB.initializeEntries(context.Background(), time.Now()))
+
+	require.Equal(t, int64(1), svcA.getBestProxy(context.Background()).ID)
+	require.Equal(t, int64(2), svcB.getBestProxy(context.Background()).ID)
+}
+
 func TestProxyAutoProbeEntryLessPrefersFailedThenSuccessLatency(t *testing.T) {
 	now := time.Now()
 	latency20 := int64(20)

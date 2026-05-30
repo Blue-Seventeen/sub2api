@@ -42,6 +42,7 @@ type ProxyAutoProbeConfig struct {
 }
 
 type ProxyAutoProbeStatus struct {
+	NodeID             string                     `json:"node_id,omitempty"`
 	Enabled            bool                       `json:"enabled"`
 	DefaultIntervalSec int                        `json:"default_interval_sec"`
 	RetryIntervalSec   int                        `json:"retry_interval_sec"`
@@ -98,6 +99,7 @@ type ProxyAutoProbeService struct {
 	settingRepo       SettingRepository
 	proxyLatencyCache ProxyLatencyCache
 	proxyStickyStore  ProxyStickyStore
+	nodeID            string
 	tickInterval      time.Duration
 
 	stopCh   chan struct{}
@@ -142,6 +144,7 @@ func NewProxyAutoProbeService(
 		settingRepo:       settingRepo,
 		proxyLatencyCache: proxyLatencyCache,
 		proxyStickyStore:  proxyStickyStore,
+		nodeID:            CurrentNodeID(),
 		tickInterval:      proxyAutoProbeTickInterval,
 		stopCh:            make(chan struct{}),
 		config:            defaultProxyAutoProbeConfig(),
@@ -273,6 +276,7 @@ func (s *ProxyAutoProbeService) GetStatus() ProxyAutoProbeStatus {
 	}
 
 	status := ProxyAutoProbeStatus{
+		NodeID:             s.nodeID,
 		Enabled:            cfg.Enabled,
 		DefaultIntervalSec: cfg.DefaultIntervalSec,
 		RetryIntervalSec:   cfg.RetryIntervalSec,

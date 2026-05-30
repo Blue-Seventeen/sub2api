@@ -762,7 +762,7 @@ Protect files:
 - upstream Affiliate 仍不吸收；本 fork 继续以 Promotion 作为唯一推广返佣体系，不允许重新引入 `/affiliate`、admin affiliate 页面、Affiliate repository/service 或 affiliate migrations。
 - 已按 upstream 删除 Ops retry/replay storage 与管理入口；升级后管理员不能再从 Ops 错误日志直接重放原请求，只保留脱敏后的 ops error log 与统计分析。
 - `/admin/proxies` 继续以本 fork 自定义体系为准：proxy stats、实时出口账号数、自动检测增量刷新、自动代理粘性、Clash/mihomo 托管订阅和订阅节点拆分都必须保留。
-- 分布式代理订阅运行态仍是节点本地状态：订阅和 proxy 绑定存在中央数据库；mihomo 进程、本地端口和 runtime 状态由每个节点本地维护；集群级实时使用统计依赖共享 Redis。
+- 分布式代理订阅运行态仍是节点本地状态：订阅和 proxy 绑定存在中央数据库；mihomo 进程、本地端口、runtime 状态、latency/quality、auto-probe 最优选择和 sticky proxy 由每个节点本地维护；集群级实时使用统计依赖共享 Redis。
 - 图片计费语义为按实际生成图片数计费，OpenAI / Gateway 路径中 `RequestCount` 使用 `ImageCount` 属于正确行为，不得改回“每个请求一次”。
 - v0.1.130 兼容修复要求保持中转热路径轻量：OpenAI ChatCompletions SSE 必须先写 `text/event-stream` header；usage 成功统计不能只依赖 `actual_cost > 0`；sticky 调试日志不得使用默认 `Info`；OpenAI 抢槽失败后不得同步 fresh-load Redis 兜底。
 - 发布前至少验证：`go test ./internal/config ./internal/service ./internal/repository ./internal/handler ./internal/handler/admin ./internal/server ./cmd/server -count=1`、`go test ./internal/pkg/apicompat ./internal/pkg/openai_compat ./internal/service -run "Test.*(OpenAI|Compatible|Gateway|Image|Proxy|Sticky|Usage|Billing)" -count=1`、`npm run typecheck`、`npm run build`、`git diff --check`。
@@ -804,6 +804,7 @@ Protect files:
 - 已吸收 upstream 内容审计运行态增强：blocked keywords、pre-block/runtime status、hash block 记录与队列观测需与本 fork 风控开关并存；默认关闭时不得读取/记录请求体或影响中转热路径。
 - 已吸收 upstream Antigravity/Anthropic/Gemini 兼容修复、Claude Opus 4.8 模型映射和模型价格元数据更新；这些仅用于协议适配、usage 准确性和价格表更新，不得覆盖本 fork 的统一倍率、GroupRates、channel pricing 优先级或图片按生成数计费语义。
 - `/admin/proxies` 仍以本 fork 为准；v0.1.133 合并不得改写 Clash/mihomo 托管订阅、订阅节点拆分、proxy stats、active usage、sticky、auto-probe、增量刷新或 gateway 代理解析链路。
+- `/admin/proxies` 分布式部署语义：代理配置、托管订阅、订阅节点列表、启停状态和账号绑定关系继续共享 DB；latency/quality、auto-probe 最优选择、sticky proxy、managed mihomo runtime 实例目录和 runtime 健康状态必须按当前节点本地化。节点身份解析顺序为 `NODE_ID` -> 本机公网 IP -> hostname -> 随机 fallback；公网多节点部署时允许不显式设置 `NODE_ID`，系统会优先用本机公网 IP 生成类似 `ip-203.0.113.10` 的节点身份。多节点共用同一 DB/Redis 时必须保证每个正在运行的节点身份唯一且稳定；如果多节点共用同一个公网出口/NAT、无法探测公网 IP、或需要自定义名称，则必须在 `deploy/.env` 显式设置不同 `NODE_ID`（例如 `sub2api-node-01`、`sub2api-node-02`），`docker-compose.yml` 已透传该变量。Redis 新 key 使用 `proxy:latency:{node_id}:{proxy_id}` 与 `proxy_sticky_account:{node_id}:{account_id}`，旧全局 key 只允许兼容 fallback，新写入不得再污染全局 key。DB `last_error` 仅保留订阅刷新/配置类共享错误，本地 mihomo 启动/进程错误只进入当前节点 runtime status。
 - 订阅管理仍以本 fork 为准；v0.1.133 合并不得回退兑换时刻滚动窗口、自定义小时限额、`starts_at` 排序、开始时间列、秒级时间展示、列设置持久化或相关迁移。
 - upstream Affiliate 仍不吸收；本 fork 继续以自研 Promotion 作为唯一推广返佣体系。
 - 发布前至少验证：`go test ./internal/service -run "Test.*(OpenAI|WS|Pool|ModelNotFound|Billing|Proxy|Sticky|Usage|RateLimit|Compatible|Subscription|Group|ContentModeration)" -count=1`、`go test ./internal/handler ./internal/handler/admin ./internal/server -run "Test.*(OpenAI|Gateway|Proxy|Subscription|Account|Group|Ops|Models|Concurrency)" -count=1`、`go test ./internal/repository ./internal/pkg/apicompat ./cmd/server -count=1`、`npm run typecheck`、`npm run build`、`git diff --check`。

@@ -48,6 +48,7 @@ services:
       - SERVER_PORT=8080
       - SERVER_MODE=${SERVER_MODE:-release}
       - RUN_MODE=${RUN_MODE:-standard}
+      - NODE_ID=${NODE_ID:-}
 
       # =======================================================================
       # Database Configuration (PostgreSQL)

@@ -112,13 +112,17 @@ type ManagedProxyRuntime struct {
 	cfg    config.ManagedProxyConfig
 	repo   ProxySubscriptionRepository
 	runner managedProxyProcessRunner
+	nodeID string
 
 	mu      sync.RWMutex
 	entries map[int64]*managedProxyRuntimeEntry
 
-	stopCh   chan struct{}
-	stopOnce sync.Once
-	wg       sync.WaitGroup
+	lifecycleMu sync.Mutex
+	started     bool
+	stopping    bool
+	stopCh      chan struct{}
+	stopOnce    sync.Once
+	wg          sync.WaitGroup
 }
 
 type managedProxyRuntimeEntry struct {
@@ -133,6 +137,8 @@ type managedProxyRuntimeEntry struct {
 	instanceDir     string
 	configPath      string
 	reloadRequested bool
+	startInProgress bool
+	startGeneration int64
 }
 
 func NewManagedProxyRuntime(cfg *config.Config, repo ProxySubscriptionRepository) *ManagedProxyRuntime {
@@ -152,6 +158,7 @@ func newManagedProxyRuntimeWithRunner(cfg config.ManagedProxyConfig, repo ProxyS
 		cfg:     cfg,
 		repo:    repo,
 		runner:  runner,
+		nodeID:  CurrentNodeID(),
 		entries: make(map[int64]*managedProxyRuntimeEntry),
 		stopCh:  make(chan struct{}),
 	}
@@ -220,11 +227,22 @@ func (r *ManagedProxyRuntime) Start() {
 		r.recordGlobalError("mihomo binary path is required")
 		return
 	}
+	if err := validateManagedProxyBindHost(r.cfg.BindHost); err != nil {
+		r.recordGlobalError(err.Error())
+		return
+	}
 	if r.repo == nil {
 		r.recordGlobalError("proxy subscription repository unavailable")
 		return
 	}
+	r.lifecycleMu.Lock()
+	if r.started || r.stopping {
+		r.lifecycleMu.Unlock()
+		return
+	}
+	r.started = true
 	r.wg.Add(1)
+	r.lifecycleMu.Unlock()
 	go func() {
 		defer r.wg.Done()
 		r.runLoop()
@@ -235,13 +253,16 @@ func (r *ManagedProxyRuntime) Stop() {
 	if r == nil {
 		return
 	}
+	r.lifecycleMu.Lock()
+	r.stopping = true
 	r.stopOnce.Do(func() {
 		close(r.stopCh)
 	})
-	r.wg.Wait()
+	r.lifecycleMu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(r.cfg.StartTimeoutSec)*time.Second)
 	defer cancel()
 	r.stopAll(ctx)
+	r.wg.Wait()
 	SetDefaultManagedProxyResolver(nil)
 }
 
@@ -273,6 +294,7 @@ func (r *ManagedProxyRuntime) GetStatus(subscriptionID int64) ManagedProxyRuntim
 	if r == nil {
 		return ManagedProxyRuntimeStatus{
 			Enabled:        false,
+			NodeID:         CurrentNodeID(),
 			Status:         ManagedProxyRuntimeStatusDisabled,
 			SubscriptionID: subscriptionID,
 			UpdatedAt:      now,
@@ -281,6 +303,7 @@ func (r *ManagedProxyRuntime) GetStatus(subscriptionID int64) ManagedProxyRuntim
 	if !r.cfg.Enabled {
 		return ManagedProxyRuntimeStatus{
 			Enabled:        false,
+			NodeID:         r.nodeID,
 			Status:         ManagedProxyRuntimeStatusDisabled,
 			SubscriptionID: subscriptionID,
 			UpdatedAt:      now,
@@ -292,6 +315,7 @@ func (r *ManagedProxyRuntime) GetStatus(subscriptionID int64) ManagedProxyRuntim
 		r.mu.RUnlock()
 		return ManagedProxyRuntimeStatus{
 			Enabled:        true,
+			NodeID:         r.nodeID,
 			Status:         ManagedProxyRuntimeStatusStopped,
 			SubscriptionID: subscriptionID,
 			UpdatedAt:      now,
@@ -304,6 +328,9 @@ func (r *ManagedProxyRuntime) GetStatus(subscriptionID int64) ManagedProxyRuntim
 
 func (r *ManagedProxyRuntime) Reload(subscriptionID int64) {
 	if r == nil || subscriptionID <= 0 {
+		return
+	}
+	if r.isStopping() {
 		return
 	}
 	now := time.Now()
@@ -325,8 +352,34 @@ func (r *ManagedProxyRuntime) Reload(subscriptionID int64) {
 	}
 	r.mu.Unlock()
 	if r.cfg.Enabled {
-		go r.syncOnce(context.Background())
+		r.triggerSync()
 	}
+}
+
+func (r *ManagedProxyRuntime) triggerSync() {
+	if r == nil {
+		return
+	}
+	r.lifecycleMu.Lock()
+	if r.stopping {
+		r.lifecycleMu.Unlock()
+		return
+	}
+	r.wg.Add(1)
+	r.lifecycleMu.Unlock()
+	go func() {
+		defer r.wg.Done()
+		r.syncOnce(context.Background())
+	}()
+}
+
+func (r *ManagedProxyRuntime) isStopping() bool {
+	if r == nil {
+		return true
+	}
+	r.lifecycleMu.Lock()
+	defer r.lifecycleMu.Unlock()
+	return r.stopping
 }
 
 func (r *ManagedProxyRuntime) runLoop() {
@@ -344,7 +397,7 @@ func (r *ManagedProxyRuntime) runLoop() {
 }
 
 func (r *ManagedProxyRuntime) syncOnce(ctx context.Context) {
-	if r == nil || !r.cfg.Enabled || r.repo == nil {
+	if r == nil || !r.cfg.Enabled || r.repo == nil || r.isStopping() {
 		return
 	}
 	subs, err := r.repo.ListActive(ctx)
@@ -354,19 +407,18 @@ func (r *ManagedProxyRuntime) syncOnce(ctx context.Context) {
 	}
 	if len(subs) > r.cfg.MaxInstances {
 		sort.Slice(subs, func(i, j int) bool { return subs[i].ID < subs[j].ID })
-		for _, sub := range subs[r.cfg.MaxInstances:] {
-			_ = r.repo.SetLastError(ctx, sub.ID, fmt.Sprintf("managed proxy max_instances=%d exceeded on this node", r.cfg.MaxInstances))
-		}
 		subs = subs[:r.cfg.MaxInstances]
 	}
 
 	active := make(map[int64]ProxySubscription, len(subs))
 	for _, sub := range subs {
+		if r.isStopping() {
+			return
+		}
 		active[sub.ID] = sub
 		if err := r.ensureRunning(ctx, sub); err != nil {
 			msg := sanitizeManagedProxyError(err)
 			logger.LegacyPrintf("service.managed_proxy", "ensure managed proxy runtime failed: subscription_id=%d err=%s", sub.ID, msg)
-			_ = r.repo.SetLastError(ctx, sub.ID, msg)
 		}
 	}
 	r.stopInactive(ctx, active)
@@ -378,44 +430,93 @@ func (r *ManagedProxyRuntime) ensureRunning(ctx context.Context, sub ProxySubscr
 	}
 	r.mu.RLock()
 	entry := r.entries[sub.ID]
-	needsStart := entry == nil || entry.process == nil || entry.status != ManagedProxyRuntimeStatusRunning || entry.revision != sub.Revision || entry.reloadRequested
+	hasProcess := false
+	if entry != nil && entry.startInProgress {
+		r.mu.RUnlock()
+		return nil
+	}
+	if entry != nil {
+		hasProcess = entry.process != nil
+	}
+	needsStart := entry == nil || !hasProcess || entry.status != ManagedProxyRuntimeStatusRunning || entry.revision != sub.Revision || entry.reloadRequested
 	r.mu.RUnlock()
 	if !needsStart {
 		return nil
-	}
-	if entry != nil && entry.process != nil {
-		r.stopEntry(ctx, sub.ID)
 	}
 	return r.startEntry(ctx, sub)
 }
 
 func (r *ManagedProxyRuntime) startEntry(parent context.Context, sub ProxySubscription) error {
-	if strings.TrimSpace(r.cfg.MihomoBinaryPath) == "" {
-		r.setEntryError(sub.ID, "mihomo binary path is required")
+	if r.isStopping() {
 		return ErrManagedProxyUnavailable
+	}
+	now := time.Now()
+	r.mu.Lock()
+	entry := r.entries[sub.ID]
+	var oldProcess managedProxyProcess
+	if entry != nil && entry.startInProgress {
+		r.mu.Unlock()
+		return nil
+	}
+	if entry != nil && entry.process != nil && entry.status == ManagedProxyRuntimeStatusRunning && entry.revision == sub.Revision && !entry.reloadRequested {
+		r.mu.Unlock()
+		return nil
+	}
+	if entry == nil {
+		entry = &managedProxyRuntimeEntry{subscriptionID: sub.ID}
+		r.entries[sub.ID] = entry
+	}
+	oldProcess = entry.process
+	entry.startGeneration++
+	generation := entry.startGeneration
+	entry.status = ManagedProxyRuntimeStatusStarting
+	entry.port = 0
+	entry.revision = sub.Revision
+	entry.lastError = ""
+	entry.startedAt = nil
+	entry.updatedAt = now
+	entry.process = nil
+	entry.instanceDir = ""
+	entry.configPath = ""
+	entry.reloadRequested = false
+	entry.startInProgress = true
+	r.mu.Unlock()
+	if oldProcess != nil {
+		stopCtx, stopCancel := context.WithTimeout(parent, time.Duration(r.cfg.StartTimeoutSec)*time.Second)
+		_ = oldProcess.Stop(stopCtx)
+		stopCancel()
+	}
+
+	if strings.TrimSpace(r.cfg.MihomoBinaryPath) == "" {
+		r.setEntryStartError(sub.ID, generation, "mihomo binary path is required")
+		return ErrManagedProxyUnavailable
+	}
+	if err := validateManagedProxyBindHost(r.cfg.BindHost); err != nil {
+		r.setEntryStartError(sub.ID, generation, err.Error())
+		return err
 	}
 	port, controllerPort, err := allocateManagedProxyPortPair(r.cfg.BindHost)
 	if err != nil {
-		r.setEntryError(sub.ID, err.Error())
+		r.setEntryStartError(sub.ID, generation, err.Error())
 		return err
 	}
-	instanceDir := filepath.Join(r.cfg.WorkDir, fmt.Sprintf("subscription-%d", sub.ID))
+	instanceDir := filepath.Join(r.cfg.WorkDir, r.nodeID, fmt.Sprintf("subscription-%d", sub.ID))
 	instanceDir, err = filepath.Abs(instanceDir)
 	if err != nil {
-		r.setEntryError(sub.ID, err.Error())
+		r.setEntryStartError(sub.ID, generation, err.Error())
 		return err
 	}
 	if err := os.MkdirAll(instanceDir, 0o700); err != nil {
-		r.setEntryError(sub.ID, err.Error())
+		r.setEntryStartError(sub.ID, generation, err.Error())
 		return err
 	}
 	if err := os.MkdirAll(filepath.Join(instanceDir, "providers"), 0o700); err != nil {
-		r.setEntryError(sub.ID, err.Error())
+		r.setEntryStartError(sub.ID, generation, err.Error())
 		return err
 	}
 	secret, err := managedProxyRandomHexString(24)
 	if err != nil {
-		r.setEntryError(sub.ID, err.Error())
+		r.setEntryStartError(sub.ID, generation, err.Error())
 		return err
 	}
 	cfgBytes, err := buildMihomoConfigYAML(sub, managedProxyMihomoConfigOptions{
@@ -426,42 +527,38 @@ func (r *ManagedProxyRuntime) startEntry(parent context.Context, sub ProxySubscr
 		HealthCheckURL:   managedProxyFirstNonEmptyString(sub.TestURL, r.cfg.HealthCheckURL),
 	})
 	if err != nil {
-		r.setEntryError(sub.ID, err.Error())
+		r.setEntryStartError(sub.ID, generation, err.Error())
 		return err
 	}
 	configPath := filepath.Join(instanceDir, managedProxyConfigName)
 	if err := os.WriteFile(configPath, cfgBytes, 0o600); err != nil {
-		r.setEntryError(sub.ID, err.Error())
+		r.setEntryStartError(sub.ID, generation, err.Error())
 		return err
 	}
-
-	now := time.Now()
-	r.mu.Lock()
-	r.entries[sub.ID] = &managedProxyRuntimeEntry{
-		subscriptionID: sub.ID,
-		status:         ManagedProxyRuntimeStatusStarting,
-		port:           port,
-		revision:       sub.Revision,
-		updatedAt:      now,
-		instanceDir:    instanceDir,
-		configPath:     configPath,
+	if r.isStopping() {
+		r.stopEntry(context.Background(), sub.ID)
+		return ErrManagedProxyUnavailable
 	}
-	r.mu.Unlock()
 
 	startCtx, cancel := context.WithTimeout(parent, time.Duration(r.cfg.StartTimeoutSec)*time.Second)
 	process, err := r.runner.Start(startCtx, strings.TrimSpace(r.cfg.MihomoBinaryPath), []string{"-f", configPath, "-d", instanceDir}, instanceDir)
 	cancel()
 	if err != nil {
-		r.setEntryError(sub.ID, err.Error())
+		r.setEntryStartError(sub.ID, generation, err.Error())
 		return err
 	}
 	startedAt := time.Now()
+	stopping := r.isStopping()
 	r.mu.Lock()
-	entry := r.entries[sub.ID]
-	if entry == nil {
-		entry = &managedProxyRuntimeEntry{subscriptionID: sub.ID}
-		r.entries[sub.ID] = entry
+	entry = r.entries[sub.ID]
+	if stopping || entry == nil || !entry.startInProgress || entry.startGeneration != generation || entry.revision != sub.Revision {
+		r.mu.Unlock()
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Duration(r.cfg.StartTimeoutSec)*time.Second)
+		_ = process.Stop(stopCtx)
+		stopCancel()
+		return nil
 	}
+	pendingReload := entry.reloadRequested
 	entry.status = ManagedProxyRuntimeStatusRunning
 	entry.port = port
 	entry.revision = sub.Revision
@@ -471,14 +568,29 @@ func (r *ManagedProxyRuntime) startEntry(parent context.Context, sub ProxySubscr
 	entry.process = process
 	entry.instanceDir = instanceDir
 	entry.configPath = configPath
-	entry.reloadRequested = false
+	entry.reloadRequested = pendingReload
+	entry.startInProgress = false
 	r.mu.Unlock()
 
-	if r.repo != nil {
-		_ = r.repo.SetLastError(parent, sub.ID, "")
+	r.watchProcessAsync(sub.ID, process)
+	if pendingReload {
+		r.triggerSync()
 	}
-	go r.watchProcess(sub.ID, process)
 	return nil
+}
+
+func (r *ManagedProxyRuntime) watchProcessAsync(subscriptionID int64, process managedProxyProcess) {
+	r.lifecycleMu.Lock()
+	if r.stopping {
+		r.lifecycleMu.Unlock()
+		return
+	}
+	r.wg.Add(1)
+	r.lifecycleMu.Unlock()
+	go func() {
+		defer r.wg.Done()
+		r.watchProcess(subscriptionID, process)
+	}()
 }
 
 func (r *ManagedProxyRuntime) watchProcess(subscriptionID int64, process managedProxyProcess) {
@@ -491,6 +603,7 @@ func (r *ManagedProxyRuntime) watchProcess(subscriptionID int64, process managed
 	if entry != nil && entry.process == process {
 		entry.process = nil
 		entry.port = 0
+		entry.startInProgress = false
 		entry.updatedAt = time.Now()
 		if err != nil {
 			entry.status = ManagedProxyRuntimeStatusError
@@ -501,9 +614,6 @@ func (r *ManagedProxyRuntime) watchProcess(subscriptionID int64, process managed
 		}
 	}
 	r.mu.Unlock()
-	if err != nil && r.repo != nil {
-		_ = r.repo.SetLastError(context.Background(), subscriptionID, sanitizeManagedProxyError(err))
-	}
 }
 
 func (r *ManagedProxyRuntime) stopInactive(ctx context.Context, active map[int64]ProxySubscription) {
@@ -543,6 +653,8 @@ func (r *ManagedProxyRuntime) stopEntry(ctx context.Context, subscriptionID int6
 	entry.process = nil
 	entry.port = 0
 	entry.status = ManagedProxyRuntimeStatusStopped
+	entry.startInProgress = false
+	entry.startGeneration++
 	entry.updatedAt = time.Now()
 	r.mu.Unlock()
 	if process != nil {
@@ -561,6 +673,22 @@ func (r *ManagedProxyRuntime) setEntryError(subscriptionID int64, message string
 	}
 	entry.status = ManagedProxyRuntimeStatusError
 	entry.port = 0
+	entry.startInProgress = false
+	entry.lastError = sanitizeManagedProxyError(errors.New(message))
+	entry.updatedAt = time.Now()
+	r.mu.Unlock()
+}
+
+func (r *ManagedProxyRuntime) setEntryStartError(subscriptionID, generation int64, message string) {
+	r.mu.Lock()
+	entry := r.entries[subscriptionID]
+	if entry == nil || !entry.startInProgress || entry.startGeneration != generation {
+		r.mu.Unlock()
+		return
+	}
+	entry.status = ManagedProxyRuntimeStatusError
+	entry.port = 0
+	entry.startInProgress = false
 	entry.lastError = sanitizeManagedProxyError(errors.New(message))
 	entry.updatedAt = time.Now()
 	r.mu.Unlock()
@@ -569,6 +697,7 @@ func (r *ManagedProxyRuntime) setEntryError(subscriptionID int64, message string
 func (r *ManagedProxyRuntime) entryStatusLocked(entry *managedProxyRuntimeEntry) ManagedProxyRuntimeStatus {
 	status := ManagedProxyRuntimeStatus{
 		Enabled:        r.cfg.Enabled,
+		NodeID:         r.nodeID,
 		Status:         ManagedProxyRuntimeStatusStopped,
 		SubscriptionID: entry.subscriptionID,
 		UpdatedAt:      entry.updatedAt,
@@ -612,6 +741,9 @@ func buildMihomoConfigYAML(sub ProxySubscription, opts managedProxyMihomoConfigO
 	bindHost := strings.TrimSpace(opts.BindHost)
 	if bindHost == "" {
 		bindHost = "127.0.0.1"
+	}
+	if err := validateManagedProxyBindHost(bindHost); err != nil {
+		return nil, err
 	}
 	healthURL := strings.TrimSpace(opts.HealthCheckURL)
 	if healthURL == "" {
@@ -750,6 +882,9 @@ func allocateManagedProxyPort(bindHost string) (int, error) {
 	if host == "" {
 		host = "127.0.0.1"
 	}
+	if err := validateManagedProxyBindHost(host); err != nil {
+		return 0, err
+	}
 	listener, err := net.Listen("tcp", net.JoinHostPort(host, "0"))
 	if err != nil {
 		return 0, err
@@ -766,6 +901,9 @@ func allocateManagedProxyPortPair(bindHost string) (int, int, error) {
 	host := strings.TrimSpace(bindHost)
 	if host == "" {
 		host = "127.0.0.1"
+	}
+	if err := validateManagedProxyBindHost(host); err != nil {
+		return 0, 0, err
 	}
 	first, err := net.Listen("tcp", net.JoinHostPort(host, "0"))
 	if err != nil {
@@ -786,6 +924,22 @@ func allocateManagedProxyPortPair(bindHost string) (int, int, error) {
 		return 0, 0, fmt.Errorf("failed to allocate controller port")
 	}
 	return firstAddr.Port, secondAddr.Port, nil
+}
+
+func validateManagedProxyBindHost(host string) error {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return nil
+	}
+	host = strings.Trim(host, "[]")
+	if strings.EqualFold(host, "localhost") {
+		return nil
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsLoopback() {
+		return fmt.Errorf("managed proxy bind_host must be loopback-only")
+	}
+	return nil
 }
 
 func managedProxyRandomHexString(size int) (string, error) {
