@@ -17,6 +17,7 @@ import (
 const (
 	EndpointMessages          = "/v1/messages"
 	EndpointChatCompletions   = "/v1/chat/completions"
+	EndpointQwenCompatible    = "/compatible-mode/v1/chat/completions"
 	EndpointEmbeddings        = "/v1/embeddings"
 	EndpointResponses         = "/v1/responses"
 	EndpointImagesGenerations = "/v1/images/generations"
@@ -45,7 +46,7 @@ func NormalizeInboundEndpoint(path string) string {
 	switch {
 	case strings.Contains(path, EndpointEmbeddings):
 		return EndpointEmbeddings
-	case strings.Contains(path, EndpointChatCompletions):
+	case path == EndpointQwenCompatible || strings.HasSuffix(path, EndpointChatCompletions):
 		return EndpointChatCompletions
 	case strings.Contains(path, EndpointMessages):
 		return EndpointMessages

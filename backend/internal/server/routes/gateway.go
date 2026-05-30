@@ -215,6 +215,7 @@ func RegisterGatewayRoutes(
 		}
 		h.NewAPIStyleGateway.Embeddings(c)
 	})
+	r.POST("/compatible-mode/v1/chat/completions", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, h.CompatibleGateway.QwenCompatibleModeChatCompletions)
 	r.POST("/images/generations", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, func(c *gin.Context) {
 		if getGroupPlatform(c) == service.PlatformOpenAI {
 			h.OpenAIGateway.Images(c)

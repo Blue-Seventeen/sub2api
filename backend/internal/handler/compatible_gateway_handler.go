@@ -47,6 +47,15 @@ func (h *CompatibleGatewayHandler) ChatCompletions(c *gin.Context) {
 	h.forward(c, service.CompatibleRouteChatCompletions)
 }
 
+func (h *CompatibleGatewayHandler) QwenCompatibleModeChatCompletions(c *gin.Context) {
+	apiKey, _ := middleware2.GetAPIKeyFromContext(c)
+	if apiKey == nil || apiKey.Group == nil || apiKey.Group.Platform != service.PlatformAli {
+		h.writeRouteError(c, service.CompatibleRouteChatCompletions, http.StatusForbidden, "permission_error", "The /compatible-mode/v1/chat/completions alias is only available for Qwen/DashScope groups", false)
+		return
+	}
+	h.ChatCompletions(c)
+}
+
 func (h *CompatibleGatewayHandler) Models(c *gin.Context) {
 	apiKey, _ := middleware2.GetAPIKeyFromContext(c)
 	var groupID *int64

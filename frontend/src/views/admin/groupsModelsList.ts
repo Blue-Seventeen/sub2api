@@ -53,11 +53,13 @@ export const setModelsListCandidates = (
   const candidateKeys = new Set(normalizedCandidates.map(modelKey))
   const existingByKey = new Map(state.items.map(item => [modelKey(item.id), item]))
   const hasExistingItems = state.items.length > 0
-  const selectionOrder = normalizeModels([
-    ...state.items.map(item => item.id),
-    ...state.savedModels,
-    ...normalizedCandidates,
-  ])
+  const selectionOrder = normalizeModels(
+    hasExistingItems
+      ? [...state.items.map(item => item.id), ...state.savedModels, ...normalizedCandidates]
+      : state.savedEnabled
+        ? state.savedModels
+        : [...state.savedModels, ...normalizedCandidates],
+  )
 
   state.items = selectionOrder.map(id => {
     const selected = hasExistingItems

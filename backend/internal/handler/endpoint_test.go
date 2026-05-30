@@ -24,6 +24,7 @@ func TestNormalizeInboundEndpoint(t *testing.T) {
 		// Direct canonical paths.
 		{"/v1/messages", EndpointMessages},
 		{"/v1/chat/completions", EndpointChatCompletions},
+		{EndpointQwenCompatible, EndpointChatCompletions},
 		{"/v1/embeddings", EndpointEmbeddings},
 		{"/v1/responses", EndpointResponses},
 		{"/v1/images/generations", EndpointImagesGenerations},
@@ -44,6 +45,7 @@ func TestNormalizeInboundEndpoint(t *testing.T) {
 
 		// Unknown path is returned as-is.
 		{"/v1/embeddings", "/v1/embeddings"},
+		{"/compatible-mode/v1/chat/completions/extra", "/compatible-mode/v1/chat/completions/extra"},
 		{"", ""},
 		{"  /v1/messages  ", EndpointMessages},
 	}

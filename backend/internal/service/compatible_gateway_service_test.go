@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -85,6 +86,54 @@ func TestCompatibleGatewayServicePrepareRequest_RewritesMappedModelForNativeMess
 	}
 	if got := gjson.GetBytes(prepared.RequestBody, "model").String(); got != "kimi-k2.5" {
 		t.Fatalf("patched request model = %q, want %q", got, "kimi-k2.5")
+	}
+}
+
+func TestCompatibleGatewayServicePrepareRequest_AliQwenASRRejectsRawBase64InputAudio(t *testing.T) {
+	svc := &CompatibleGatewayService{}
+	account := &Account{
+		Platform:    PlatformAli,
+		Type:        AccountTypeAPIKey,
+		Credentials: map[string]any{"api_key": "test-key"},
+	}
+	for _, data := range []string{
+		"SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMA==",
+		"SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMA__",
+	} {
+		body := []byte(`{"model":"qwen3-asr-flash","messages":[{"role":"user","content":[{"type":"input_audio","input_audio":{"data":"` + data + `","format":"mp3"}}]}]}`)
+
+		_, err := svc.prepareRequest(account, CompatibleRouteChatCompletions, body)
+		if err == nil {
+			t.Fatal("prepareRequest() error = nil, want raw base64 rejection")
+		}
+		var clientErr *CompatibleClientError
+		if !errors.As(err, &clientErr) {
+			t.Fatalf("error type = %T, want *CompatibleClientError", err)
+		}
+		if clientErr.StatusCode != http.StatusBadRequest || clientErr.ErrorType != "invalid_request_error" {
+			t.Fatalf("client error = %#v", clientErr)
+		}
+		if !strings.Contains(clientErr.Message, "data:audio/mpeg;base64") {
+			t.Fatalf("client error message = %q", clientErr.Message)
+		}
+	}
+}
+
+func TestCompatibleGatewayServicePrepareRequest_AliQwenASRAllowsURLAndDataURLInputAudio(t *testing.T) {
+	svc := &CompatibleGatewayService{}
+	account := &Account{
+		Platform:    PlatformAli,
+		Type:        AccountTypeAPIKey,
+		Credentials: map[string]any{"api_key": "test-key"},
+	}
+	for _, data := range []string{
+		"https://example.com/audio.mp3",
+		"data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMA==",
+	} {
+		body := []byte(`{"model":"qwen3-asr-flash","messages":[{"role":"user","content":[{"type":"input_audio","input_audio":{"data":"` + data + `","format":"mp3"}}]}]}`)
+		if _, err := svc.prepareRequest(account, CompatibleRouteChatCompletions, body); err != nil {
+			t.Fatalf("prepareRequest(%q) error = %v", data, err)
+		}
 	}
 }
 

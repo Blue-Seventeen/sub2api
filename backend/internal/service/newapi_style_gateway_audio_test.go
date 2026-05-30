@@ -13,6 +13,8 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestNewAPIStyleAudioForwardMapsOpenAIAndZhipuPaths(t *testing.T) {
@@ -133,6 +135,49 @@ func TestNewAPIStyleAudioForwardPreservesTTSJSONBodyWithoutMapping(t *testing.T)
 	if !bytes.Equal(upstream.lastBody, body) {
 		t.Fatalf("forwarded body changed:\n got %s\nwant %s", string(upstream.lastBody), string(body))
 	}
+}
+
+func TestNewAPIStyleAliQwenASRRejectsRawBase64BeforeUpstream(t *testing.T) {
+	body := []byte(`{"model":"qwen3-asr-flash","messages":[{"role":"user","content":[{"type":"input_audio","input_audio":{"data":"SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMA==","format":"mp3"}}]}]}`)
+	upstream := &httpUpstreamRecorder{resp: newAPIStyleAudioResponse("application/json", `{"ok":true}`)}
+	svc := &NewAPIStyleGatewayService{httpUpstream: upstream}
+
+	_, _, err := svc.Forward(context.Background(), newAPIStyleTestContext(), newAPIStyleAudioAccount(PlatformAli, nil), NewAPIStyleForwardOptions{
+		Route:       NewAPIStyleRouteChatCompletions,
+		RequestBody: body,
+		InboundPath: "/compatible-mode/v1/chat/completions",
+		ContentType: "application/json",
+	})
+
+	var clientErr *CompatibleClientError
+	require.ErrorAs(t, err, &clientErr)
+	require.Equal(t, http.StatusBadRequest, clientErr.StatusCode)
+	require.Contains(t, clientErr.Message, "data:audio/mpeg;base64")
+	require.Nil(t, upstream.lastReq, "invalid ASR input must not reach upstream")
+}
+
+func TestNewAPIStyleAliQwenASRAllowsDataURLAndAddsDashScopeHeader(t *testing.T) {
+	body := []byte(`{"model":"qwen3-asr-flash","messages":[{"role":"user","content":[{"type":"input_audio","input_audio":{"data":"data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMA==","format":"mp3"}}]}]}`)
+	upstream := &httpUpstreamRecorder{resp: newAPIStyleAudioResponse("application/json", `{"id":"chatcmpl_test","object":"chat.completion","model":"qwen3-asr-flash","choices":[{"message":{"role":"assistant","content":"你好。"},"finish_reason":"stop","index":0}],"usage":{"prompt_tokens":18,"completion_tokens":9,"total_tokens":27}}`)}
+	svc := &NewAPIStyleGatewayService{httpUpstream: upstream}
+
+	result, endpoint, err := svc.Forward(context.Background(), newAPIStyleTestContext(), newAPIStyleAudioAccount(PlatformAli, nil), NewAPIStyleForwardOptions{
+		Route:       NewAPIStyleRouteChatCompletions,
+		RequestBody: body,
+		InboundPath: "/compatible-mode/v1/chat/completions",
+		ContentType: "application/json",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "/compatible-mode/v1/chat/completions", endpoint)
+	require.NotNil(t, upstream.lastReq)
+	require.Equal(t, "/compatible-mode/v1/chat/completions", upstream.lastReq.URL.Path)
+	require.Equal(t, "enable", upstream.lastReq.Header.Get("X-DashScope-SSE"))
+	require.Equal(t, "qwen3-asr-flash", gjson.GetBytes(upstream.lastBody, "model").String())
+	require.Equal(t, "data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMA==", gjson.GetBytes(upstream.lastBody, "messages.0.content.0.input_audio.data").String())
+	require.Equal(t, 18, result.Usage.InputTokens)
+	require.Equal(t, 9, result.Usage.OutputTokens)
 }
 
 func TestNewAPIStyleAudioMultipartModelExtractionAndRewrite(t *testing.T) {

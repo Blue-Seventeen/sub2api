@@ -15,20 +15,25 @@ import (
 )
 
 func newGatewayRoutesTestRouter() *gin.Engine {
+	return newGatewayRoutesTestRouterForPlatform(service.PlatformOpenAI)
+}
+
+func newGatewayRoutesTestRouterForPlatform(platform string) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 
 	RegisterGatewayRoutes(
 		router,
 		&handler.Handlers{
-			Gateway:       &handler.GatewayHandler{},
-			OpenAIGateway: &handler.OpenAIGatewayHandler{},
+			Gateway:           &handler.GatewayHandler{},
+			OpenAIGateway:     &handler.OpenAIGatewayHandler{},
+			CompatibleGateway: handler.NewCompatibleGatewayHandler(nil, &handler.GatewayHandler{}),
 		},
 		servermiddleware.APIKeyAuthMiddleware(func(c *gin.Context) {
 			groupID := int64(1)
 			c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{
 				GroupID: &groupID,
-				Group:   &service.Group{Platform: service.PlatformOpenAI},
+				Group:   &service.Group{Platform: platform},
 			})
 			c.Next()
 		}),
@@ -76,4 +81,16 @@ func TestGatewayRoutesOpenAIImagesPathsAreRegistered(t *testing.T) {
 		router.ServeHTTP(w, req)
 		require.NotEqual(t, http.StatusNotFound, w.Code, "path=%s should hit OpenAI images handler", path)
 	}
+}
+
+func TestGatewayRoutesQwenCompatibleModeAliasRejectsNonAliGroups(t *testing.T) {
+	router := newGatewayRoutesTestRouterForPlatform(service.PlatformOpenAI)
+	req := httptest.NewRequest(http.MethodPost, "/compatible-mode/v1/chat/completions", strings.NewReader(`{"model":"qwen3-asr-flash"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.Contains(t, w.Body.String(), "Qwen/DashScope")
 }

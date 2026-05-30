@@ -783,7 +783,7 @@ Protect files:
 ## 16. v0.1.132 升级兼容说明
 
 - 当前 `codex/sync-v0.1.132` 以 `codex/sync-v0.1.131` 为基线合入 upstream `v0.1.132`，`v0.1.132` tag 已是当前分支祖先；后续不得回退 v0.1.131 已保留的 Promotion、CompatibleGateway、usage fallback、统一倍率、AccountAutoOps、订阅管理和 `/admin/proxies` 自定义体系。
-- 已吸收并增强 upstream 分组自定义 `/v1/models` 模型列表：新增 `models_list_config` 字段、管理端配置入口和 API key auth snapshot 版本刷新；启用后同时作为该分组的请求模型白名单，支持大小写不敏感匹配与后缀 `*` 通配。限制只校验用户请求模型名，不校验映射后的上游模型名，不改变实际账号调度、模型映射、计费倍率或 compatible fallback 语义。
+- 已吸收并增强 upstream 分组自定义 `/v1/models` 模型列表：新增 `models_list_config` 字段、管理端配置入口和 API key auth snapshot 版本刷新；启用后同时作为该分组的请求模型白名单，支持大小写不敏感匹配与后缀 `*` 通配。限制只校验用户请求模型名，不校验映射后的上游模型名，不改变实际账号调度、模型映射、计费倍率或 compatible fallback 语义。已启用并保存过的自定义模型列表重新打开时必须只展示已保存白名单条目，管理员删除的模型不得由默认候选模型自动补回；默认候选只用于新建分组、未启用配置或管理员手动新增/编辑时参考。
 - 已吸收 upstream 账号池同账号重试状态码配置；未配置时必须继续回退默认 `[401,403,429]`，不得让该配置覆盖现有 failover、sticky、auto-probe 或代理粘性选择规则。
 - 已吸收 upstream OpenAI WS rate-limit failover、API Key Responses SSE fallback、Chat Responses usage billing 保留、模型 404 按账号+模型冷却、Antigravity `message_start.input_tokens`、Bedrock `context_management` 清理和 Ops local business-limit 分类；这些属于错误处理、计费准确性和观测分类优化，不得引入成功热路径同步 DB/Redis 等待。
 - 已吸收 upstream 长上下文 `cache_read` / `cache_creation` 倍率计费修复；这是计费准确性修复，不得改回未乘倍率，也不得覆盖本 fork 的 `QuotaPlatform`、`ClientProfile`、`CompatibilityRoute`、`FallbackChain`、`ChannelUsageFields` usage 写入字段。
@@ -796,6 +796,7 @@ Protect files:
 ## 17. v0.1.133 升级兼容说明
 
 - 当前 `codex/sync-v0.1.133` 以 `codex/sync-v0.1.132` 为基线合入 upstream `v0.1.133`，`backend/cmd/server/VERSION` 对齐为 `0.1.133`；后续不得回退 v0.1.132 已保留的 Promotion、CompatibleGateway、usage fallback、统一倍率、AccountAutoOps、订阅管理和 `/admin/proxies` 自定义体系。
+- 本 fork 新增 Qwen/DashScope ASR 官方路径别名：`POST /compatible-mode/v1/chat/completions` 仅允许 Ali/Qwen 分组使用，进入后复用现有 CompatibleGateway/NewAPI-style 主链路、模型白名单、账号调度、mandatory usage/billing 和订阅扣费，不新增旁路计费逻辑。该路径用于让用户以 DashScope 官方 OpenAI-compatible 路径调用 `qwen3-asr*`，同时保留原 `/v1/chat/completions` 调用方式；`input_audio.data` 必须使用 URL 或 `data:audio/mpeg;base64,<base64>` Data URL，裸 Base64 在上游前返回明确 `400 invalid_request_error`，Ali NewAPI-style 分支也必须执行同样校验并补齐 `X-DashScope-SSE: enable`。嵌入前端绕过只允许精确该路径，不得扩大为整个 `/compatible-mode/` 前缀。
 - 已吸收 upstream OpenAI/Codex 兼容增强：OpenAI embeddings gateway、endpoint capability 路由限制、Claude Code Codex 插件全局放行开关、WS terminal event first-token 修复、Responses/Chat usage 字段透传、concurrency acquire 错误分类和 request context 透传；合并时必须保留本 fork 的 mandatory usage/billing 防漏扣兜底。
 - 已吸收 upstream 账号 quota 自动暂停能力：支持按 5h/7d 用量阈值自动暂停账号调度，并在配置更新后刷新调度热路径缓存；该能力不得替代现有账号状态、AccountAutoOps、sticky proxy、auto-probe 或 proxy stats 语义。
 - 已吸收 upstream 内容审计运行态增强：blocked keywords、pre-block/runtime status、hash block 记录与队列观测需与本 fork 风控开关并存；默认关闭时不得读取/记录请求体或影响中转热路径。

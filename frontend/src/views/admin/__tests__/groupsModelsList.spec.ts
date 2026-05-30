@@ -33,7 +33,7 @@ describe("groupsModelsList", () => {
     ]);
   });
 
-  it("keeps saved selections and marks new candidates as unselected when editing", () => {
+  it("shows only saved whitelist entries when editing an enabled config", () => {
     const state = createModelsListState({
       enabled: true,
       models: ["gpt-5.5", "gpt-5.4"],
@@ -45,11 +45,10 @@ describe("groupsModelsList", () => {
     expect(simpleItems(state.items)).toEqual([
       { id: "gpt-5.5", selected: true },
       { id: "gpt-5.4", selected: true },
-      { id: "legacy-gpt", selected: false },
     ]);
   });
 
-  it("keeps an enabled empty saved list empty instead of default-selecting candidates", () => {
+  it("keeps an enabled empty saved list empty instead of adding candidates back", () => {
     const state = createModelsListState({
       enabled: true,
       models: [],
@@ -57,27 +56,29 @@ describe("groupsModelsList", () => {
 
     setModelsListCandidates(state, ["gpt-5.5", "gpt-5.4"]);
 
-    expect(simpleItems(state.items)).toEqual([
-      { id: "gpt-5.5", selected: false },
-      { id: "gpt-5.4", selected: false },
-    ]);
+    expect(simpleItems(state.items)).toEqual([]);
     expect(buildModelsListConfig(state)).toEqual({
       enabled: true,
       models: [],
     });
   });
 
-  it("preserves explicitly unselected saved candidates when candidates refresh", () => {
+  it("does not re-add deleted default candidates when reopening an enabled config", () => {
     const state = createModelsListState({
       enabled: true,
-      models: ["gpt-5.5"],
+      models: ["kimi-k2.6", "kimi-k2.5"],
     });
 
-    setModelsListCandidates(state, ["gpt-5.5", "gpt-5.4"]);
+    setModelsListCandidates(state, [
+      "kimi-k2.6",
+      "kimi-k2.5",
+      "kimi-k2-thinking",
+      "kimi-k2-thinking-turbo",
+    ]);
 
     expect(simpleItems(state.items)).toEqual([
-      { id: "gpt-5.5", selected: true },
-      { id: "gpt-5.4", selected: false },
+      { id: "kimi-k2.6", selected: true },
+      { id: "kimi-k2.5", selected: true },
     ]);
   });
 

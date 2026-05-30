@@ -434,6 +434,7 @@ func TestFrontendServer_Middleware(t *testing.T) {
 			"/api/v1/users",
 			"/v1/models",
 			"/v1beta/chat",
+			"/compatible-mode/v1/chat/completions",
 			"/backend-api/codex/responses",
 			"/backend-api/codex/responses/compact",
 			"/antigravity/test",
@@ -486,6 +487,61 @@ func TestFrontendServer_Middleware(t *testing.T) {
 		assert.True(t, nextCalled, "next handler should be called for compact API route")
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.JSONEq(t, `{"ok":true}`, w.Body.String())
+	})
+
+	t.Run("skips_compatible_mode_chat_completions_post_route", func(t *testing.T) {
+		provider := &mockSettingsProvider{
+			settings: map[string]string{"test": "value"},
+		}
+
+		server, err := NewFrontendServer(provider)
+		require.NoError(t, err)
+
+		router := gin.New()
+		router.Use(server.Middleware())
+		nextCalled := false
+		router.POST("/compatible-mode/v1/chat/completions", func(c *gin.Context) {
+			nextCalled = true
+			c.String(http.StatusOK, `{"ok":true}`)
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/compatible-mode/v1/chat/completions", strings.NewReader(`{"model":"qwen3-asr-flash"}`))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		assert.True(t, nextCalled, "next handler should be called for compatible-mode API route")
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.JSONEq(t, `{"ok":true}`, w.Body.String())
+	})
+
+	t.Run("serves_index_for_unknown_compatible_mode_routes", func(t *testing.T) {
+		provider := &mockSettingsProvider{
+			settings: map[string]string{"test": "value"},
+		}
+
+		server, err := NewFrontendServer(provider)
+		require.NoError(t, err)
+
+		router := gin.New()
+		router.Use(func(c *gin.Context) {
+			c.Set(middleware.CSPNonceKey, "test-nonce")
+			c.Next()
+		})
+		router.Use(server.Middleware())
+		nextCalled := false
+		router.GET("/compatible-mode/v1/unknown", func(c *gin.Context) {
+			nextCalled = true
+			c.String(http.StatusOK, "ok")
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/compatible-mode/v1/unknown", nil)
+		router.ServeHTTP(w, req)
+
+		assert.False(t, nextCalled, "unknown compatible-mode routes should not bypass SPA fallback")
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Header().Get("Content-Type"), "text/html")
 	})
 
 	t.Run("serves_index_for_spa_routes", func(t *testing.T) {
@@ -638,6 +694,7 @@ func TestServeEmbeddedFrontend(t *testing.T) {
 			"/api/users",
 			"/v1/models",
 			"/v1beta/chat",
+			"/compatible-mode/v1/chat/completions",
 			"/backend-api/codex/responses",
 			"/backend-api/codex/responses/compact",
 			"/antigravity/test",
@@ -664,6 +721,47 @@ func TestServeEmbeddedFrontend(t *testing.T) {
 				assert.True(t, nextCalled, "next handler should be called for API route")
 			})
 		}
+	})
+
+	t.Run("skips_compatible_mode_chat_completions_post_route", func(t *testing.T) {
+		middleware := ServeEmbeddedFrontend()
+
+		nextCalled := false
+		router := gin.New()
+		router.Use(middleware)
+		router.POST("/compatible-mode/v1/chat/completions", func(c *gin.Context) {
+			nextCalled = true
+			c.String(http.StatusOK, `{"ok":true}`)
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/compatible-mode/v1/chat/completions", strings.NewReader(`{"model":"qwen3-asr-flash"}`))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		assert.True(t, nextCalled, "next handler should be called for compatible-mode API route")
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.JSONEq(t, `{"ok":true}`, w.Body.String())
+	})
+
+	t.Run("serves_index_for_unknown_compatible_mode_routes", func(t *testing.T) {
+		middleware := ServeEmbeddedFrontend()
+
+		nextCalled := false
+		router := gin.New()
+		router.Use(middleware)
+		router.GET("/compatible-mode/v1/unknown", func(c *gin.Context) {
+			nextCalled = true
+			c.String(http.StatusOK, "ok")
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/compatible-mode/v1/unknown", nil)
+		router.ServeHTTP(w, req)
+
+		assert.False(t, nextCalled, "unknown compatible-mode routes should not bypass SPA fallback")
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Header().Get("Content-Type"), "text/html")
 	})
 }
 

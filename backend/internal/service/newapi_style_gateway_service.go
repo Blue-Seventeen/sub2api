@@ -184,6 +184,10 @@ func (s *NewAPIStyleGatewayService) Forward(
 			opts.Model = mapped
 		}
 	}
+	body, err = patchNewAPIStyleCompatibleBody(body, account, opts)
+	if err != nil {
+		return nil, upstreamEndpoint, err
+	}
 
 	upstreamReq, err := http.NewRequestWithContext(ctx, opts.Method, targetURL, bytes.NewReader(body))
 	if err != nil {
@@ -616,6 +620,16 @@ func (s *NewAPIStyleGatewayService) patchHeaders(req *http.Request, account *Acc
 	if org := strings.TrimSpace(account.GetCredential("organization")); org != "" {
 		req.Header.Set("OpenAI-Organization", org)
 	}
+	if account != nil && account.Platform == PlatformAli && opts.Route == NewAPIStyleRouteChatCompletions {
+		patchAliStreamingHeaders(req, account, opts.Model)
+	}
+}
+
+func patchNewAPIStyleCompatibleBody(body []byte, account *Account, opts NewAPIStyleForwardOptions) ([]byte, error) {
+	if account == nil || account.Platform != PlatformAli || opts.Route != NewAPIStyleRouteChatCompletions {
+		return body, nil
+	}
+	return patchAliBody(body, account, opts.Model)
 }
 
 func newAPIStyleAuthToken(account *Account) string {
