@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -30,13 +32,29 @@ func (h *NewAPIStyleGatewayHandler) Images(c *gin.Context) {
 func (h *NewAPIStyleGatewayHandler) Audio(c *gin.Context) {
 	h.forward(c, service.NewAPIStyleRouteAudio)
 }
-func (h *NewAPIStyleGatewayHandler) QwenTTS(c *gin.Context) {
+func (h *NewAPIStyleGatewayHandler) QwenMultimodalGeneration(c *gin.Context) {
 	apiKey, _ := middleware2.GetAPIKeyFromContext(c)
 	if apiKey == nil || apiKey.Group == nil || apiKey.Group.Platform != service.PlatformAli {
-		h.writeError(c, http.StatusForbidden, "permission_error", "The DashScope TTS official path alias is only available for Qwen/DashScope groups")
+		h.writeError(c, http.StatusForbidden, "permission_error", "The DashScope multimodal official path alias is only available for Qwen/DashScope groups")
+		return
+	}
+	model, _, err := peekNewAPIStyleRequestModel(c)
+	if err != nil {
+		h.writeError(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		return
+	}
+	if strings.TrimSpace(model) == "" {
+		h.writeError(c, http.StatusBadRequest, "invalid_request_error", "model is required")
+		return
+	}
+	if service.IsAliQwenImageModel(model) {
+		h.forward(c, service.NewAPIStyleRouteQwenImage)
 		return
 	}
 	h.forward(c, service.NewAPIStyleRouteQwenTTS)
+}
+func (h *NewAPIStyleGatewayHandler) QwenTTS(c *gin.Context) {
+	h.QwenMultimodalGeneration(c)
 }
 func (h *NewAPIStyleGatewayHandler) Embeddings(c *gin.Context) {
 	h.forward(c, service.NewAPIStyleRouteEmbeddings)
@@ -103,7 +121,7 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 	}
 
 	model := service.ExtractNewAPIStyleModel(body, c.GetHeader("Content-Type"))
-	if route == service.NewAPIStyleRouteQwenTTS && strings.TrimSpace(model) == "" {
+	if (route == service.NewAPIStyleRouteImages || route == service.NewAPIStyleRouteQwenTTS || route == service.NewAPIStyleRouteQwenImage) && strings.TrimSpace(model) == "" {
 		h.writeError(c, http.StatusBadRequest, "invalid_request_error", "model is required")
 		return
 	}
@@ -329,6 +347,19 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 				fs.FailedAccountIDs[account.ID] = struct{}{}
 				continue
 			}
+			var clientErr *service.CompatibleClientError
+			if errors.As(err, &clientErr) {
+				status := clientErr.StatusCode
+				if status == 0 {
+					status = http.StatusBadRequest
+				}
+				errType := clientErr.ErrorType
+				if strings.TrimSpace(errType) == "" {
+					errType = "invalid_request_error"
+				}
+				h.writeRouteError(c, route, status, errType, clientErr.Message, streamStarted)
+				return
+			}
 			h.writeRouteError(c, route, http.StatusBadGateway, "upstream_error", err.Error(), streamStarted)
 			return
 		}
@@ -389,7 +420,7 @@ func contentModerationProtocolForNewAPIStyleRoute(route service.NewAPIStyleRoute
 		return service.ContentModerationProtocolAnthropicMessages
 	case service.NewAPIStyleRouteResponses:
 		return service.ContentModerationProtocolOpenAIResponses
-	case service.NewAPIStyleRouteImages:
+	case service.NewAPIStyleRouteImages, service.NewAPIStyleRouteQwenImage:
 		return service.ContentModerationProtocolOpenAIImages
 	default:
 		return service.ContentModerationProtocolOpenAIChat
@@ -433,6 +464,19 @@ func requestCanHaveBody(method string) bool {
 	default:
 		return true
 	}
+}
+
+func peekNewAPIStyleRequestModel(c *gin.Context) (string, []byte, error) {
+	if c == nil || c.Request == nil {
+		return "", nil, nil
+	}
+	body, err := readRequestBodyWithObservability(c, nil)
+	if err != nil {
+		return "", nil, err
+	}
+	c.Request.Body = io.NopCloser(bytes.NewReader(body))
+	c.Request.ContentLength = int64(len(body))
+	return service.ExtractNewAPIStyleModel(body, c.GetHeader("Content-Type")), body, nil
 }
 
 func methodRequiresRequestBody(method string) bool {

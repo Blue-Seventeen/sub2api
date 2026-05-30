@@ -29,6 +29,7 @@ const (
 	NewAPIStyleRouteImages          NewAPIStyleRoute = "images"
 	NewAPIStyleRouteAudio           NewAPIStyleRoute = "audio"
 	NewAPIStyleRouteQwenTTS         NewAPIStyleRoute = "qwen_tts"
+	NewAPIStyleRouteQwenImage       NewAPIStyleRoute = "qwen_image"
 	NewAPIStyleRouteEmbeddings      NewAPIStyleRoute = "embeddings"
 	NewAPIStyleRouteRerank          NewAPIStyleRoute = "rerank"
 	NewAPIStyleRouteVideo           NewAPIStyleRoute = "video"
@@ -46,9 +47,10 @@ const (
 )
 
 const (
-	zhipuAudioTranscriptionsPath = "/api/paas/v4/audio/transcriptions"
-	zhipuAudioSpeechPath         = "/api/paas/v4/audio/speech"
-	aliQwenTTSGenerationPath     = "/api/v1/services/aigc/multimodal-generation/generation"
+	zhipuAudioTranscriptionsPath    = "/api/paas/v4/audio/transcriptions"
+	zhipuAudioSpeechPath            = "/api/paas/v4/audio/speech"
+	aliQwenMultimodalGenerationPath = "/api/v1/services/aigc/multimodal-generation/generation"
+	aliQwenTTSGenerationPath        = aliQwenMultimodalGenerationPath
 
 	maxNewAPIStyleMultipartModelBytes = 64 << 10
 )
@@ -99,7 +101,10 @@ func (s *NewAPIStyleGatewayService) SupportsForGroup(account *Account, group *Gr
 	if account == nil {
 		return false
 	}
-	if route == NewAPIStyleRouteQwenTTS {
+	if route == NewAPIStyleRouteImages && account.Platform == PlatformAli {
+		return true
+	}
+	if route == NewAPIStyleRouteQwenTTS || route == NewAPIStyleRouteQwenImage {
 		return account.Platform == PlatformAli
 	}
 	if !account.UseNewAPIStyleInterfaceForGroup(group) {
@@ -115,7 +120,9 @@ func (s *NewAPIStyleGatewayService) SupportsForGroup(account *Account, group *Gr
 		return account.Platform == PlatformAnthropic
 	case NewAPIStyleRouteResponses:
 		return account.Platform == PlatformOpenAI || account.Platform == PlatformXAI
-	case NewAPIStyleRouteImages, NewAPIStyleRouteVideo:
+	case NewAPIStyleRouteImages:
+		return account.Platform == PlatformOpenAI || account.Platform == PlatformAli
+	case NewAPIStyleRouteVideo:
 		return account.Platform == PlatformOpenAI
 	case NewAPIStyleRouteEmbeddings:
 		return platformSupportsNewAPIStyleEmbeddings(account.Platform)
@@ -297,13 +304,18 @@ func (s *NewAPIStyleGatewayService) Forward(
 	if err != nil {
 		return nil, upstreamEndpoint, err
 	}
-	s.applyUsageGuardrails(result, opts, respBody)
+	downstreamBody := respBody
 	contentType := strings.TrimSpace(resp.Header.Get("Content-Type"))
+	if normalized, ok := normalizeAliQwenImagesOpenAIResponse(account, opts, respBody); ok {
+		downstreamBody = normalized
+		contentType = "application/json"
+	}
+	s.applyUsageGuardrails(result, opts, respBody)
 	if contentType == "" {
 		contentType = "application/json"
 	}
 	if c != nil {
-		c.Data(resp.StatusCode, contentType, respBody)
+		c.Data(resp.StatusCode, contentType, downstreamBody)
 	}
 	result.Duration = time.Since(start)
 	return result, upstreamEndpoint, nil
@@ -368,7 +380,7 @@ func (s *NewAPIStyleGatewayService) buildTargetURL(account *Account, opts NewAPI
 
 	path := newAPIStyleRoutePath(account.Platform, opts)
 	if path == "" {
-		if opts.Route == NewAPIStyleRouteAudio || opts.Route == NewAPIStyleRouteQwenTTS {
+		if opts.Route == NewAPIStyleRouteAudio || opts.Route == NewAPIStyleRouteQwenTTS || opts.Route == NewAPIStyleRouteQwenImage {
 			return "", "", fmt.Errorf("%w: platform=%s route=%s path=%s", ErrNewAPIStyleUnsupportedCapability, account.Platform, opts.Route, opts.InboundPath)
 		}
 		path = "/v1/" + strings.TrimPrefix(strings.TrimSpace(opts.InboundPath), "/")
@@ -418,6 +430,12 @@ func newAPIStyleRoutePath(platform string, opts NewAPIStyleForwardOptions) strin
 	case NewAPIStyleRouteResponses:
 		return "/v1/responses"
 	case NewAPIStyleRouteImages:
+		if strings.TrimSpace(platform) == PlatformAli {
+			if strings.Contains(inbound, "/edits") {
+				return ""
+			}
+			return aliQwenMultimodalGenerationPath
+		}
 		if strings.Contains(inbound, "/edits") {
 			return "/v1/images/edits"
 		}
@@ -427,6 +445,11 @@ func newAPIStyleRoutePath(platform string, opts NewAPIStyleForwardOptions) strin
 	case NewAPIStyleRouteQwenTTS:
 		if strings.TrimSpace(platform) == PlatformAli {
 			return aliQwenTTSGenerationPath
+		}
+		return ""
+	case NewAPIStyleRouteQwenImage:
+		if strings.TrimSpace(platform) == PlatformAli {
+			return aliQwenMultimodalGenerationPath
 		}
 		return ""
 	case NewAPIStyleRouteEmbeddings, NewAPIStyleRouteRerank,
@@ -645,11 +668,96 @@ func (s *NewAPIStyleGatewayService) patchHeaders(req *http.Request, account *Acc
 	}
 }
 
+func IsAliQwenImageModel(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(model, "qwen-image")
+}
+
 func patchNewAPIStyleCompatibleBody(body []byte, account *Account, opts NewAPIStyleForwardOptions) ([]byte, error) {
-	if account == nil || account.Platform != PlatformAli || opts.Route != NewAPIStyleRouteChatCompletions {
+	if account == nil || account.Platform != PlatformAli {
 		return body, nil
 	}
-	return patchAliBody(body, account, opts.Model)
+	switch opts.Route {
+	case NewAPIStyleRouteChatCompletions:
+		return patchAliBody(body, account, opts.Model)
+	case NewAPIStyleRouteImages:
+		return convertOpenAIImagesRequestToAliQwenMultimodal(body, opts.Model)
+	default:
+		return body, nil
+	}
+}
+
+func convertOpenAIImagesRequestToAliQwenMultimodal(body []byte, model string) ([]byte, error) {
+	model = strings.TrimSpace(firstNonEmptyText(model, gjson.GetBytes(body, "model").String()))
+	if model == "" {
+		return nil, &CompatibleClientError{
+			StatusCode: http.StatusBadRequest,
+			ErrorType:  "invalid_request_error",
+			Message:    "model is required",
+		}
+	}
+	prompt := strings.TrimSpace(gjson.GetBytes(body, "prompt").String())
+	if prompt == "" {
+		return nil, &CompatibleClientError{
+			StatusCode: http.StatusBadRequest,
+			ErrorType:  "invalid_request_error",
+			Message:    "prompt is required for Qwen image generation",
+		}
+	}
+
+	parameters := map[string]any{
+		"watermark": false,
+	}
+	if value := strings.TrimSpace(gjson.GetBytes(body, "negative_prompt").String()); value != "" {
+		parameters["negative_prompt"] = value
+	}
+	if value := strings.TrimSpace(gjson.GetBytes(body, "size").String()); value != "" {
+		parameters["size"] = normalizeAliQwenImageSize(value)
+	}
+	if n := gjson.GetBytes(body, "n"); n.Exists() {
+		parameters["n"] = n.Int()
+	}
+	if value := gjson.GetBytes(body, "prompt_extend"); value.Exists() {
+		parameters["prompt_extend"] = value.Bool()
+	}
+	if value := gjson.GetBytes(body, "watermark"); value.Exists() {
+		parameters["watermark"] = value.Bool()
+	}
+	if seed := gjson.GetBytes(body, "seed"); seed.Exists() {
+		parameters["seed"] = seed.Int()
+	}
+
+	payload := map[string]any{
+		"model": model,
+		"input": map[string]any{
+			"messages": []map[string]any{
+				{
+					"role": "user",
+					"content": []map[string]any{
+						{"text": prompt},
+					},
+				},
+			},
+		},
+		"parameters": parameters,
+	}
+	out, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func normalizeAliQwenImageSize(size string) string {
+	size = strings.TrimSpace(size)
+	if size == "" {
+		return ""
+	}
+	lower := strings.ToLower(size)
+	if strings.Contains(lower, "x") {
+		return strings.ReplaceAll(lower, "x", "*")
+	}
+	return size
 }
 
 func newAPIStyleAuthToken(account *Account) string {
@@ -687,7 +795,7 @@ func (s *NewAPIStyleGatewayService) applyUsageGuardrails(result *ForwardResult, 
 	}
 
 	switch opts.Route {
-	case NewAPIStyleRouteImages:
+	case NewAPIStyleRouteImages, NewAPIStyleRouteQwenImage:
 		result.ImageCount = inferImageCount(opts.RequestBody, respBody)
 		result.ImageSize = inferImageSize(opts.RequestBody)
 		result.BillableUnitType = BillableUnitTypeImage
@@ -704,7 +812,7 @@ func (s *NewAPIStyleGatewayService) applyUsageGuardrails(result *ForwardResult, 
 	if !forwardResultHasBillableUsage(result) {
 		result.Usage.InputTokens = estimateNewAPIStyleInputTokens(opts.RequestBody)
 		result.UsageEstimated = true
-		if result.Usage.InputTokens == 0 && opts.Route != NewAPIStyleRouteImages {
+		if result.Usage.InputTokens == 0 && opts.Route != NewAPIStyleRouteImages && opts.Route != NewAPIStyleRouteQwenImage {
 			result.RequestCount = 1
 			result.BillableUnitType = BillableUnitTypeRequest
 		}
@@ -737,9 +845,88 @@ func parseNewAPIStyleUsage(body []byte) ClaudeUsage {
 	}
 }
 
+func normalizeAliQwenImagesOpenAIResponse(account *Account, opts NewAPIStyleForwardOptions, body []byte) ([]byte, bool) {
+	if account == nil || account.Platform != PlatformAli || opts.Route != NewAPIStyleRouteImages {
+		return nil, false
+	}
+	data := aliQwenImageDataItems(body)
+	if len(data) == 0 {
+		return nil, false
+	}
+	payload := map[string]any{
+		"created": time.Now().Unix(),
+		"data":    data,
+	}
+	if id := strings.TrimSpace(gjson.GetBytes(body, "request_id").String()); id != "" {
+		payload["id"] = id
+	}
+	out, err := json.Marshal(payload)
+	if err != nil {
+		return nil, false
+	}
+	return out, true
+}
+
+func aliQwenImageDataItems(body []byte) []map[string]any {
+	var data []map[string]any
+	for _, choice := range gjson.GetBytes(body, "output.choices").Array() {
+		for _, part := range choice.Get("message.content").Array() {
+			if item := aliQwenImageDataItem(part); item != nil {
+				data = append(data, item)
+			}
+		}
+	}
+	if len(data) > 0 {
+		return data
+	}
+	for _, path := range []string{"output.image", "output.image_url", "output.url", "image", "image_url", "url"} {
+		if item := aliQwenImageDataItem(gjson.GetBytes(body, path)); item != nil {
+			return []map[string]any{item}
+		}
+	}
+	return nil
+}
+
+func aliQwenImageDataItem(value gjson.Result) map[string]any {
+	if !value.Exists() {
+		return nil
+	}
+	var urlValue string
+	var b64Value string
+	if value.Type == gjson.String {
+		urlValue = strings.TrimSpace(value.String())
+	} else {
+		for _, key := range []string{"image", "image_url", "url"} {
+			if s := strings.TrimSpace(value.Get(key).String()); s != "" {
+				urlValue = s
+				break
+			}
+		}
+		for _, key := range []string{"b64_json", "base64", "data"} {
+			if s := strings.TrimSpace(value.Get(key).String()); s != "" {
+				b64Value = s
+				break
+			}
+		}
+	}
+	if urlValue == "" && b64Value == "" {
+		return nil
+	}
+	item := make(map[string]any, 1)
+	if urlValue != "" {
+		item["url"] = urlValue
+	}
+	if b64Value != "" {
+		item["b64_json"] = b64Value
+	}
+	return item
+}
+
 func inferImageCount(requestBody, responseBody []byte) int {
-	if n := int(gjson.GetBytes(requestBody, "n").Int()); n > 0 {
-		return n
+	for _, path := range []string{"usage.image_count", "output.usage.image_count"} {
+		if n := int(gjson.GetBytes(responseBody, path).Int()); n > 0 {
+			return n
+		}
 	}
 	if data := gjson.GetBytes(responseBody, "data"); data.IsArray() {
 		count := 0
@@ -751,11 +938,23 @@ func inferImageCount(requestBody, responseBody []byte) int {
 			return count
 		}
 	}
+	if items := aliQwenImageDataItems(responseBody); len(items) > 0 {
+		return len(items)
+	}
+	if n := int(gjson.GetBytes(requestBody, "n").Int()); n > 0 {
+		return n
+	}
+	if n := int(gjson.GetBytes(requestBody, "parameters.n").Int()); n > 0 {
+		return n
+	}
 	return 1
 }
 
 func inferImageSize(requestBody []byte) string {
-	size := strings.ToLower(strings.TrimSpace(gjson.GetBytes(requestBody, "size").String()))
+	size := strings.ToLower(strings.TrimSpace(firstNonEmptyText(
+		gjson.GetBytes(requestBody, "size").String(),
+		gjson.GetBytes(requestBody, "parameters.size").String(),
+	)))
 	switch {
 	case strings.Contains(size, "4096"), strings.Contains(size, "4k"):
 		return "4K"

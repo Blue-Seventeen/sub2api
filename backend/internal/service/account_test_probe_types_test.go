@@ -563,6 +563,82 @@ func TestAccountTestAudioDataURLWrapsZhipuRawPCMAsWAV(t *testing.T) {
 	}
 }
 
+func TestAccountTestAliImageGenerationProbeBuildsDashScopeRequest(t *testing.T) {
+	c, rec := accountProbeTestContext()
+	upstream := &accountProbeHTTPUpstream{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body: io.NopCloser(strings.NewReader(`{
+				"output":{"choices":[{"message":{"content":[{"image":"https://example.com/qwen-image.png"}]}}]},
+				"usage":{"image_count":1}
+			}`)),
+		},
+	}
+	svc := &AccountTestService{httpUpstream: upstream}
+	account := &Account{
+		ID:          9,
+		Platform:    PlatformAli,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "qwen-test", "base_url": "http://dashscope.example"},
+	}
+
+	if err := svc.testImageAccountConnection(c, account, "qwen-image", "draw a cat"); err != nil {
+		t.Fatalf("Qwen image probe failed: %v", err)
+	}
+	if len(upstream.requests) != 1 {
+		t.Fatalf("upstream calls = %d, want 1", len(upstream.requests))
+	}
+	req := upstream.requests[0]
+	if req.URL.Path != aliQwenMultimodalGenerationPath {
+		t.Fatalf("path = %s, want %s", req.URL.Path, aliQwenMultimodalGenerationPath)
+	}
+	if got := req.Header.Get("X-DashScope-SSE"); got != "" {
+		t.Fatalf("X-DashScope-SSE = %q, want empty for JSON image probe", got)
+	}
+	bodyBytes := upstream.bodies[0]
+	for _, want := range [][]byte{
+		[]byte(`"model":"qwen-image"`),
+		[]byte(`"text":"draw a cat"`),
+		[]byte(`"watermark":false`),
+	} {
+		if !bytes.Contains(bodyBytes, want) {
+			t.Fatalf("expected %q in Qwen image body, got %s", want, string(bodyBytes))
+		}
+	}
+	output := rec.Body.String()
+	if !strings.Contains(output, "https://example.com/qwen-image.png") || !strings.Contains(output, `"success":true`) {
+		t.Fatalf("expected image success SSE, got %s", output)
+	}
+}
+
+func TestExtractAliQwenGeneratedImageURL(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "content_image",
+			body: `{"output":{"choices":[{"message":{"content":[{"image":"https://example.com/a.png"}]}}]}}`,
+			want: "https://example.com/a.png",
+		},
+		{
+			name: "output_url",
+			body: `{"output":{"url":"https://example.com/b.png"}}`,
+			want: "https://example.com/b.png",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := extractAliQwenGeneratedImageURL([]byte(tt.body)); got != tt.want {
+				t.Fatalf("extractAliQwenGeneratedImageURL() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAccountTestVideoUnderstandingProbeBuildsChatRequest(t *testing.T) {
 	c, rec := accountProbeTestContext()
 	upstream := &accountProbeHTTPUpstream{

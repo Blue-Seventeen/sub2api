@@ -25,9 +25,10 @@ func newGatewayRoutesTestRouterForPlatform(platform string) *gin.Engine {
 	RegisterGatewayRoutes(
 		router,
 		&handler.Handlers{
-			Gateway:           &handler.GatewayHandler{},
-			OpenAIGateway:     &handler.OpenAIGatewayHandler{},
-			CompatibleGateway: handler.NewCompatibleGatewayHandler(nil, &handler.GatewayHandler{}),
+			Gateway:            &handler.GatewayHandler{},
+			OpenAIGateway:      &handler.OpenAIGatewayHandler{},
+			NewAPIStyleGateway: handler.NewNewAPIStyleGatewayHandler(&handler.GatewayHandler{}),
+			CompatibleGateway:  handler.NewCompatibleGatewayHandler(nil, &handler.GatewayHandler{}),
 		},
 		servermiddleware.APIKeyAuthMiddleware(func(c *gin.Context) {
 			groupID := int64(1)
@@ -80,6 +81,34 @@ func TestGatewayRoutesOpenAIImagesPathsAreRegistered(t *testing.T) {
 
 		router.ServeHTTP(w, req)
 		require.NotEqual(t, http.StatusNotFound, w.Code, "path=%s should hit OpenAI images handler", path)
+	}
+}
+
+func TestGatewayRoutesQwenImagesGenerationsUsesNewAPIStylePath(t *testing.T) {
+	router := newGatewayRoutesTestRouterForPlatform(service.PlatformAli)
+
+	for _, path := range []string{"/v1/images/generations", "/images/generations"} {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"model":"qwen-image","prompt":"draw a cat"}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+		require.NotEqual(t, http.StatusNotFound, w.Code, "path=%s should not hit old unsupported images gate", path)
+		require.NotContains(t, w.Body.String(), "Images API is not supported")
+	}
+}
+
+func TestGatewayRoutesQwenImagesEditsRemainUnsupported(t *testing.T) {
+	router := newGatewayRoutesTestRouterForPlatform(service.PlatformAli)
+
+	for _, path := range []string{"/v1/images/edits", "/images/edits"} {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"model":"qwen-image","prompt":"edit"}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+		require.Equal(t, http.StatusNotFound, w.Code)
+		require.Contains(t, w.Body.String(), "Images API is not supported")
 	}
 }
 

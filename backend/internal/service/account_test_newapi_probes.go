@@ -85,6 +85,8 @@ func (s *AccountTestService) testImageAccountConnection(c *gin.Context, account 
 	}
 	ctx := c.Request.Context()
 	switch {
+	case account.Platform == PlatformAli:
+		return s.testAliImageGenerationProbe(c, account, modelID, prompt)
 	case account.IsOpenAI():
 		testModelID := strings.TrimSpace(modelID)
 		testModelID = account.GetMappedModel(testModelID)
@@ -102,6 +104,65 @@ func (s *AccountTestService) testImageAccountConnection(c *gin.Context, account 
 	default:
 		return s.sendUnsupportedTestType(c, AccountTestTypeImage, account, "platform does not expose an image probe")
 	}
+}
+
+func (s *AccountTestService) testAliImageGenerationProbe(c *gin.Context, account *Account, modelID string, prompt string) error {
+	if account == nil || account.Type != AccountTypeAPIKey {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("test type %s requires a Qwen/DashScope API key account", AccountTestTypeImage))
+	}
+	model := strings.TrimSpace(modelID)
+	imagePrompt := strings.TrimSpace(prompt)
+	if imagePrompt == "" {
+		imagePrompt = "A tiny orange cat sticker on a clean white background."
+	}
+	payload := map[string]any{
+		"model": model,
+		"input": map[string]any{
+			"messages": []map[string]any{
+				{
+					"role": "user",
+					"content": []map[string]any{
+						{"text": imagePrompt},
+					},
+				},
+			},
+		},
+		"parameters": map[string]any{
+			"negative_prompt": "",
+			"watermark":       false,
+		},
+	}
+	body, _ := json.Marshal(payload)
+
+	s.prepareAccountTestStream(c)
+	s.sendEvent(c, TestEvent{Type: "test_start", Model: model, Data: map[string]any{"test_type": AccountTestTypeImage}})
+
+	req, err := s.aliQwenMultimodalGenerationTestRequest(c.Request.Context(), account, body, false)
+	if err != nil {
+		return s.sendErrorAndEnd(c, err.Error())
+	}
+	resp, responseBody, err := s.executeAccountTestRequest(c.Request.Context(), account, req)
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, strings.TrimSpace(extractUpstreamErrorMessage(responseBody))))
+	}
+	imageURL := extractAliQwenGeneratedImageURL(responseBody)
+	if imageURL == "" {
+		return s.sendErrorAndEnd(c, "Qwen image probe response did not include an image URL")
+	}
+	s.sendEvent(c, TestEvent{
+		Type:     "image",
+		ImageURL: imageURL,
+		Data: map[string]any{
+			"prompt": imagePrompt,
+			"url":    imageURL,
+		},
+	})
+	s.sendEvent(c, TestEvent{Type: "content", Text: "Qwen image generation probe succeeded", Data: map[string]any{"url": imageURL}})
+	s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+	return nil
 }
 
 func (s *AccountTestService) testAudioTranscriptionProbe(c *gin.Context, account *Account, modelID string) error {
@@ -673,7 +734,7 @@ func audioSpeechProbePayload(account *Account, model string, input string, voice
 	return payload
 }
 
-func (s *AccountTestService) aliQwenTTSTestRequest(ctx context.Context, account *Account, body []byte) (*http.Request, error) {
+func (s *AccountTestService) aliQwenMultimodalGenerationTestRequest(ctx context.Context, account *Account, body []byte, enableSSE bool) (*http.Request, error) {
 	baseURL := strings.TrimSpace(account.GetCredential("base_url"))
 	if baseURL == "" && account.IsCustomBaseURLEnabled() {
 		baseURL = strings.TrimSpace(account.GetCustomBaseURL())
@@ -682,13 +743,13 @@ func (s *AccountTestService) aliQwenTTSTestRequest(ctx context.Context, account 
 		baseURL = CompatibleDefaultBaseURL(PlatformAli)
 	}
 	if baseURL == "" {
-		return nil, fmt.Errorf("base_url is required for Qwen TTS account test")
+		return nil, fmt.Errorf("base_url is required for Qwen/DashScope multimodal account test")
 	}
 	normalizedBaseURL, err := s.validateAccountTestBaseURL(baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid base URL: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, joinRelayCompatibleURL(normalizedBaseURL, aliQwenTTSGenerationPath), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, joinRelayCompatibleURL(normalizedBaseURL, aliQwenMultimodalGenerationPath), bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -698,9 +759,15 @@ func (s *AccountTestService) aliQwenTTSTestRequest(ctx context.Context, account 
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-DashScope-SSE", "enable")
+	if enableSSE {
+		req.Header.Set("X-DashScope-SSE", "enable")
+	}
 	req.ContentLength = int64(len(body))
 	return req, nil
+}
+
+func (s *AccountTestService) aliQwenTTSTestRequest(ctx context.Context, account *Account, body []byte) (*http.Request, error) {
+	return s.aliQwenMultimodalGenerationTestRequest(ctx, account, body, true)
 }
 
 func inferAliQwenTTSLanguageType(input string) string {
@@ -744,6 +811,33 @@ func extractAliQwenTTSAudioBody(responseBody []byte) ([]byte, error) {
 		return repaired, nil
 	}
 	return audio, nil
+}
+
+func extractAliQwenGeneratedImageURL(responseBody []byte) string {
+	for _, path := range []string{
+		"output.choices.0.message.content.0.image",
+		"output.choices.0.message.content.0.image_url",
+		"output.choices.0.message.content.0.url",
+		"output.image_url",
+		"output.url",
+		"image_url",
+		"url",
+	} {
+		value := gjson.GetBytes(responseBody, path)
+		if value.Exists() {
+			if s := strings.TrimSpace(value.String()); s != "" {
+				return s
+			}
+		}
+	}
+	for _, item := range gjson.GetBytes(responseBody, "output.choices.0.message.content").Array() {
+		for _, key := range []string{"image", "image_url", "url"} {
+			if s := strings.TrimSpace(item.Get(key).String()); s != "" {
+				return s
+			}
+		}
+	}
+	return ""
 }
 
 func normalizeAccountTestVoice(voice string) string {

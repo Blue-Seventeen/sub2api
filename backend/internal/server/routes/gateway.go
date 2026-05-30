@@ -134,8 +134,7 @@ func RegisterGatewayRoutes(
 				h.OpenAIGateway.Images(c)
 				return
 			}
-			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
-			writeImagesUnsupported(c)
+			h.NewAPIStyleGateway.Images(c)
 		})
 		gateway.POST("/images/edits", func(c *gin.Context) {
 			if getGroupPlatform(c) == service.PlatformOpenAI {
@@ -221,8 +220,7 @@ func RegisterGatewayRoutes(
 			h.OpenAIGateway.Images(c)
 			return
 		}
-		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
-		writeImagesUnsupported(c)
+		h.NewAPIStyleGateway.Images(c)
 	})
 	r.POST("/images/edits", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, func(c *gin.Context) {
 		if getGroupPlatform(c) == service.PlatformOpenAI {
@@ -235,7 +233,7 @@ func RegisterGatewayRoutes(
 	newAPIOnly := []gin.HandlerFunc{bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic}
 	r.POST("/audio/*subpath", append(newAPIOnly, h.NewAPIStyleGateway.Audio)...)
 	r.POST("/api/paas/v4/audio/*subpath", append(newAPIOnly, h.NewAPIStyleGateway.Audio)...)
-	r.POST("/api/v1/services/aigc/multimodal-generation/generation", append(newAPIOnly, h.NewAPIStyleGateway.QwenTTS)...)
+	r.POST("/api/v1/services/aigc/multimodal-generation/generation", append(newAPIOnly, h.NewAPIStyleGateway.QwenMultimodalGeneration)...)
 	r.POST("/rerank", append(newAPIOnly, h.NewAPIStyleGateway.Rerank)...)
 	r.GET("/videos", append(newAPIOnly, h.NewAPIStyleGateway.Videos)...)
 	r.POST("/videos", append(newAPIOnly, h.NewAPIStyleGateway.Videos)...)
