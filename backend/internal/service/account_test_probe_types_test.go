@@ -425,12 +425,17 @@ func TestAccountTestTTSProbeBuildsZhipuRequest(t *testing.T) {
 
 func TestAccountTestTTSProbeBuildsAliDashScopeSSERequest(t *testing.T) {
 	c, rec := accountProbeTestContext()
-	audio := []byte("RIFFxxxxWAVEaudio")
+	audioChunk1 := []byte("RIFFxxxxWAVE")
+	audioChunk2 := []byte("audio")
 	sseBody := `id:1
 event:result
-data:{"output":{"audio":{"data":"` + base64.StdEncoding.EncodeToString(audio) + `","id":"audio-test"},"finish_reason":"null"},"request_id":"req-test"}
+data:{"output":{"audio":{"data":"` + base64.StdEncoding.EncodeToString(audioChunk1) + `","id":"audio-test"},"finish_reason":"null"},"request_id":"req-test"}
 
 id:2
+event:result
+data:{"output":{"audio":{"data":"` + base64.StdEncoding.EncodeToString(audioChunk2) + `","id":"audio-test"},"finish_reason":"null"},"request_id":"req-test"}
+
+id:3
 event:result
 data:{"output":{"audio":{"data":"","id":"audio-test"},"finish_reason":"stop"},"usage":{"characters":2},"request_id":"req-test"}
 `
@@ -477,8 +482,42 @@ data:{"output":{"audio":{"data":"","id":"audio-test"},"finish_reason":"stop"},"u
 	if !strings.Contains(rec.Body.String(), `"type":"audio"`) || !strings.Contains(rec.Body.String(), `"audio_url":"data:audio/wav;base64,`) {
 		t.Fatalf("expected Ali audio SSE preview event, got %s", rec.Body.String())
 	}
+	if !strings.Contains(rec.Body.String(), `"bytes":17`) {
+		t.Fatalf("expected Ali audio preview to include both SSE audio chunks, got %s", rec.Body.String())
+	}
 	if !strings.Contains(rec.Body.String(), `"success":true`) {
 		t.Fatalf("expected success SSE, got %s", rec.Body.String())
+	}
+}
+
+func TestExtractAliQwenTTSAudioBodyRepairsStreamingWAVHeader(t *testing.T) {
+	pcm := []byte{0x00, 0x00, 0x01, 0x00, 0xff, 0x00, 0x00, 0x00}
+	streamingWAV := buildZeroSizedDataWAV(pcm)
+	_, dataOffset := findWAVChunk(t, buildZeroSizedDataWAV(nil), "data")
+	binary.LittleEndian.PutUint32(streamingWAV[4:8], 0xffffffff)
+	binary.LittleEndian.PutUint32(streamingWAV[dataOffset+4:dataOffset+8], 0x7fffff9b)
+	first := streamingWAV[:24]
+	second := streamingWAV[24:]
+	sseBody := `event:result
+data:{"output":{"audio":{"data":"` + base64.StdEncoding.EncodeToString(first) + `","id":"audio-test"},"finish_reason":"null"},"request_id":"req-test"}
+
+event:result
+data:{"output":{"audio":{"data":"` + base64.StdEncoding.EncodeToString(second) + `","id":"audio-test"},"finish_reason":"null"},"request_id":"req-test"}
+`
+
+	audio, err := extractAliQwenTTSAudioBody([]byte(sseBody))
+	if err != nil {
+		t.Fatalf("extractAliQwenTTSAudioBody() error = %v", err)
+	}
+	if got := binary.LittleEndian.Uint32(audio[4:8]); got != uint32(len(audio)-8) {
+		t.Fatalf("RIFF size = %d, want %d", got, len(audio)-8)
+	}
+	data, offset := findWAVChunk(t, audio, "data")
+	if got := binary.LittleEndian.Uint32(audio[offset+4 : offset+8]); got != uint32(len(pcm)) {
+		t.Fatalf("data chunk size = %d, want %d", got, len(pcm))
+	}
+	if !bytes.Equal(data, pcm) {
+		t.Fatalf("data chunk = %v, want %v", data, pcm)
 	}
 }
 

@@ -26,8 +26,6 @@ const (
 	accountTestTaskPollInterval  = 5 * time.Second
 )
 
-const aliQwenTTSGenerationPath = "/api/v1/services/aigc/multimodal-generation/generation"
-
 //go:embed testdata/asr_probe_zh.mp3
 var accountTestChineseASRProbeMP3 []byte
 
@@ -715,6 +713,7 @@ func inferAliQwenTTSLanguageType(input string) string {
 }
 
 func extractAliQwenTTSAudioBody(responseBody []byte) ([]byte, error) {
+	var out bytes.Buffer
 	for _, line := range strings.Split(string(responseBody), "\n") {
 		line = strings.TrimSpace(line)
 		if !strings.HasPrefix(line, "data:") {
@@ -735,9 +734,16 @@ func extractAliQwenTTSAudioBody(responseBody []byte) ([]byte, error) {
 		if len(decoded) == 0 {
 			continue
 		}
-		return decoded, nil
+		out.Write(decoded)
 	}
-	return nil, fmt.Errorf("Qwen TTS probe response did not include audio data")
+	if out.Len() == 0 {
+		return nil, fmt.Errorf("Qwen TTS probe response did not include audio data")
+	}
+	audio := out.Bytes()
+	if repaired, ok := repairWAVForBrowser(audio); ok {
+		return repaired, nil
+	}
+	return audio, nil
 }
 
 func normalizeAccountTestVoice(voice string) string {

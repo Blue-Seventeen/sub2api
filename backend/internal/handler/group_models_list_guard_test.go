@@ -28,6 +28,15 @@ func TestNewAPIStyleGroupModelsListModel(t *testing.T) {
 			wantOK:    true,
 		},
 		{
+			name:      "qwen tts official route uses request model",
+			route:     service.NewAPIStyleRouteQwenTTS,
+			model:     "qwen3-tts-flash",
+			method:    http.MethodPost,
+			path:      "/api/v1/services/aigc/multimodal-generation/generation",
+			wantModel: "qwen3-tts-flash",
+			wantOK:    true,
+		},
+		{
 			name:      "suno music submit infers product model",
 			route:     service.NewAPIStyleRouteSuno,
 			method:    http.MethodPost,

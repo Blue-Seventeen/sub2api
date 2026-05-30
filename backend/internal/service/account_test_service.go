@@ -1388,6 +1388,8 @@ func (s *AccountTestService) processClaudeStream(c *gin.Context, body io.Reader)
 func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader) error {
 	reader := bufio.NewReader(body)
 	seenCompleted := false
+	seenChatChunk := false
+	currentEvent := ""
 
 	for {
 		line, err := reader.ReadString('\n')
@@ -1403,13 +1405,20 @@ func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader)
 		}
 
 		line = strings.TrimSpace(line)
-		if line == "" || !sseDataPrefix.MatchString(line) {
+		if line == "" {
+			continue
+		}
+		if event, ok := strings.CutPrefix(line, "event:"); ok {
+			currentEvent = strings.TrimSpace(event)
+			continue
+		}
+		if !sseDataPrefix.MatchString(line) {
 			continue
 		}
 
 		jsonStr := sseDataPrefix.ReplaceAllString(line, "")
 		if jsonStr == "[DONE]" {
-			if seenCompleted {
+			if seenCompleted || seenChatChunk {
 				s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
 				return nil
 			}
@@ -1418,6 +1427,26 @@ func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader)
 
 		var data map[string]any
 		if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
+			continue
+		}
+		eventName := currentEvent
+		currentEvent = ""
+		if eventName == "error" {
+			if msg := accountTestStreamErrorMessage(data); msg != "" {
+				return s.sendErrorAndEnd(c, msg)
+			}
+			return s.sendErrorAndEnd(c, "OpenAI response failed")
+		}
+
+		if object := strings.ToLower(strings.TrimSpace(gjson.Get(jsonStr, "object").String())); object == "chat.completion.chunk" || gjson.Get(jsonStr, "choices").Exists() {
+			seenChatChunk = true
+			if delta := gjson.Get(jsonStr, "choices.0.delta.content").String(); delta != "" {
+				s.sendEvent(c, TestEvent{Type: "content", Text: delta})
+			}
+			if finish := gjson.Get(jsonStr, "choices.0.finish_reason").String(); finish != "" {
+				s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+				return nil
+			}
 			continue
 		}
 
@@ -1442,11 +1471,9 @@ func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader)
 			}
 			return s.sendErrorAndEnd(c, errorMsg)
 		case "error":
-			errorMsg := "Unknown error"
-			if errData, ok := data["error"].(map[string]any); ok {
-				if msg, ok := errData["message"].(string); ok {
-					errorMsg = msg
-				}
+			errorMsg := accountTestStreamErrorMessage(data)
+			if errorMsg == "" {
+				errorMsg = "Unknown error"
 			}
 			return s.sendErrorAndEnd(c, errorMsg)
 		}
@@ -1456,72 +1483,7 @@ func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader)
 // processOpenAIChatCompletionsStream processes SSE chunks from the
 // OpenAI-compatible Chat Completions API.
 func (s *AccountTestService) processOpenAIChatCompletionsStream(c *gin.Context, body io.Reader) error {
-	reader := bufio.NewReader(body)
-	seenCompleted := false
-
-	for {
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			if err == io.EOF {
-				if seenCompleted {
-					s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
-					return nil
-				}
-				return s.sendErrorAndEnd(c, "Stream ended before response.completed")
-			}
-			return s.sendErrorAndEnd(c, fmt.Sprintf("Stream read error: %s", err.Error()))
-		}
-
-		line = strings.TrimSpace(line)
-		if line == "" || !sseDataPrefix.MatchString(line) {
-			continue
-		}
-
-		jsonStr := sseDataPrefix.ReplaceAllString(line, "")
-		if jsonStr == "[DONE]" {
-			if seenCompleted {
-				s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
-				return nil
-			}
-			return s.sendErrorAndEnd(c, "Stream ended before response.completed")
-		}
-
-		var data map[string]any
-		if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
-			continue
-		}
-
-		eventType, _ := data["type"].(string)
-
-		switch eventType {
-		case "response.output_text.delta":
-			// OpenAI Responses API uses "delta" field for text content
-			if delta, ok := data["delta"].(string); ok && delta != "" {
-				s.sendEvent(c, TestEvent{Type: "content", Text: delta})
-			}
-		case "response.completed", "response.done":
-			s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
-			return nil
-		case "response.failed":
-			errorMsg := "OpenAI response failed"
-			if responseData, ok := data["response"].(map[string]any); ok {
-				if errData, ok := responseData["error"].(map[string]any); ok {
-					if msg, ok := errData["message"].(string); ok && msg != "" {
-						errorMsg = msg
-					}
-				}
-			}
-			return s.sendErrorAndEnd(c, errorMsg)
-		case "error":
-			errorMsg := "Unknown error"
-			if errData, ok := data["error"].(map[string]any); ok {
-				if msg, ok := errData["message"].(string); ok {
-					errorMsg = msg
-				}
-			}
-			return s.sendErrorAndEnd(c, errorMsg)
-		}
-	}
+	return s.processChatCompletionsStream(c, body)
 }
 
 func (s *AccountTestService) testCompatibleAccountConnection(c *gin.Context, account *Account, modelID string) error {
@@ -1553,7 +1515,8 @@ func (s *AccountTestService) testCompatibleAccountConnection(c *gin.Context, acc
 	var apiURL string
 	var payloadBytes []byte
 	upstreamKind := compatibleUpstreamChat
-	if preset.SupportsResponses {
+	useResponsesProbe := shouldUseCompatibleResponsesAccountProbe(preset)
+	if useResponsesProbe {
 		apiURL = preset.BuildResponsesURL(normalizedBaseURL, testModelID)
 		payload := createOpenAITestPayload(testModelID, false)
 		payloadBytes, _ = json.Marshal(payload)
@@ -1564,7 +1527,7 @@ func (s *AccountTestService) testCompatibleAccountConnection(c *gin.Context, acc
 		payloadBytes, _ = json.Marshal(payload)
 	}
 
-	if preset.SupportsResponses {
+	if useResponsesProbe {
 		if preset.PatchResponsesBody != nil {
 			if payloadBytes, err = preset.PatchResponsesBody(payloadBytes, account, testModelID); err != nil {
 				return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to patch request body: %s", err.Error()))
@@ -1606,7 +1569,7 @@ func (s *AccountTestService) testCompatibleAccountConnection(c *gin.Context, acc
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.ContentLength = int64(len(payloadBytes))
-		if preset.SupportsResponses {
+		if useResponsesProbe {
 			if preset.PatchResponsesHeaders != nil {
 				preset.PatchResponsesHeaders(req, account, testModelID)
 			}
@@ -1637,10 +1600,51 @@ func (s *AccountTestService) testCompatibleAccountConnection(c *gin.Context, acc
 		return s.sendErrorAndEnd(c, "No upstream response")
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if preset.SupportsResponses {
+	if useResponsesProbe {
 		return s.processOpenAIStream(c, resp.Body)
 	}
 	return s.processChatCompletionsStream(c, resp.Body)
+}
+
+func shouldUseCompatibleResponsesAccountProbe(preset CompatibleProviderPreset) bool {
+	if !preset.SupportsResponses || preset.BuildResponsesURL == nil {
+		return false
+	}
+	// DashScope exposes Chat Completions as the canonical model test path.
+	// Its Responses-compatible endpoint supports a narrower model set, so using
+	// it here can reject otherwise valid Qwen models such as qwen-max.
+	if preset.Platform == PlatformAli && preset.SupportsChat && preset.BuildChatURL != nil {
+		return false
+	}
+	return true
+}
+
+func accountTestStreamErrorMessage(data map[string]any) string {
+	if data == nil {
+		return ""
+	}
+	if msg, ok := data["message"].(string); ok && strings.TrimSpace(msg) != "" {
+		return strings.TrimSpace(msg)
+	}
+	if errString, ok := data["error"].(string); ok && strings.TrimSpace(errString) != "" {
+		return strings.TrimSpace(errString)
+	}
+	if errData, ok := data["error"].(map[string]any); ok {
+		if msg, ok := errData["message"].(string); ok && strings.TrimSpace(msg) != "" {
+			return strings.TrimSpace(msg)
+		}
+	}
+	if responseData, ok := data["response"].(map[string]any); ok {
+		if errData, ok := responseData["error"].(map[string]any); ok {
+			if msg, ok := errData["message"].(string); ok && strings.TrimSpace(msg) != "" {
+				return strings.TrimSpace(msg)
+			}
+		}
+	}
+	if code, ok := data["code"].(string); ok && strings.TrimSpace(code) != "" {
+		return strings.TrimSpace(code)
+	}
+	return ""
 }
 
 func createCompatibleChatTestPayload(modelID string) map[string]any {

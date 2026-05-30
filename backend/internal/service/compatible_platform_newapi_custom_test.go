@@ -128,6 +128,7 @@ func TestNewAPIStyleGatewaySupportsExplicitCapabilityMatrix(t *testing.T) {
 	openAIGroupEnabled := &Group{ID: 1, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true, NewAPIStyleInterfaceEnabled: true}
 	deepSeekGroupEnabled := &Group{ID: 2, Platform: PlatformDeepSeek, Status: StatusActive, Hydrated: true, NewAPIStyleInterfaceEnabled: true}
 	zhipuGroupEnabled := &Group{ID: 3, Platform: PlatformZhipu, Status: StatusActive, Hydrated: true, NewAPIStyleInterfaceEnabled: true}
+	aliGroup := &Group{ID: 4, Platform: PlatformAli, Status: StatusActive, Hydrated: true}
 
 	tests := []struct {
 		name     string
@@ -214,6 +215,20 @@ func TestNewAPIStyleGatewaySupportsExplicitCapabilityMatrix(t *testing.T) {
 			name:     "zhipu audio still requires new api style switch",
 			account:  &Account{Platform: PlatformZhipu},
 			route:    NewAPIStyleRouteAudio,
+			expected: false,
+		},
+		{
+			name:     "qwen tts official route requires ali platform only",
+			account:  &Account{Platform: PlatformAli},
+			group:    aliGroup,
+			route:    NewAPIStyleRouteQwenTTS,
+			expected: true,
+		},
+		{
+			name:     "qwen tts official route rejects other compatible platforms",
+			account:  &Account{Platform: PlatformDeepSeek, Extra: enabledExtra},
+			group:    deepSeekGroupEnabled,
+			route:    NewAPIStyleRouteQwenTTS,
 			expected: false,
 		},
 		{

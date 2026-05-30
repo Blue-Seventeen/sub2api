@@ -28,6 +28,7 @@ const (
 	NewAPIStyleRouteResponses       NewAPIStyleRoute = "responses"
 	NewAPIStyleRouteImages          NewAPIStyleRoute = "images"
 	NewAPIStyleRouteAudio           NewAPIStyleRoute = "audio"
+	NewAPIStyleRouteQwenTTS         NewAPIStyleRoute = "qwen_tts"
 	NewAPIStyleRouteEmbeddings      NewAPIStyleRoute = "embeddings"
 	NewAPIStyleRouteRerank          NewAPIStyleRoute = "rerank"
 	NewAPIStyleRouteVideo           NewAPIStyleRoute = "video"
@@ -47,6 +48,7 @@ const (
 const (
 	zhipuAudioTranscriptionsPath = "/api/paas/v4/audio/transcriptions"
 	zhipuAudioSpeechPath         = "/api/paas/v4/audio/speech"
+	aliQwenTTSGenerationPath     = "/api/v1/services/aigc/multimodal-generation/generation"
 
 	maxNewAPIStyleMultipartModelBytes = 64 << 10
 )
@@ -94,7 +96,13 @@ func (s *NewAPIStyleGatewayService) Supports(account *Account, route NewAPIStyle
 }
 
 func (s *NewAPIStyleGatewayService) SupportsForGroup(account *Account, group *Group, route NewAPIStyleRoute) bool {
-	if account == nil || !account.UseNewAPIStyleInterfaceForGroup(group) {
+	if account == nil {
+		return false
+	}
+	if route == NewAPIStyleRouteQwenTTS {
+		return account.Platform == PlatformAli
+	}
+	if !account.UseNewAPIStyleInterfaceForGroup(group) {
 		return false
 	}
 	if !PlatformSupportsNewAPIStyleInterface(account.Platform) {
@@ -360,7 +368,7 @@ func (s *NewAPIStyleGatewayService) buildTargetURL(account *Account, opts NewAPI
 
 	path := newAPIStyleRoutePath(account.Platform, opts)
 	if path == "" {
-		if opts.Route == NewAPIStyleRouteAudio {
+		if opts.Route == NewAPIStyleRouteAudio || opts.Route == NewAPIStyleRouteQwenTTS {
 			return "", "", fmt.Errorf("%w: platform=%s route=%s path=%s", ErrNewAPIStyleUnsupportedCapability, account.Platform, opts.Route, opts.InboundPath)
 		}
 		path = "/v1/" + strings.TrimPrefix(strings.TrimSpace(opts.InboundPath), "/")
@@ -416,6 +424,11 @@ func newAPIStyleRoutePath(platform string, opts NewAPIStyleForwardOptions) strin
 		return "/v1/images/generations"
 	case NewAPIStyleRouteAudio:
 		return newAPIStyleAudioRoutePath(platform, inbound)
+	case NewAPIStyleRouteQwenTTS:
+		if strings.TrimSpace(platform) == PlatformAli {
+			return aliQwenTTSGenerationPath
+		}
+		return ""
 	case NewAPIStyleRouteEmbeddings, NewAPIStyleRouteRerank,
 		NewAPIStyleRouteVideo, NewAPIStyleRouteSuno, NewAPIStyleRouteKling, NewAPIStyleRouteMidjourney:
 		return inbound
@@ -623,6 +636,13 @@ func (s *NewAPIStyleGatewayService) patchHeaders(req *http.Request, account *Acc
 	if account != nil && account.Platform == PlatformAli && opts.Route == NewAPIStyleRouteChatCompletions {
 		patchAliStreamingHeaders(req, account, opts.Model)
 	}
+	if account != nil && account.Platform == PlatformAli && opts.Route == NewAPIStyleRouteQwenTTS {
+		sse := strings.TrimSpace(opts.HeaderSource.Get("X-DashScope-SSE"))
+		if sse == "" {
+			sse = "enable"
+		}
+		req.Header.Set("X-DashScope-SSE", sse)
+	}
 }
 
 func patchNewAPIStyleCompatibleBody(body []byte, account *Account, opts NewAPIStyleForwardOptions) ([]byte, error) {
@@ -671,7 +691,7 @@ func (s *NewAPIStyleGatewayService) applyUsageGuardrails(result *ForwardResult, 
 		result.ImageCount = inferImageCount(opts.RequestBody, respBody)
 		result.ImageSize = inferImageSize(opts.RequestBody)
 		result.BillableUnitType = BillableUnitTypeImage
-	case NewAPIStyleRouteAudio, NewAPIStyleRouteEmbeddings, NewAPIStyleRouteRerank:
+	case NewAPIStyleRouteAudio, NewAPIStyleRouteQwenTTS, NewAPIStyleRouteEmbeddings, NewAPIStyleRouteRerank:
 		result.RequestCount = 1
 		result.BillableUnitType = BillableUnitTypeRequest
 	case NewAPIStyleRouteVideo, NewAPIStyleRouteSuno, NewAPIStyleRouteKling, NewAPIStyleRouteMidjourney, NewAPIStyleRouteTask:

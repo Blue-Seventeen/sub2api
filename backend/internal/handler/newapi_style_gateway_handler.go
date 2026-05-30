@@ -30,6 +30,14 @@ func (h *NewAPIStyleGatewayHandler) Images(c *gin.Context) {
 func (h *NewAPIStyleGatewayHandler) Audio(c *gin.Context) {
 	h.forward(c, service.NewAPIStyleRouteAudio)
 }
+func (h *NewAPIStyleGatewayHandler) QwenTTS(c *gin.Context) {
+	apiKey, _ := middleware2.GetAPIKeyFromContext(c)
+	if apiKey == nil || apiKey.Group == nil || apiKey.Group.Platform != service.PlatformAli {
+		h.writeError(c, http.StatusForbidden, "permission_error", "The DashScope TTS official path alias is only available for Qwen/DashScope groups")
+		return
+	}
+	h.forward(c, service.NewAPIStyleRouteQwenTTS)
+}
 func (h *NewAPIStyleGatewayHandler) Embeddings(c *gin.Context) {
 	h.forward(c, service.NewAPIStyleRouteEmbeddings)
 }
@@ -95,6 +103,10 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 	}
 
 	model := service.ExtractNewAPIStyleModel(body, c.GetHeader("Content-Type"))
+	if route == service.NewAPIStyleRouteQwenTTS && strings.TrimSpace(model) == "" {
+		h.writeError(c, http.StatusBadRequest, "invalid_request_error", "model is required")
+		return
+	}
 	stream := gjson.GetBytes(body, "stream").Bool()
 	setOpsRequestContext(c, model, stream)
 	setOpsEndpointContext(c, model, int16(service.RequestTypeFromLegacy(stream, false)))

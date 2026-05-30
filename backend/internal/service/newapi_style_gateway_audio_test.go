@@ -180,6 +180,65 @@ func TestNewAPIStyleAliQwenASRAllowsDataURLAndAddsDashScopeHeader(t *testing.T) 
 	require.Equal(t, 9, result.Usage.OutputTokens)
 }
 
+func TestNewAPIStyleAliQwenTTSOfficialRouteForwardsDashScopeRequest(t *testing.T) {
+	body := []byte(`{"model":"qwen3-tts-flash","input":{"text":"hello","voice":"Cherry","language_type":"English"}}`)
+	upstream := &httpUpstreamRecorder{resp: newAPIStyleAudioResponse("text/event-stream", `event:result
+data:{"output":{"audio":{"data":"UklGRg==","id":"audio-test"},"finish_reason":"stop"},"usage":{"characters":5},"request_id":"req-test"}
+
+`)}
+	svc := &NewAPIStyleGatewayService{httpUpstream: upstream}
+
+	result, endpoint, err := svc.Forward(context.Background(), newAPIStyleTestContext(), newAPIStyleAudioAccount(PlatformAli, nil), NewAPIStyleForwardOptions{
+		Route:       NewAPIStyleRouteQwenTTS,
+		RequestBody: body,
+		InboundPath: aliQwenTTSGenerationPath,
+		ContentType: "application/json",
+		HeaderSource: http.Header{
+			"Accept": []string{"text/event-stream"},
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, aliQwenTTSGenerationPath, endpoint)
+	require.NotNil(t, upstream.lastReq)
+	require.Equal(t, aliQwenTTSGenerationPath, upstream.lastReq.URL.Path)
+	require.Equal(t, "Bearer account-token", upstream.lastReq.Header.Get("Authorization"))
+	require.Equal(t, "enable", upstream.lastReq.Header.Get("X-DashScope-SSE"))
+	require.Equal(t, "text/event-stream", upstream.lastReq.Header.Get("Accept"))
+	require.JSONEq(t, string(body), string(upstream.lastBody))
+	require.NotNil(t, result)
+	require.Equal(t, "qwen3-tts-flash", result.Model)
+	require.Equal(t, 1, result.RequestCount)
+	require.Equal(t, BillableUnitTypeRequest, result.BillableUnitType)
+}
+
+func TestNewAPIStyleAliQwenTTSOfficialRoutePreservesClientDashScopeSSEHeader(t *testing.T) {
+	body := []byte(`{"model":"qwen3-tts-flash","input":{"text":"hello","voice":"Cherry","language_type":"English"}}`)
+	upstream := &httpUpstreamRecorder{resp: newAPIStyleAudioResponse("application/json", `{"output":{"audio":{"url":"https://example.test/audio.wav"}}}`)}
+	svc := &NewAPIStyleGatewayService{httpUpstream: upstream}
+	headers := make(http.Header)
+	headers.Set("X-DashScope-SSE", "disable")
+
+	_, _, err := svc.Forward(context.Background(), newAPIStyleTestContext(), newAPIStyleAudioAccount(PlatformAli, nil), NewAPIStyleForwardOptions{
+		Route:        NewAPIStyleRouteQwenTTS,
+		RequestBody:  body,
+		InboundPath:  aliQwenTTSGenerationPath,
+		ContentType:  "application/json",
+		HeaderSource: headers,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "disable", upstream.lastReq.Header.Get("X-DashScope-SSE"))
+}
+
+func TestExtractNewAPIStyleModelReadsQwenTTSOfficialBody(t *testing.T) {
+	body := []byte(`{"model":"qwen3-tts-flash","input":{"text":"hello","voice":"Cherry","language_type":"English"}}`)
+
+	if got := ExtractNewAPIStyleModel(body, "application/json"); got != "qwen3-tts-flash" {
+		t.Fatalf("ExtractNewAPIStyleModel() = %q, want qwen3-tts-flash", got)
+	}
+}
+
 func TestNewAPIStyleAudioMultipartModelExtractionAndRewrite(t *testing.T) {
 	body, contentType := buildNewAPIStyleAudioMultipart(t, "glm-asr", []byte("fake-audio-bytes"))
 	upstream := &httpUpstreamRecorder{resp: newAPIStyleAudioResponse("application/json", `{"text":"ok"}`)}
