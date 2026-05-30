@@ -104,6 +104,9 @@ func (s *AccountTestService) testImageAccountConnection(c *gin.Context, account 
 }
 
 func (s *AccountTestService) testAudioTranscriptionProbe(c *gin.Context, account *Account, modelID string) error {
+	if account != nil && account.Platform == PlatformAli {
+		return s.testAliAudioTranscriptionProbe(c, account, modelID)
+	}
 	if err := s.requireAudioProbeAccount(account, AccountTestTypeASR); err != nil {
 		return s.sendErrorAndEnd(c, err.Error())
 	}
@@ -138,6 +141,53 @@ func (s *AccountTestService) testAudioTranscriptionProbe(c *gin.Context, account
 				caption = "ASR transcription: " + text
 			}
 			s.sendEvent(c, TestEvent{Type: "content", Text: caption, Data: map[string]any{"text": text}})
+			return nil
+		},
+	})
+}
+
+func (s *AccountTestService) testAliAudioTranscriptionProbe(c *gin.Context, account *Account, modelID string) error {
+	if account == nil || account.Type != AccountTypeAPIKey {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("test type %s requires an API key account", AccountTestTypeASR))
+	}
+	model := strings.TrimSpace(modelID)
+	audioData := "data:audio/mpeg;base64," + base64.StdEncoding.EncodeToString(accountTestASRProbeAudio())
+	payload := map[string]any{
+		"model": model,
+		"messages": []map[string]any{
+			{
+				"role": "user",
+				"content": []map[string]any{
+					{
+						"type": "input_audio",
+						"input_audio": map[string]any{
+							"data":   audioData,
+							"format": "mp3",
+						},
+					},
+				},
+			},
+		},
+		"stream": false,
+	}
+	body, _ := json.Marshal(payload)
+	return s.runNewAPIProbe(c, account, newAPIProbeRequest{
+		TestType:    AccountTestTypeASR,
+		Route:       NewAPIStyleRouteChatCompletions,
+		InboundPath: "/v1/chat/completions",
+		Model:       model,
+		Method:      http.MethodPost,
+		Body:        body,
+		ContentType: "application/json",
+		Validate: func(resp *http.Response, responseBody []byte) error {
+			text := strings.TrimSpace(gjson.GetBytes(responseBody, "choices.0.message.content").String())
+			if text == "" {
+				text = strings.TrimSpace(gjson.GetBytes(responseBody, "output.text").String())
+			}
+			if text == "" {
+				return fmt.Errorf("ASR probe returned an empty transcription")
+			}
+			s.sendEvent(c, TestEvent{Type: "content", Text: "ASR transcription: " + text, Data: map[string]any{"text": text}})
 			return nil
 		},
 	})
@@ -508,7 +558,7 @@ func (s *AccountTestService) requireAudioProbeAccount(account *Account, testType
 	if account.IsOpenAI() || account.Platform == PlatformZhipu {
 		return nil
 	}
-	return fmt.Errorf("test type %s requires an OpenAI or GLM/Zhipu API key account", testType)
+	return fmt.Errorf("test type %s requires an OpenAI, GLM/Zhipu, or Qwen/DashScope API key account", testType)
 }
 
 func (s *AccountTestService) requireVideoUnderstandingProbeAccount(account *Account) error {

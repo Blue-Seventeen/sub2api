@@ -152,7 +152,7 @@ func TestAccountTestExplicitUnsupportedDoesNotCallUpstream(t *testing.T) {
 	if len(upstream.requests) != 0 {
 		t.Fatalf("unexpected upstream calls: %d", len(upstream.requests))
 	}
-	if !strings.Contains(rec.Body.String(), "requires an OpenAI or GLM/Zhipu API key account") {
+	if !strings.Contains(rec.Body.String(), "requires an OpenAI, GLM/Zhipu, or Qwen/DashScope API key account") {
 		t.Fatalf("expected unsupported SSE error, got %s", rec.Body.String())
 	}
 }
@@ -330,6 +330,52 @@ func TestAccountTestASRProbeBuildsZhipuRequest(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"success":true`) {
 		t.Fatalf("expected success SSE, got %s", rec.Body.String())
+	}
+}
+
+func TestAccountTestASRProbeBuildsAliChatCompletionsInputAudioRequest(t *testing.T) {
+	c, rec := accountProbeTestContext()
+	upstream := &accountProbeHTTPUpstream{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":"欢迎使用阿里云"}}],"usage":{"total_tokens":55}}`)),
+		},
+	}
+	svc := &AccountTestService{httpUpstream: upstream}
+	account := &Account{
+		ID:          8,
+		Platform:    PlatformAli,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "qwen-test", "base_url": "http://upstream.example"},
+	}
+
+	if err := svc.testAudioTranscriptionProbe(c, account, "qwen3-asr-flash"); err != nil {
+		t.Fatalf("Ali ASR probe failed: %v", err)
+	}
+	if len(upstream.requests) != 1 {
+		t.Fatalf("upstream calls = %d, want 1", len(upstream.requests))
+	}
+	req := upstream.requests[0]
+	if req.URL.Path != "/compatible-mode/v1/chat/completions" {
+		t.Fatalf("path = %s, want /compatible-mode/v1/chat/completions", req.URL.Path)
+	}
+	if got := req.Header.Get("Authorization"); got != "Bearer qwen-test" {
+		t.Fatalf("authorization header = %q", got)
+	}
+	if got := req.Header.Get("Content-Type"); got != "application/json" {
+		t.Fatalf("content type = %q, want application/json", got)
+	}
+	body := string(upstream.bodies[0])
+	if !strings.Contains(body, `"model":"qwen3-asr-flash"`) ||
+		!strings.Contains(body, `"type":"input_audio"`) ||
+		!strings.Contains(body, `"format":"mp3"`) ||
+		!strings.Contains(body, `"data:audio/mpeg;base64,`) {
+		t.Fatalf("expected Ali ASR input_audio json body, got %s", body)
+	}
+	if !strings.Contains(rec.Body.String(), "欢迎使用阿里云") || !strings.Contains(rec.Body.String(), `"success":true`) {
+		t.Fatalf("expected success SSE with transcription, got %s", rec.Body.String())
 	}
 }
 
