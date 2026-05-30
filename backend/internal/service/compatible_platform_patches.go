@@ -11,11 +11,14 @@ import (
 )
 
 func normalizeTopPForCompatibleBody(body []byte, _ *Account, _ string) ([]byte, error) {
-	return normalizeTopPForCompatibleBodyRaw(body), nil
+	body = normalizeTopPForCompatibleBodyRaw(body)
+	body = ensureCompatibleStreamingUsageIncluded(body)
+	return body, nil
 }
 
 func patchMoonshotCompatibleChatBody(body []byte, account *Account, _ string) ([]byte, error) {
 	body = normalizeTopPForCompatibleBodyRaw(body)
+	body = ensureCompatibleMaxTokensForChat(body)
 	if !moonshotAccountFeatureEnabled(account, "kimi_official_fast_path_enabled", true) ||
 		!moonshotAccountFeatureEnabled(account, "kimi_native_chat_enabled", true) {
 		body = collapseMoonshotHistoricalToolCallsToText(body)
@@ -33,6 +36,7 @@ func patchMoonshotCompatibleChatBody(body []byte, account *Account, _ string) ([
 
 func patchMoonshotCompatibleChatBodyForAnthropicFallback(body []byte, _ *Account, _ string) ([]byte, error) {
 	body = normalizeTopPForCompatibleBodyRaw(body)
+	body = ensureCompatibleMaxTokensForChat(body)
 	body = normalizeMoonshotRequiredToolChoiceToAuto(body)
 	body = collapseMoonshotHistoricalToolCallsToText(body)
 	body = ensureMoonshotReasoningContentForToolCalls(body)
@@ -174,6 +178,21 @@ func normalizeTopPForCompatibleBodyRaw(body []byte) []byte {
 		}
 	}
 	return body
+}
+
+func ensureCompatibleMaxTokensForChat(body []byte) []byte {
+	if gjson.GetBytes(body, "max_tokens").Exists() {
+		return body
+	}
+	maxCompletionTokens := gjson.GetBytes(body, "max_completion_tokens")
+	if !maxCompletionTokens.Exists() {
+		return body
+	}
+	updated, err := sjson.SetBytes(body, "max_tokens", maxCompletionTokens.Value())
+	if err != nil {
+		return body
+	}
+	return updated
 }
 
 func ensureCompatibleStreamingUsageIncluded(body []byte) []byte {

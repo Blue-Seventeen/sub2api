@@ -796,15 +796,17 @@ func extractAliQwenTTSAudioBody(responseBody []byte) ([]byte, error) {
 		}
 		decoded, err := base64.StdEncoding.DecodeString(audioData)
 		if err != nil {
-			return nil, fmt.Errorf("Qwen TTS probe returned invalid audio data: %w", err)
+			return nil, fmt.Errorf("qwen TTS probe returned invalid audio data: %w", err)
 		}
 		if len(decoded) == 0 {
 			continue
 		}
-		out.Write(decoded)
+		if _, err := out.Write(decoded); err != nil {
+			return nil, fmt.Errorf("qwen TTS probe buffered audio data: %w", err)
+		}
 	}
 	if out.Len() == 0 {
-		return nil, fmt.Errorf("Qwen TTS probe response did not include audio data")
+		return nil, fmt.Errorf("qwen TTS probe response did not include audio data")
 	}
 	audio := out.Bytes()
 	if repaired, ok := repairWAVForBrowser(audio); ok {

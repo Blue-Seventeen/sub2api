@@ -44,7 +44,7 @@ func TestGatewayProxyStatsRequestID(t *testing.T) {
 	localOnly := context.WithValue(context.Background(), ctxkey.RequestID, " local-2 ")
 	require.Equal(t, "local:local-2", gatewayProxyStatsRequestID(localOnly))
 	require.Empty(t, gatewayProxyStatsRequestID(context.Background()))
-	require.Empty(t, gatewayProxyStatsRequestID(nil))
+	require.Empty(t, gatewayProxyStatsRequestID(context.TODO()))
 }
 
 func TestRecordGatewayProxyFailureStatSubmitsAsyncTask(t *testing.T) {

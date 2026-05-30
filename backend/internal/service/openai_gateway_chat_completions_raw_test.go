@@ -5,6 +5,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +18,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+func largeRawChatCompletionsBody() []byte {
+	padding := strings.Repeat("x", openAISilentRefusalMinRequestBodyBytes+1024)
+	return []byte(`{"model":"gpt-5.5","messages":[{"role":"user","content":"` + padding + `"}],"stream":true}`)
+}
 
 func TestBuildOpenAIChatCompletionsURL(t *testing.T) {
 	t.Parallel()

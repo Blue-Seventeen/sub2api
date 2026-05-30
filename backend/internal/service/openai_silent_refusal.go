@@ -234,6 +234,7 @@ func (d *openAIChatSilentRefusalDetector) observeResponseMessageItem(item gjson.
 	}
 }
 
+//nolint:unused
 func newOpenAISilentRefusalFailoverError(c *gin.Context, account *Account, upstreamRequestID string) *UpstreamFailoverError {
 	accountID := int64(0)
 	accountName := ""
@@ -266,6 +267,7 @@ func newOpenAISilentRefusalFailoverError(c *gin.Context, account *Account, upstr
 	}
 }
 
+//nolint:unused
 func openAISilentRefusalErrorBody() []byte {
 	body, err := json.Marshal(map[string]any{
 		"error": map[string]any{

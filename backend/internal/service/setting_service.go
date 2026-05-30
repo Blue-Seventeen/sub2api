@@ -173,11 +173,6 @@ type cachedAntigravityUserAgentVersion struct {
 	expiresAt int64 // unix nano
 }
 
-var openAICodexUserAgentCache atomic.Value // *cachedOpenAICodexUserAgent
-var openAICodexUserAgentSF singleflight.Group
-var antigravityUserAgentVersionCache atomic.Value // *cachedAntigravityUserAgentVersion
-var antigravityUserAgentVersionSF singleflight.Group
-
 type cachedOpenAIQuotaAutoPauseSettings struct {
 	settings  OpsOpenAIAccountQuotaAutoPauseSettings
 	expiresAt int64
@@ -237,12 +232,12 @@ type SettingService struct {
 	onUpdate                    func() // Callback when settings are updated (for cache invalidation)
 	version                     string // Application version
 	webSearchManagerBuilder     WebSearchManagerBuilder
-	antigravityUAVersionCache   atomic.Value // *cachedAntigravityUserAgentVersion
-	antigravityUAVersionSF      singleflight.Group
-	openAICodexUACache          atomic.Value // *cachedOpenAICodexUserAgent
-	openAICodexUASF             singleflight.Group
 	openAIAllowCodexPluginCache atomic.Value // *cachedOpenAIAllowCodexPlugin
 	openAIAllowCodexPluginSF    singleflight.Group
+	openAICodexUserAgentCache   atomic.Value // *cachedOpenAICodexUserAgent
+	openAICodexUserAgentSF      singleflight.Group
+	antigravityUAVersionCache   atomic.Value // *cachedAntigravityUserAgentVersion
+	antigravityUAVersionSF      singleflight.Group
 
 	// openAIQuotaAutoPauseSettingsCache holds the most recently observed quota auto-pause
 	// settings. GetOpenAIQuotaAutoPauseSettings reads this atomic.Value on the request hot
@@ -1178,14 +1173,14 @@ func (s *SettingService) GetAntigravityUserAgentVersion(ctx context.Context) str
 	if s == nil || s.settingRepo == nil {
 		return fallback
 	}
-	if cached, ok := antigravityUserAgentVersionCache.Load().(*cachedAntigravityUserAgentVersion); ok && cached != nil {
+	if cached, ok := s.antigravityUAVersionCache.Load().(*cachedAntigravityUserAgentVersion); ok && cached != nil {
 		if time.Now().UnixNano() < cached.expiresAt {
 			return cached.value
 		}
 	}
 
-	result, _, _ := antigravityUserAgentVersionSF.Do("antigravity_user_agent_version", func() (any, error) {
-		if cached, ok := antigravityUserAgentVersionCache.Load().(*cachedAntigravityUserAgentVersion); ok && cached != nil {
+	result, _, _ := s.antigravityUAVersionSF.Do("antigravity_user_agent_version", func() (any, error) {
+		if cached, ok := s.antigravityUAVersionCache.Load().(*cachedAntigravityUserAgentVersion); ok && cached != nil {
 			if time.Now().UnixNano() < cached.expiresAt {
 				return cached.value, nil
 			}
@@ -1198,7 +1193,7 @@ func (s *SettingService) GetAntigravityUserAgentVersion(ctx context.Context) str
 		value, err := s.settingRepo.GetValue(dbCtx, SettingKeyAntigravityUserAgentVersion)
 		if err != nil && !errors.Is(err, ErrSettingNotFound) {
 			slog.Warn("failed to get antigravity user agent version setting", "error", err)
-			antigravityUserAgentVersionCache.Store(&cachedAntigravityUserAgentVersion{
+			s.antigravityUAVersionCache.Store(&cachedAntigravityUserAgentVersion{
 				value:     fallback,
 				expiresAt: time.Now().Add(antigravityUserAgentVersionErrorTTL).UnixNano(),
 			})
@@ -1208,7 +1203,7 @@ func (s *SettingService) GetAntigravityUserAgentVersion(ctx context.Context) str
 		if version == "" {
 			version = fallback
 		}
-		antigravityUserAgentVersionCache.Store(&cachedAntigravityUserAgentVersion{
+		s.antigravityUAVersionCache.Store(&cachedAntigravityUserAgentVersion{
 			value:     version,
 			expiresAt: time.Now().Add(antigravityUserAgentVersionCacheTTL).UnixNano(),
 		})
@@ -1227,14 +1222,14 @@ func (s *SettingService) GetOpenAICodexUserAgent(ctx context.Context) string {
 	if s == nil || s.settingRepo == nil {
 		return fallback
 	}
-	if cached, ok := openAICodexUserAgentCache.Load().(*cachedOpenAICodexUserAgent); ok && cached != nil {
+	if cached, ok := s.openAICodexUserAgentCache.Load().(*cachedOpenAICodexUserAgent); ok && cached != nil {
 		if time.Now().UnixNano() < cached.expiresAt {
 			return cached.value
 		}
 	}
 
-	result, _, _ := openAICodexUserAgentSF.Do("openai_codex_user_agent", func() (any, error) {
-		if cached, ok := openAICodexUserAgentCache.Load().(*cachedOpenAICodexUserAgent); ok && cached != nil {
+	result, _, _ := s.openAICodexUserAgentSF.Do("openai_codex_user_agent", func() (any, error) {
+		if cached, ok := s.openAICodexUserAgentCache.Load().(*cachedOpenAICodexUserAgent); ok && cached != nil {
 			if time.Now().UnixNano() < cached.expiresAt {
 				return cached.value, nil
 			}
@@ -1247,7 +1242,7 @@ func (s *SettingService) GetOpenAICodexUserAgent(ctx context.Context) string {
 		value, err := s.settingRepo.GetValue(dbCtx, SettingKeyOpenAICodexUserAgent)
 		if err != nil && !errors.Is(err, ErrSettingNotFound) {
 			slog.Warn("failed to get openai codex user agent setting", "error", err)
-			openAICodexUserAgentCache.Store(&cachedOpenAICodexUserAgent{
+			s.openAICodexUserAgentCache.Store(&cachedOpenAICodexUserAgent{
 				value:     fallback,
 				expiresAt: time.Now().Add(openAICodexUserAgentErrorTTL).UnixNano(),
 			})
@@ -1257,7 +1252,7 @@ func (s *SettingService) GetOpenAICodexUserAgent(ctx context.Context) string {
 		if ua == "" {
 			ua = fallback
 		}
-		openAICodexUserAgentCache.Store(&cachedOpenAICodexUserAgent{
+		s.openAICodexUserAgentCache.Store(&cachedOpenAICodexUserAgent{
 			value:     ua,
 			expiresAt: time.Now().Add(openAICodexUserAgentCacheTTL).UnixNano(),
 		})

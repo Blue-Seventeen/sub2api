@@ -643,7 +643,3 @@ func registerChannelMonitorRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		templates.POST("/:id/apply", h.Admin.ChannelMonitorTemplate.Apply)
 	}
 }
-
-// registerAffiliateRoutes 注册邀请返利的管理端路由（专属用户配置）
-func registerAffiliateRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
-}

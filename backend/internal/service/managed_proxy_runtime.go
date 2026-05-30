@@ -664,6 +664,7 @@ func (r *ManagedProxyRuntime) stopEntry(ctx context.Context, subscriptionID int6
 	}
 }
 
+//nolint:unused
 func (r *ManagedProxyRuntime) setEntryError(subscriptionID int64, message string) {
 	r.mu.Lock()
 	entry := r.entries[subscriptionID]
@@ -696,15 +697,15 @@ func (r *ManagedProxyRuntime) setEntryStartError(subscriptionID, generation int6
 
 func (r *ManagedProxyRuntime) entryStatusLocked(entry *managedProxyRuntimeEntry) ManagedProxyRuntimeStatus {
 	status := ManagedProxyRuntimeStatus{
-		Enabled:        r.cfg.Enabled,
-		NodeID:         r.nodeID,
-		Status:         ManagedProxyRuntimeStatusStopped,
-		SubscriptionID: entry.subscriptionID,
-		UpdatedAt:      entry.updatedAt,
+		Enabled: r.cfg.Enabled,
+		NodeID:  r.nodeID,
+		Status:  ManagedProxyRuntimeStatusStopped,
 	}
 	if entry == nil {
 		return status
 	}
+	status.SubscriptionID = entry.subscriptionID
+	status.UpdatedAt = entry.updatedAt
 	status.Status = entry.status
 	status.Port = entry.port
 	status.Revision = entry.revision

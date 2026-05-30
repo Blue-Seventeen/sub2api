@@ -104,12 +104,12 @@ func NormalizeNodeID(value string) string {
 			(r >= '0' && r <= '9') ||
 			r == '-' || r == '_' || r == '.'
 		if allowed {
-			b.WriteRune(r)
+			_, _ = b.WriteRune(r)
 			lastUnderscore = false
 			continue
 		}
 		if !lastUnderscore {
-			b.WriteByte('_')
+			_ = b.WriteByte('_')
 			lastUnderscore = true
 		}
 	}
