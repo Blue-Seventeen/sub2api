@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
 	"github.com/gin-gonic/gin"
@@ -24,6 +25,8 @@ const (
 	accountTestTaskPollTimeout   = 60 * time.Second
 	accountTestTaskPollInterval  = 5 * time.Second
 )
+
+const aliQwenTTSGenerationPath = "/api/v1/services/aigc/multimodal-generation/generation"
 
 //go:embed testdata/asr_probe_zh.mp3
 var accountTestChineseASRProbeMP3 []byte
@@ -194,6 +197,9 @@ func (s *AccountTestService) testAliAudioTranscriptionProbe(c *gin.Context, acco
 }
 
 func (s *AccountTestService) testAudioSpeechProbe(c *gin.Context, account *Account, modelID string, prompt string, options AccountTestOptions) error {
+	if account != nil && account.Platform == PlatformAli {
+		return s.testAliAudioSpeechProbe(c, account, modelID, prompt, options)
+	}
 	if err := s.requireAudioProbeAccount(account, AccountTestTypeTTS); err != nil {
 		return s.sendErrorAndEnd(c, err.Error())
 	}
@@ -233,6 +239,64 @@ func (s *AccountTestService) testAudioSpeechProbe(c *gin.Context, account *Accou
 			return nil
 		},
 	})
+}
+
+func (s *AccountTestService) testAliAudioSpeechProbe(c *gin.Context, account *Account, modelID string, prompt string, options AccountTestOptions) error {
+	if account == nil || account.Type != AccountTypeAPIKey {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("test type %s requires an API key account", AccountTestTypeTTS))
+	}
+
+	model := strings.TrimSpace(modelID)
+	input := strings.TrimSpace(prompt)
+	if input == "" {
+		input = "\u4f60\u597d"
+	}
+	voice := normalizeAccountTestVoice(options.Voice)
+	if voice == "" {
+		voice = "Cherry"
+	}
+	payload := map[string]any{
+		"model": model,
+		"input": map[string]any{
+			"text":          input,
+			"voice":         voice,
+			"language_type": inferAliQwenTTSLanguageType(input),
+		},
+	}
+	body, _ := json.Marshal(payload)
+
+	s.prepareAccountTestStream(c)
+	s.sendEvent(c, TestEvent{Type: "test_start", Model: model, Data: map[string]any{"test_type": AccountTestTypeTTS}})
+
+	req, err := s.aliQwenTTSTestRequest(c.Request.Context(), account, body)
+	if err != nil {
+		return s.sendErrorAndEnd(c, err.Error())
+	}
+	resp, responseBody, err := s.executeAccountTestRequest(c.Request.Context(), account, req)
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, strings.TrimSpace(extractUpstreamErrorMessage(responseBody))))
+	}
+
+	audioBody, err := extractAliQwenTTSAudioBody(responseBody)
+	if err != nil {
+		return s.sendErrorAndEnd(c, err.Error())
+	}
+	audioURL, mimeType, previewBytes := accountTestAudioDataURL(account, "", audioBody)
+	s.sendEvent(c, TestEvent{Type: "audio", AudioURL: audioURL, MimeType: mimeType, Data: map[string]any{
+		"content_type": mimeType,
+		"bytes":        previewBytes,
+		"voice":        voice,
+	}})
+	s.sendEvent(c, TestEvent{Type: "content", Text: "Qwen TTS audio probe succeeded", Data: map[string]any{
+		"content_type": mimeType,
+		"bytes":        len(audioBody),
+		"voice":        voice,
+	}})
+	s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+	return nil
 }
 
 func (s *AccountTestService) testOpenAIEmbeddingProbe(c *gin.Context, account *Account, modelID string) error {
@@ -609,6 +673,71 @@ func audioSpeechProbePayload(account *Account, model string, input string, voice
 	payload["voice"] = voice
 	payload["response_format"] = "mp3"
 	return payload
+}
+
+func (s *AccountTestService) aliQwenTTSTestRequest(ctx context.Context, account *Account, body []byte) (*http.Request, error) {
+	baseURL := strings.TrimSpace(account.GetCredential("base_url"))
+	if baseURL == "" && account.IsCustomBaseURLEnabled() {
+		baseURL = strings.TrimSpace(account.GetCustomBaseURL())
+	}
+	if baseURL == "" {
+		baseURL = CompatibleDefaultBaseURL(PlatformAli)
+	}
+	if baseURL == "" {
+		return nil, fmt.Errorf("base_url is required for Qwen TTS account test")
+	}
+	normalizedBaseURL, err := s.validateAccountTestBaseURL(baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid base URL: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, joinRelayCompatibleURL(normalizedBaseURL, aliQwenTTSGenerationPath), bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	token := s.newAPIProbeAuthToken(account)
+	if token == "" {
+		return nil, fmt.Errorf("no API key available")
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-DashScope-SSE", "enable")
+	req.ContentLength = int64(len(body))
+	return req, nil
+}
+
+func inferAliQwenTTSLanguageType(input string) string {
+	for _, r := range input {
+		if unicode.Is(unicode.Han, r) {
+			return "Chinese"
+		}
+	}
+	return "English"
+}
+
+func extractAliQwenTTSAudioBody(responseBody []byte) ([]byte, error) {
+	for _, line := range strings.Split(string(responseBody), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		raw := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if raw == "" {
+			continue
+		}
+		audioData := strings.TrimSpace(gjson.Get(raw, "output.audio.data").String())
+		if audioData == "" {
+			continue
+		}
+		decoded, err := base64.StdEncoding.DecodeString(audioData)
+		if err != nil {
+			return nil, fmt.Errorf("Qwen TTS probe returned invalid audio data: %w", err)
+		}
+		if len(decoded) == 0 {
+			continue
+		}
+		return decoded, nil
+	}
+	return nil, fmt.Errorf("Qwen TTS probe response did not include audio data")
 }
 
 func normalizeAccountTestVoice(voice string) string {

@@ -423,6 +423,65 @@ func TestAccountTestTTSProbeBuildsZhipuRequest(t *testing.T) {
 	}
 }
 
+func TestAccountTestTTSProbeBuildsAliDashScopeSSERequest(t *testing.T) {
+	c, rec := accountProbeTestContext()
+	audio := []byte("RIFFxxxxWAVEaudio")
+	sseBody := `id:1
+event:result
+data:{"output":{"audio":{"data":"` + base64.StdEncoding.EncodeToString(audio) + `","id":"audio-test"},"finish_reason":"null"},"request_id":"req-test"}
+
+id:2
+event:result
+data:{"output":{"audio":{"data":"","id":"audio-test"},"finish_reason":"stop"},"usage":{"characters":2},"request_id":"req-test"}
+`
+	header := make(http.Header)
+	header.Set("Content-Type", "text/event-stream;charset=UTF-8")
+	upstream := &accountProbeHTTPUpstream{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     header,
+			Body:       io.NopCloser(strings.NewReader(sseBody)),
+		},
+	}
+	svc := &AccountTestService{httpUpstream: upstream}
+	account := &Account{
+		ID:          9,
+		Platform:    PlatformAli,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "qwen-test", "base_url": "http://upstream.example"},
+	}
+
+	if err := svc.testAudioSpeechProbe(c, account, "qwen3-tts-flash", "\u4f60\u597d", AccountTestOptions{Voice: "Cherry"}); err != nil {
+		t.Fatalf("Ali TTS probe failed: %v", err)
+	}
+	if len(upstream.requests) != 1 {
+		t.Fatalf("upstream calls = %d, want 1", len(upstream.requests))
+	}
+	req := upstream.requests[0]
+	if req.URL.Path != "/api/v1/services/aigc/multimodal-generation/generation" {
+		t.Fatalf("path = %s, want DashScope multimodal generation path", req.URL.Path)
+	}
+	if got := req.Header.Get("Authorization"); got != "Bearer qwen-test" {
+		t.Fatalf("authorization header = %q", got)
+	}
+	if got := req.Header.Get("X-DashScope-SSE"); got != "enable" {
+		t.Fatalf("X-DashScope-SSE = %q, want enable", got)
+	}
+	body := string(upstream.bodies[0])
+	for _, want := range []string{`"model":"qwen3-tts-flash"`, `"voice":"Cherry"`, `"language_type":"Chinese"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected %s in Ali TTS json body, got %s", want, body)
+		}
+	}
+	if !strings.Contains(rec.Body.String(), `"type":"audio"`) || !strings.Contains(rec.Body.String(), `"audio_url":"data:audio/wav;base64,`) {
+		t.Fatalf("expected Ali audio SSE preview event, got %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"success":true`) {
+		t.Fatalf("expected success SSE, got %s", rec.Body.String())
+	}
+}
+
 func TestAccountTestAudioDataURLRepairsZeroSizedWAVDataChunk(t *testing.T) {
 	pcm := []byte{0x00, 0x00, 0x01, 0x00, 0xff, 0x00, 0x00, 0x00}
 	audioURL, mimeType, previewBytes := accountTestAudioDataURL(&Account{Platform: PlatformZhipu}, "audio/wav", buildZeroSizedDataWAV(pcm))
