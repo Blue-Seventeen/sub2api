@@ -180,6 +180,170 @@ func TestNewAPIStyleAliQwenASRAllowsDataURLAndAddsDashScopeHeader(t *testing.T) 
 	require.Equal(t, 9, result.Usage.OutputTokens)
 }
 
+func TestNewAPIStyleAliQwenASRBillsUsageSecondsOnChatRoute(t *testing.T) {
+	body := []byte(`{"model":"qwen3-asr-flash","messages":[{"role":"user","content":[{"type":"input_audio","input_audio":{"data":"data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMA==","format":"mp3"}}]}]}`)
+	upstream := &httpUpstreamRecorder{resp: newAPIStyleAudioResponse("application/json", `{
+		"id":"chatcmpl_test",
+		"object":"chat.completion",
+		"model":"qwen3-asr-flash",
+		"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop","index":0}],
+		"usage":{"seconds":2.1,"prompt_tokens":18,"completion_tokens":9,"total_tokens":27}
+	}`)}
+	svc := &NewAPIStyleGatewayService{httpUpstream: upstream}
+
+	result, _, err := svc.Forward(context.Background(), newAPIStyleTestContext(), newAPIStyleAudioAccount(PlatformAli, nil), NewAPIStyleForwardOptions{
+		Route:       NewAPIStyleRouteChatCompletions,
+		RequestBody: body,
+		InboundPath: "/compatible-mode/v1/chat/completions",
+		ContentType: "application/json",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 3, result.BillableDurationSeconds)
+	require.Equal(t, BillableUnitTypeDuration, result.BillableUnitType)
+	require.Zero(t, result.BillableCharacterCount)
+}
+
+func TestNewAPIStyleZhipuASRBillsFallbackAudioDuration(t *testing.T) {
+	body, contentType := buildNewAPIStyleAudioMultipart(t, "glm-asr-2512", testWAVBytes(3))
+	upstream := &httpUpstreamRecorder{resp: newAPIStyleAudioResponse("application/json", `{
+		"id":"asr-test",
+		"created":123,
+		"request_id":"asr-req",
+		"model":"glm-asr-2512",
+		"text":"ok"
+	}`)}
+	svc := &NewAPIStyleGatewayService{httpUpstream: upstream}
+
+	result, endpoint, err := svc.Forward(context.Background(), newAPIStyleTestContext(), newAPIStyleAudioAccount(PlatformZhipu, nil), NewAPIStyleForwardOptions{
+		Route:       NewAPIStyleRouteAudio,
+		RequestBody: body,
+		InboundPath: "/v1/audio/transcriptions",
+		ContentType: contentType,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, zhipuAudioTranscriptionsPath, endpoint)
+	require.Equal(t, zhipuAudioTranscriptionsPath, upstream.lastReq.URL.Path)
+	require.NotNil(t, result)
+	require.Equal(t, 3, result.BillableDurationSeconds)
+	require.Equal(t, BillableUnitTypeDuration, result.BillableUnitType)
+
+	groupID := int64(2)
+	unitPrice := 0.04
+	pricingSvc := newAudioPricingGatewayService(t, groupID, PlatformZhipu, ChannelModelPricing{
+		Platform:        PlatformZhipu,
+		Models:          []string{"glm-asr-2512"},
+		BillingMode:     BillingModeDuration,
+		PerRequestPrice: &unitPrice,
+	})
+	cost := pricingSvc.calculateRecordUsageCost(context.Background(), result, &APIKey{GroupID: &groupID}, "glm-asr-2512", 1, 1, &recordUsageOpts{})
+
+	require.NotNil(t, cost)
+	require.Equal(t, string(BillingModeDuration), cost.BillingMode)
+	require.InDelta(t, 0.12, cost.TotalCost, 1e-12)
+}
+
+func TestNewAPIStyleZhipuASRBillsResponseDurationSeconds(t *testing.T) {
+	body, contentType := buildNewAPIStyleAudioMultipart(t, "glm-asr-2512", []byte("not-audio"))
+	upstream := &httpUpstreamRecorder{resp: newAPIStyleAudioResponse("application/json", `{
+		"id":"asr-test",
+		"created":123,
+		"request_id":"asr-req",
+		"model":"glm-asr-2512",
+		"text":"ok",
+		"usage":{"duration_seconds":2.1}
+	}`)}
+	svc := &NewAPIStyleGatewayService{httpUpstream: upstream}
+
+	result, _, err := svc.Forward(context.Background(), newAPIStyleTestContext(), newAPIStyleAudioAccount(PlatformZhipu, nil), NewAPIStyleForwardOptions{
+		Route:       NewAPIStyleRouteAudio,
+		RequestBody: body,
+		InboundPath: "/v1/audio/transcriptions",
+		ContentType: contentType,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 3, result.BillableDurationSeconds)
+	require.Equal(t, BillableUnitTypeDuration, result.BillableUnitType)
+}
+
+func TestNewAPIStyleASRUpstreamHTTPErrorReturnsNilResult(t *testing.T) {
+	body := []byte(`{"model":"qwen3-asr-flash","messages":[{"role":"user","content":[{"type":"input_audio","input_audio":{"data":"data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMA==","format":"mp3"}}]}]}`)
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusInternalServerError,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"usage":{"seconds":9},"error":{"message":"upstream failed"}}`)),
+	}}
+	svc := &NewAPIStyleGatewayService{httpUpstream: upstream}
+
+	result, _, err := svc.Forward(context.Background(), newAPIStyleTestContext(), newAPIStyleAudioAccount(PlatformAli, nil), NewAPIStyleForwardOptions{
+		Route:       NewAPIStyleRouteChatCompletions,
+		RequestBody: body,
+		InboundPath: "/compatible-mode/v1/chat/completions",
+		ContentType: "application/json",
+	})
+
+	require.Error(t, err)
+	require.Nil(t, result)
+}
+
+func TestNewAPIStyleZhipuASRUpstreamHTTPErrorReturnsNilResult(t *testing.T) {
+	body, contentType := buildNewAPIStyleAudioMultipart(t, "glm-asr-2512", testWAVBytes(3))
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusInternalServerError,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"usage":{"duration_seconds":9},"error":{"message":"upstream failed"}}`)),
+	}}
+	svc := &NewAPIStyleGatewayService{httpUpstream: upstream}
+
+	result, _, err := svc.Forward(context.Background(), newAPIStyleTestContext(), newAPIStyleAudioAccount(PlatformZhipu, nil), NewAPIStyleForwardOptions{
+		Route:       NewAPIStyleRouteAudio,
+		RequestBody: body,
+		InboundPath: "/v1/audio/transcriptions",
+		ContentType: contentType,
+	})
+
+	require.Error(t, err)
+	require.Nil(t, result)
+}
+
+func TestNewAPIStyleZhipuASRHTTP200ErrorPayloadReturnsNilResult(t *testing.T) {
+	body, contentType := buildNewAPIStyleAudioMultipart(t, "glm-asr-2512", testWAVBytes(3))
+	upstream := &httpUpstreamRecorder{resp: newAPIStyleAudioResponse("application/json", `{"error":{"message":"business failed"}}`)}
+	svc := &NewAPIStyleGatewayService{httpUpstream: upstream}
+
+	result, _, err := svc.Forward(context.Background(), newAPIStyleTestContext(), newAPIStyleAudioAccount(PlatformZhipu, nil), NewAPIStyleForwardOptions{
+		Route:       NewAPIStyleRouteAudio,
+		RequestBody: body,
+		InboundPath: "/v1/audio/transcriptions",
+		ContentType: contentType,
+	})
+
+	require.Error(t, err)
+	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
+}
+
+func TestNewAPIStyleTTSUpstreamTransportErrorReturnsNilResult(t *testing.T) {
+	body := []byte(`{"model":"qwen3-tts-flash","input":{"text":"hello","voice":"Cherry"}}`)
+	upstream := &httpUpstreamRecorder{err: errors.New("dial tcp: connection refused")}
+	svc := &NewAPIStyleGatewayService{httpUpstream: upstream}
+
+	result, _, err := svc.Forward(context.Background(), newAPIStyleTestContext(), newAPIStyleAudioAccount(PlatformAli, nil), NewAPIStyleForwardOptions{
+		Route:       NewAPIStyleRouteQwenTTS,
+		RequestBody: body,
+		InboundPath: aliQwenTTSGenerationPath,
+		ContentType: "application/json",
+	})
+
+	require.Error(t, err)
+	require.Nil(t, result)
+}
+
 func TestNewAPIStyleAliQwenTTSOfficialRouteForwardsDashScopeRequest(t *testing.T) {
 	body := []byte(`{"model":"qwen3-tts-flash","input":{"text":"hello","voice":"Cherry","language_type":"English"}}`)
 	upstream := &httpUpstreamRecorder{resp: newAPIStyleAudioResponse("text/event-stream", `event:result
@@ -208,8 +372,112 @@ data:{"output":{"audio":{"data":"UklGRg==","id":"audio-test"},"finish_reason":"s
 	require.JSONEq(t, string(body), string(upstream.lastBody))
 	require.NotNil(t, result)
 	require.Equal(t, "qwen3-tts-flash", result.Model)
+	require.Equal(t, 5, result.BillableCharacterCount)
+	require.Equal(t, BillableUnitTypeCharacter, result.BillableUnitType)
+}
+
+func TestNewAPIStyleZhipuTTSBillsRequestCharacters(t *testing.T) {
+	body := []byte(`{"model":"glm-tts","input":"\u4f60\u597dabc","voice":"tongtong","response_format":"wav"}`)
+	upstream := &httpUpstreamRecorder{resp: newAPIStyleAudioResponse("audio/wav", "RIFFxxxxWAVEaudio")}
+	svc := &NewAPIStyleGatewayService{httpUpstream: upstream}
+
+	result, endpoint, err := svc.Forward(context.Background(), newAPIStyleTestContext(), newAPIStyleAudioAccount(PlatformZhipu, nil), NewAPIStyleForwardOptions{
+		Route:       NewAPIStyleRouteAudio,
+		RequestBody: body,
+		InboundPath: "/v1/audio/speech",
+		ContentType: "application/json",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, zhipuAudioSpeechPath, endpoint)
+	require.Equal(t, zhipuAudioSpeechPath, upstream.lastReq.URL.Path)
+	require.NotNil(t, result)
+	require.Equal(t, 5, result.BillableCharacterCount)
+	require.Equal(t, BillableUnitTypeCharacter, result.BillableUnitType)
+
+	groupID := int64(2)
+	unitPrice := 10.0
+	pricingSvc := newAudioPricingGatewayService(t, groupID, PlatformZhipu, ChannelModelPricing{
+		Platform:        PlatformZhipu,
+		Models:          []string{"glm-tts"},
+		BillingMode:     BillingModeCharacter,
+		PerRequestPrice: &unitPrice,
+	})
+	cost := pricingSvc.calculateRecordUsageCost(context.Background(), result, &APIKey{GroupID: &groupID}, "glm-tts", 1, 1, &recordUsageOpts{})
+
+	require.NotNil(t, cost)
+	require.Equal(t, string(BillingModeCharacter), cost.BillingMode)
+	require.InDelta(t, 0.05, cost.TotalCost, 1e-12)
+}
+
+func TestNewAPIStyleZhipuTTSPerRequestPricingStillUsesRequestCount(t *testing.T) {
+	body := []byte(`{"model":"glm-tts","input":"hello","voice":"tongtong","response_format":"wav"}`)
+	upstream := &httpUpstreamRecorder{resp: newAPIStyleAudioResponse("audio/wav", "RIFFxxxxWAVEaudio")}
+	svc := &NewAPIStyleGatewayService{httpUpstream: upstream}
+
+	result, _, err := svc.Forward(context.Background(), newAPIStyleTestContext(), newAPIStyleAudioAccount(PlatformZhipu, nil), NewAPIStyleForwardOptions{
+		Route:       NewAPIStyleRouteAudio,
+		RequestBody: body,
+		InboundPath: "/v1/audio/speech",
+		ContentType: "application/json",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
 	require.Equal(t, 1, result.RequestCount)
-	require.Equal(t, BillableUnitTypeRequest, result.BillableUnitType)
+	require.Equal(t, 5, result.BillableCharacterCount)
+
+	groupID := int64(2)
+	perRequestPrice := 0.02
+	pricingSvc := newAudioPricingGatewayService(t, groupID, PlatformZhipu, ChannelModelPricing{
+		Platform:        PlatformZhipu,
+		Models:          []string{"glm-tts"},
+		BillingMode:     BillingModePerRequest,
+		PerRequestPrice: &perRequestPrice,
+	})
+	cost := pricingSvc.calculateRecordUsageCost(context.Background(), result, &APIKey{GroupID: &groupID}, "glm-tts", 1, 1, &recordUsageOpts{})
+
+	require.NotNil(t, cost)
+	require.Equal(t, string(BillingModePerRequest), cost.BillingMode)
+	require.InDelta(t, 0.02, cost.TotalCost, 1e-12)
+}
+
+func TestNewAPIStyleZhipuTTSHTTP200ErrorPayloadReturnsNilResult(t *testing.T) {
+	body := []byte(`{"model":"glm-tts","input":"hello","voice":"tongtong","response_format":"wav"}`)
+	upstream := &httpUpstreamRecorder{resp: newAPIStyleAudioResponse("application/json", `{"error":"business failed"}`)}
+	svc := &NewAPIStyleGatewayService{httpUpstream: upstream}
+
+	result, _, err := svc.Forward(context.Background(), newAPIStyleTestContext(), newAPIStyleAudioAccount(PlatformZhipu, nil), NewAPIStyleForwardOptions{
+		Route:       NewAPIStyleRouteAudio,
+		RequestBody: body,
+		InboundPath: "/v1/audio/speech",
+		ContentType: "application/json",
+	})
+
+	require.Error(t, err)
+	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
+}
+
+func TestNewAPIStyleZhipuTTSHTTP200SSEErrorPayloadReturnsNilResult(t *testing.T) {
+	body := []byte(`{"model":"glm-tts","input":"hello","voice":"tongtong","response_format":"wav"}`)
+	upstream := &httpUpstreamRecorder{resp: newAPIStyleAudioResponse("text/event-stream", "event: error\ndata: {\"error\":{\"message\":\"stream failed\"}}\n\n")}
+	svc := &NewAPIStyleGatewayService{httpUpstream: upstream}
+
+	result, _, err := svc.Forward(context.Background(), newAPIStyleTestContext(), newAPIStyleAudioAccount(PlatformZhipu, nil), NewAPIStyleForwardOptions{
+		Route:       NewAPIStyleRouteAudio,
+		RequestBody: body,
+		InboundPath: "/v1/audio/speech",
+		ContentType: "application/json",
+	})
+
+	require.Error(t, err)
+	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
 }
 
 func TestNewAPIStyleAliQwenTTSOfficialRoutePreservesClientDashScopeSSEHeader(t *testing.T) {

@@ -138,6 +138,10 @@ func (UsageLog) Fields() []ent.Field {
 		// 图片生成字段（仅 gemini-3-pro-image 等图片模型使用）
 		field.Int("image_count").
 			Default(0),
+		field.Int("billable_duration_seconds").
+			Default(0),
+		field.Int("billable_character_count").
+			Default(0),
 		field.String("image_size").
 			MaxLen(10).
 			Optional().

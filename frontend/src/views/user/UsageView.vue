@@ -215,6 +215,16 @@
               <span class="font-medium text-gray-900 dark:text-white">{{ row.image_count }}{{ t('usage.imageUnit') }}</span>
               <span class="text-gray-400">({{ formatImageBillingSize(row, t) }})</span>
             </div>
+            <!-- Duration billing -->
+            <div v-else-if="isDurationUsage(row)" class="flex items-center gap-1.5">
+              <Icon name="clock" size="sm" class="h-4 w-4 text-cyan-500" />
+              <span class="font-medium text-gray-900 dark:text-white">{{ formatBillableSeconds(row.billable_duration_seconds) }}</span>
+            </div>
+            <!-- Character billing -->
+            <div v-else-if="isCharacterUsage(row)" class="flex items-center gap-1.5">
+              <Icon name="document" size="sm" class="h-4 w-4 text-amber-500" />
+              <span class="font-medium text-gray-900 dark:text-white">{{ formatBillableCharacters(row.billable_character_count) }}</span>
+            </div>
             <!-- Token 请求 -->
             <div v-else class="flex items-center gap-1.5">
               <div class="space-y-1.5 text-sm">
@@ -482,6 +492,34 @@
                 <span class="font-medium text-white">{{ formatCostAmount(tooltipData.total_cost || 0, 6) }}</span>
               </div>
             </template>
+            <template v-else-if="tooltipData && isDurationUsage(tooltipData)">
+              <div class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('usage.durationSeconds') }}</span>
+                <span class="font-medium text-white">{{ formatBillableSeconds(tooltipData.billable_duration_seconds) }}</span>
+              </div>
+              <div class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('usage.durationUnitPrice') }}</span>
+                <span class="font-medium text-sky-300">{{ formatCostAmount(durationUnitPrice(tooltipData), 6) }}</span>
+              </div>
+              <div class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('usage.durationTotalPrice') }}</span>
+                <span class="font-medium text-white">{{ formatCostAmount(tooltipData.total_cost || 0, 6) }}</span>
+              </div>
+            </template>
+            <template v-else-if="tooltipData && isCharacterUsage(tooltipData)">
+              <div class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('usage.characterCount') }}</span>
+                <span class="font-medium text-white">{{ formatBillableCharacters(tooltipData.billable_character_count) }}</span>
+              </div>
+              <div class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('usage.characterUnitPrice') }}</span>
+                <span class="font-medium text-sky-300">{{ formatCostAmount(characterUnitPrice(tooltipData), 6) }}</span>
+              </div>
+              <div class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('usage.characterTotalPrice') }}</span>
+                <span class="font-medium text-white">{{ formatCostAmount(tooltipData.total_cost || 0, 6) }}</span>
+              </div>
+            </template>
             <!-- Token billing: show unit prices per 1M tokens -->
             <template v-else-if="!getDisplayBillingMode(tooltipData) || getDisplayBillingMode(tooltipData) === BILLING_MODE_TOKEN">
               <div v-if="tooltipData && tooltipData.input_tokens > 0" class="flex items-center justify-between gap-4">
@@ -559,6 +597,8 @@ import { formatTokenPricePerMillion } from '@/utils/usagePricing'
 import { getUsageServiceTierLabel } from '@/utils/usageServiceTier'
 import { resolveUsageRequestType } from '@/utils/usageRequestType'
 import {
+  BILLING_MODE_CHARACTER,
+  BILLING_MODE_DURATION,
   BILLING_MODE_IMAGE,
   BILLING_MODE_TOKEN,
   getBillingModeBadgeClass,
@@ -678,6 +718,20 @@ const imageUnitPrice = (row: UsageLog | null): number => {
   return Number.isFinite(price) ? price : 0
 }
 
+const durationUnitPrice = (row: UsageLog | null): number => {
+  const seconds = row?.billable_duration_seconds ?? 0
+  if (!row || seconds <= 0) return 0
+  const price = (row.total_cost ?? 0) / seconds
+  return Number.isFinite(price) ? price : 0
+}
+
+const characterUnitPrice = (row: UsageLog | null): number => {
+  const count = row?.billable_character_count ?? 0
+  if (!row || count <= 0) return 0
+  const price = ((row.total_cost ?? 0) * 1000) / count
+  return Number.isFinite(price) ? price : 0
+}
+
 const isImageUsage = (row: Pick<UsageLog, 'image_count'> | null | undefined): boolean => {
   return (row?.image_count ?? 0) > 0
 }
@@ -687,6 +741,22 @@ const getDisplayBillingMode = (row: Pick<UsageLog, 'billing_mode' | 'image_count
     return BILLING_MODE_IMAGE
   }
   return row?.billing_mode
+}
+
+const isDurationUsage = (row: Pick<UsageLog, 'billing_mode' | 'image_count'> | null | undefined): boolean => {
+  return getDisplayBillingMode(row) === BILLING_MODE_DURATION
+}
+
+const isCharacterUsage = (row: Pick<UsageLog, 'billing_mode' | 'image_count'> | null | undefined): boolean => {
+  return getDisplayBillingMode(row) === BILLING_MODE_CHARACTER
+}
+
+const formatBillableSeconds = (seconds: number | null | undefined): string => {
+  return `${(seconds ?? 0).toLocaleString()}s`
+}
+
+const formatBillableCharacters = (count: number | null | undefined): string => {
+  return `${(count ?? 0).toLocaleString()} ${t('usage.characterUnit')}`
 }
 
 const formatUserAgent = (ua: string): string => {
@@ -906,6 +976,8 @@ const exportToCSV = async () => {
       'Output Tokens',
       'Cache Read Tokens',
       'Cache Creation Tokens',
+      'Billable Duration Seconds',
+      'Billable Characters',
       'Rate Multiplier',
       'Billed Cost',
       'Original Cost',
@@ -925,6 +997,8 @@ const exportToCSV = async () => {
         log.output_tokens,
         log.cache_read_tokens,
         log.cache_creation_tokens,
+        log.billable_duration_seconds,
+        log.billable_character_count,
         log.rate_multiplier,
         log.actual_cost.toFixed(8),
         log.total_cost.toFixed(8),

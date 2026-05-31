@@ -182,10 +182,12 @@ type UsageLog struct {
 	ImageSizeBreakdown map[string]int
 	MediaType          *string
 
-	RequestCount     int
-	TaskCount        int
-	UsageEstimated   bool
-	BillableUnitType *string
+	RequestCount            int
+	TaskCount               int
+	BillableDurationSeconds int
+	BillableCharacterCount  int
+	UsageEstimated          bool
+	BillableUnitType        *string
 
 	CreatedAt time.Time
 

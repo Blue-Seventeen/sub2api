@@ -491,6 +491,34 @@ func (_c *UsageLogCreate) SetNillableImageCount(v *int) *UsageLogCreate {
 	return _c
 }
 
+// SetBillableDurationSeconds sets the "billable_duration_seconds" field.
+func (_c *UsageLogCreate) SetBillableDurationSeconds(v int) *UsageLogCreate {
+	_c.mutation.SetBillableDurationSeconds(v)
+	return _c
+}
+
+// SetNillableBillableDurationSeconds sets the "billable_duration_seconds" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableBillableDurationSeconds(v *int) *UsageLogCreate {
+	if v != nil {
+		_c.SetBillableDurationSeconds(*v)
+	}
+	return _c
+}
+
+// SetBillableCharacterCount sets the "billable_character_count" field.
+func (_c *UsageLogCreate) SetBillableCharacterCount(v int) *UsageLogCreate {
+	_c.mutation.SetBillableCharacterCount(v)
+	return _c
+}
+
+// SetNillableBillableCharacterCount sets the "billable_character_count" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableBillableCharacterCount(v *int) *UsageLogCreate {
+	if v != nil {
+		_c.SetBillableCharacterCount(*v)
+	}
+	return _c
+}
+
 // SetImageSize sets the "image_size" field.
 func (_c *UsageLogCreate) SetImageSize(v string) *UsageLogCreate {
 	_c.mutation.SetImageSize(v)
@@ -713,6 +741,14 @@ func (_c *UsageLogCreate) defaults() {
 		v := usagelog.DefaultImageCount
 		_c.mutation.SetImageCount(v)
 	}
+	if _, ok := _c.mutation.BillableDurationSeconds(); !ok {
+		v := usagelog.DefaultBillableDurationSeconds
+		_c.mutation.SetBillableDurationSeconds(v)
+	}
+	if _, ok := _c.mutation.BillableCharacterCount(); !ok {
+		v := usagelog.DefaultBillableCharacterCount
+		_c.mutation.SetBillableCharacterCount(v)
+	}
 	if _, ok := _c.mutation.CacheTTLOverridden(); !ok {
 		v := usagelog.DefaultCacheTTLOverridden
 		_c.mutation.SetCacheTTLOverridden(v)
@@ -838,6 +874,12 @@ func (_c *UsageLogCreate) check() error {
 	}
 	if _, ok := _c.mutation.ImageCount(); !ok {
 		return &ValidationError{Name: "image_count", err: errors.New(`ent: missing required field "UsageLog.image_count"`)}
+	}
+	if _, ok := _c.mutation.BillableDurationSeconds(); !ok {
+		return &ValidationError{Name: "billable_duration_seconds", err: errors.New(`ent: missing required field "UsageLog.billable_duration_seconds"`)}
+	}
+	if _, ok := _c.mutation.BillableCharacterCount(); !ok {
+		return &ValidationError{Name: "billable_character_count", err: errors.New(`ent: missing required field "UsageLog.billable_character_count"`)}
 	}
 	if v, ok := _c.mutation.ImageSize(); ok {
 		if err := usagelog.ImageSizeValidator(v); err != nil {
@@ -1024,6 +1066,14 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.ImageCount(); ok {
 		_spec.SetField(usagelog.FieldImageCount, field.TypeInt, value)
 		_node.ImageCount = value
+	}
+	if value, ok := _c.mutation.BillableDurationSeconds(); ok {
+		_spec.SetField(usagelog.FieldBillableDurationSeconds, field.TypeInt, value)
+		_node.BillableDurationSeconds = value
+	}
+	if value, ok := _c.mutation.BillableCharacterCount(); ok {
+		_spec.SetField(usagelog.FieldBillableCharacterCount, field.TypeInt, value)
+		_node.BillableCharacterCount = value
 	}
 	if value, ok := _c.mutation.ImageSize(); ok {
 		_spec.SetField(usagelog.FieldImageSize, field.TypeString, value)
@@ -1823,6 +1873,42 @@ func (u *UsageLogUpsert) UpdateImageCount() *UsageLogUpsert {
 // AddImageCount adds v to the "image_count" field.
 func (u *UsageLogUpsert) AddImageCount(v int) *UsageLogUpsert {
 	u.Add(usagelog.FieldImageCount, v)
+	return u
+}
+
+// SetBillableDurationSeconds sets the "billable_duration_seconds" field.
+func (u *UsageLogUpsert) SetBillableDurationSeconds(v int) *UsageLogUpsert {
+	u.Set(usagelog.FieldBillableDurationSeconds, v)
+	return u
+}
+
+// UpdateBillableDurationSeconds sets the "billable_duration_seconds" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateBillableDurationSeconds() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldBillableDurationSeconds)
+	return u
+}
+
+// AddBillableDurationSeconds adds v to the "billable_duration_seconds" field.
+func (u *UsageLogUpsert) AddBillableDurationSeconds(v int) *UsageLogUpsert {
+	u.Add(usagelog.FieldBillableDurationSeconds, v)
+	return u
+}
+
+// SetBillableCharacterCount sets the "billable_character_count" field.
+func (u *UsageLogUpsert) SetBillableCharacterCount(v int) *UsageLogUpsert {
+	u.Set(usagelog.FieldBillableCharacterCount, v)
+	return u
+}
+
+// UpdateBillableCharacterCount sets the "billable_character_count" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateBillableCharacterCount() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldBillableCharacterCount)
+	return u
+}
+
+// AddBillableCharacterCount adds v to the "billable_character_count" field.
+func (u *UsageLogUpsert) AddBillableCharacterCount(v int) *UsageLogUpsert {
+	u.Add(usagelog.FieldBillableCharacterCount, v)
 	return u
 }
 
@@ -2712,6 +2798,48 @@ func (u *UsageLogUpsertOne) AddImageCount(v int) *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) UpdateImageCount() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateImageCount()
+	})
+}
+
+// SetBillableDurationSeconds sets the "billable_duration_seconds" field.
+func (u *UsageLogUpsertOne) SetBillableDurationSeconds(v int) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetBillableDurationSeconds(v)
+	})
+}
+
+// AddBillableDurationSeconds adds v to the "billable_duration_seconds" field.
+func (u *UsageLogUpsertOne) AddBillableDurationSeconds(v int) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddBillableDurationSeconds(v)
+	})
+}
+
+// UpdateBillableDurationSeconds sets the "billable_duration_seconds" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateBillableDurationSeconds() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateBillableDurationSeconds()
+	})
+}
+
+// SetBillableCharacterCount sets the "billable_character_count" field.
+func (u *UsageLogUpsertOne) SetBillableCharacterCount(v int) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetBillableCharacterCount(v)
+	})
+}
+
+// AddBillableCharacterCount adds v to the "billable_character_count" field.
+func (u *UsageLogUpsertOne) AddBillableCharacterCount(v int) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddBillableCharacterCount(v)
+	})
+}
+
+// UpdateBillableCharacterCount sets the "billable_character_count" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateBillableCharacterCount() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateBillableCharacterCount()
 	})
 }
 
@@ -3784,6 +3912,48 @@ func (u *UsageLogUpsertBulk) AddImageCount(v int) *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) UpdateImageCount() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateImageCount()
+	})
+}
+
+// SetBillableDurationSeconds sets the "billable_duration_seconds" field.
+func (u *UsageLogUpsertBulk) SetBillableDurationSeconds(v int) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetBillableDurationSeconds(v)
+	})
+}
+
+// AddBillableDurationSeconds adds v to the "billable_duration_seconds" field.
+func (u *UsageLogUpsertBulk) AddBillableDurationSeconds(v int) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddBillableDurationSeconds(v)
+	})
+}
+
+// UpdateBillableDurationSeconds sets the "billable_duration_seconds" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateBillableDurationSeconds() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateBillableDurationSeconds()
+	})
+}
+
+// SetBillableCharacterCount sets the "billable_character_count" field.
+func (u *UsageLogUpsertBulk) SetBillableCharacterCount(v int) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetBillableCharacterCount(v)
+	})
+}
+
+// AddBillableCharacterCount adds v to the "billable_character_count" field.
+func (u *UsageLogUpsertBulk) AddBillableCharacterCount(v int) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddBillableCharacterCount(v)
+	})
+}
+
+// UpdateBillableCharacterCount sets the "billable_character_count" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateBillableCharacterCount() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateBillableCharacterCount()
 	})
 }
 

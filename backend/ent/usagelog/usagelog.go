@@ -86,6 +86,10 @@ const (
 	FieldIPAddress = "ip_address"
 	// FieldImageCount holds the string denoting the image_count field in the database.
 	FieldImageCount = "image_count"
+	// FieldBillableDurationSeconds holds the string denoting the billable_duration_seconds field in the database.
+	FieldBillableDurationSeconds = "billable_duration_seconds"
+	// FieldBillableCharacterCount holds the string denoting the billable_character_count field in the database.
+	FieldBillableCharacterCount = "billable_character_count"
 	// FieldImageSize holds the string denoting the image_size field in the database.
 	FieldImageSize = "image_size"
 	// FieldImageInputSize holds the string denoting the image_input_size field in the database.
@@ -188,6 +192,8 @@ var Columns = []string{
 	FieldUserAgent,
 	FieldIPAddress,
 	FieldImageCount,
+	FieldBillableDurationSeconds,
+	FieldBillableCharacterCount,
 	FieldImageSize,
 	FieldImageInputSize,
 	FieldImageOutputSize,
@@ -262,6 +268,10 @@ var (
 	IPAddressValidator func(string) error
 	// DefaultImageCount holds the default value on creation for the "image_count" field.
 	DefaultImageCount int
+	// DefaultBillableDurationSeconds holds the default value on creation for the "billable_duration_seconds" field.
+	DefaultBillableDurationSeconds int
+	// DefaultBillableCharacterCount holds the default value on creation for the "billable_character_count" field.
+	DefaultBillableCharacterCount int
 	// ImageSizeValidator is a validator for the "image_size" field. It is called by the builders before save.
 	ImageSizeValidator func(string) error
 	// ImageInputSizeValidator is a validator for the "image_input_size" field. It is called by the builders before save.
@@ -462,6 +472,16 @@ func ByIPAddress(opts ...sql.OrderTermOption) OrderOption {
 // ByImageCount orders the results by the image_count field.
 func ByImageCount(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldImageCount, opts...).ToFunc()
+}
+
+// ByBillableDurationSeconds orders the results by the billable_duration_seconds field.
+func ByBillableDurationSeconds(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldBillableDurationSeconds, opts...).ToFunc()
+}
+
+// ByBillableCharacterCount orders the results by the billable_character_count field.
+func ByBillableCharacterCount(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldBillableCharacterCount, opts...).ToFunc()
 }
 
 // ByImageSize orders the results by the image_size field.

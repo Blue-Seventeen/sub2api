@@ -5,6 +5,11 @@ import (
 	"strings"
 )
 
+type accountStatsBillableQuantity struct {
+	DurationSeconds int
+	CharacterCount  int
+}
+
 // resolveAccountStatsCost 计算账号统计定价费用。
 // 返回 nil 表示不覆盖，使用默认公式（total_cost × account_rate_multiplier）。
 //
@@ -26,6 +31,7 @@ func resolveAccountStatsCost(
 	tokens UsageTokens,
 	requestCount int,
 	totalCost float64,
+	quantities ...accountStatsBillableQuantity,
 ) *float64 {
 	if channelService == nil || upstreamModel == "" {
 		return nil
@@ -38,7 +44,7 @@ func resolveAccountStatsCost(
 	platform := channelService.GetGroupPlatform(ctx, groupID)
 
 	// 优先级 1：自定义规则（始终尝试）
-	if cost := tryCustomRules(channel, accountID, groupID, platform, upstreamModel, tokens, requestCount); cost != nil {
+	if cost := tryCustomRules(channel, accountID, groupID, platform, upstreamModel, tokens, requestCount, quantities...); cost != nil {
 		return cost
 	}
 
@@ -80,6 +86,7 @@ func tryModelFilePricing(billingService *BillingService, model string, tokens Us
 func tryCustomRules(
 	channel *Channel, accountID, groupID int64,
 	platform, model string, tokens UsageTokens, requestCount int,
+	quantities ...accountStatsBillableQuantity,
 ) *float64 {
 	modelLower := strings.ToLower(model)
 	for _, rule := range channel.AccountStatsPricingRules {
@@ -90,7 +97,7 @@ func tryCustomRules(
 		if pricing == nil {
 			continue // 规则匹配但模型不在规则定价中，继续下一条
 		}
-		return calculateStatsCost(pricing, tokens, requestCount)
+		return calculateStatsCost(pricing, tokens, requestCount, quantities...)
 	}
 	return nil
 }
@@ -159,13 +166,17 @@ func isPlatformMatch(queryPlatform, pricingPlatform string) bool {
 }
 
 // calculateStatsCost 使用给定的定价计算费用（不含任何倍率，原始费用）。
-func calculateStatsCost(pricing *ChannelModelPricing, tokens UsageTokens, requestCount int) *float64 {
+func calculateStatsCost(pricing *ChannelModelPricing, tokens UsageTokens, requestCount int, quantities ...accountStatsBillableQuantity) *float64 {
 	if pricing == nil {
 		return nil
 	}
 	switch pricing.BillingMode {
 	case BillingModePerRequest, BillingModeImage:
 		return calculatePerRequestStatsCost(pricing, requestCount)
+	case BillingModeDuration:
+		return calculateDurationStatsCost(pricing, firstAccountStatsBillableQuantity(quantities).DurationSeconds)
+	case BillingModeCharacter:
+		return calculateCharacterStatsCost(pricing, firstAccountStatsBillableQuantity(quantities).CharacterCount)
 	default:
 		return calculateTokenStatsCost(pricing, tokens)
 	}
@@ -178,6 +189,35 @@ func calculatePerRequestStatsCost(pricing *ChannelModelPricing, requestCount int
 	}
 	cost := *pricing.PerRequestPrice * float64(requestCount)
 	return &cost
+}
+
+func calculateDurationStatsCost(pricing *ChannelModelPricing, seconds int) *float64 {
+	if pricing.PerRequestPrice == nil || *pricing.PerRequestPrice <= 0 {
+		return nil
+	}
+	if seconds <= 0 {
+		seconds = defaultDurationSeconds
+	}
+	cost := *pricing.PerRequestPrice * float64(seconds)
+	return &cost
+}
+
+func calculateCharacterStatsCost(pricing *ChannelModelPricing, count int) *float64 {
+	if pricing.PerRequestPrice == nil || *pricing.PerRequestPrice <= 0 {
+		return nil
+	}
+	if count <= 0 {
+		count = defaultCharacterCount
+	}
+	cost := *pricing.PerRequestPrice * (float64(count) / 1000.0)
+	return &cost
+}
+
+func firstAccountStatsBillableQuantity(quantities []accountStatsBillableQuantity) accountStatsBillableQuantity {
+	if len(quantities) == 0 {
+		return accountStatsBillableQuantity{}
+	}
+	return quantities[0]
 }
 
 // calculateTokenStatsCost Token 计费。
@@ -236,5 +276,9 @@ func applyAccountStatsCost(
 	}
 	usageLog.AccountStatsCost = resolveAccountStatsCost(
 		ctx, cs, bs, accountID, groupID, model, tokens, requestCount, totalCost,
+		accountStatsBillableQuantity{
+			DurationSeconds: usageLog.BillableDurationSeconds,
+			CharacterCount:  usageLog.BillableCharacterCount,
+		},
 	)
 }

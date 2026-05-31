@@ -69,7 +69,7 @@ func (r *ModelPricingResolver) Resolve(ctx context.Context, input PricingInput) 
 			if mode == "" {
 				mode = BillingModeToken
 			}
-			if mode == BillingModePerRequest || mode == BillingModeImage {
+			if isUnitBillingMode(mode) {
 				resolved := &ResolvedPricing{
 					Mode:   mode,
 					Source: PricingSourceChannel,
@@ -128,9 +128,16 @@ func (r *ModelPricingResolver) applyChannelOverrides(ctx context.Context, groupI
 	switch resolved.Mode {
 	case BillingModeToken:
 		r.applyTokenOverrides(chPricing, resolved)
-	case BillingModePerRequest, BillingModeImage:
+	case BillingModePerRequest, BillingModeImage, BillingModeDuration, BillingModeCharacter:
 		r.applyRequestTierOverrides(chPricing, resolved)
 	}
+}
+
+func isUnitBillingMode(mode BillingMode) bool {
+	return mode == BillingModePerRequest ||
+		mode == BillingModeImage ||
+		mode == BillingModeDuration ||
+		mode == BillingModeCharacter
 }
 
 // applyTokenOverrides 应用 token 模式的渠道覆盖

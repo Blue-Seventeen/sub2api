@@ -14,12 +14,14 @@ const (
 	BillingModeToken      BillingMode = "token"       // 按 token 区间计费
 	BillingModePerRequest BillingMode = "per_request" // 按次计费（支持上下文窗口分层）
 	BillingModeImage      BillingMode = "image"       // 图片计费（当前按次，预留 token 计费）
+	BillingModeDuration   BillingMode = "duration"    // ASR 按秒计费
+	BillingModeCharacter  BillingMode = "character"   // TTS 按字符计费
 )
 
 // IsValid 检查 BillingMode 是否为合法值
 func (m BillingMode) IsValid() bool {
 	switch m {
-	case BillingModeToken, BillingModePerRequest, BillingModeImage, "":
+	case BillingModeToken, BillingModePerRequest, BillingModeImage, BillingModeDuration, BillingModeCharacter, "":
 		return true
 	}
 	return false
@@ -299,8 +301,9 @@ func ValidateIntervals(intervals []PricingInterval, mode BillingMode) error {
 		}
 	}
 
-	// per_request / image 模式按 tier_label 匹配，不做 token 区间重叠校验
-	if mode == BillingModePerRequest || mode == BillingModeImage {
+	// per_request / image / duration / character 模式不做 token 区间重叠校验
+	if mode == BillingModePerRequest || mode == BillingModeImage ||
+		mode == BillingModeDuration || mode == BillingModeCharacter {
 		return nil
 	}
 	return validateIntervalOverlap(sorted)

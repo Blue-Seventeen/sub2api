@@ -235,6 +235,16 @@ func ImageCount(v int) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldImageCount, v))
 }
 
+// BillableDurationSeconds applies equality check predicate on the "billable_duration_seconds" field. It's identical to BillableDurationSecondsEQ.
+func BillableDurationSeconds(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldBillableDurationSeconds, v))
+}
+
+// BillableCharacterCount applies equality check predicate on the "billable_character_count" field. It's identical to BillableCharacterCountEQ.
+func BillableCharacterCount(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldBillableCharacterCount, v))
+}
+
 // ImageSize applies equality check predicate on the "image_size" field. It's identical to ImageSizeEQ.
 func ImageSize(v string) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldImageSize, v))
@@ -1928,6 +1938,86 @@ func ImageCountLT(v int) predicate.UsageLog {
 // ImageCountLTE applies the LTE predicate on the "image_count" field.
 func ImageCountLTE(v int) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldLTE(FieldImageCount, v))
+}
+
+// BillableDurationSecondsEQ applies the EQ predicate on the "billable_duration_seconds" field.
+func BillableDurationSecondsEQ(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldBillableDurationSeconds, v))
+}
+
+// BillableDurationSecondsNEQ applies the NEQ predicate on the "billable_duration_seconds" field.
+func BillableDurationSecondsNEQ(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldBillableDurationSeconds, v))
+}
+
+// BillableDurationSecondsIn applies the In predicate on the "billable_duration_seconds" field.
+func BillableDurationSecondsIn(vs ...int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldBillableDurationSeconds, vs...))
+}
+
+// BillableDurationSecondsNotIn applies the NotIn predicate on the "billable_duration_seconds" field.
+func BillableDurationSecondsNotIn(vs ...int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldBillableDurationSeconds, vs...))
+}
+
+// BillableDurationSecondsGT applies the GT predicate on the "billable_duration_seconds" field.
+func BillableDurationSecondsGT(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldBillableDurationSeconds, v))
+}
+
+// BillableDurationSecondsGTE applies the GTE predicate on the "billable_duration_seconds" field.
+func BillableDurationSecondsGTE(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldBillableDurationSeconds, v))
+}
+
+// BillableDurationSecondsLT applies the LT predicate on the "billable_duration_seconds" field.
+func BillableDurationSecondsLT(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldBillableDurationSeconds, v))
+}
+
+// BillableDurationSecondsLTE applies the LTE predicate on the "billable_duration_seconds" field.
+func BillableDurationSecondsLTE(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldBillableDurationSeconds, v))
+}
+
+// BillableCharacterCountEQ applies the EQ predicate on the "billable_character_count" field.
+func BillableCharacterCountEQ(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldBillableCharacterCount, v))
+}
+
+// BillableCharacterCountNEQ applies the NEQ predicate on the "billable_character_count" field.
+func BillableCharacterCountNEQ(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldBillableCharacterCount, v))
+}
+
+// BillableCharacterCountIn applies the In predicate on the "billable_character_count" field.
+func BillableCharacterCountIn(vs ...int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldBillableCharacterCount, vs...))
+}
+
+// BillableCharacterCountNotIn applies the NotIn predicate on the "billable_character_count" field.
+func BillableCharacterCountNotIn(vs ...int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldBillableCharacterCount, vs...))
+}
+
+// BillableCharacterCountGT applies the GT predicate on the "billable_character_count" field.
+func BillableCharacterCountGT(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldBillableCharacterCount, v))
+}
+
+// BillableCharacterCountGTE applies the GTE predicate on the "billable_character_count" field.
+func BillableCharacterCountGTE(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldBillableCharacterCount, v))
+}
+
+// BillableCharacterCountLT applies the LT predicate on the "billable_character_count" field.
+func BillableCharacterCountLT(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldBillableCharacterCount, v))
+}
+
+// BillableCharacterCountLTE applies the LTE predicate on the "billable_character_count" field.
+func BillableCharacterCountLTE(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldBillableCharacterCount, v))
 }
 
 // ImageSizeEQ applies the EQ predicate on the "image_size" field.

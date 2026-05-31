@@ -2288,6 +2288,38 @@ func TestValidatePricingBillingMode(t *testing.T) {
 			errMsg:  "per-request price or intervals required",
 		},
 		{
+			name: "duration with unit price - valid",
+			pricing: []ChannelModelPricing{{
+				BillingMode:     BillingModeDuration,
+				PerRequestPrice: testPtrFloat64(0.02),
+			}},
+		},
+		{
+			name: "character with unit price - valid",
+			pricing: []ChannelModelPricing{{
+				BillingMode:     BillingModeCharacter,
+				PerRequestPrice: testPtrFloat64(0.03),
+			}},
+		},
+		{
+			name: "duration intervals without unit price - invalid",
+			pricing: []ChannelModelPricing{{
+				BillingMode: BillingModeDuration,
+				Intervals:   []PricingInterval{{MinTokens: 0, MaxTokens: testPtrInt(1000), PerRequestPrice: testPtrFloat64(0.1)}},
+			}},
+			wantErr: true,
+			errMsg:  "per_request_price is required",
+		},
+		{
+			name: "character intervals without unit price - invalid",
+			pricing: []ChannelModelPricing{{
+				BillingMode: BillingModeCharacter,
+				Intervals:   []PricingInterval{{MinTokens: 0, MaxTokens: testPtrInt(1000), PerRequestPrice: testPtrFloat64(0.1)}},
+			}},
+			wantErr: true,
+			errMsg:  "per_request_price is required",
+		},
+		{
 			name:    "empty list - valid",
 			pricing: []ChannelModelPricing{},
 		},

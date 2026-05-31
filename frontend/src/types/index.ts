@@ -1314,6 +1314,8 @@ export interface UsageLog {
   image_size_breakdown?: ImageSizeBreakdown | null
   request_count: number
   task_count: number
+  billable_duration_seconds?: number
+  billable_character_count?: number
   usage_estimated: boolean
   billable_unit_type?: string | null
 

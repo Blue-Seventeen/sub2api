@@ -188,6 +188,31 @@ func TestPrepareUsageLogInsert_PersistsImageSizeMetadata(t *testing.T) {
 	require.JSONEq(t, `{"1K":1,"4K":1}`, breakdownJSON)
 }
 
+func TestPrepareUsageLogInsert_PersistsBillableQuantityMetadata(t *testing.T) {
+	unitType := service.BillableUnitTypeDuration
+	billingMode := string(service.BillingModeDuration)
+	prepared := prepareUsageLogInsert(&service.UsageLog{
+		UserID:                  1,
+		APIKeyID:                2,
+		AccountID:               3,
+		RequestID:               "req-quantity-metadata",
+		Model:                   "glm-asr-2512",
+		RequestedModel:          "glm-asr-2512",
+		RequestCount:            1,
+		BillableDurationSeconds: 7,
+		BillableCharacterCount:  1234,
+		BillableUnitType:        &unitType,
+		BillingMode:             &billingMode,
+		CreatedAt:               time.Date(2025, 1, 7, 12, 0, 0, 0, time.UTC),
+	})
+
+	require.Equal(t, 1, prepared.args[41])
+	require.Equal(t, 7, prepared.args[43])
+	require.Equal(t, 1234, prepared.args[44])
+	require.Equal(t, sql.NullString{String: unitType, Valid: true}, prepared.args[46])
+	require.Equal(t, sql.NullString{String: billingMode, Valid: true}, prepared.args[59])
+}
+
 func TestCoalesceTrimmedString(t *testing.T) {
 	require.Equal(t, "fallback", coalesceTrimmedString(sql.NullString{}, "fallback"))
 	require.Equal(t, "fallback", coalesceTrimmedString(sql.NullString{Valid: true, String: "   "}, "fallback"))
@@ -537,6 +562,8 @@ type usageLogScanRowOptions struct {
 	ImageOutputSize    *string
 	ImageSizeSource    *string
 	ImageSizeBreakdown map[string]int
+	DurationSeconds    int
+	CharacterCount     int
 	ServiceTier        *string
 	CreatedAt          time.Time
 }
@@ -596,10 +623,12 @@ func buildUsageLogScanValues(opts usageLogScanRowOptions) []any {
 		nullString(opts.ImageOutputSize),
 		nullString(opts.ImageSizeSource),
 		nullStringIntMapJSONForScan(opts.ImageSizeBreakdown),
-		0,                // request_count
-		0,                // task_count
-		false,            // usage_estimated
-		sql.NullString{}, // billable_unit_type
+		0,                    // request_count
+		0,                    // task_count
+		opts.DurationSeconds, // billable_duration_seconds
+		opts.CharacterCount,  // billable_character_count
+		false,                // usage_estimated
+		sql.NullString{},     // billable_unit_type
 		nullString(opts.ServiceTier),
 		sql.NullString{},  // reasoning_effort
 		sql.NullString{},  // inbound_endpoint

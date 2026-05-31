@@ -534,10 +534,12 @@ type ForwardResult struct {
 	ImageSizeSource    string
 	ImageSizeBreakdown map[string]int
 
-	RequestCount     int
-	TaskCount        int
-	UsageEstimated   bool
-	BillableUnitType string
+	RequestCount            int
+	TaskCount               int
+	BillableDurationSeconds int
+	BillableCharacterCount  int
+	UsageEstimated          bool
+	BillableUnitType        string
 }
 
 // UpstreamFailoverError indicates an upstream error that should trigger account failover.
@@ -8321,6 +8323,12 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 		cmd.CacheCreationTokens = usageLog.CacheCreationTokens
 		cmd.CacheReadTokens = usageLog.CacheReadTokens
 		cmd.ImageCount = usageLog.ImageCount
+		switch usageLogBillingMode(usageLog) {
+		case BillingModeDuration:
+			cmd.BillableDurationSeconds = usageLog.BillableDurationSeconds
+		case BillingModeCharacter:
+			cmd.BillableCharacterCount = usageLog.BillableCharacterCount
+		}
 		if usageLog.ServiceTier != nil {
 			cmd.ServiceTier = *usageLog.ServiceTier
 		}
@@ -8355,6 +8363,13 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 
 	cmd.Normalize()
 	return cmd
+}
+
+func usageLogBillingMode(usageLog *UsageLog) BillingMode {
+	if usageLog == nil || usageLog.BillingMode == nil {
+		return ""
+	}
+	return BillingMode(strings.TrimSpace(*usageLog.BillingMode))
 }
 
 func applyUsageBilling(ctx context.Context, requestID string, usageLog *UsageLog, p *postUsageBillingParams, deps *billingDeps, repo UsageBillingRepository) (bool, error) {
@@ -8603,6 +8618,12 @@ type recordUsageOpts struct {
 
 // RecordUsage 记录使用量并扣费（或更新订阅用量）
 func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInput) error {
+	if input == nil {
+		return errors.New("usage input is nil")
+	}
+	if input.Result == nil {
+		return errors.New("usage result is nil")
+	}
 	return s.recordUsageCore(ctx, &recordUsageCoreInput{
 		Result:             input.Result,
 		ParsedRequest:      input.ParsedRequest,
@@ -8655,6 +8676,12 @@ type RecordUsageLongContextInput struct {
 
 // RecordUsageWithLongContext 记录使用量并扣费，支持长上下文双倍计费（用于 Gemini）
 func (s *GatewayService) RecordUsageWithLongContext(ctx context.Context, input *RecordUsageLongContextInput) error {
+	if input == nil {
+		return errors.New("usage input is nil")
+	}
+	if input.Result == nil {
+		return errors.New("usage result is nil")
+	}
 	return s.recordUsageCore(ctx, &recordUsageCoreInput{
 		Result:             input.Result,
 		APIKey:             input.APIKey,
@@ -8927,6 +8954,9 @@ func (s *GatewayService) calculateRecordUsageCost(
 	imageMultiplier float64,
 	opts *recordUsageOpts,
 ) *CostBreakdown {
+	if cost := s.calculateQuantityModeCost(ctx, result, apiKey, billingModel, multiplier); cost != nil {
+		return cost
+	}
 	if unitCount := resultBillableRequestCount(result); unitCount > 0 {
 		if resolved := s.resolveChannelPricing(ctx, billingModel, apiKey); resolved != nil &&
 			resolved.Mode == BillingModeToken &&
@@ -8943,6 +8973,41 @@ func (s *GatewayService) calculateRecordUsageCost(
 
 	// Token 计费
 	return s.calculateTokenCost(ctx, result, apiKey, billingModel, multiplier, opts)
+}
+
+func (s *GatewayService) calculateQuantityModeCost(
+	ctx context.Context,
+	result *ForwardResult,
+	apiKey *APIKey,
+	billingModel string,
+	multiplier float64,
+) *CostBreakdown {
+	if result == nil {
+		return nil
+	}
+	resolved := s.resolveChannelPricing(ctx, billingModel, apiKey)
+	if resolved == nil || (resolved.Mode != BillingModeDuration && resolved.Mode != BillingModeCharacter) {
+		return nil
+	}
+	gid, ok := apiKeyBillingGroupID(apiKey)
+	if !ok {
+		return &CostBreakdown{ActualCost: 0, BillingMode: string(resolved.Mode)}
+	}
+	cost, err := s.billingService.CalculateCostUnified(CostInput{
+		Ctx:             ctx,
+		Model:           billingModel,
+		GroupID:         &gid,
+		DurationSeconds: result.BillableDurationSeconds,
+		CharacterCount:  result.BillableCharacterCount,
+		RateMultiplier:  multiplier,
+		Resolver:        s.resolver,
+		Resolved:        resolved,
+	})
+	if err != nil {
+		logger.LegacyPrintf("service.gateway", "Calculate quantity-mode cost failed: %v", err)
+		return &CostBreakdown{ActualCost: 0, BillingMode: string(resolved.Mode)}
+	}
+	return cost
 }
 
 func forwardResultHasTokenUsage(result *ForwardResult) bool {
@@ -9168,49 +9233,55 @@ func (s *GatewayService) buildRecordUsageLog(
 	durationMs := int(result.Duration.Milliseconds())
 	requestID := resolveUsageBillingRequestID(ctx, result.RequestID)
 	usageLog := &UsageLog{
-		UserID:                user.ID,
-		APIKeyID:              apiKey.ID,
-		AccountID:             account.ID,
-		RequestID:             requestID,
-		Model:                 result.Model,
-		RequestedModel:        requestedModel,
-		UpstreamModel:         optionalNonEqualStringPtr(result.UpstreamModel, result.Model),
-		ReasoningEffort:       result.ReasoningEffort,
-		InboundEndpoint:       optionalTrimmedStringPtr(input.InboundEndpoint),
-		UpstreamEndpoint:      optionalTrimmedStringPtr(input.UpstreamEndpoint),
-		ClientProfile:         optionalTrimmedStringPtr(input.ClientProfile),
-		CompatibilityRoute:    optionalTrimmedStringPtr(input.CompatibilityRoute),
-		FallbackChain:         optionalTrimmedStringPtr(input.FallbackChain),
-		UpstreamTransport:     optionalTrimmedStringPtr(input.UpstreamTransport),
-		InputTokens:           result.Usage.InputTokens,
-		OutputTokens:          result.Usage.OutputTokens,
-		CacheCreationTokens:   result.Usage.CacheCreationInputTokens,
-		CacheReadTokens:       result.Usage.CacheReadInputTokens,
-		CacheCreation5mTokens: result.Usage.CacheCreation5mTokens,
-		CacheCreation1hTokens: result.Usage.CacheCreation1hTokens,
-		ImageOutputTokens:     result.Usage.ImageOutputTokens,
-		RateMultiplier:        multiplier,
-		UnifiedRateMultiplier: unifiedRateMultiplier,
-		AccountRateMultiplier: &accountRateMultiplier,
-		BillingType:           billingType,
-		BillingMode:           resolveBillingMode(result, cost),
-		Stream:                result.Stream,
-		DurationMs:            &durationMs,
-		FirstTokenMs:          result.FirstTokenMs,
-		ImageCount:            result.ImageCount,
-		ImageSize:             optionalTrimmedStringPtr(result.ImageSize),
-		RequestCount:          result.RequestCount,
-		TaskCount:             result.TaskCount,
-		UsageEstimated:        result.UsageEstimated,
-		BillableUnitType:      optionalTrimmedStringPtr(result.BillableUnitType),
-		CacheTTLOverridden:    cacheTTLOverridden,
-		ChannelID:             optionalInt64Ptr(input.ChannelID),
-		ModelMappingChain:     optionalTrimmedStringPtr(input.ModelMappingChain),
-		UserAgent:             optionalTrimmedStringPtr(input.UserAgent),
-		IPAddress:             optionalTrimmedStringPtr(input.IPAddress),
-		GroupID:               apiKey.GroupID,
-		SubscriptionID:        optionalSubscriptionID(subscription),
-		CreatedAt:             time.Now(),
+		UserID:                  user.ID,
+		APIKeyID:                apiKey.ID,
+		AccountID:               account.ID,
+		RequestID:               requestID,
+		Model:                   result.Model,
+		RequestedModel:          requestedModel,
+		UpstreamModel:           optionalNonEqualStringPtr(result.UpstreamModel, result.Model),
+		ReasoningEffort:         result.ReasoningEffort,
+		InboundEndpoint:         optionalTrimmedStringPtr(input.InboundEndpoint),
+		UpstreamEndpoint:        optionalTrimmedStringPtr(input.UpstreamEndpoint),
+		ClientProfile:           optionalTrimmedStringPtr(input.ClientProfile),
+		CompatibilityRoute:      optionalTrimmedStringPtr(input.CompatibilityRoute),
+		FallbackChain:           optionalTrimmedStringPtr(input.FallbackChain),
+		UpstreamTransport:       optionalTrimmedStringPtr(input.UpstreamTransport),
+		InputTokens:             result.Usage.InputTokens,
+		OutputTokens:            result.Usage.OutputTokens,
+		CacheCreationTokens:     result.Usage.CacheCreationInputTokens,
+		CacheReadTokens:         result.Usage.CacheReadInputTokens,
+		CacheCreation5mTokens:   result.Usage.CacheCreation5mTokens,
+		CacheCreation1hTokens:   result.Usage.CacheCreation1hTokens,
+		ImageOutputTokens:       result.Usage.ImageOutputTokens,
+		RateMultiplier:          multiplier,
+		UnifiedRateMultiplier:   unifiedRateMultiplier,
+		AccountRateMultiplier:   &accountRateMultiplier,
+		BillingType:             billingType,
+		BillingMode:             resolveBillingMode(result, cost),
+		Stream:                  result.Stream,
+		DurationMs:              &durationMs,
+		FirstTokenMs:            result.FirstTokenMs,
+		ImageCount:              result.ImageCount,
+		ImageSize:               optionalTrimmedStringPtr(result.ImageSize),
+		ImageInputSize:          optionalTrimmedStringPtr(result.ImageInputSize),
+		ImageOutputSize:         optionalTrimmedStringPtr(result.ImageOutputSize),
+		ImageSizeSource:         optionalTrimmedStringPtr(result.ImageSizeSource),
+		ImageSizeBreakdown:      result.ImageSizeBreakdown,
+		RequestCount:            result.RequestCount,
+		TaskCount:               result.TaskCount,
+		BillableDurationSeconds: result.BillableDurationSeconds,
+		BillableCharacterCount:  result.BillableCharacterCount,
+		UsageEstimated:          result.UsageEstimated,
+		BillableUnitType:        optionalTrimmedStringPtr(result.BillableUnitType),
+		CacheTTLOverridden:      cacheTTLOverridden,
+		ChannelID:               optionalInt64Ptr(input.ChannelID),
+		ModelMappingChain:       optionalTrimmedStringPtr(input.ModelMappingChain),
+		UserAgent:               optionalTrimmedStringPtr(input.UserAgent),
+		IPAddress:               optionalTrimmedStringPtr(input.IPAddress),
+		GroupID:                 apiKey.GroupID,
+		SubscriptionID:          optionalSubscriptionID(subscription),
+		CreatedAt:               time.Now(),
 	}
 	if result.ImageCount > 0 {
 		usageLog.RateMultiplier = imageMultiplier
@@ -9235,6 +9306,10 @@ func resolveBillingMode(result *ForwardResult, cost *CostBreakdown) *string {
 	switch {
 	case cost != nil && cost.BillingMode != "":
 		mode = cost.BillingMode
+	case result != nil && result.BillableDurationSeconds > 0:
+		mode = string(BillingModeDuration)
+	case result != nil && result.BillableCharacterCount > 0:
+		mode = string(BillingModeCharacter)
 	case resultBillableRequestCount(result) > 0:
 		mode = string(BillingModePerRequest)
 	case result.ImageCount > 0:

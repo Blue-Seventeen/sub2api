@@ -19,20 +19,22 @@ type UsageBillingCommand struct {
 	RequestFingerprint string
 	RequestPayloadHash string
 
-	UserID              int64
-	AccountID           int64
-	SubscriptionID      *int64
-	AccountType         string
-	Model               string
-	ServiceTier         string
-	ReasoningEffort     string
-	BillingType         int8
-	InputTokens         int
-	OutputTokens        int
-	CacheCreationTokens int
-	CacheReadTokens     int
-	ImageCount          int
-	MediaType           string
+	UserID                  int64
+	AccountID               int64
+	SubscriptionID          *int64
+	AccountType             string
+	Model                   string
+	ServiceTier             string
+	ReasoningEffort         string
+	BillingType             int8
+	InputTokens             int
+	OutputTokens            int
+	CacheCreationTokens     int
+	CacheReadTokens         int
+	ImageCount              int
+	BillableDurationSeconds int
+	BillableCharacterCount  int
+	MediaType               string
 
 	BalanceCost         float64
 	SubscriptionCost    float64
@@ -51,8 +53,56 @@ func (c *UsageBillingCommand) Normalize() {
 	}
 }
 
+func (c *UsageBillingCommand) MatchesRequestFingerprint(candidate string) bool {
+	if c == nil {
+		return strings.TrimSpace(candidate) == ""
+	}
+	normalizedCandidate := strings.TrimSpace(candidate)
+	if normalizedCandidate == strings.TrimSpace(c.RequestFingerprint) {
+		return true
+	}
+	legacy := buildUsageBillingLegacyFingerprint(c)
+	return legacy != "" && normalizedCandidate == legacy
+}
+
 func buildUsageBillingFingerprint(c *UsageBillingCommand) string {
 	if c == nil {
+		return ""
+	}
+	raw := fmt.Sprintf(
+		"%d|%d|%d|%s|%s|%s|%s|%d|%d|%d|%d|%d|%d|%d|%d|%s|%d|%0.10f|%0.10f|%0.10f|%0.10f|%0.10f",
+		c.UserID,
+		c.AccountID,
+		c.APIKeyID,
+		strings.TrimSpace(c.AccountType),
+		strings.TrimSpace(c.Model),
+		strings.TrimSpace(c.ServiceTier),
+		strings.TrimSpace(c.ReasoningEffort),
+		c.BillingType,
+		c.InputTokens,
+		c.OutputTokens,
+		c.CacheCreationTokens,
+		c.CacheReadTokens,
+		c.ImageCount,
+		c.BillableDurationSeconds,
+		c.BillableCharacterCount,
+		strings.TrimSpace(c.MediaType),
+		valueOrZero(c.SubscriptionID),
+		c.BalanceCost,
+		c.SubscriptionCost,
+		c.APIKeyQuotaCost,
+		c.APIKeyRateLimitCost,
+		c.AccountQuotaCost,
+	)
+	if payloadHash := strings.TrimSpace(c.RequestPayloadHash); payloadHash != "" {
+		raw += "|" + payloadHash
+	}
+	sum := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(sum[:])
+}
+
+func buildUsageBillingLegacyFingerprint(c *UsageBillingCommand) string {
+	if c == nil || c.BillableDurationSeconds != 0 || c.BillableCharacterCount != 0 {
 		return ""
 	}
 	raw := fmt.Sprintf(

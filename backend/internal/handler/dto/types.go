@@ -484,10 +484,12 @@ type UsageLog struct {
 	ImageSizeBreakdown map[string]int `json:"image_size_breakdown"`
 	MediaType          *string        `json:"media_type"`
 
-	RequestCount     int     `json:"request_count"`
-	TaskCount        int     `json:"task_count"`
-	UsageEstimated   bool    `json:"usage_estimated"`
-	BillableUnitType *string `json:"billable_unit_type,omitempty"`
+	RequestCount            int     `json:"request_count"`
+	TaskCount               int     `json:"task_count"`
+	BillableDurationSeconds int     `json:"billable_duration_seconds"`
+	BillableCharacterCount  int     `json:"billable_character_count"`
+	UsageEstimated          bool    `json:"usage_estimated"`
+	BillableUnitType        *string `json:"billable_unit_type,omitempty"`
 
 	// User-Agent
 	UserAgent *string `json:"user_agent"`

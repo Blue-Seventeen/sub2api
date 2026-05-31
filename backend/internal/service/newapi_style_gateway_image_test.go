@@ -49,6 +49,7 @@ func TestNewAPIStyleAliImagesGenerationsConvertsOpenAIRequestToDashScope(t *test
 	require.NotNil(t, result)
 	require.Equal(t, 2, result.ImageCount)
 	require.Equal(t, "1K", result.ImageSize)
+	require.Equal(t, "1024x1024", result.ImageInputSize)
 	require.Equal(t, BillableUnitTypeImage, result.BillableUnitType)
 	require.Equal(t, "qwen-image", result.Model)
 
@@ -122,6 +123,7 @@ func TestNewAPIStyleAliQwenImageOfficialRouteForwardsDashScopeBodyAndBillsImage(
 	require.NotNil(t, result)
 	require.Equal(t, 1, result.ImageCount)
 	require.Equal(t, "2K", result.ImageSize)
+	require.Equal(t, "2048x2048", result.ImageInputSize)
 	require.Equal(t, BillableUnitTypeImage, result.BillableUnitType)
 	require.Zero(t, result.RequestCount)
 }
@@ -173,6 +175,7 @@ data:{"output":{"audio":{"data":"UklGRg=="}}}
 	require.NoError(t, err)
 	require.Equal(t, "enable", upstream.lastReq.Header.Get("X-DashScope-SSE"))
 	require.Equal(t, 1, result.RequestCount)
-	require.Equal(t, BillableUnitTypeRequest, result.BillableUnitType)
+	require.Equal(t, 5, result.BillableCharacterCount)
+	require.Equal(t, BillableUnitTypeCharacter, result.BillableUnitType)
 	require.Zero(t, result.ImageCount)
 }

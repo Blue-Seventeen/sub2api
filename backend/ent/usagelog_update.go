@@ -761,6 +761,48 @@ func (_u *UsageLogUpdate) AddImageCount(v int) *UsageLogUpdate {
 	return _u
 }
 
+// SetBillableDurationSeconds sets the "billable_duration_seconds" field.
+func (_u *UsageLogUpdate) SetBillableDurationSeconds(v int) *UsageLogUpdate {
+	_u.mutation.ResetBillableDurationSeconds()
+	_u.mutation.SetBillableDurationSeconds(v)
+	return _u
+}
+
+// SetNillableBillableDurationSeconds sets the "billable_duration_seconds" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableBillableDurationSeconds(v *int) *UsageLogUpdate {
+	if v != nil {
+		_u.SetBillableDurationSeconds(*v)
+	}
+	return _u
+}
+
+// AddBillableDurationSeconds adds value to the "billable_duration_seconds" field.
+func (_u *UsageLogUpdate) AddBillableDurationSeconds(v int) *UsageLogUpdate {
+	_u.mutation.AddBillableDurationSeconds(v)
+	return _u
+}
+
+// SetBillableCharacterCount sets the "billable_character_count" field.
+func (_u *UsageLogUpdate) SetBillableCharacterCount(v int) *UsageLogUpdate {
+	_u.mutation.ResetBillableCharacterCount()
+	_u.mutation.SetBillableCharacterCount(v)
+	return _u
+}
+
+// SetNillableBillableCharacterCount sets the "billable_character_count" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableBillableCharacterCount(v *int) *UsageLogUpdate {
+	if v != nil {
+		_u.SetBillableCharacterCount(*v)
+	}
+	return _u
+}
+
+// AddBillableCharacterCount adds value to the "billable_character_count" field.
+func (_u *UsageLogUpdate) AddBillableCharacterCount(v int) *UsageLogUpdate {
+	_u.mutation.AddBillableCharacterCount(v)
+	return _u
+}
+
 // SetImageSize sets the "image_size" field.
 func (_u *UsageLogUpdate) SetImageSize(v string) *UsageLogUpdate {
 	_u.mutation.SetImageSize(v)
@@ -1233,6 +1275,18 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedImageCount(); ok {
 		_spec.AddField(usagelog.FieldImageCount, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.BillableDurationSeconds(); ok {
+		_spec.SetField(usagelog.FieldBillableDurationSeconds, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedBillableDurationSeconds(); ok {
+		_spec.AddField(usagelog.FieldBillableDurationSeconds, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.BillableCharacterCount(); ok {
+		_spec.SetField(usagelog.FieldBillableCharacterCount, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedBillableCharacterCount(); ok {
+		_spec.AddField(usagelog.FieldBillableCharacterCount, field.TypeInt, value)
 	}
 	if value, ok := _u.mutation.ImageSize(); ok {
 		_spec.SetField(usagelog.FieldImageSize, field.TypeString, value)
@@ -2161,6 +2215,48 @@ func (_u *UsageLogUpdateOne) AddImageCount(v int) *UsageLogUpdateOne {
 	return _u
 }
 
+// SetBillableDurationSeconds sets the "billable_duration_seconds" field.
+func (_u *UsageLogUpdateOne) SetBillableDurationSeconds(v int) *UsageLogUpdateOne {
+	_u.mutation.ResetBillableDurationSeconds()
+	_u.mutation.SetBillableDurationSeconds(v)
+	return _u
+}
+
+// SetNillableBillableDurationSeconds sets the "billable_duration_seconds" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableBillableDurationSeconds(v *int) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetBillableDurationSeconds(*v)
+	}
+	return _u
+}
+
+// AddBillableDurationSeconds adds value to the "billable_duration_seconds" field.
+func (_u *UsageLogUpdateOne) AddBillableDurationSeconds(v int) *UsageLogUpdateOne {
+	_u.mutation.AddBillableDurationSeconds(v)
+	return _u
+}
+
+// SetBillableCharacterCount sets the "billable_character_count" field.
+func (_u *UsageLogUpdateOne) SetBillableCharacterCount(v int) *UsageLogUpdateOne {
+	_u.mutation.ResetBillableCharacterCount()
+	_u.mutation.SetBillableCharacterCount(v)
+	return _u
+}
+
+// SetNillableBillableCharacterCount sets the "billable_character_count" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableBillableCharacterCount(v *int) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetBillableCharacterCount(*v)
+	}
+	return _u
+}
+
+// AddBillableCharacterCount adds value to the "billable_character_count" field.
+func (_u *UsageLogUpdateOne) AddBillableCharacterCount(v int) *UsageLogUpdateOne {
+	_u.mutation.AddBillableCharacterCount(v)
+	return _u
+}
+
 // SetImageSize sets the "image_size" field.
 func (_u *UsageLogUpdateOne) SetImageSize(v string) *UsageLogUpdateOne {
 	_u.mutation.SetImageSize(v)
@@ -2663,6 +2759,18 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if value, ok := _u.mutation.AddedImageCount(); ok {
 		_spec.AddField(usagelog.FieldImageCount, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.BillableDurationSeconds(); ok {
+		_spec.SetField(usagelog.FieldBillableDurationSeconds, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedBillableDurationSeconds(); ok {
+		_spec.AddField(usagelog.FieldBillableDurationSeconds, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.BillableCharacterCount(); ok {
+		_spec.SetField(usagelog.FieldBillableCharacterCount, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedBillableCharacterCount(); ok {
+		_spec.AddField(usagelog.FieldBillableCharacterCount, field.TypeInt, value)
 	}
 	if value, ok := _u.mutation.ImageSize(); ok {
 		_spec.SetField(usagelog.FieldImageSize, field.TypeString, value)

@@ -1,0 +1,2 @@
+ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS billable_duration_seconds INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS billable_character_count INTEGER NOT NULL DEFAULT 0;

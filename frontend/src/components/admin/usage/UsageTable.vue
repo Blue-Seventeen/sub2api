@@ -100,6 +100,16 @@
             <span class="font-medium text-gray-900 dark:text-white">{{ row.image_count }}{{ t('usage.imageUnit') }}</span>
             <span class="text-gray-400">({{ formatImageBillingSize(row, t) }})</span>
           </div>
+          <!-- Duration billing -->
+          <div v-else-if="isDurationUsage(row)" class="flex items-center gap-1.5">
+            <Icon name="clock" size="sm" class="h-4 w-4 text-cyan-500" />
+            <span class="font-medium text-gray-900 dark:text-white">{{ formatBillableSeconds(row.billable_duration_seconds) }}</span>
+          </div>
+          <!-- Character billing -->
+          <div v-else-if="isCharacterUsage(row)" class="flex items-center gap-1.5">
+            <Icon name="document" size="sm" class="h-4 w-4 text-amber-500" />
+            <span class="font-medium text-gray-900 dark:text-white">{{ formatBillableCharacters(row.billable_character_count) }}</span>
+          </div>
           <!-- Token 请求 -->
           <div v-else class="flex items-center gap-1.5">
             <div class="space-y-1 text-sm">
@@ -314,6 +324,34 @@
                 <span class="font-medium text-white">{{ formatCostAmount(tooltipData.total_cost || 0, 6) }}</span>
               </div>
             </template>
+            <template v-else-if="tooltipData && isDurationUsage(tooltipData)">
+              <div class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('usage.durationSeconds') }}</span>
+                <span class="font-medium text-white">{{ formatBillableSeconds(tooltipData.billable_duration_seconds) }}</span>
+              </div>
+              <div class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('usage.durationUnitPrice') }}</span>
+                <span class="font-medium text-sky-300">{{ formatCostAmount(durationUnitPrice(tooltipData), 6) }}</span>
+              </div>
+              <div class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('usage.durationTotalPrice') }}</span>
+                <span class="font-medium text-white">{{ formatCostAmount(tooltipData.total_cost || 0, 6) }}</span>
+              </div>
+            </template>
+            <template v-else-if="tooltipData && isCharacterUsage(tooltipData)">
+              <div class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('usage.characterCount') }}</span>
+                <span class="font-medium text-white">{{ formatBillableCharacters(tooltipData.billable_character_count) }}</span>
+              </div>
+              <div class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('usage.characterUnitPrice') }}</span>
+                <span class="font-medium text-sky-300">{{ formatCostAmount(characterUnitPrice(tooltipData), 6) }}</span>
+              </div>
+              <div class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('usage.characterTotalPrice') }}</span>
+                <span class="font-medium text-white">{{ formatCostAmount(tooltipData.total_cost || 0, 6) }}</span>
+              </div>
+            </template>
             <template v-else-if="!tooltipData?.billing_mode || tooltipData.billing_mode === BILLING_MODE_TOKEN">
               <div v-if="tooltipData && tooltipData.input_tokens > 0" class="flex items-center justify-between gap-4">
                 <span class="text-gray-400">{{ t('usage.inputTokenPrice') }}</span>
@@ -385,7 +423,14 @@ import { formatTokenPricePerMillion } from '@/utils/usagePricing'
 import { formatAdminDisplayBaseRateMultiplier } from '@/utils/usageRate'
 import { getUsageServiceTierLabel } from '@/utils/usageServiceTier'
 import { resolveUsageRequestType } from '@/utils/usageRequestType'
-import { getBillingModeLabel, getBillingModeBadgeClass, BILLING_MODE_TOKEN, BILLING_MODE_IMAGE } from '@/utils/billingMode'
+import {
+  getBillingModeLabel,
+  getBillingModeBadgeClass,
+  BILLING_MODE_TOKEN,
+  BILLING_MODE_IMAGE,
+  BILLING_MODE_DURATION,
+  BILLING_MODE_CHARACTER
+} from '@/utils/billingMode'
 import {
   formatImageBillingSize,
   formatImageInputSize,
@@ -406,6 +451,20 @@ function imageUnitPrice(row: AdminUsageLog | null): number {
   return Number.isFinite(price) ? price : 0
 }
 
+function durationUnitPrice(row: AdminUsageLog | null): number {
+  const seconds = row?.billable_duration_seconds ?? 0
+  if (!row || seconds <= 0) return 0
+  const price = (row.total_cost ?? 0) / seconds
+  return Number.isFinite(price) ? price : 0
+}
+
+function characterUnitPrice(row: AdminUsageLog | null): number {
+  const count = row?.billable_character_count ?? 0
+  if (!row || count <= 0) return 0
+  const price = ((row.total_cost ?? 0) * 1000) / count
+  return Number.isFinite(price) ? price : 0
+}
+
 function isImageUsage(row: Pick<AdminUsageLog, 'image_count'> | null | undefined): boolean {
   return (row?.image_count ?? 0) > 0
 }
@@ -415,6 +474,22 @@ function getDisplayBillingMode(row: Pick<AdminUsageLog, 'billing_mode' | 'image_
     return BILLING_MODE_IMAGE
   }
   return row?.billing_mode
+}
+
+function isDurationUsage(row: Pick<AdminUsageLog, 'billing_mode' | 'image_count'> | null | undefined): boolean {
+  return getDisplayBillingMode(row) === BILLING_MODE_DURATION
+}
+
+function isCharacterUsage(row: Pick<AdminUsageLog, 'billing_mode' | 'image_count'> | null | undefined): boolean {
+  return getDisplayBillingMode(row) === BILLING_MODE_CHARACTER
+}
+
+function formatBillableSeconds(seconds: number | null | undefined): string {
+  return `${(seconds ?? 0).toLocaleString()}s`
+}
+
+function formatBillableCharacters(count: number | null | undefined): string {
+  return `${(count ?? 0).toLocaleString()} ${t('usage.characterUnit')}`
 }
 
 import DataTable from '@/components/common/DataTable.vue'

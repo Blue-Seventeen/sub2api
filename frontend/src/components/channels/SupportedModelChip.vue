@@ -113,11 +113,33 @@
             <PricingRow
               v-if="
                 model.pricing.billing_mode === BILLING_MODE_IMAGE &&
-                model.pricing.image_output_price != null
+                model.pricing.per_request_price != null
               "
-              :label="t(prefixKey('imageOutputPrice'))"
-              :value="model.pricing.image_output_price"
-              :unit="t(prefixKey('unitPerRequest'))"
+              :label="t(prefixKey('imageUnitPrice'))"
+              :value="model.pricing.per_request_price"
+              :unit="t(prefixKey('unitPerImage'))"
+              :scale="1"
+            />
+
+            <PricingRow
+              v-if="
+                model.pricing.billing_mode === BILLING_MODE_DURATION &&
+                model.pricing.per_request_price != null
+              "
+              :label="t(prefixKey('durationSecondPrice'))"
+              :value="model.pricing.per_request_price"
+              unit="/s"
+              :scale="1"
+            />
+
+            <PricingRow
+              v-if="
+                model.pricing.billing_mode === BILLING_MODE_CHARACTER &&
+                model.pricing.per_request_price != null
+              "
+              :label="t(prefixKey('characterThousandPrice'))"
+              :value="model.pricing.per_request_price"
+              unit="/1K chars"
               :scale="1"
             />
 
@@ -159,6 +181,8 @@ import {
   BILLING_MODE_TOKEN,
   BILLING_MODE_PER_REQUEST,
   BILLING_MODE_IMAGE,
+  BILLING_MODE_DURATION,
+  BILLING_MODE_CHARACTER,
   type BillingMode
 } from '@/constants/channel'
 // 复用 api/channels.ts 的用户侧最小形态 DTO。
@@ -222,6 +246,10 @@ const billingModeLabel = computed(() => {
       return t(prefixKey('billingModePerRequest'))
     case BILLING_MODE_IMAGE:
       return t(prefixKey('billingModeImage'))
+    case BILLING_MODE_DURATION:
+      return t(prefixKey('billingModeDuration'))
+    case BILLING_MODE_CHARACTER:
+      return t(prefixKey('billingModeCharacter'))
     default:
       return '-'
   }
@@ -233,7 +261,12 @@ function formatRange(min: number, max: number | null): string {
 }
 
 function formatInterval(iv: UserPricingInterval, mode: BillingMode): string {
-  if (mode === BILLING_MODE_PER_REQUEST || mode === BILLING_MODE_IMAGE) {
+  if (
+    mode === BILLING_MODE_PER_REQUEST ||
+    mode === BILLING_MODE_IMAGE ||
+    mode === BILLING_MODE_DURATION ||
+    mode === BILLING_MODE_CHARACTER
+  ) {
     return formatScaled(iv.per_request_price, 1)
   }
   const input = formatScaled(iv.input_price, perMillionScale)

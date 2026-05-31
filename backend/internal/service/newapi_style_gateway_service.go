@@ -40,10 +40,12 @@ const (
 )
 
 const (
-	BillableUnitTypeToken   = "token"
-	BillableUnitTypeImage   = "image"
-	BillableUnitTypeRequest = "request"
-	BillableUnitTypeTask    = "task"
+	BillableUnitTypeToken     = "token"
+	BillableUnitTypeImage     = "image"
+	BillableUnitTypeRequest   = "request"
+	BillableUnitTypeTask      = "task"
+	BillableUnitTypeDuration  = "duration"
+	BillableUnitTypeCharacter = "character"
 )
 
 const (
@@ -52,7 +54,8 @@ const (
 	aliQwenMultimodalGenerationPath = "/api/v1/services/aigc/multimodal-generation/generation"
 	aliQwenTTSGenerationPath        = aliQwenMultimodalGenerationPath
 
-	maxNewAPIStyleMultipartModelBytes = 64 << 10
+	maxNewAPIStyleMultipartModelBytes          = 64 << 10
+	maxNewAPIStyleAudioStreamErrorCaptureBytes = 1 << 20
 )
 
 var ErrNewAPIStyleUnsupportedCapability = errors.New("new-api style capability unsupported")
@@ -282,14 +285,28 @@ func (s *NewAPIStyleGatewayService) Forward(
 
 	writeResponseHeaders(c, resp.Header)
 	if opts.Stream || isEventStream(resp.Header.Get("Content-Type")) {
+		captureAudioStream := isNewAPIStyleASRRoute(opts) || isNewAPIStyleTTSRoute(opts)
+		var streamCapture bytes.Buffer
+		streamReader := io.Reader(resp.Body)
+		if captureAudioStream {
+			streamReader = io.TeeReader(resp.Body, &limitedBufferWriter{
+				buffer: &streamCapture,
+				limit:  maxNewAPIStyleAudioStreamErrorCaptureBytes,
+			})
+		}
 		if c != nil {
 			c.Status(resp.StatusCode)
-			_, _ = io.Copy(c.Writer, resp.Body)
+			_, _ = io.Copy(c.Writer, streamReader)
 			if f, ok := c.Writer.(http.Flusher); ok {
 				f.Flush()
 			}
 		} else {
-			_, _ = io.Copy(io.Discard, resp.Body)
+			_, _ = io.Copy(io.Discard, streamReader)
+		}
+		if captureAudioStream {
+			if upstreamMsg, ok := newAPIStyleAudioUpstreamErrorPayload(opts, streamCapture.Bytes()); ok {
+				return nil, upstreamEndpoint, newAPIStyleAudioErrorPayloadResult(c, account, resp, upstreamReq, streamCapture.Bytes(), upstreamMsg)
+			}
 		}
 		s.applyUsageGuardrails(result, opts, nil)
 		result.Duration = time.Since(start)
@@ -303,6 +320,9 @@ func (s *NewAPIStyleGatewayService) Forward(
 	})
 	if err != nil {
 		return nil, upstreamEndpoint, err
+	}
+	if upstreamMsg, ok := newAPIStyleAudioUpstreamErrorPayload(opts, respBody); ok {
+		return nil, upstreamEndpoint, newAPIStyleAudioErrorPayloadResult(c, account, resp, upstreamReq, respBody, upstreamMsg)
 	}
 	downstreamBody := respBody
 	contentType := strings.TrimSpace(resp.Header.Get("Content-Type"))
@@ -347,18 +367,25 @@ func OpenAIForwardResultFromForwardResult(result *ForwardResult) *OpenAIForwardR
 			CacheReadInputTokens:     result.Usage.CacheReadInputTokens,
 			ImageOutputTokens:        result.Usage.ImageOutputTokens,
 		},
-		Model:            result.Model,
-		UpstreamModel:    result.UpstreamModel,
-		ReasoningEffort:  result.ReasoningEffort,
-		Stream:           result.Stream,
-		Duration:         result.Duration,
-		FirstTokenMs:     result.FirstTokenMs,
-		ImageCount:       result.ImageCount,
-		ImageSize:        result.ImageSize,
-		RequestCount:     result.RequestCount,
-		TaskCount:        result.TaskCount,
-		UsageEstimated:   result.UsageEstimated,
-		BillableUnitType: result.BillableUnitType,
+		Model:                   result.Model,
+		UpstreamModel:           result.UpstreamModel,
+		ReasoningEffort:         result.ReasoningEffort,
+		Stream:                  result.Stream,
+		Duration:                result.Duration,
+		FirstTokenMs:            result.FirstTokenMs,
+		ImageCount:              result.ImageCount,
+		ImageSize:               result.ImageSize,
+		ImageInputSize:          result.ImageInputSize,
+		ImageOutputSize:         result.ImageOutputSize,
+		ImageOutputSizes:        result.ImageOutputSizes,
+		ImageSizeSource:         result.ImageSizeSource,
+		ImageSizeBreakdown:      result.ImageSizeBreakdown,
+		RequestCount:            result.RequestCount,
+		TaskCount:               result.TaskCount,
+		BillableDurationSeconds: result.BillableDurationSeconds,
+		BillableCharacterCount:  result.BillableCharacterCount,
+		UsageEstimated:          result.UsageEstimated,
+		BillableUnitType:        result.BillableUnitType,
 	}
 }
 
@@ -798,6 +825,8 @@ func (s *NewAPIStyleGatewayService) applyUsageGuardrails(result *ForwardResult, 
 	case NewAPIStyleRouteImages, NewAPIStyleRouteQwenImage:
 		result.ImageCount = inferImageCount(opts.RequestBody, respBody)
 		result.ImageSize = inferImageSize(opts.RequestBody)
+		result.ImageInputSize = inferImageRequestedSize(opts.RequestBody)
+		result.ImageOutputSizes = collectOpenAIResponseImageOutputSizesFromJSONBytes(respBody)
 		result.BillableUnitType = BillableUnitTypeImage
 	case NewAPIStyleRouteAudio, NewAPIStyleRouteQwenTTS, NewAPIStyleRouteEmbeddings, NewAPIStyleRouteRerank:
 		result.RequestCount = 1
@@ -809,6 +838,19 @@ func (s *NewAPIStyleGatewayService) applyUsageGuardrails(result *ForwardResult, 
 		result.BillableUnitType = BillableUnitTypeToken
 	}
 
+	if isASRRoute := isNewAPIStyleASRRoute(opts); isASRRoute {
+		if seconds, ok := extractBillableDurationSeconds(respBody, opts.RequestBody, opts.ContentType, isASRRoute); ok {
+			result.BillableDurationSeconds = seconds
+			result.BillableUnitType = BillableUnitTypeDuration
+		}
+	}
+	if isTTSRoute := isNewAPIStyleTTSRoute(opts); isTTSRoute {
+		if chars, ok := extractBillableCharacterCount(opts.RequestBody, opts.ContentType, isTTSRoute); ok {
+			result.BillableCharacterCount = chars
+			result.BillableUnitType = BillableUnitTypeCharacter
+		}
+	}
+
 	if !forwardResultHasBillableUsage(result) {
 		result.Usage.InputTokens = estimateNewAPIStyleInputTokens(opts.RequestBody)
 		result.UsageEstimated = true
@@ -817,6 +859,184 @@ func (s *NewAPIStyleGatewayService) applyUsageGuardrails(result *ForwardResult, 
 			result.BillableUnitType = BillableUnitTypeRequest
 		}
 	}
+}
+
+func isNewAPIStyleASRRoute(opts NewAPIStyleForwardOptions) bool {
+	if opts.Route == NewAPIStyleRouteAudio {
+		path := strings.ToLower(strings.TrimSpace(opts.InboundPath))
+		return strings.Contains(path, "transcriptions") || strings.Contains(path, "translations")
+	}
+	if opts.Route != NewAPIStyleRouteChatCompletions &&
+		opts.Route != NewAPIStyleRouteMessages &&
+		opts.Route != NewAPIStyleRouteResponses {
+		return false
+	}
+	model := strings.ToLower(firstNonEmptyText(opts.Model, ExtractNewAPIStyleModel(opts.RequestBody, opts.ContentType)))
+	return strings.Contains(model, "asr") && requestContainsAudioInput(opts.RequestBody, opts.ContentType)
+}
+
+func isNewAPIStyleTTSRoute(opts NewAPIStyleForwardOptions) bool {
+	if opts.Route == NewAPIStyleRouteQwenTTS {
+		return true
+	}
+	if opts.Route != NewAPIStyleRouteAudio {
+		return false
+	}
+	path := strings.ToLower(strings.TrimSpace(opts.InboundPath))
+	return strings.Contains(path, "speech")
+}
+
+func newAPIStyleAudioUpstreamErrorPayload(opts NewAPIStyleForwardOptions, body []byte) (string, bool) {
+	if len(body) == 0 || (!isNewAPIStyleASRRoute(opts) && !isNewAPIStyleTTSRoute(opts)) {
+		return "", false
+	}
+	if json.Valid(body) {
+		return newAPIStyleAudioJSONErrorPayload(body)
+	}
+	return newAPIStyleAudioSSEErrorPayload(body)
+}
+
+func newAPIStyleAudioJSONErrorPayload(body []byte) (string, bool) {
+	value := gjson.GetBytes(body, "error")
+	if !value.Exists() || value.Raw == "null" {
+		return "", false
+	}
+	if value.Type == gjson.String {
+		msg := strings.TrimSpace(value.String())
+		return msg, msg != ""
+	}
+	if value.IsObject() {
+		msg := strings.TrimSpace(firstNonEmptyText(
+			value.Get("message").String(),
+			value.Get("msg").String(),
+			value.Get("code").String(),
+		))
+		if msg == "" {
+			msg = "upstream returned error payload"
+		}
+		return msg, true
+	}
+	return "upstream returned error payload", true
+}
+
+func newAPIStyleAudioSSEErrorPayload(body []byte) (string, bool) {
+	var eventName string
+	for _, rawLine := range strings.Split(string(body), "\n") {
+		line := strings.TrimSpace(strings.TrimSuffix(rawLine, "\r"))
+		if line == "" {
+			eventName = ""
+			continue
+		}
+		if event, ok := strings.CutPrefix(strings.ToLower(line), "event:"); ok {
+			eventName = strings.TrimSpace(event)
+			continue
+		}
+		if !sseDataRe.MatchString(line) {
+			continue
+		}
+		data := strings.TrimSpace(sseDataRe.ReplaceAllString(line, ""))
+		if data == "" || data == "[DONE]" {
+			continue
+		}
+		if msg, ok := newAPIStyleAudioJSONErrorPayload([]byte(data)); ok {
+			return msg, true
+		}
+		if strings.Contains(eventName, "error") {
+			if json.Valid([]byte(data)) {
+				if msg := strings.TrimSpace(firstNonEmptyText(
+					gjson.Get(data, "message").String(),
+					gjson.Get(data, "msg").String(),
+					gjson.Get(data, "code").String(),
+				)); msg != "" {
+					return msg, true
+				}
+			}
+			return data, true
+		}
+	}
+	return "", false
+}
+
+func newAPIStyleAudioErrorPayloadResult(
+	c *gin.Context,
+	account *Account,
+	resp *http.Response,
+	upstreamReq *http.Request,
+	respBody []byte,
+	upstreamMsg string,
+) error {
+	upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+	if upstreamMsg == "" {
+		upstreamMsg = "upstream returned error payload"
+	}
+	upstreamStatus := 0
+	var responseHeaders http.Header
+	var upstreamRequestID string
+	if resp != nil {
+		upstreamStatus = resp.StatusCode
+		responseHeaders = resp.Header.Clone()
+		upstreamRequestID = firstNonEmptyText(resp.Header.Get("x-request-id"), resp.Header.Get("request-id"))
+	}
+	upstreamURL := ""
+	if upstreamReq != nil && upstreamReq.URL != nil {
+		upstreamURL = safeUpstreamURL(upstreamReq.URL.String())
+	}
+	setOpsUpstreamError(c, http.StatusBadGateway, upstreamMsg, "")
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		Platform:             account.Platform,
+		AccountID:            account.ID,
+		AccountName:          account.Name,
+		UpstreamStatusCode:   upstreamStatus,
+		UpstreamRequestID:    upstreamRequestID,
+		UpstreamURL:          upstreamURL,
+		UpstreamResponseBody: string(respBody),
+		Kind:                 "http_error",
+		Message:              upstreamMsg,
+	})
+	return &UpstreamFailoverError{
+		StatusCode:      http.StatusBadGateway,
+		ResponseBody:    respBody,
+		ResponseHeaders: responseHeaders,
+	}
+}
+
+type limitedBufferWriter struct {
+	buffer *bytes.Buffer
+	limit  int
+}
+
+func (w *limitedBufferWriter) Write(p []byte) (int, error) {
+	n := len(p)
+	if w == nil || w.buffer == nil || w.limit <= 0 || w.buffer.Len() >= w.limit {
+		return n, nil
+	}
+	remaining := w.limit - w.buffer.Len()
+	if remaining > len(p) {
+		remaining = len(p)
+	}
+	_, _ = w.buffer.Write(p[:remaining])
+	return n, nil
+}
+
+func requestContainsAudioInput(body []byte, contentType string) bool {
+	if len(body) == 0 {
+		return false
+	}
+	if isAudioContentType(contentType) {
+		return true
+	}
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err == nil && strings.HasPrefix(strings.ToLower(mediaType), "multipart/") {
+		return true
+	}
+	if !json.Valid(body) {
+		return false
+	}
+	lower := strings.ToLower(string(body))
+	return strings.Contains(lower, "input_audio") ||
+		strings.Contains(lower, "data:audio/") ||
+		strings.Contains(lower, `"audio"`) ||
+		strings.Contains(lower, `"audio_url"`)
 }
 
 func parseNewAPIStyleUsage(body []byte) ClaudeUsage {
@@ -965,6 +1185,24 @@ func inferImageSize(requestBody []byte) string {
 	}
 }
 
+func inferImageRequestedSize(requestBody []byte) string {
+	size := strings.TrimSpace(firstNonEmptyText(
+		gjson.GetBytes(requestBody, "size").String(),
+		gjson.GetBytes(requestBody, "parameters.size").String(),
+	))
+	if size == "" {
+		return ""
+	}
+	normalized := strings.ToLower(strings.ReplaceAll(size, "*", "x"))
+	if width, height, ok := parseImageBillingDimensions(normalized); ok {
+		return fmt.Sprintf("%dx%d", width, height)
+	}
+	if tier, ok := ClassifyImageBillingTier(normalized); ok {
+		return tier
+	}
+	return size
+}
+
 func estimateNewAPIStyleInputTokens(body []byte) int {
 	if len(body) == 0 {
 		return 0
@@ -993,7 +1231,9 @@ func forwardResultHasBillableUsage(result *ForwardResult) bool {
 		result.Usage.ImageOutputTokens > 0 ||
 		result.ImageCount > 0 ||
 		result.RequestCount > 0 ||
-		result.TaskCount > 0
+		result.TaskCount > 0 ||
+		result.BillableDurationSeconds > 0 ||
+		result.BillableCharacterCount > 0
 }
 
 func isEventStream(contentType string) bool {

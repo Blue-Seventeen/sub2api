@@ -325,6 +325,46 @@ func TestCalculateStatsCost_ImageBilling_PriceNil(t *testing.T) {
 	require.Nil(t, result)
 }
 
+func TestCalculateStatsCost_DurationBilling(t *testing.T) {
+	pricing := &ChannelModelPricing{
+		BillingMode:     BillingModeDuration,
+		PerRequestPrice: testPtrFloat64(0.02),
+	}
+	result := calculateStatsCost(pricing, UsageTokens{}, 1, accountStatsBillableQuantity{DurationSeconds: 12})
+	require.NotNil(t, result)
+	require.InDelta(t, 0.24, *result, 1e-12)
+}
+
+func TestCalculateStatsCost_DurationBilling_FallbackSecond(t *testing.T) {
+	pricing := &ChannelModelPricing{
+		BillingMode:     BillingModeDuration,
+		PerRequestPrice: testPtrFloat64(0.02),
+	}
+	result := calculateStatsCost(pricing, UsageTokens{}, 1)
+	require.NotNil(t, result)
+	require.InDelta(t, 0.02, *result, 1e-12)
+}
+
+func TestCalculateStatsCost_CharacterBilling(t *testing.T) {
+	pricing := &ChannelModelPricing{
+		BillingMode:     BillingModeCharacter,
+		PerRequestPrice: testPtrFloat64(0.03),
+	}
+	result := calculateStatsCost(pricing, UsageTokens{}, 1, accountStatsBillableQuantity{CharacterCount: 2500})
+	require.NotNil(t, result)
+	require.InDelta(t, 0.075, *result, 1e-12)
+}
+
+func TestCalculateStatsCost_CharacterBilling_FallbackThousandCharacters(t *testing.T) {
+	pricing := &ChannelModelPricing{
+		BillingMode:     BillingModeCharacter,
+		PerRequestPrice: testPtrFloat64(0.03),
+	}
+	result := calculateStatsCost(pricing, UsageTokens{}, 1)
+	require.NotNil(t, result)
+	require.InDelta(t, 0.03, *result, 1e-12)
+}
+
 func TestCalculateStatsCost_DefaultBillingMode_FallsToToken(t *testing.T) {
 	// BillingMode is empty string (default) → falls into token billing
 	pricing := &ChannelModelPricing{

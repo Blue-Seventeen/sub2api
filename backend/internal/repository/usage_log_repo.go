@@ -28,7 +28,7 @@ import (
 	gocache "github.com/patrickmn/go-cache"
 )
 
-const usageLogSelectColumns = "id, user_id, api_key_id, account_id, request_id, model, requested_model, upstream_model, group_id, subscription_id, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cache_creation_5m_tokens, cache_creation_1h_tokens, image_output_tokens, image_output_cost, input_cost, output_cost, cache_creation_cost, cache_read_cost, total_cost, actual_cost, real_actual_cost, unified_rate_multiplier, rate_multiplier, account_rate_multiplier, billing_type, request_type, stream, openai_ws_mode, duration_ms, first_token_ms, user_agent, ip_address, image_count, image_size, image_input_size, image_output_size, image_size_source, image_size_breakdown, request_count, task_count, usage_estimated, billable_unit_type, service_tier, reasoning_effort, inbound_endpoint, upstream_endpoint, client_profile, compatibility_route, fallback_chain, upstream_transport, cache_ttl_overridden, channel_id, model_mapping_chain, billing_tier, billing_mode, account_stats_cost, created_at"
+const usageLogSelectColumns = "id, user_id, api_key_id, account_id, request_id, model, requested_model, upstream_model, group_id, subscription_id, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cache_creation_5m_tokens, cache_creation_1h_tokens, image_output_tokens, image_output_cost, input_cost, output_cost, cache_creation_cost, cache_read_cost, total_cost, actual_cost, real_actual_cost, unified_rate_multiplier, rate_multiplier, account_rate_multiplier, billing_type, request_type, stream, openai_ws_mode, duration_ms, first_token_ms, user_agent, ip_address, image_count, image_size, image_input_size, image_output_size, image_size_source, image_size_breakdown, request_count, task_count, billable_duration_seconds, billable_character_count, usage_estimated, billable_unit_type, service_tier, reasoning_effort, inbound_endpoint, upstream_endpoint, client_profile, compatibility_route, fallback_chain, upstream_transport, cache_ttl_overridden, channel_id, model_mapping_chain, billing_tier, billing_mode, account_stats_cost, created_at"
 
 // usageLogInsertArgTypes must stay in the same order as:
 //  1. prepareUsageLogInsert().args
@@ -81,6 +81,8 @@ var usageLogInsertArgTypes = [...]string{
 	"jsonb",       // image_size_breakdown
 	"integer",     // request_count
 	"integer",     // task_count
+	"integer",     // billable_duration_seconds
+	"integer",     // billable_character_count
 	"boolean",     // usage_estimated
 	"text",        // billable_unit_type
 	"text",        // service_tier
@@ -130,6 +132,8 @@ const usageLogSuccessFilterUL = `(
 	OR COALESCE(ul.image_count, 0) > 0
 	OR COALESCE(ul.request_count, 0) > 0
 	OR COALESCE(ul.task_count, 0) > 0
+	OR COALESCE(ul.billable_duration_seconds, 0) > 0
+	OR COALESCE(ul.billable_character_count, 0) > 0
 )`
 
 // usageLogEffectivePlatformExpr 用于按"有效平台"维度聚合 usage_logs：
@@ -423,6 +427,8 @@ func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,
 			image_size_breakdown,
 			request_count,
 			task_count,
+			billable_duration_seconds,
+			billable_character_count,
 			usage_estimated,
 			billable_unit_type,
 			service_tier,
@@ -446,7 +452,7 @@ func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,
 			$10, $11, $12, $13,
 			$14, $15, $16, $17,
 			$18, $19, $20, $21, $22, $23,
-			$24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60
+			$24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 		RETURNING id, created_at
@@ -875,6 +881,8 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 			image_size_breakdown,
 			request_count,
 			task_count,
+			billable_duration_seconds,
+			billable_character_count,
 			usage_estimated,
 			billable_unit_type,
 			service_tier,
@@ -966,6 +974,8 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				image_size_breakdown,
 				request_count,
 				task_count,
+				billable_duration_seconds,
+				billable_character_count,
 				usage_estimated,
 				billable_unit_type,
 				service_tier,
@@ -1028,6 +1038,8 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				image_size_breakdown,
 				request_count,
 				task_count,
+				billable_duration_seconds,
+				billable_character_count,
 				usage_estimated,
 				billable_unit_type,
 				service_tier,
@@ -1130,6 +1142,8 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			image_size_breakdown,
 			request_count,
 			task_count,
+			billable_duration_seconds,
+			billable_character_count,
 			usage_estimated,
 			billable_unit_type,
 			service_tier,
@@ -1218,6 +1232,8 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			image_size_breakdown,
 			request_count,
 			task_count,
+			billable_duration_seconds,
+			billable_character_count,
 			usage_estimated,
 			billable_unit_type,
 			service_tier,
@@ -1280,6 +1296,8 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			image_size_breakdown,
 			request_count,
 			task_count,
+			billable_duration_seconds,
+			billable_character_count,
 			usage_estimated,
 			billable_unit_type,
 			service_tier,
@@ -1350,6 +1368,8 @@ func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared 
 			image_size_breakdown,
 			request_count,
 			task_count,
+			billable_duration_seconds,
+			billable_character_count,
 			usage_estimated,
 			billable_unit_type,
 			service_tier,
@@ -1373,7 +1393,7 @@ func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared 
 			$10, $11, $12, $13,
 			$14, $15, $16, $17,
 			$18, $19, $20, $21, $22, $23,
-			$24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60
+			$24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 	`, prepared.args...)
@@ -1477,6 +1497,8 @@ func prepareUsageLogInsert(log *service.UsageLog) usageLogInsertPrepared {
 			imageSizeBreakdown,
 			log.RequestCount,
 			log.TaskCount,
+			log.BillableDurationSeconds,
+			log.BillableCharacterCount,
 			log.UsageEstimated,
 			billableUnitType,
 			serviceTier,
@@ -4371,67 +4393,69 @@ func (r *usageLogRepository) loadSubscriptions(ctx context.Context, ids []int64)
 
 func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, error) {
 	var (
-		id                    int64
-		userID                int64
-		apiKeyID              int64
-		accountID             int64
-		requestID             sql.NullString
-		model                 string
-		requestedModel        sql.NullString
-		upstreamModel         sql.NullString
-		groupID               sql.NullInt64
-		subscriptionID        sql.NullInt64
-		inputTokens           int
-		outputTokens          int
-		cacheCreationTokens   int
-		cacheReadTokens       int
-		cacheCreation5m       int
-		cacheCreation1h       int
-		imageOutputTokens     int
-		imageOutputCost       float64
-		inputCost             float64
-		outputCost            float64
-		cacheCreationCost     float64
-		cacheReadCost         float64
-		totalCost             float64
-		actualCost            float64
-		realActualCost        float64
-		unifiedRateMultiplier float64
-		rateMultiplier        float64
-		accountRateMultiplier sql.NullFloat64
-		billingType           int16
-		requestTypeRaw        int16
-		stream                bool
-		openaiWSMode          bool
-		durationMs            sql.NullInt64
-		firstTokenMs          sql.NullInt64
-		userAgent             sql.NullString
-		ipAddress             sql.NullString
-		imageCount            int
-		imageSize             sql.NullString
-		imageInputSize        sql.NullString
-		imageOutputSize       sql.NullString
-		imageSizeSource       sql.NullString
-		imageSizeBreakdown    sql.NullString
-		requestCount          int
-		taskCount             int
-		usageEstimated        bool
-		billableUnitType      sql.NullString
-		serviceTier           sql.NullString
-		reasoningEffort       sql.NullString
-		inboundEndpoint       sql.NullString
-		upstreamEndpoint      sql.NullString
-		clientProfile         sql.NullString
-		compatibilityRoute    sql.NullString
-		fallbackChain         sql.NullString
-		upstreamTransport     sql.NullString
-		cacheTTLOverridden    bool
-		channelID             sql.NullInt64
-		modelMappingChain     sql.NullString
-		billingTier           sql.NullString
-		billingMode           sql.NullString
-		accountStatsCost      sql.NullFloat64
-		createdAt             time.Time
+		id                      int64
+		userID                  int64
+		apiKeyID                int64
+		accountID               int64
+		requestID               sql.NullString
+		model                   string
+		requestedModel          sql.NullString
+		upstreamModel           sql.NullString
+		groupID                 sql.NullInt64
+		subscriptionID          sql.NullInt64
+		inputTokens             int
+		outputTokens            int
+		cacheCreationTokens     int
+		cacheReadTokens         int
+		cacheCreation5m         int
+		cacheCreation1h         int
+		imageOutputTokens       int
+		imageOutputCost         float64
+		inputCost               float64
+		outputCost              float64
+		cacheCreationCost       float64
+		cacheReadCost           float64
+		totalCost               float64
+		actualCost              float64
+		realActualCost          float64
+		unifiedRateMultiplier   float64
+		rateMultiplier          float64
+		accountRateMultiplier   sql.NullFloat64
+		billingType             int16
+		requestTypeRaw          int16
+		stream                  bool
+		openaiWSMode            bool
+		durationMs              sql.NullInt64
+		firstTokenMs            sql.NullInt64
+		userAgent               sql.NullString
+		ipAddress               sql.NullString
+		imageCount              int
+		imageSize               sql.NullString
+		imageInputSize          sql.NullString
+		imageOutputSize         sql.NullString
+		imageSizeSource         sql.NullString
+		imageSizeBreakdown      sql.NullString
+		requestCount            int
+		taskCount               int
+		billableDurationSeconds int
+		billableCharacterCount  int
+		usageEstimated          bool
+		billableUnitType        sql.NullString
+		serviceTier             sql.NullString
+		reasoningEffort         sql.NullString
+		inboundEndpoint         sql.NullString
+		upstreamEndpoint        sql.NullString
+		clientProfile           sql.NullString
+		compatibilityRoute      sql.NullString
+		fallbackChain           sql.NullString
+		upstreamTransport       sql.NullString
+		cacheTTLOverridden      bool
+		channelID               sql.NullInt64
+		modelMappingChain       sql.NullString
+		billingTier             sql.NullString
+		billingMode             sql.NullString
+		accountStatsCost        sql.NullFloat64
+		createdAt               time.Time
 	)
 
 	if err := scanner.Scan(
@@ -4479,6 +4503,8 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 		&imageSizeBreakdown,
 		&requestCount,
 		&taskCount,
+		&billableDurationSeconds,
+		&billableCharacterCount,
 		&usageEstimated,
 		&billableUnitType,
 		&serviceTier,
@@ -4501,38 +4527,40 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 	}
 
 	log := &service.UsageLog{
-		ID:                    id,
-		UserID:                userID,
-		APIKeyID:              apiKeyID,
-		AccountID:             accountID,
-		Model:                 model,
-		RequestedModel:        coalesceTrimmedString(requestedModel, model),
-		InputTokens:           inputTokens,
-		OutputTokens:          outputTokens,
-		CacheCreationTokens:   cacheCreationTokens,
-		CacheReadTokens:       cacheReadTokens,
-		CacheCreation5mTokens: cacheCreation5m,
-		CacheCreation1hTokens: cacheCreation1h,
-		ImageOutputTokens:     imageOutputTokens,
-		ImageOutputCost:       imageOutputCost,
-		InputCost:             inputCost,
-		OutputCost:            outputCost,
-		CacheCreationCost:     cacheCreationCost,
-		CacheReadCost:         cacheReadCost,
-		TotalCost:             totalCost,
-		ActualCost:            actualCost,
-		RealActualCost:        realActualCost,
-		UnifiedRateMultiplier: unifiedRateMultiplier,
-		RateMultiplier:        rateMultiplier,
-		AccountRateMultiplier: nullFloat64Ptr(accountRateMultiplier),
-		BillingType:           int8(billingType),
-		RequestType:           service.RequestTypeFromInt16(requestTypeRaw),
-		ImageCount:            imageCount,
-		RequestCount:          requestCount,
-		TaskCount:             taskCount,
-		UsageEstimated:        usageEstimated,
-		CacheTTLOverridden:    cacheTTLOverridden,
-		CreatedAt:             createdAt,
+		ID:                      id,
+		UserID:                  userID,
+		APIKeyID:                apiKeyID,
+		AccountID:               accountID,
+		Model:                   model,
+		RequestedModel:          coalesceTrimmedString(requestedModel, model),
+		InputTokens:             inputTokens,
+		OutputTokens:            outputTokens,
+		CacheCreationTokens:     cacheCreationTokens,
+		CacheReadTokens:         cacheReadTokens,
+		CacheCreation5mTokens:   cacheCreation5m,
+		CacheCreation1hTokens:   cacheCreation1h,
+		ImageOutputTokens:       imageOutputTokens,
+		ImageOutputCost:         imageOutputCost,
+		InputCost:               inputCost,
+		OutputCost:              outputCost,
+		CacheCreationCost:       cacheCreationCost,
+		CacheReadCost:           cacheReadCost,
+		TotalCost:               totalCost,
+		ActualCost:              actualCost,
+		RealActualCost:          realActualCost,
+		UnifiedRateMultiplier:   unifiedRateMultiplier,
+		RateMultiplier:          rateMultiplier,
+		AccountRateMultiplier:   nullFloat64Ptr(accountRateMultiplier),
+		BillingType:             int8(billingType),
+		RequestType:             service.RequestTypeFromInt16(requestTypeRaw),
+		ImageCount:              imageCount,
+		RequestCount:            requestCount,
+		TaskCount:               taskCount,
+		BillableDurationSeconds: billableDurationSeconds,
+		BillableCharacterCount:  billableCharacterCount,
+		UsageEstimated:          usageEstimated,
+		CacheTTLOverridden:      cacheTTLOverridden,
+		CreatedAt:               createdAt,
 	}
 	// 先回填 legacy 字段，再基于 legacy + request_type 计算最终请求类型，保证历史数据兼容。
 	log.Stream = stream

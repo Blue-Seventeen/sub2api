@@ -1158,7 +1158,7 @@ func (s *CompatibleGatewayService) handleMessagesResponse(resp *http.Response, c
 	if parsed := parseClaudeUsageFromResponseBody(body); parsed != nil {
 		usage = *parsed
 	}
-	return buildCompatibleForwardResult(resp, prepared, usage, false, startTime, nil)
+	return buildCompatibleForwardResult(resp, prepared, usage, false, startTime, nil, body)
 }
 
 func (s *CompatibleGatewayService) handleResponsesResponse(resp *http.Response, c *gin.Context, prepared *compatiblePreparedRequest, startTime time.Time) *ForwardResult {
@@ -1211,7 +1211,7 @@ func (s *CompatibleGatewayService) handleResponsesResponse(resp *http.Response, 
 	if parsed, ok := extractOpenAIUsageFromJSONBytes(body); ok {
 		usage = openAIUsageToClaudeUsage(parsed)
 	}
-	return buildCompatibleForwardResult(resp, prepared, usage, false, startTime, nil)
+	return buildCompatibleForwardResult(resp, prepared, usage, false, startTime, nil, body)
 }
 
 func (s *CompatibleGatewayService) handleChatPassthrough(resp *http.Response, c *gin.Context, prepared *compatiblePreparedRequest, startTime time.Time) *ForwardResult {
@@ -1256,7 +1256,7 @@ func (s *CompatibleGatewayService) handleChatPassthrough(resp *http.Response, c 
 	if parsed, ok := extractOpenAIUsageFromJSONBytes(body); ok {
 		usage = openAIUsageToClaudeUsage(parsed)
 	}
-	return buildCompatibleForwardResult(resp, prepared, usage, false, startTime, nil)
+	return buildCompatibleForwardResult(resp, prepared, usage, false, startTime, nil, body)
 }
 
 func (s *CompatibleGatewayService) handleChatAsResponses(resp *http.Response, c *gin.Context, prepared *compatiblePreparedRequest, startTime time.Time) *ForwardResult {
@@ -1277,7 +1277,7 @@ func (s *CompatibleGatewayService) handleChatAsResponses(resp *http.Response, c 
 		if responsesResp != nil && responsesResp.Usage != nil {
 			usage = responsesUsageToClaudeUsage(responsesResp.Usage)
 		}
-		return buildCompatibleForwardResult(resp, prepared, usage, false, startTime, nil)
+		return buildCompatibleForwardResult(resp, prepared, usage, false, startTime, nil, body)
 	}
 
 	c.Header("Content-Type", "text/event-stream")
@@ -1433,7 +1433,7 @@ func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *
 				CacheReadInputTokens: anthropicResp.Usage.CacheReadInputTokens,
 			}
 		}
-		return buildCompatibleForwardResult(resp, prepared, usage, false, startTime, nil)
+		return buildCompatibleForwardResult(resp, prepared, usage, false, startTime, nil, body)
 	}
 
 	c.Header("Content-Type", "text/event-stream")
@@ -1647,12 +1647,13 @@ func buildCompatibleForwardResult(
 	stream bool,
 	startTime time.Time,
 	firstTokenMs *int,
+	responseBody ...[]byte,
 ) *ForwardResult {
 	requestID := ""
 	if resp != nil {
 		requestID = resp.Header.Get("x-request-id")
 	}
-	return &ForwardResult{
+	result := &ForwardResult{
 		RequestID:     requestID,
 		Usage:         usage,
 		Model:         prepared.OriginalModel,
@@ -1661,6 +1662,36 @@ func buildCompatibleForwardResult(
 		Duration:      time.Since(startTime),
 		FirstTokenMs:  firstTokenMs,
 	}
+	var body []byte
+	if len(responseBody) > 0 {
+		body = responseBody[0]
+	}
+	applyCompatibleBillableQuantities(result, prepared, body)
+	return result
+}
+
+func applyCompatibleBillableQuantities(result *ForwardResult, prepared *compatiblePreparedRequest, responseBody []byte) {
+	if result == nil || prepared == nil {
+		return
+	}
+	if !isCompatibleASRRequest(prepared) {
+		return
+	}
+	if seconds, ok := extractBillableDurationSeconds(responseBody, prepared.RequestBody, "application/json", true); ok {
+		result.BillableDurationSeconds = seconds
+		result.BillableUnitType = BillableUnitTypeDuration
+	}
+}
+
+func isCompatibleASRRequest(prepared *compatiblePreparedRequest) bool {
+	if prepared == nil || compatiblePreparedClientRoute(prepared) != CompatibleRouteChatCompletions {
+		return false
+	}
+	model := strings.ToLower(strings.TrimSpace(firstNonEmptyText(prepared.OriginalModel, prepared.UpstreamModel)))
+	if !strings.Contains(model, "asr") {
+		return false
+	}
+	return requestContainsAudioInput(prepared.RequestBody, "application/json")
 }
 
 func markCompatibleFirstToken(startTime time.Time, firstTokenMs **int, payload string) {

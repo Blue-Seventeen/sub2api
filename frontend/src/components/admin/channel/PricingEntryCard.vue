@@ -204,7 +204,7 @@
           <!-- Image tiers -->
           <div class="mt-3 flex items-center justify-between">
             <label class="text-xs font-medium text-gray-500 dark:text-gray-400">
-              {{ t('admin.channels.form.imageTiers', '图片计费层级（按次）') }}
+              {{ t('admin.channels.form.imageTiers', '图片计费层级（按张/规格）') }}
             </label>
             <button type="button" @click="addImageTier" class="text-xs text-primary-600 hover:text-primary-700">
               + {{ t('admin.channels.form.addTier', '添加层级') }}
@@ -220,6 +220,36 @@
               @remove="removeInterval(idx)"
             />
           </div>
+        </div>
+
+        <!-- Duration mode -->
+        <div v-else-if="entry.billing_mode === 'duration'">
+          <label class="mt-3 block text-xs font-medium text-gray-500 dark:text-gray-400">
+            {{ t('admin.channels.form.durationSecondPrice', '每秒价格') }}
+            <span class="ml-1 font-normal text-gray-400">{{ getDisplayCurrencySymbol() }}/s</span>
+          </label>
+          <div class="mt-1 w-48">
+            <input :value="entry.per_request_price" @input="emitField('per_request_price', ($event.target as HTMLInputElement).value)"
+              type="number" step="any" min="0" class="input text-sm" :placeholder="t('admin.channels.form.pricePlaceholder', '默认')" />
+          </div>
+          <p class="mt-2 text-xs text-gray-400">
+            {{ t('admin.channels.form.durationBillingHint', 'ASR 按响应或上传音频时长计费，缺失时按 1 秒兜底。') }}
+          </p>
+        </div>
+
+        <!-- Character mode -->
+        <div v-else-if="entry.billing_mode === 'character'">
+          <label class="mt-3 block text-xs font-medium text-gray-500 dark:text-gray-400">
+            {{ t('admin.channels.form.characterThousandPrice', '每 1000 字符价格') }}
+            <span class="ml-1 font-normal text-gray-400">{{ getDisplayCurrencySymbol() }}/1K chars</span>
+          </label>
+          <div class="mt-1 w-48">
+            <input :value="entry.per_request_price" @input="emitField('per_request_price', ($event.target as HTMLInputElement).value)"
+              type="number" step="any" min="0" class="input text-sm" :placeholder="t('admin.channels.form.pricePlaceholder', '默认')" />
+          </div>
+          <p class="mt-2 text-xs text-gray-400">
+            {{ t('admin.channels.form.characterBillingHint', 'TTS 按请求文本字符数计费，未提取到文本时按 1000 字符兜底。') }}
+          </p>
         </div>
       </div>
     </div>
@@ -257,7 +287,9 @@ const collapsed = ref(props.entry.models.length > 0)
 const billingModeOptions = computed(() => [
   { value: 'token', label: 'Token' },
   { value: 'per_request', label: t('admin.channels.billingMode.perRequest', '按次') },
-  { value: 'image', label: t('admin.channels.billingMode.image', '图片（按次）') }
+  { value: 'image', label: t('admin.channels.billingMode.image', '图片（按张/规格）') },
+  { value: 'duration', label: t('admin.channels.billingMode.duration', 'ASR（按秒）') },
+  { value: 'character', label: t('admin.channels.billingMode.character', 'TTS（按字符）') }
 ])
 
 const billingModeLabel = computed(() => {

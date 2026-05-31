@@ -7,10 +7,14 @@ export type ChannelStatus = typeof CHANNEL_STATUS_ACTIVE | typeof CHANNEL_STATUS
 export const BILLING_MODE_TOKEN = 'token' as const
 export const BILLING_MODE_PER_REQUEST = 'per_request' as const
 export const BILLING_MODE_IMAGE = 'image' as const
+export const BILLING_MODE_DURATION = 'duration' as const
+export const BILLING_MODE_CHARACTER = 'character' as const
 export type BillingMode =
   | typeof BILLING_MODE_TOKEN
   | typeof BILLING_MODE_PER_REQUEST
   | typeof BILLING_MODE_IMAGE
+  | typeof BILLING_MODE_DURATION
+  | typeof BILLING_MODE_CHARACTER
 
 /** Billing-model-source values (must match service.BillingModelSource* constants in Go). */
 export const BILLING_MODEL_SOURCE_REQUESTED = 'requested' as const

@@ -79,7 +79,7 @@ func (r *usageBillingRepository) claimUsageBillingKey(ctx context.Context, tx *s
 		`, cmd.RequestID, cmd.APIKeyID).Scan(&existingFingerprint); err != nil {
 			return false, err
 		}
-		if strings.TrimSpace(existingFingerprint) != strings.TrimSpace(cmd.RequestFingerprint) {
+		if !cmd.MatchesRequestFingerprint(existingFingerprint) {
 			return false, service.ErrUsageBillingRequestConflict
 		}
 		return false, nil
@@ -94,7 +94,7 @@ func (r *usageBillingRepository) claimUsageBillingKey(ctx context.Context, tx *s
 		WHERE request_id = $1 AND api_key_id = $2
 	`, cmd.RequestID, cmd.APIKeyID).Scan(&archivedFingerprint)
 	if err == nil {
-		if strings.TrimSpace(archivedFingerprint) != strings.TrimSpace(cmd.RequestFingerprint) {
+		if !cmd.MatchesRequestFingerprint(archivedFingerprint) {
 			return false, service.ErrUsageBillingRequestConflict
 		}
 		return false, nil

@@ -259,6 +259,49 @@ func TestCompatibleGatewayServiceHandleChatPassthrough_NonStreamTracksDuration(t
 	}
 }
 
+func TestCompatibleGatewayServiceHandleChatPassthrough_ASRDurationBilling(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"x-request-id": []string{"req-asr-duration"},
+			"Content-Type": []string{"application/json"},
+		},
+		Body: io.NopCloser(strings.NewReader(`{
+			"id":"chatcmpl_test",
+			"object":"chat.completion",
+			"model":"qwen3-asr-flash",
+			"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop","index":0}],
+			"usage":{"seconds":2.1,"prompt_tokens":18,"completion_tokens":9,"total_tokens":27}
+		}`)),
+	}
+
+	svc := &CompatibleGatewayService{}
+	prepared := &compatiblePreparedRequest{
+		OriginalModel: "qwen3-asr-flash",
+		UpstreamModel: "qwen3-asr-flash",
+		ClientStream:  false,
+		ClientRoute:   CompatibleRouteChatCompletions,
+		RequestBody:   []byte(`{"model":"qwen3-asr-flash","messages":[{"role":"user","content":[{"type":"input_audio","input_audio":{"data":"data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMA==","format":"mp3"}}]}]}`),
+	}
+
+	result := svc.handleChatPassthrough(resp, c, prepared, time.Now().Add(-30*time.Millisecond))
+
+	if result.BillableDurationSeconds != 3 {
+		t.Fatalf("BillableDurationSeconds = %d, want 3", result.BillableDurationSeconds)
+	}
+	if result.BillableUnitType != BillableUnitTypeDuration {
+		t.Fatalf("BillableUnitType = %q, want %q", result.BillableUnitType, BillableUnitTypeDuration)
+	}
+	if result.Usage.InputTokens != 18 || result.Usage.OutputTokens != 9 {
+		t.Fatalf("usage = %+v, want input=18 output=9", result.Usage)
+	}
+}
+
 func TestCompatibleGatewayService_NonStreamTooLargeReturnsBadGateway(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

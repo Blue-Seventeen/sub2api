@@ -230,23 +230,25 @@ type OpenAIForwardResult struct {
 	ServiceTier *string
 	// ReasoningEffort is extracted from request body (reasoning.effort) or derived from model suffix.
 	// Stored for usage records display; nil means not provided / not applicable.
-	ReasoningEffort    *string
-	Stream             bool
-	OpenAIWSMode       bool
-	ResponseHeaders    http.Header
-	Duration           time.Duration
-	FirstTokenMs       *int
-	ImageCount         int
-	ImageSize          string
-	ImageInputSize     string
-	ImageOutputSize    string
-	ImageOutputSizes   []string
-	ImageSizeSource    string
-	ImageSizeBreakdown map[string]int
-	RequestCount       int
-	TaskCount          int
-	UsageEstimated     bool
-	BillableUnitType   string
+	ReasoningEffort         *string
+	Stream                  bool
+	OpenAIWSMode            bool
+	ResponseHeaders         http.Header
+	Duration                time.Duration
+	FirstTokenMs            *int
+	ImageCount              int
+	ImageSize               string
+	ImageInputSize          string
+	ImageOutputSize         string
+	ImageOutputSizes        []string
+	ImageSizeSource         string
+	ImageSizeBreakdown      map[string]int
+	RequestCount            int
+	TaskCount               int
+	BillableDurationSeconds int
+	BillableCharacterCount  int
+	UsageEstimated          bool
+	BillableUnitType        string
 }
 
 type OpenAIWSRetryMetricsSnapshot struct {
@@ -5859,36 +5861,38 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}
 
 	usageLog := &UsageLog{
-		UserID:              user.ID,
-		APIKeyID:            apiKey.ID,
-		AccountID:           account.ID,
-		RequestID:           requestID,
-		Model:               result.Model,
-		RequestedModel:      requestedModel,
-		UpstreamModel:       optionalNonEqualStringPtr(result.UpstreamModel, result.Model),
-		ServiceTier:         result.ServiceTier,
-		ReasoningEffort:     result.ReasoningEffort,
-		InboundEndpoint:     optionalTrimmedStringPtr(input.InboundEndpoint),
-		UpstreamEndpoint:    optionalTrimmedStringPtr(input.UpstreamEndpoint),
-		ClientProfile:       optionalTrimmedStringPtr(input.ClientProfile),
-		CompatibilityRoute:  optionalTrimmedStringPtr(input.CompatibilityRoute),
-		FallbackChain:       optionalTrimmedStringPtr(input.FallbackChain),
-		UpstreamTransport:   optionalTrimmedStringPtr(input.UpstreamTransport),
-		InputTokens:         actualInputTokens,
-		OutputTokens:        result.Usage.OutputTokens,
-		CacheCreationTokens: result.Usage.CacheCreationInputTokens,
-		CacheReadTokens:     result.Usage.CacheReadInputTokens,
-		ImageOutputTokens:   result.Usage.ImageOutputTokens,
-		ImageCount:          result.ImageCount,
-		ImageSize:           optionalTrimmedStringPtr(result.ImageSize),
-		ImageInputSize:      optionalTrimmedStringPtr(result.ImageInputSize),
-		ImageOutputSize:     optionalTrimmedStringPtr(result.ImageOutputSize),
-		ImageSizeSource:     optionalTrimmedStringPtr(result.ImageSizeSource),
-		ImageSizeBreakdown:  result.ImageSizeBreakdown,
-		RequestCount:        result.RequestCount,
-		TaskCount:           result.TaskCount,
-		UsageEstimated:      result.UsageEstimated,
-		BillableUnitType:    optionalTrimmedStringPtr(result.BillableUnitType),
+		UserID:                  user.ID,
+		APIKeyID:                apiKey.ID,
+		AccountID:               account.ID,
+		RequestID:               requestID,
+		Model:                   result.Model,
+		RequestedModel:          requestedModel,
+		UpstreamModel:           optionalNonEqualStringPtr(result.UpstreamModel, result.Model),
+		ServiceTier:             result.ServiceTier,
+		ReasoningEffort:         result.ReasoningEffort,
+		InboundEndpoint:         optionalTrimmedStringPtr(input.InboundEndpoint),
+		UpstreamEndpoint:        optionalTrimmedStringPtr(input.UpstreamEndpoint),
+		ClientProfile:           optionalTrimmedStringPtr(input.ClientProfile),
+		CompatibilityRoute:      optionalTrimmedStringPtr(input.CompatibilityRoute),
+		FallbackChain:           optionalTrimmedStringPtr(input.FallbackChain),
+		UpstreamTransport:       optionalTrimmedStringPtr(input.UpstreamTransport),
+		InputTokens:             actualInputTokens,
+		OutputTokens:            result.Usage.OutputTokens,
+		CacheCreationTokens:     result.Usage.CacheCreationInputTokens,
+		CacheReadTokens:         result.Usage.CacheReadInputTokens,
+		ImageOutputTokens:       result.Usage.ImageOutputTokens,
+		ImageCount:              result.ImageCount,
+		ImageSize:               optionalTrimmedStringPtr(result.ImageSize),
+		ImageInputSize:          optionalTrimmedStringPtr(result.ImageInputSize),
+		ImageOutputSize:         optionalTrimmedStringPtr(result.ImageOutputSize),
+		ImageSizeSource:         optionalTrimmedStringPtr(result.ImageSizeSource),
+		ImageSizeBreakdown:      result.ImageSizeBreakdown,
+		RequestCount:            result.RequestCount,
+		TaskCount:               result.TaskCount,
+		BillableDurationSeconds: result.BillableDurationSeconds,
+		BillableCharacterCount:  result.BillableCharacterCount,
+		UsageEstimated:          result.UsageEstimated,
+		BillableUnitType:        optionalTrimmedStringPtr(result.BillableUnitType),
 	}
 	if cost != nil {
 		usageLog.InputCost = cost.InputCost
@@ -5915,6 +5919,12 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	// 设置计费模式
 	if cost != nil && cost.BillingMode != "" {
 		billingMode := cost.BillingMode
+		usageLog.BillingMode = &billingMode
+	} else if result.BillableDurationSeconds > 0 {
+		billingMode := string(BillingModeDuration)
+		usageLog.BillingMode = &billingMode
+	} else if result.BillableCharacterCount > 0 {
+		billingMode := string(BillingModeCharacter)
 		usageLog.BillingMode = &billingMode
 	} else if result.TaskCount > 0 || result.RequestCount > 0 {
 		billingMode := string(BillingModePerRequest)
@@ -6053,6 +6063,23 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageTokenCost(
 	tokens UsageTokens,
 	serviceTier string,
 ) (*CostBreakdown, error) {
+	if result != nil {
+		if resolved := s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey); resolved != nil &&
+			(resolved.Mode == BillingModeDuration || resolved.Mode == BillingModeCharacter) {
+			gid := apiKey.Group.ID
+			return s.billingService.CalculateCostUnified(CostInput{
+				Ctx:             ctx,
+				Model:           billingModel,
+				GroupID:         &gid,
+				DurationSeconds: result.BillableDurationSeconds,
+				CharacterCount:  result.BillableCharacterCount,
+				RateMultiplier:  multiplier,
+				ServiceTier:     serviceTier,
+				Resolver:        s.resolver,
+				Resolved:        resolved,
+			})
+		}
+	}
 	if result != nil {
 		unitCount := result.RequestCount
 		if result.TaskCount > 0 {

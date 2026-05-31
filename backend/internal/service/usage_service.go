@@ -38,10 +38,12 @@ type CreateUsageLogRequest struct {
 	// RealActualCost 是管理员真实消费口径。
 	RealActualCost float64 `json:"real_actual_cost"`
 	// UnifiedRateMultiplier 是写入日志时的统一倍率快照。
-	UnifiedRateMultiplier float64 `json:"unified_rate_multiplier"`
-	RateMultiplier        float64 `json:"rate_multiplier"`
-	Stream                bool    `json:"stream"`
-	DurationMs            *int    `json:"duration_ms"`
+	UnifiedRateMultiplier   float64 `json:"unified_rate_multiplier"`
+	RateMultiplier          float64 `json:"rate_multiplier"`
+	Stream                  bool    `json:"stream"`
+	DurationMs              *int    `json:"duration_ms"`
+	BillableDurationSeconds int     `json:"billable_duration_seconds"`
+	BillableCharacterCount  int     `json:"billable_character_count"`
 }
 
 // UsageStats 使用统计
@@ -96,28 +98,30 @@ func (s *UsageService) Create(ctx context.Context, req CreateUsageLogRequest) (*
 
 	// 创建使用日志
 	usageLog := &UsageLog{
-		UserID:                req.UserID,
-		APIKeyID:              req.APIKeyID,
-		AccountID:             req.AccountID,
-		RequestID:             req.RequestID,
-		Model:                 req.Model,
-		InputTokens:           req.InputTokens,
-		OutputTokens:          req.OutputTokens,
-		CacheCreationTokens:   req.CacheCreationTokens,
-		CacheReadTokens:       req.CacheReadTokens,
-		CacheCreation5mTokens: req.CacheCreation5mTokens,
-		CacheCreation1hTokens: req.CacheCreation1hTokens,
-		InputCost:             req.InputCost,
-		OutputCost:            req.OutputCost,
-		CacheCreationCost:     req.CacheCreationCost,
-		CacheReadCost:         req.CacheReadCost,
-		TotalCost:             req.TotalCost,
-		ActualCost:            req.ActualCost,
-		RealActualCost:        req.RealActualCost,
-		UnifiedRateMultiplier: req.UnifiedRateMultiplier,
-		RateMultiplier:        req.RateMultiplier,
-		Stream:                req.Stream,
-		DurationMs:            req.DurationMs,
+		UserID:                  req.UserID,
+		APIKeyID:                req.APIKeyID,
+		AccountID:               req.AccountID,
+		RequestID:               req.RequestID,
+		Model:                   req.Model,
+		InputTokens:             req.InputTokens,
+		OutputTokens:            req.OutputTokens,
+		CacheCreationTokens:     req.CacheCreationTokens,
+		CacheReadTokens:         req.CacheReadTokens,
+		CacheCreation5mTokens:   req.CacheCreation5mTokens,
+		CacheCreation1hTokens:   req.CacheCreation1hTokens,
+		InputCost:               req.InputCost,
+		OutputCost:              req.OutputCost,
+		CacheCreationCost:       req.CacheCreationCost,
+		CacheReadCost:           req.CacheReadCost,
+		TotalCost:               req.TotalCost,
+		ActualCost:              req.ActualCost,
+		RealActualCost:          req.RealActualCost,
+		UnifiedRateMultiplier:   req.UnifiedRateMultiplier,
+		RateMultiplier:          req.RateMultiplier,
+		Stream:                  req.Stream,
+		DurationMs:              req.DurationMs,
+		BillableDurationSeconds: req.BillableDurationSeconds,
+		BillableCharacterCount:  req.BillableCharacterCount,
 	}
 
 	inserted, err := s.usageRepo.Create(txCtx, usageLog)

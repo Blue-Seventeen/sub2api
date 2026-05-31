@@ -1484,10 +1484,15 @@ async function handleSubmit() {
     }
   }
 
-  // 校验 per_request/image 模式必须有价格 (只校验启用的平台)
+  // 校验按单位计费模式必须有价格 (只校验启用的平台)
   for (const section of form.platforms.filter(s => s.enabled)) {
     for (const entry of section.model_pricing) {
       if (entry.models.length === 0) continue
+      if ((entry.billing_mode === 'duration' || entry.billing_mode === 'character') &&
+          (entry.per_request_price == null || entry.per_request_price === '')) {
+        appStore.showError(t('admin.channels.form.unitPriceRequired', 'ASR/TTS 计费模式必须设置单位价格'))
+        return
+      }
       if ((entry.billing_mode === 'per_request' || entry.billing_mode === 'image') &&
           (entry.per_request_price == null || entry.per_request_price === '') &&
           (!entry.intervals || entry.intervals.length === 0)) {
