@@ -609,6 +609,8 @@ func TestAPIContracts(t *testing.T) {
 						"billing_type": 0,
 						"request_count": 0,
 						"task_count": 0,
+						"billable_duration_seconds": 0,
+						"billable_character_count": 0,
 						"usage_estimated": false,
 							"stream": true,
 							"duration_ms": 100,

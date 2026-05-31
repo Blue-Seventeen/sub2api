@@ -213,7 +213,7 @@ func compactBase64(value string) string {
 		case ' ', '\n', '\r', '\t':
 			continue
 		default:
-			b.WriteRune(r)
+			_, _ = b.WriteRune(r)
 		}
 	}
 	return b.String()
@@ -431,13 +431,14 @@ func scanMP4Duration(data []byte, depth int) (float64, bool) {
 		size := uint64(binary.BigEndian.Uint32(data[offset : offset+4]))
 		boxType := string(data[offset+4 : offset+8])
 		header := 8
-		if size == 1 {
+		switch size {
+		case 1:
 			if offset+16 > len(data) {
 				return 0, false
 			}
 			size = binary.BigEndian.Uint64(data[offset+8 : offset+16])
 			header = 16
-		} else if size == 0 {
+		case 0:
 			size = uint64(len(data) - offset)
 		}
 		if size < uint64(header) || offset+int(size) > len(data) {
@@ -605,10 +606,17 @@ func looksLikeBase64(value string) bool {
 		return false
 	}
 	for _, r := range compact {
-		if !(r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '+' || r == '/' || r == '=' || r == '-' || r == '_') {
+		if !isBase64AlphabetRune(r) {
 			return false
 		}
 	}
 	_, err := base64.StdEncoding.DecodeString(strings.NewReplacer("-", "+", "_", "/").Replace(compact))
 	return err == nil
+}
+
+func isBase64AlphabetRune(r rune) bool {
+	return r >= 'A' && r <= 'Z' ||
+		r >= 'a' && r <= 'z' ||
+		r >= '0' && r <= '9' ||
+		r == '+' || r == '/' || r == '=' || r == '-' || r == '_'
 }

@@ -237,4 +237,43 @@ describe('admin UsageTable tooltip', () => {
 
     expect(wrapper.text()).toContain('0.00x')
   })
+
+  it('shows image request size metadata in admin rows', async () => {
+    const row = {
+      ...baseImageRow,
+      image_input_size: '1024x1024',
+      image_size_source: 'input',
+    }
+
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [row],
+        loading: false,
+        columns: [],
+      },
+      global: {
+        stubs: {
+          DataTable: DataTableStub,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('2 images')
+    expect(wrapper.text()).toContain('(2K)')
+
+    const tooltipTriggers = wrapper.findAll('.group.relative')
+    await tooltipTriggers[tooltipTriggers.length - 1].trigger('mouseenter')
+    await nextTick()
+
+    const text = wrapper.text()
+    expect(text).toContain('Size source')
+    expect(text).toContain('Request input')
+    expect(text).toContain('Input size')
+    expect(text).toContain('1024x1024')
+    expect(text).toContain('Output size')
+    expect(text).toContain('unknown')
+  })
 })
