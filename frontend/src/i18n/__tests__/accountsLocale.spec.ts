@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import zh from '../locales/zh'
+import en from '../locales/en'
 
 const suspiciousMojibakePattern = /[�鍦鍒鍙鍚鍛鍜鍝鍞鍟鍠鎴鏂鏌鐪鐧璐骞彿绫闂淇娴鍔瀛鏁鎿缁璇杩鎺]/
 
@@ -21,6 +22,10 @@ describe('account locale strings', () => {
     expect(suspicious).toEqual([])
   })
 
+  it('contains en copy for the combined auto-ops recovery action', () => {
+    expect(en.admin.accounts.autoOpsDialog.action.recover_state_enable_schedulable).toBe('Recover State + Enable Scheduling')
+  })
+
   it('contains cleaned zh copy for key account-management labels', () => {
     expect(zh.admin.accounts.title).toBe('账号管理')
     expect(zh.admin.accounts.description).toBe('管理 AI 平台账号和凭证')
@@ -33,6 +38,7 @@ describe('account locale strings', () => {
     expect(zh.admin.accounts.autoOpsDialog.title).toBe('自动运维')
     expect(zh.admin.accounts.autoOpsDialog.targetRulesTitle).toBe('自动运维对象配置')
     expect(zh.admin.accounts.autoOpsDialog.targetAction.takeover).toBe('自动运维接管')
+    expect(zh.admin.accounts.autoOpsDialog.action.recover_state_enable_schedulable).toBe('恢复状态 + 启用调度')
     expect(zh.admin.accounts.autoOpsDialog.targetField.last_used_days).toBe('最近使用天数')
   })
 })

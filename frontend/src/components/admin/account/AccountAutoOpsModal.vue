@@ -488,6 +488,7 @@ const actionOptions = computed<Array<SelectOption & { value: AccountAutoOpsActio
   { value: 'retest', label: t('admin.accounts.autoOpsDialog.action.retest') },
   { value: 'refresh_token', label: t('admin.accounts.autoOpsDialog.action.refresh_token') },
   { value: 'recover_state', label: t('admin.accounts.autoOpsDialog.action.recover_state') },
+  { value: 'recover_state_enable_schedulable', label: t('admin.accounts.autoOpsDialog.action.recover_state_enable_schedulable') },
   { value: 'enable_schedulable', label: t('admin.accounts.autoOpsDialog.action.enable_schedulable') },
   { value: 'disable_schedulable', label: t('admin.accounts.autoOpsDialog.action.disable_schedulable') },
   { value: 'delete_account', label: t('admin.accounts.autoOpsDialog.action.delete_account') }

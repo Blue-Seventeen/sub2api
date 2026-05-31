@@ -1988,6 +1988,7 @@ export type AccountAutoOpsAction =
   | 'retest'
   | 'refresh_token'
   | 'recover_state'
+  | 'recover_state_enable_schedulable'
   | 'enable_schedulable'
   | 'disable_schedulable'
   | 'delete_account'

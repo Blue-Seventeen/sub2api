@@ -4482,6 +4482,7 @@ export default {
           retest: 'Retest',
           refresh_token: 'Refresh Token',
           recover_state: 'Recover State',
+          recover_state_enable_schedulable: 'Recover State + Enable Scheduling',
           enable_schedulable: 'Enable Scheduling',
           disable_schedulable: 'Pause Scheduling',
           delete_account: 'Delete Account'

@@ -291,6 +291,7 @@ async function openModal() {
 
 describe('AccountAutoOpsModal', () => {
   beforeEach(() => {
+    vi.clearAllMocks()
     getAutoOpsConfigMock.mockResolvedValue(buildConfig())
     getAutoOpsLogsMock.mockResolvedValue(buildLogs())
     getAutoOpsSamplesMock.mockResolvedValue(buildSamples())
@@ -329,6 +330,30 @@ describe('AccountAutoOpsModal', () => {
     const reorderedRows = wrapper.findAll('[data-testid^="auto-ops-rule-row-"]')
     expect(reorderedRows[0].attributes('data-testid')).toBe('auto-ops-rule-row-rule-b')
     expect(reorderedRows[1].attributes('data-testid')).toBe('auto-ops-rule-row-rule-a')
+  })
+
+  it('支持选择恢复状态并启用调度动作并保存 action 值', async () => {
+    const wrapper = await openModal()
+
+    await wrapper.get('[data-testid="auto-ops-edit-rule-a"]').trigger('click')
+    const actionSelect = wrapper.findAll('select.select-stub').find((select) => select.element.value === 'recover_state')
+    expect(actionSelect?.text()).toContain('admin.accounts.autoOpsDialog.action.recover_state_enable_schedulable')
+
+    await actionSelect!.setValue('recover_state_enable_schedulable')
+    await wrapper.get('.btn.btn-primary').trigger('click')
+    await flushPromises()
+
+    expect(updateAutoOpsConfigMock).toHaveBeenCalledTimes(1)
+    expect(updateAutoOpsConfigMock.mock.calls[0][0].rules).toEqual([
+      expect.objectContaining({
+        id: 'rule-a',
+        action: 'recover_state_enable_schedulable'
+      }),
+      expect.objectContaining({
+        id: 'rule-b',
+        action: 'refresh_token'
+      })
+    ])
   })
 
   it('仅展示命中规则的步骤，并对英文匹配高亮使用严格边界', async () => {

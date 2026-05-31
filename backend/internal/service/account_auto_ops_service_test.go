@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -143,4 +144,138 @@ func TestAccountAutoOpsServiceRunManualAndAutomaticRespectTargetRules(t *testing
 	require.NotNil(t, run)
 	require.Equal(t, 0, run.EligibleAccounts)
 	require.Equal(t, AccountAutoOpsRunStatusCompleted, run.Status)
+}
+
+type accountAutoOpsRecoverEnableRepoStub struct {
+	AccountRepository
+	account       *Account
+	clearErrorErr error
+	setSchedErr   error
+	calls         []string
+}
+
+func (r *accountAutoOpsRecoverEnableRepoStub) GetByID(ctx context.Context, id int64) (*Account, error) {
+	return r.account, nil
+}
+
+func (r *accountAutoOpsRecoverEnableRepoStub) ClearError(ctx context.Context, id int64) error {
+	r.calls = append(r.calls, "clear_error")
+	if r.clearErrorErr != nil {
+		return r.clearErrorErr
+	}
+	r.account.Status = StatusActive
+	r.account.ErrorMessage = ""
+	return nil
+}
+
+func (r *accountAutoOpsRecoverEnableRepoStub) SetSchedulable(ctx context.Context, id int64, schedulable bool) error {
+	r.calls = append(r.calls, "set_schedulable")
+	if r.setSchedErr != nil {
+		return r.setSchedErr
+	}
+	r.account.Schedulable = schedulable
+	return nil
+}
+
+type accountAutoOpsStepRepoStub struct {
+	AccountAutoOpsRepository
+	steps []*AccountAutoOpsStep
+}
+
+func (r *accountAutoOpsStepRepoStub) CreateStep(ctx context.Context, step *AccountAutoOpsStep) (*AccountAutoOpsStep, error) {
+	r.steps = append(r.steps, step)
+	return step, nil
+}
+
+func TestAccountAutoOpsRecoverStateEnableSchedulableAction(t *testing.T) {
+	account := &Account{ID: 41, Name: "recover-enable", Type: AccountTypeOAuth, Status: StatusError, Schedulable: false, ErrorMessage: "custom error"}
+	accountRepo := &accountAutoOpsRecoverEnableRepoStub{account: account}
+	steps := &accountAutoOpsStepRepoStub{}
+	rateLimitSvc := NewRateLimitService(accountRepo, nil, nil, nil, nil)
+	adminSvc := &adminServiceImpl{accountRepo: accountRepo}
+	svc := NewAccountAutoOpsService(nil, nil, steps, nil, nil, rateLimitSvc, adminSvc, nil)
+	run := &AccountAutoOpsRun{ID: 1001}
+	cfg := &AccountAutoOpsConfig{
+		Rules: []AccountAutoOpsRule{
+			{
+				ID:        "rule_recover_enable",
+				Name:      "recover and enable",
+				Subject:   AccountAutoOpsSubjectAccountName,
+				Priority:  10,
+				MatchType: AccountAutoOpsMatchContains,
+				Pattern:   "recover-enable",
+				Action:    AccountAutoOpsActionRecoverAndEnable,
+			},
+		},
+	}
+
+	err := svc.processAccount(context.Background(), run, account, cfg)
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"clear_error", "set_schedulable"}, accountRepo.calls)
+	require.True(t, account.Schedulable)
+	require.Equal(t, StatusActive, account.Status)
+	require.Len(t, steps.steps, 1)
+	require.Equal(t, AccountAutoOpsStepStatusActionExecuted, steps.steps[0].Status)
+	require.Equal(t, AccountAutoOpsActionRecoverAndEnable, steps.steps[0].Action)
+	require.JSONEq(t, `{"recovery":{"ClearedError":true,"ClearedRateLimit":false},"schedulable":true}`, steps.steps[0].ActionResultText)
+}
+
+func TestAccountAutoOpsRecoverStateEnableSchedulableActionRecoveryFailure(t *testing.T) {
+	account := &Account{ID: 42, Name: "recover-enable", Type: AccountTypeOAuth, Status: StatusError, Schedulable: false}
+	accountRepo := &accountAutoOpsRecoverEnableRepoStub{
+		account:       account,
+		clearErrorErr: errors.New("recover failed"),
+	}
+	steps := &accountAutoOpsStepRepoStub{}
+	rateLimitSvc := NewRateLimitService(accountRepo, nil, nil, nil, nil)
+	adminSvc := &adminServiceImpl{accountRepo: accountRepo}
+	svc := NewAccountAutoOpsService(nil, nil, steps, nil, nil, rateLimitSvc, adminSvc, nil)
+	cfg := &AccountAutoOpsConfig{Rules: []AccountAutoOpsRule{{
+		ID:        "rule_recover_enable",
+		Name:      "recover and enable",
+		Subject:   AccountAutoOpsSubjectAccountName,
+		Priority:  10,
+		MatchType: AccountAutoOpsMatchContains,
+		Pattern:   "recover-enable",
+		Action:    AccountAutoOpsActionRecoverAndEnable,
+	}}}
+
+	err := svc.processAccount(context.Background(), &AccountAutoOpsRun{ID: 1002}, account, cfg)
+
+	require.Error(t, err)
+	require.Equal(t, []string{"clear_error"}, accountRepo.calls)
+	require.False(t, account.Schedulable)
+	require.Len(t, steps.steps, 1)
+	require.Equal(t, AccountAutoOpsStepStatusActionFailed, steps.steps[0].Status)
+}
+
+func TestAccountAutoOpsRecoverStateEnableSchedulableActionEnableFailure(t *testing.T) {
+	account := &Account{ID: 43, Name: "recover-enable", Type: AccountTypeOAuth, Status: StatusError, Schedulable: false}
+	accountRepo := &accountAutoOpsRecoverEnableRepoStub{
+		account:     account,
+		setSchedErr: errors.New("enable failed"),
+	}
+	steps := &accountAutoOpsStepRepoStub{}
+	rateLimitSvc := NewRateLimitService(accountRepo, nil, nil, nil, nil)
+	adminSvc := &adminServiceImpl{accountRepo: accountRepo}
+	svc := NewAccountAutoOpsService(nil, nil, steps, nil, nil, rateLimitSvc, adminSvc, nil)
+	cfg := &AccountAutoOpsConfig{Rules: []AccountAutoOpsRule{{
+		ID:        "rule_recover_enable",
+		Name:      "recover and enable",
+		Subject:   AccountAutoOpsSubjectAccountName,
+		Priority:  10,
+		MatchType: AccountAutoOpsMatchContains,
+		Pattern:   "recover-enable",
+		Action:    AccountAutoOpsActionRecoverAndEnable,
+	}}}
+
+	err := svc.processAccount(context.Background(), &AccountAutoOpsRun{ID: 1003}, account, cfg)
+
+	require.Error(t, err)
+	require.Equal(t, []string{"clear_error", "set_schedulable"}, accountRepo.calls)
+	require.False(t, account.Schedulable)
+	require.Equal(t, StatusActive, account.Status)
+	require.Len(t, steps.steps, 1)
+	require.Equal(t, AccountAutoOpsStepStatusActionFailed, steps.steps[0].Status)
 }

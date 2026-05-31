@@ -3499,6 +3499,7 @@ export default {
           retest: '\u91cd\u65b0\u6d4b\u8bd5',
           refresh_token: '\u5237\u65b0\u4ee4\u724c',
           recover_state: '\u6062\u590d\u72b6\u6001',
+          recover_state_enable_schedulable: '\u6062\u590d\u72b6\u6001 + \u542f\u7528\u8c03\u5ea6',
           enable_schedulable: '\u542f\u7528\u8c03\u5ea6',
           disable_schedulable: '\u6682\u505c\u8c03\u5ea6',
           delete_account: '\u5220\u9664\u8d26\u53f7'

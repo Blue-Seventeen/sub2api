@@ -493,6 +493,30 @@ func (s *AccountAutoOpsService) executeRuleAction(ctx context.Context, account *
 		data, _ := json.Marshal(recovery)
 		out.resultText = string(data)
 		return out, true, nil
+	case AccountAutoOpsActionRecoverAndEnable:
+		if s.rateLimitSvc == nil {
+			return out, true, fmt.Errorf("rate limit service not configured")
+		}
+		if s.adminService == nil {
+			return out, true, fmt.Errorf("admin service not configured")
+		}
+		recovery, err := s.rateLimitSvc.RecoverAccountState(ctx, account.ID, AccountRecoveryOptions{InvalidateToken: true})
+		if err != nil {
+			return out, true, err
+		}
+		updated, err := s.adminService.SetAccountSchedulable(ctx, account.ID, true)
+		if err != nil {
+			return out, true, err
+		}
+		if updated != nil {
+			account.Schedulable = updated.Schedulable
+		}
+		data, _ := json.Marshal(map[string]any{
+			"recovery":    recovery,
+			"schedulable": true,
+		})
+		out.resultText = string(data)
+		return out, true, nil
 	case AccountAutoOpsActionEnableSchedulable:
 		if s.adminService == nil {
 			return out, true, fmt.Errorf("admin service not configured")

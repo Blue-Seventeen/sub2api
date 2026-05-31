@@ -31,6 +31,7 @@ const (
 	AccountAutoOpsActionRetest             = "retest"
 	AccountAutoOpsActionRefreshToken       = "refresh_token"
 	AccountAutoOpsActionRecoverState       = "recover_state"
+	AccountAutoOpsActionRecoverAndEnable   = "recover_state_enable_schedulable"
 	AccountAutoOpsActionEnableSchedulable  = "enable_schedulable"
 	AccountAutoOpsActionDisableSchedulable = "disable_schedulable"
 	AccountAutoOpsActionDeleteAccount      = "delete_account"
@@ -93,6 +94,7 @@ var (
 		AccountAutoOpsActionRetest:             {},
 		AccountAutoOpsActionRefreshToken:       {},
 		AccountAutoOpsActionRecoverState:       {},
+		AccountAutoOpsActionRecoverAndEnable:   {},
 		AccountAutoOpsActionEnableSchedulable:  {},
 		AccountAutoOpsActionDisableSchedulable: {},
 		AccountAutoOpsActionDeleteAccount:      {},
