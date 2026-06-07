@@ -311,7 +311,7 @@
               <span class="font-medium text-pink-300">${{ tooltipData.image_output_cost.toFixed(6) }}</span>
             </div>
             <!-- Token billing: show unit prices per 1M tokens -->
-            <template v-if="!tooltipData?.billing_mode || tooltipData.billing_mode === BILLING_MODE_TOKEN">
+            <template v-if="tooltipData && !isImageUsage(tooltipData) && (!tooltipData.billing_mode || tooltipData.billing_mode === BILLING_MODE_TOKEN)">
               <div v-if="tooltipData && tooltipData.input_tokens > 0" class="flex items-center justify-between gap-4">
                 <span class="text-gray-400">{{ t('usage.inputTokenPrice') }}</span>
                 <span class="font-medium text-sky-300">{{ formatTokenPricePerMillion(tooltipData.input_cost, tooltipData.input_tokens) }} {{ t('usage.perMillionTokens') }}</span>
@@ -325,7 +325,7 @@
                 <span class="font-medium text-pink-300">{{ formatTokenPricePerMillion(tooltipData.image_output_cost ?? 0, tooltipData.image_output_tokens) }} {{ t('usage.perMillionTokens') }}</span>
               </div>
             </template>
-            <template v-else-if="isImageUsage(tooltipData)">
+            <template v-else-if="tooltipData && isImageUsage(tooltipData)">
               <div class="flex items-center justify-between gap-4">
                 <span class="text-gray-400">{{ t('usage.imageCount') }}</span>
                 <span class="font-medium text-white">{{ tooltipData.image_count }}{{ t('usage.imageUnit') }}</span>
@@ -387,7 +387,7 @@
                 <span class="font-medium text-white">{{ formatCostAmount(tooltipData.total_cost || 0, 6) }}</span>
               </div>
             </template>
-            <div v-else class="flex items-center justify-between gap-4">
+            <div v-else-if="tooltipData" class="flex items-center justify-between gap-4">
               <span class="text-gray-400">{{ tooltipData.billing_mode === BILLING_MODE_IMAGE ? t('usage.imageUnitPrice') : t('usage.unitPrice') }}</span>
               <span class="font-medium text-sky-300">{{ formatCostAmount(tooltipData.total_cost || 0, 6) }}</span>
             </div>
@@ -494,13 +494,13 @@ function characterUnitPrice(row: AdminUsageLog | null): number {
   return Number.isFinite(price) ? price : 0
 }
 
-function isImageUsage(row: Pick<AdminUsageLog, 'image_count'> | null | undefined): boolean {
-  return (row?.image_count ?? 0) > 0
+function isImageUsage(row: Pick<AdminUsageLog, 'billing_mode' | 'image_count'> | null | undefined): boolean {
+  return (row?.image_count ?? 0) > 0 && row?.billing_mode !== BILLING_MODE_TOKEN
 }
 
 function getDisplayBillingMode(row: Pick<AdminUsageLog, 'billing_mode' | 'image_count'> | null | undefined): string | null | undefined {
   if (isImageUsage(row)) {
-    return BILLING_MODE_IMAGE
+    return row?.billing_mode ?? BILLING_MODE_IMAGE
   }
   return row?.billing_mode
 }

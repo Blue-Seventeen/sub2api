@@ -277,6 +277,41 @@ describe('admin UsageTable tooltip', () => {
     expect(text).toContain('Output size')
     expect(text).toContain('unknown')
   })
+
+  it('shows image output tokens when an image request is billed as tokens', () => {
+    const row = {
+      ...baseImageRow,
+      request_id: 'req-admin-image-token-billed',
+      billing_mode: 'token',
+      image_count: 1,
+      input_tokens: 42,
+      output_tokens: 123,
+      image_output_tokens: 123,
+      image_output_cost: 0.0123,
+    }
+
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [row],
+        loading: false,
+        columns: [],
+      },
+      global: {
+        stubs: {
+          DataTable: DataTableStub,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    const text = wrapper.text()
+    expect(text).toContain('Token')
+    expect(text).toContain('42')
+    expect(text).toContain('123')
+    expect(text).not.toContain('1 images')
+  })
 })
 
 // A DataTable stub that also renders cell-user, so the deleted badge can be asserted.

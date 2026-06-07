@@ -537,4 +537,71 @@ describe('user UsageView tooltip', () => {
     expect(text).toContain('3840x2160')
     expect(text).toContain('4K x 2')
   })
+
+  it('shows image output tokens when an image request is billed as tokens', async () => {
+    query.mockResolvedValue({
+      items: [
+        {
+          request_id: 'req-user-image-token-billed',
+          actual_cost: 0.0123,
+          total_cost: 0.0123,
+          rate_multiplier: 1,
+          service_tier: null,
+          input_cost: 0,
+          output_cost: 0,
+          cache_creation_cost: 0,
+          cache_read_cost: 0,
+          input_tokens: 42,
+          output_tokens: 123,
+          image_output_tokens: 123,
+          image_output_cost: 0.0123,
+          cache_creation_tokens: 0,
+          cache_read_tokens: 0,
+          cache_creation_5m_tokens: 0,
+          cache_creation_1h_tokens: 0,
+          cache_ttl_overridden: false,
+          billing_mode: 'token',
+          image_count: 1,
+          image_size: '2K',
+          first_token_ms: null,
+          duration_ms: 1,
+          created_at: '2026-03-08T00:00:00Z',
+        },
+      ],
+      total: 1,
+      pages: 1,
+    })
+    getStatsByDateRange.mockResolvedValue({
+      total_requests: 1,
+      total_tokens: 165,
+      total_cost: 0.0123,
+      avg_duration_ms: 1,
+    })
+    list.mockResolvedValue({ items: [] })
+
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          TablePageLayout: TablePageLayoutStub,
+          Pagination: true,
+          EmptyState: true,
+          Select: true,
+          DateRangePicker: true,
+          DataTable: DataTableStub,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    await flushPromises()
+    await nextTick()
+
+    const text = wrapper.text()
+    expect(text).toContain('Token')
+    expect(text).toContain('42')
+    expect(text).toContain('123')
+    expect(text).not.toContain('1 images')
+  })
 })
