@@ -114,6 +114,19 @@
           </div>
         </div>
 
+        <div v-if="detail.api_key_name || detail.api_key_id || detail.api_key_deleted" class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
+          <div class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t('admin.ops.errorDetail.apiKeyName') }}</div>
+          <div class="mt-1 text-sm font-medium text-gray-900 dark:text-white">
+            <span>{{ detail.api_key_name || (detail.api_key_id != null ? '#' + detail.api_key_id : '-') }}</span>
+            <span
+              v-if="detail.api_key_deleted"
+              class="ml-2 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold ring-1 ring-inset bg-red-50 text-red-700 ring-red-600/20 dark:bg-red-900/30 dark:text-red-400 dark:ring-red-500/30"
+            >
+              {{ t('admin.ops.errorDetail.keyDeletedBadge') }}
+            </span>
+          </div>
+        </div>
+
         <div v-if="detail.api_key_prefix" class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
           <div class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t('admin.ops.errorDetail.apiKeyPrefix') }}</div>
           <div class="mt-1 font-mono text-sm font-medium text-gray-900 dark:text-white">

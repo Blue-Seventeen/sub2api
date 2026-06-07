@@ -27,8 +27,17 @@ services:
     ports:
       - "127.0.0.1:8080:8080"
     environment:
-      DATABASE_URL: postgres://sub2api:${POSTGRES_PASSWORD}@postgres:5432/sub2api?sslmode=disable
-      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      AUTO_SETUP: "true"
+      DATABASE_HOST: postgres
+      DATABASE_PORT: "5432"
+      DATABASE_USER: sub2api
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
+      DATABASE_DBNAME: sub2api
+      DATABASE_SSLMODE: disable
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_DB: "0"
       SERVER_MODE: release
       TZ: Asia/Shanghai
     depends_on:
@@ -36,9 +45,23 @@ services:
       - redis
 
   postgres:
-    image: postgres:15-alpine
+    image: postgres:18-alpine
     restart: unless-stopped
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -e
+        if [ ! -s "$$PGDATA/PG_VERSION" ] && [ -s "$$PGDATA/pgdata/PG_VERSION" ]; then
+          echo "Migrating PostgreSQL data directory from $$PGDATA/pgdata to $$PGDATA"
+          find "$$PGDATA/pgdata" -mindepth 1 -maxdepth 1 -exec mv {} "$$PGDATA"/ \;
+          rmdir "$$PGDATA/pgdata"
+        fi
+        exec docker-entrypoint.sh "$@"
+      - docker-entrypoint-sh
+    command: ["postgres"]
     environment:
+      PGDATA: /var/lib/postgresql/data
       POSTGRES_USER: sub2api
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: sub2api
@@ -46,7 +69,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
 
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     restart: unless-stopped
     command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}"]
     volumes:

@@ -69,7 +69,7 @@ func TestIncrementUserPlatformQuotaUsage_SyncCallsCache(t *testing.T) {
 	}
 }
 
-func TestIncrementUserPlatformQuotaUsage_CacheNotReadyReturnsFalseAndInvalidates(t *testing.T) {
+func TestIncrementUserPlatformQuotaUsage_CacheNotReadyReturnsFalseWithoutInvalidating(t *testing.T) {
 	fake := &fakeIncrCache{err: ErrUserPlatformQuotaCacheNotReady}
 	cfg := &config.Config{}
 	cfg.Billing.UserPlatformQuotaCacheTTLSeconds = 120
@@ -86,8 +86,8 @@ func TestIncrementUserPlatformQuotaUsage_CacheNotReadyReturnsFalseAndInvalidates
 	if len(fake.calls) != 1 || !fake.calls[0].markDirty {
 		t.Fatalf("expected one dirty increment call, got %+v", fake.calls)
 	}
-	if fake.deleteCalls != 1 {
-		t.Fatalf("expected stale quota cache invalidation, got %d", fake.deleteCalls)
+	if fake.deleteCalls != 0 {
+		t.Fatalf("cache-not-ready must preserve quota cache for post-guard snapshot, got %d deletes", fake.deleteCalls)
 	}
 }
 
@@ -137,6 +137,8 @@ type fakeFullCache struct {
 	lastSetTTL  time.Duration // 最近一次 Set 的 ttl
 	getErr      error         // 非 nil 时 Get 先返回 (nil,false,getErr)
 	setErr      error         // 非 nil 时 Set 返回该 err(setCalls 仍+1)
+	guarded     bool
+	guardErr    error
 	// dirty 模拟脏集，供 flusher 测试使用。
 	dirty map[UserPlatformQuotaKey]struct{}
 }
@@ -199,6 +201,12 @@ func (f *fakeFullCache) DeleteUserPlatformQuotaCache(_ context.Context, _ int64,
 	f.deleteCalls++
 	f.entry = nil
 	return nil
+}
+
+func (f *fakeFullCache) IsUserPlatformQuotaMutationGuarded(_ context.Context, _ int64, _ string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.guarded, f.guardErr
 }
 
 func (f *fakeFullCache) PopDirtyUserPlatformQuotaKeys(_ context.Context, n int) ([]UserPlatformQuotaKey, error) {
@@ -823,6 +831,15 @@ func TestHasUserPlatformQuotaLimit(t *testing.T) {
 				return svc
 			},
 			want: false,
+		},
+		{
+			name: "mutation_guarded",
+			setup: func() *BillingCacheService {
+				entry := &UserPlatformQuotaCacheEntry{}
+				svc := newServiceForPreflight(t, &fakeQuotaRepo{}, &fakeFullCache{entry: entry, guarded: true})
+				return svc
+			},
+			want: true,
 		},
 		{
 			name: "cache_miss",

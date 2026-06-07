@@ -31,6 +31,13 @@ type UserHandler struct {
 	billingCache          service.BillingCache                // T17/T18 缓存失效（PUT/POST 路径）
 }
 
+type userPlatformQuotaCacheMutationGuard interface {
+	BeginUserPlatformQuotaCacheMutation(ctx context.Context, userID int64, platform string, ttl time.Duration) error
+	EndUserPlatformQuotaCacheMutation(ctx context.Context, userID int64, platform string) error
+}
+
+const userPlatformQuotaAdminMutationGuardTTL = 30 * time.Second
+
 // NewUserHandler creates a new admin user handler
 func NewUserHandler(
 	adminService service.AdminService,
@@ -703,6 +710,11 @@ func (h *UserHandler) UpdateUserPlatformQuotas(c *gin.Context) {
 	if beforeErr != nil {
 		slog.Warn("quota audit before snapshot failed", "user_id", userID, "err", beforeErr)
 	}
+	endQuotaCacheMutation, ok := h.beginUserPlatformQuotaCacheMutation(c, userID, service.AllowedQuotaPlatforms, "UpsertForUser")
+	if !ok {
+		return
+	}
+	defer endQuotaCacheMutation()
 	if err := h.userPlatformQuotaRepo.UpsertForUser(ctx, userID, records); err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -753,18 +765,6 @@ func (h *UserHandler) UpdateUserPlatformQuotas(c *gin.Context) {
 		"platform_count", len(records),
 		"before_snapshot_available", beforeErr == nil,
 		"changes", changes)
-
-	// 失效 cache：对全部允许的 platform 统一 invalidate。
-	// Trade-off：精确失效（仅 req 涉及平台 + 被软删平台）需 upsert 前额外 ListByUser，
-	// 增加一次 DB 查询和逻辑复杂度。由于 AllowedQuotaPlatforms 只有 4 个元素，
-	// 全量 invalidate 的额外开销可接受，且能可靠覆盖软删除场景。
-	if h.billingCache != nil {
-		for _, p := range service.AllowedQuotaPlatforms {
-			if err := h.billingCache.DeleteUserPlatformQuotaCache(ctx, userID, p); err != nil {
-				slog.Error("ALERT: quota cache invalidation failed after UpsertForUser; limit 生效可能延迟至 sentinel TTL(最长 1h),需人工确认或重试失效", "user_id", userID, "platform", p, "err", err)
-			}
-		}
-	}
 
 	// 返回最新状态
 	now := time.Now().UTC()
@@ -828,6 +828,11 @@ func (h *UserHandler) ResetUserPlatformQuotaWindow(c *gin.Context) {
 		return
 	}
 	now := time.Now().UTC()
+	endQuotaCacheMutation, ok := h.beginUserPlatformQuotaCacheMutation(c, userID, []string{req.Platform}, "ResetExpiredWindow")
+	if !ok {
+		return
+	}
+	defer endQuotaCacheMutation()
 	if err := h.userPlatformQuotaRepo.ResetExpiredWindow(ctx, userID, req.Platform, req.Window, now); err != nil {
 		if errors.Is(err, service.ErrUserPlatformQuotaNotFound) {
 			response.NotFound(c, "user platform quota not found")
@@ -843,12 +848,6 @@ func (h *UserHandler) ResetUserPlatformQuotaWindow(c *gin.Context) {
 		"platform", req.Platform,
 		"window", req.Window)
 
-	if h.billingCache != nil {
-		if err := h.billingCache.DeleteUserPlatformQuotaCache(ctx, userID, req.Platform); err != nil {
-			slog.Error("ALERT: quota cache invalidation failed after ResetExpiredWindow; 窗口重置可能延迟至 sentinel TTL(最长 1h)", "user_id", userID, "platform", req.Platform, "err", err)
-		}
-	}
-
 	records, err := h.userPlatformQuotaRepo.ListByUser(ctx, userID)
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -859,4 +858,166 @@ func (h *UserHandler) ResetUserPlatformQuotaWindow(c *gin.Context) {
 		out = append(out, quotaview.LazyZeroQuotaForResponse(records[i], now, true))
 	}
 	response.Success(c, map[string]any{"platform_quotas": out})
+}
+
+func (h *UserHandler) preInvalidateUserPlatformQuotaCaches(c *gin.Context, userID int64, platforms []string, operation string) bool {
+	if h == nil || h.billingCache == nil {
+		return true
+	}
+	ctx := c.Request.Context()
+	for _, p := range platforms {
+		if err := h.billingCache.DeleteUserPlatformQuotaCache(ctx, userID, p); err != nil {
+			slog.Error("ALERT: quota cache pre-invalidation failed; aborting admin quota mutation to avoid stale Redis snapshot overwrite",
+				"user_id", userID,
+				"platform", p,
+				"operation", operation,
+				"err", err)
+			response.Error(c, 503, "quota cache invalidation failed; please retry")
+			return false
+		}
+	}
+	return true
+}
+
+func (h *UserHandler) beginUserPlatformQuotaCacheMutation(c *gin.Context, userID int64, platforms []string, operation string) (func(), bool) {
+	if h == nil || h.billingCache == nil {
+		return func() {}, true
+	}
+	if !h.flushCachedUserPlatformQuotaUsageBeforeMutation(c, userID, platforms, operation) {
+		return func() {}, false
+	}
+	if guard, ok := h.billingCache.(userPlatformQuotaCacheMutationGuard); ok {
+		ctx := c.Request.Context()
+		begun := make([]string, 0, len(platforms))
+		for _, p := range platforms {
+			if err := guard.BeginUserPlatformQuotaCacheMutation(ctx, userID, p, userPlatformQuotaAdminMutationGuardTTL); err != nil {
+				slog.Error("ALERT: quota cache mutation guard begin failed; aborting admin quota mutation to avoid stale Redis snapshot overwrite",
+					"user_id", userID,
+					"platform", p,
+					"operation", operation,
+					"err", err)
+				response.Error(c, 503, "quota cache invalidation failed; please retry")
+				return func() {}, false
+			}
+			begun = append(begun, p)
+		}
+		if !h.flushCachedUserPlatformQuotaUsageBeforeMutation(c, userID, platforms, operation) {
+			slog.Error("ALERT: quota cache post-guard snapshot failed; leaving mutation guard to expire to preserve Redis usage cache",
+				"user_id", userID,
+				"operation", operation,
+				"guarded_platform_count", len(begun))
+			return func() {}, false
+		}
+		for _, p := range platforms {
+			if err := h.billingCache.DeleteUserPlatformQuotaCache(ctx, userID, p); err != nil {
+				slog.Error("ALERT: quota cache delete failed after post-guard snapshot; aborting admin quota mutation and leaving guard to expire",
+					"user_id", userID,
+					"platform", p,
+					"operation", operation,
+					"err", err)
+				response.Error(c, 503, "quota cache invalidation failed; please retry")
+				return func() {}, false
+			}
+		}
+		ended := false
+		return func() {
+			if ended {
+				return
+			}
+			ended = true
+			h.endUserPlatformQuotaCacheMutations(guard, userID, begun, operation)
+		}, true
+	}
+
+	if !h.preInvalidateUserPlatformQuotaCaches(c, userID, platforms, operation) {
+		return func() {}, false
+	}
+	ended := false
+	return func() {
+		if ended {
+			return
+		}
+		ended = true
+		for _, p := range platforms {
+			if err := h.billingCache.DeleteUserPlatformQuotaCache(context.Background(), userID, p); err != nil {
+				slog.Error("ALERT: quota cache invalidation failed after admin quota mutation; limit changes may be delayed until cache TTL",
+					"user_id", userID,
+					"platform", p,
+					"operation", operation,
+					"err", err)
+			}
+		}
+	}, true
+}
+
+func (h *UserHandler) flushCachedUserPlatformQuotaUsageBeforeMutation(c *gin.Context, userID int64, platforms []string, operation string) bool {
+	if h == nil || h.billingCache == nil || h.userPlatformQuotaRepo == nil || len(platforms) == 0 {
+		return true
+	}
+	ctx := c.Request.Context()
+	keys := make([]service.UserPlatformQuotaKey, 0, len(platforms))
+	for _, p := range platforms {
+		keys = append(keys, service.UserPlatformQuotaKey{UserID: userID, Platform: p})
+	}
+	entries, err := h.billingCache.BatchGetUserPlatformQuotaCache(ctx, keys)
+	if err != nil {
+		slog.Error("ALERT: quota cache snapshot read failed before admin mutation; aborting to avoid losing pending Redis usage",
+			"user_id", userID,
+			"operation", operation,
+			"err", err)
+		response.Error(c, 503, "quota cache snapshot failed; please retry")
+		return false
+	}
+	snapshotTakenAt := time.Now().UTC()
+	snaps := make([]service.UserPlatformQuotaSnapshot, 0, len(entries))
+	for i, entry := range entries {
+		if entry == nil ||
+			entry.SchemaVersion != service.UserPlatformQuotaCacheSchemaV1 ||
+			entry.DailyWindowStart == nil ||
+			entry.WeeklyWindowStart == nil ||
+			entry.MonthlyWindowStart == nil {
+			continue
+		}
+		snaps = append(snaps, service.UserPlatformQuotaSnapshot{
+			UserID:             keys[i].UserID,
+			Platform:           keys[i].Platform,
+			DailyUsageUSD:      entry.DailyUsageUSD,
+			WeeklyUsageUSD:     entry.WeeklyUsageUSD,
+			MonthlyUsageUSD:    entry.MonthlyUsageUSD,
+			DailyWindowStart:   *entry.DailyWindowStart,
+			WeeklyWindowStart:  *entry.WeeklyWindowStart,
+			MonthlyWindowStart: *entry.MonthlyWindowStart,
+			SnapshotTakenAt:    snapshotTakenAt,
+		})
+	}
+	if len(snaps) == 0 {
+		return true
+	}
+	if err := h.userPlatformQuotaRepo.BatchSnapshotUsage(ctx, snaps, snapshotTakenAt); err != nil {
+		slog.Error("ALERT: quota cache snapshot write failed before admin mutation; aborting to avoid losing pending Redis usage",
+			"user_id", userID,
+			"operation", operation,
+			"snapshot_count", len(snaps),
+			"err", err)
+		response.Error(c, 503, "quota cache snapshot failed; please retry")
+		return false
+	}
+	return true
+}
+
+func (h *UserHandler) endUserPlatformQuotaCacheMutations(guard userPlatformQuotaCacheMutationGuard, userID int64, platforms []string, operation string) {
+	if guard == nil || len(platforms) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	for _, p := range platforms {
+		if err := guard.EndUserPlatformQuotaCacheMutation(ctx, userID, p); err != nil {
+			slog.Error("ALERT: quota cache mutation guard end failed; quota cache may remain guarded until TTL",
+				"user_id", userID,
+				"platform", p,
+				"operation", operation,
+				"err", err)
+		}
+	}
 }

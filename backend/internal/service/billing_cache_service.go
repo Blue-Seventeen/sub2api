@@ -724,7 +724,6 @@ func (s *BillingCacheService) IncrementUserPlatformQuotaUsage(userID int64, plat
 	markDirty := s.cfg.Database.UserPlatformQuotaFlusherEnabled
 	if err := s.cache.IncrUserPlatformQuotaUsageCache(ctx, userID, platform, cost, ttl, markDirty); err != nil {
 		if errors.Is(err, ErrUserPlatformQuotaCacheNotReady) {
-			_ = s.cache.DeleteUserPlatformQuotaCache(context.Background(), userID, platform)
 			logger.LegacyPrintf("service.billing_cache",
 				"ALERT: user platform quota cache not ready user=%d platform=%s cost=%f; caller must DB fallback",
 				userID, platform, cost)
@@ -1403,6 +1402,14 @@ func (s *BillingCacheService) HasUserPlatformQuotaLimit(ctx context.Context, use
 	}
 	if s.cache == nil {
 		return true
+	}
+	if guard, ok := s.cache.(interface {
+		IsUserPlatformQuotaMutationGuarded(context.Context, int64, string) (bool, error)
+	}); ok {
+		guarded, err := guard.IsUserPlatformQuotaMutationGuarded(ctx, userID, platform)
+		if err != nil || guarded {
+			return true
+		}
 	}
 	entry, ok, err := s.cache.GetUserPlatformQuotaCache(ctx, userID, platform)
 	if err != nil || !ok || entry == nil {

@@ -162,3 +162,66 @@ func TestUserPlatformQuotaCache_Delete(t *testing.T) {
 		t.Error("expected miss after delete")
 	}
 }
+
+func TestUserPlatformQuotaCache_MutationGuardSkipsSetAndDirtyIncr(t *testing.T) {
+	c, mr := newMiniRedisCache(t)
+	ctx := context.Background()
+	dailyLimit := 10.0
+	entry := &service.UserPlatformQuotaCacheEntry{
+		DailyLimitUSD:   &dailyLimit,
+		SchemaVersion:   service.UserPlatformQuotaCacheSchemaV1,
+		DailyUsageUSD:   1,
+		WeeklyUsageUSD:  1,
+		MonthlyUsageUSD: 1,
+	}
+
+	if err := c.SetUserPlatformQuotaCache(ctx, 1, "openai", entry, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.BeginUserPlatformQuotaCacheMutation(ctx, 1, "openai", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	staleEntry := &service.UserPlatformQuotaCacheEntry{
+		DailyLimitUSD:   &dailyLimit,
+		SchemaVersion:   service.UserPlatformQuotaCacheSchemaV1,
+		DailyUsageUSD:   99,
+		WeeklyUsageUSD:  99,
+		MonthlyUsageUSD: 99,
+	}
+	if err := c.SetUserPlatformQuotaCache(ctx, 1, "openai", staleEntry, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok, err := c.GetUserPlatformQuotaCache(ctx, 1, "openai"); err != nil || !ok || got == nil || got.DailyUsageUSD != 1 {
+		t.Fatalf("guarded Set must not overwrite preserved cache, got ok=%v entry=%+v err=%v", ok, got, err)
+	}
+
+	err := c.IncrUserPlatformQuotaUsageCache(ctx, 1, "openai", 0.5, time.Minute, true)
+	if !errors.Is(err, service.ErrUserPlatformQuotaCacheNotReady) {
+		t.Fatalf("expected ErrUserPlatformQuotaCacheNotReady during mutation guard, got %v", err)
+	}
+	if mr.Exists(userPlatformQuotaDirtySetKey()) {
+		t.Fatal("guarded dirty incr must not dirty-mark the preserved quota hash")
+	}
+
+	if err := c.DeleteUserPlatformQuotaCache(ctx, 1, "openai"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := c.EndUserPlatformQuotaCacheMutation(ctx, 1, "openai"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SetUserPlatformQuotaCache(ctx, 1, "openai", entry, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok, err := c.GetUserPlatformQuotaCache(ctx, 1, "openai"); err != nil || ok || got != nil {
+		t.Fatalf("settle guard must still block stale cache refill, got ok=%v entry=%+v err=%v", ok, got, err)
+	}
+
+	mr.FastForward(userPlatformQuotaMutationGuardSettleTTL + time.Second)
+	if err := c.SetUserPlatformQuotaCache(ctx, 1, "openai", entry, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok, err := c.GetUserPlatformQuotaCache(ctx, 1, "openai"); err != nil || !ok || got == nil {
+		t.Fatalf("cache set should resume after guard TTL, got ok=%v entry=%+v err=%v", ok, got, err)
+	}
+}

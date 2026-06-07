@@ -392,5 +392,5 @@ type PromotionRepository interface {
 	CreatePromotionActivation(ctx context.Context, activation PromotionActivation, bonusAmount float64) error
 	UpsertDailyPromotionCommissions(ctx context.Context, businessDate time.Time, businessStart, businessEnd time.Time) error
 	ListSettlablePromotionBusinessDates(ctx context.Context, boundaryDate time.Time) ([]time.Time, error)
-	SettlePromotionBusinessDate(ctx context.Context, businessDate time.Time, operatorUserID *int64, note string) error
+	SettlePromotionBusinessDate(ctx context.Context, businessDate time.Time, operatorUserID *int64, note string) ([]int64, error)
 }

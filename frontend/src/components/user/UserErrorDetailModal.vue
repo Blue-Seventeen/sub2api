@@ -48,6 +48,17 @@
           <span class="font-medium text-gray-500 dark:text-dark-400">{{ t('usage.errors.platform') }}</span>
           <p class="mt-0.5 text-gray-900 dark:text-dark-100">{{ detail.platform || '-' }}</p>
         </div>
+        <!-- API Key -->
+        <div>
+          <span class="font-medium text-gray-500 dark:text-dark-400">{{ t('usage.errors.keyName') }}</span>
+          <p class="mt-0.5 text-gray-900 dark:text-dark-100">
+            <span>{{ detail.key_name || '-' }}</span>
+            <span
+              v-if="detail.key_deleted"
+              class="ml-1 inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-gray-100 text-gray-500 dark:bg-dark-700 dark:text-gray-400"
+            >{{ t('usage.errors.keyDeleted') }}</span>
+          </p>
+        </div>
         <!-- Upstream status code -->
         <div v-if="detail.upstream_status_code != null">
           <span class="font-medium text-gray-500 dark:text-dark-400">{{ t('usage.errors.detail.upstreamStatus') }}</span>

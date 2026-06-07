@@ -27,6 +27,82 @@ func TestRedactText_QueryLike(t *testing.T) {
 	}
 }
 
+func TestRedactText_AuthorizationBearer(t *testing.T) {
+	in := "upstream said Authorization: Bearer sk-secret-token access_token=plain-secret"
+	out := RedactText(in)
+	if strings.Contains(out, "sk-secret-token") || strings.Contains(out, "plain-secret") {
+		t.Fatalf("expected bearer and query-like secrets redacted, got %q", out)
+	}
+	if !strings.Contains(out, "Authorization: ***") {
+		t.Fatalf("expected authorization marker to be redacted, got %q", out)
+	}
+}
+
+func TestRedactText_AuthorizationBasicAndProxy(t *testing.T) {
+	in := "Authorization: Basic abc123-secret proxy-authorization=Bearer upstream-secret"
+	out := RedactText(in)
+	for _, secret := range []string{"abc123-secret", "upstream-secret", "Basic", "Bearer"} {
+		if strings.Contains(out, secret) {
+			t.Fatalf("expected %q redacted, got %q", secret, out)
+		}
+	}
+	if !strings.Contains(out, "Authorization: ***") || !strings.Contains(out, "proxy-authorization=***") {
+		t.Fatalf("expected auth headers redacted, got %q", out)
+	}
+}
+
+func TestRedactText_APIKeyHeadersAndFields(t *testing.T) {
+	in := "api_key=sk-api-secret apikey:sk-alt-secret x-api-key=sk-header-secret proxy-authorization=upstream-secret"
+	out := RedactText(in)
+	for _, secret := range []string{"sk-api-secret", "sk-alt-secret", "sk-header-secret", "upstream-secret"} {
+		if strings.Contains(out, secret) {
+			t.Fatalf("expected %q redacted, got %q", secret, out)
+		}
+	}
+}
+
+func TestRedactText_CookieAndCustomTokenHeaders(t *testing.T) {
+	in := strings.Join([]string{
+		"Set-Cookie: sid=session-secret; HttpOnly",
+		"Cookie: sid=session-secret; theme=dark",
+		"X-Auth-Token: custom-token-secret",
+		"x-access-token=access-token-secret",
+	}, "\n")
+	out := RedactText(in)
+	for _, secret := range []string{"session-secret", "custom-token-secret", "access-token-secret"} {
+		if strings.Contains(out, secret) {
+			t.Fatalf("expected %q redacted, got %q", secret, out)
+		}
+	}
+	for _, marker := range []string{"Set-Cookie: ***", "Cookie: ***", "X-Auth-Token: ***", "x-access-token=***"} {
+		if !strings.Contains(out, marker) {
+			t.Fatalf("expected marker %q in %q", marker, out)
+		}
+	}
+}
+
+func TestRedactText_JSONStringValuesUseExtraKeys(t *testing.T) {
+	in := `{"error":{"message":"custom_secret=abc api_key=sk-api-secret"},"other":"ok"}`
+	out := RedactText(in, "custom_secret")
+	if strings.Contains(out, "abc") || strings.Contains(out, "sk-api-secret") {
+		t.Fatalf("expected secrets inside JSON string values redacted, got %q", out)
+	}
+	if !strings.Contains(out, `"other":"ok"`) {
+		t.Fatalf("expected safe values preserved, got %q", out)
+	}
+}
+
+func TestRedactText_JSONStringValues(t *testing.T) {
+	in := `{"error":{"message":"Authorization: Bearer sk-secret-token access_token=plain-secret"},"other":"ok"}`
+	out := RedactText(in)
+	if strings.Contains(out, "sk-secret-token") || strings.Contains(out, "plain-secret") {
+		t.Fatalf("expected secrets inside JSON string values redacted, got %q", out)
+	}
+	if !strings.Contains(out, `"other":"ok"`) {
+		t.Fatalf("expected safe values preserved, got %q", out)
+	}
+}
+
 func TestRedactText_GOCSPX(t *testing.T) {
 	in := "client_secret=GOCSPX-your-client-secret"
 	out := RedactText(in)

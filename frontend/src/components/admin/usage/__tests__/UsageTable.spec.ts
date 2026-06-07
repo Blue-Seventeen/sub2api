@@ -285,8 +285,8 @@ describe('admin UsageTable tooltip', () => {
       billing_mode: 'token',
       image_count: 1,
       input_tokens: 42,
-      output_tokens: 123,
-      image_output_tokens: 123,
+      output_tokens: 200,
+      image_output_tokens: 150,
       image_output_cost: 0.0123,
     }
 
@@ -309,7 +309,9 @@ describe('admin UsageTable tooltip', () => {
     const text = wrapper.text()
     expect(text).toContain('Token')
     expect(text).toContain('42')
-    expect(text).toContain('123')
+    expect(text).toContain('50')
+    expect(text).toContain('150')
+    expect(text).not.toContain('200')
     expect(text).not.toContain('1 images')
   })
 })

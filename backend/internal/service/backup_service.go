@@ -3,6 +3,7 @@ package service
 import (
 	"compress/gzip"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,6 +35,8 @@ const (
 	backupScheduleReconcileInterval    = time.Minute
 	backupScheduleReconcileTimeout     = 10 * time.Second
 	backupScheduleReconcileStopTimeout = 5 * time.Second
+	backupOperationLeaderLockKey       = "backup:operation:global"
+	backupOperationLeaderLockTTL       = 24 * time.Hour
 )
 
 var (
@@ -126,6 +129,10 @@ type BackupService struct {
 	backingUp bool
 	restoring bool
 
+	lockCache  LeaderLockCache
+	lockDB     *sql.DB
+	instanceID string
+
 	storeMu sync.Mutex // 保护 store/s3Cfg 缓存
 	store   BackupObjectStore
 	s3Cfg   *BackupS3Config
@@ -165,9 +172,67 @@ func NewBackupService(
 		dumper:                    dumper,
 		scheduleLocalConfigPath:   defaultBackupScheduleLocalConfigPath(),
 		scheduleReconcileInterval: backupScheduleReconcileInterval,
+		instanceID:                CurrentNodeID() + ":backup-service",
 		bgCtx:                     bgCtx,
 		bgCancel:                  bgCancel,
 	}
+}
+
+// SetLeaderLock injects distributed lock backends for multi-instance deployments.
+func (s *BackupService) SetLeaderLock(lockCache LeaderLockCache, db *sql.DB) {
+	if s == nil {
+		return
+	}
+	s.lockCache = lockCache
+	s.lockDB = db
+}
+
+func (s *BackupService) beginOperation(ctx context.Context, op string) (func(), error) {
+	s.opMu.Lock()
+	if s.backingUp {
+		s.opMu.Unlock()
+		return nil, ErrBackupInProgress
+	}
+	if s.restoring {
+		s.opMu.Unlock()
+		return nil, ErrRestoreInProgress
+	}
+	switch op {
+	case "backup":
+		s.backingUp = true
+	case "restore":
+		s.restoring = true
+	default:
+		s.opMu.Unlock()
+		return nil, infraerrors.BadRequest("BACKUP_OPERATION_INVALID", "invalid backup operation")
+	}
+	s.opMu.Unlock()
+
+	releaseLocal := func() {
+		s.opMu.Lock()
+		if op == "backup" {
+			s.backingUp = false
+		} else {
+			s.restoring = false
+		}
+		s.opMu.Unlock()
+	}
+
+	releaseLeader, ok := tryAcquireSingletonLeaderLock(ctx, s.lockCache, s.lockDB, backupOperationLeaderLockKey, s.instanceID+":"+op, backupOperationLeaderLockTTL)
+	if !ok {
+		releaseLocal()
+		if op == "restore" {
+			return nil, ErrRestoreInProgress
+		}
+		return nil, ErrBackupInProgress
+	}
+
+	return func() {
+		if releaseLeader != nil {
+			releaseLeader()
+		}
+		releaseLocal()
+	}, nil
 }
 
 func defaultBackupScheduleLocalConfigPath() string {
@@ -663,18 +728,11 @@ func (s *BackupService) CreateBackup(ctx context.Context, triggeredBy string, ex
 		return nil, infraerrors.ServiceUnavailable("SERVER_SHUTTING_DOWN", "server is shutting down")
 	}
 
-	s.opMu.Lock()
-	if s.backingUp {
-		s.opMu.Unlock()
-		return nil, ErrBackupInProgress
+	releaseOp, err := s.beginOperation(ctx, "backup")
+	if err != nil {
+		return nil, err
 	}
-	s.backingUp = true
-	s.opMu.Unlock()
-	defer func() {
-		s.opMu.Lock()
-		s.backingUp = false
-		s.opMu.Unlock()
-	}()
+	defer releaseOp()
 
 	s3Cfg, err := s.loadS3Config(ctx)
 	if err != nil {
@@ -762,7 +820,13 @@ func (s *BackupService) CreateBackup(ctx context.Context, triggeredBy string, ex
 		_ = s.saveRecord(ctx, record)
 		return record, fmt.Errorf("backup upload: %w", err)
 	}
-	<-gzipDone // 确保 gzip goroutine 已退出
+	if gzErr := <-gzipDone; gzErr != nil {
+		record.Status = "failed"
+		record.ErrorMsg = fmt.Sprintf("gzip/dump failed: %v", gzErr)
+		record.FinishedAt = time.Now().Format(time.RFC3339)
+		_ = s.saveRecord(ctx, record)
+		return record, fmt.Errorf("gzip/dump: %w", gzErr)
+	}
 
 	record.SizeBytes = sizeBytes
 	record.Status = "completed"
@@ -780,21 +844,16 @@ func (s *BackupService) StartBackup(ctx context.Context, triggeredBy string, exp
 		return nil, infraerrors.ServiceUnavailable("SERVER_SHUTTING_DOWN", "server is shutting down")
 	}
 
-	s.opMu.Lock()
-	if s.backingUp {
-		s.opMu.Unlock()
-		return nil, ErrBackupInProgress
+	releaseOp, err := s.beginOperation(ctx, "backup")
+	if err != nil {
+		return nil, err
 	}
-	s.backingUp = true
-	s.opMu.Unlock()
 
 	// 初始化阶段出错时自动重置标志
 	launched := false
 	defer func() {
 		if !launched {
-			s.opMu.Lock()
-			s.backingUp = false
-			s.opMu.Unlock()
+			releaseOp()
 		}
 	}()
 
@@ -845,11 +904,7 @@ func (s *BackupService) StartBackup(ctx context.Context, triggeredBy string, exp
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		defer func() {
-			s.opMu.Lock()
-			s.backingUp = false
-			s.opMu.Unlock()
-		}()
+		defer releaseOp()
 		defer func() {
 			if r := recover(); r != nil {
 				logger.LegacyPrintf("service.backup", "[Backup] panic recovered: %v", r)
@@ -931,7 +986,14 @@ func (s *BackupService) executeBackup(record *BackupRecord, objectStore BackupOb
 		_ = s.saveRecord(context.Background(), record)
 		return
 	}
-	<-gzipDone // 确保 gzip goroutine 已退出
+	if gzErr := <-gzipDone; gzErr != nil {
+		record.Status = "failed"
+		record.Progress = ""
+		record.ErrorMsg = fmt.Sprintf("gzip/dump failed: %v", gzErr)
+		record.FinishedAt = time.Now().Format(time.RFC3339)
+		_ = s.saveRecord(context.Background(), record)
+		return
+	}
 
 	record.SizeBytes = sizeBytes
 	record.Status = "completed"
@@ -944,18 +1006,11 @@ func (s *BackupService) executeBackup(record *BackupRecord, objectStore BackupOb
 
 // RestoreBackup 从 S3 下载备份并流式恢复到数据库
 func (s *BackupService) RestoreBackup(ctx context.Context, backupID string) error {
-	s.opMu.Lock()
-	if s.restoring {
-		s.opMu.Unlock()
-		return ErrRestoreInProgress
+	releaseOp, err := s.beginOperation(ctx, "restore")
+	if err != nil {
+		return err
 	}
-	s.restoring = true
-	s.opMu.Unlock()
-	defer func() {
-		s.opMu.Lock()
-		s.restoring = false
-		s.opMu.Unlock()
-	}()
+	defer releaseOp()
 
 	record, err := s.GetBackupRecord(ctx, backupID)
 	if err != nil {
@@ -1002,21 +1057,16 @@ func (s *BackupService) StartRestore(ctx context.Context, backupID string) (*Bac
 		return nil, infraerrors.ServiceUnavailable("SERVER_SHUTTING_DOWN", "server is shutting down")
 	}
 
-	s.opMu.Lock()
-	if s.restoring {
-		s.opMu.Unlock()
-		return nil, ErrRestoreInProgress
+	releaseOp, err := s.beginOperation(ctx, "restore")
+	if err != nil {
+		return nil, err
 	}
-	s.restoring = true
-	s.opMu.Unlock()
 
 	// 初始化阶段出错时自动重置标志
 	launched := false
 	defer func() {
 		if !launched {
-			s.opMu.Lock()
-			s.restoring = false
-			s.opMu.Unlock()
+			releaseOp()
 		}
 	}()
 
@@ -1046,11 +1096,7 @@ func (s *BackupService) StartRestore(ctx context.Context, backupID string) (*Bac
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		defer func() {
-			s.opMu.Lock()
-			s.restoring = false
-			s.opMu.Unlock()
-		}()
+		defer releaseOp()
 		defer func() {
 			if r := recover(); r != nil {
 				logger.LegacyPrintf("service.backup", "[Backup] restore panic recovered: %v", r)
@@ -1278,7 +1324,10 @@ func (s *BackupService) saveRecord(ctx context.Context, record *BackupRecord) er
 	s.recordsMu.Lock()
 	defer s.recordsMu.Unlock()
 
-	records, _ := s.loadRecordsLocked(ctx)
+	records, err := s.loadRecordsLocked(ctx)
+	if err != nil {
+		return err
+	}
 
 	// 更新已有记录或追加
 	found := false

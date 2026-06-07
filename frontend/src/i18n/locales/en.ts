@@ -5431,6 +5431,7 @@ export default {
         suggestAuth: 'Auth failed: verify API key/credentials',
         suggestPlatform: 'Platform error: prioritize investigation and fix',
         suggestGeneric: 'See details for more context',
+        apiKeyName: 'Key Name',
         apiKeyPrefix: 'Key Prefix',
         attemptedKeyPrefix: 'Attempted Key Prefix',
         deletedKeyOwner: 'Deleted Key Owner',

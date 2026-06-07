@@ -365,3 +365,68 @@ func TestBatchSnapshotUsage_InsertOverwriteMultiKey(t *testing.T) {
 	require.InDelta(t, 18.8, rec2After.WeeklyUsageUSD, 1e-9, "user2 weekly must be overwritten to 18.8")
 	require.InDelta(t, 28.8, rec2After.MonthlyUsageUSD, 1e-9, "user2 monthly must be overwritten to 28.8")
 }
+
+func TestBatchSnapshotUsage_OldSnapshotDoesNotOverwriteNewerDBFallback(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	userID := mustCreateUserForQuota(t, client)
+	repo := NewUserPlatformQuotaRepository(client)
+
+	snapshotTime := time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)
+	dailyStart := time.Date(2026, 5, 29, 0, 0, 0, 0, time.UTC)
+	weeklyStart := time.Date(2026, 5, 25, 0, 0, 0, 0, time.UTC)
+	monthlyStart := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+
+	require.NoError(t, repo.BatchSnapshotUsage(ctx, []UserPlatformQuotaSnapshot{{
+		UserID:             userID,
+		Platform:           "anthropic",
+		DailyUsageUSD:      10,
+		WeeklyUsageUSD:     10,
+		MonthlyUsageUSD:    10,
+		DailyWindowStart:   dailyStart,
+		WeeklyWindowStart:  weeklyStart,
+		MonthlyWindowStart: monthlyStart,
+		SnapshotTakenAt:    snapshotTime,
+	}}, snapshotTime), "initial snapshot")
+
+	fallbackTime := snapshotTime.Add(2 * time.Minute)
+	require.NoError(t, repo.IncrementUsageWithReset(ctx, userID, "anthropic", 5, fallbackTime), "db fallback increment")
+
+	require.NoError(t, repo.BatchSnapshotUsage(ctx, []UserPlatformQuotaSnapshot{{
+		UserID:             userID,
+		Platform:           "anthropic",
+		DailyUsageUSD:      11,
+		WeeklyUsageUSD:     11,
+		MonthlyUsageUSD:    11,
+		DailyWindowStart:   dailyStart,
+		WeeklyWindowStart:  weeklyStart,
+		MonthlyWindowStart: monthlyStart,
+		SnapshotTakenAt:    snapshotTime.Add(time.Minute),
+	}}, snapshotTime.Add(10*time.Minute)), "old redis snapshot written later")
+
+	rec, err := repo.GetByUserPlatform(ctx, userID, "anthropic")
+	require.NoError(t, err)
+	require.NotNil(t, rec)
+	require.InDelta(t, 15, rec.DailyUsageUSD, 1e-9, "old snapshot must not overwrite newer DB fallback")
+	require.InDelta(t, 15, rec.WeeklyUsageUSD, 1e-9)
+	require.InDelta(t, 15, rec.MonthlyUsageUSD, 1e-9)
+
+	require.NoError(t, repo.BatchSnapshotUsage(ctx, []UserPlatformQuotaSnapshot{{
+		UserID:             userID,
+		Platform:           "anthropic",
+		DailyUsageUSD:      20,
+		WeeklyUsageUSD:     20,
+		MonthlyUsageUSD:    20,
+		DailyWindowStart:   dailyStart,
+		WeeklyWindowStart:  weeklyStart,
+		MonthlyWindowStart: monthlyStart,
+		SnapshotTakenAt:    fallbackTime.Add(time.Minute),
+	}}, fallbackTime.Add(time.Minute)), "newer snapshot should overwrite")
+
+	rec, err = repo.GetByUserPlatform(ctx, userID, "anthropic")
+	require.NoError(t, err)
+	require.NotNil(t, rec)
+	require.InDelta(t, 20, rec.DailyUsageUSD, 1e-9)
+	require.InDelta(t, 20, rec.WeeklyUsageUSD, 1e-9)
+	require.InDelta(t, 20, rec.MonthlyUsageUSD, 1e-9)
+}

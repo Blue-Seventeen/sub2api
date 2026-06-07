@@ -274,7 +274,8 @@ describe('admin UsageView distribution metric toggles', () => {
       request_id: id === 101 ? '-request' : `req-${id}`,
       user_agent: id === 101 ? '\tagent' : 'agent',
       input_tokens: 1,
-      output_tokens: 2,
+      output_tokens: id === 101 ? 200 : 2,
+      image_output_tokens: id === 101 ? 150 : 0,
       cache_read_tokens: 0,
       cache_creation_tokens: 0,
       input_cost: 0,
@@ -353,6 +354,7 @@ describe('admin UsageView distribution metric toggles', () => {
     expect(csvText).toContain("'=cmd|test")
     expect(csvText).toContain("'-request")
     expect(csvText).toContain("'\tagent")
+    expect(csvText).toContain(',1,50,0,0,150,')
   })
 })
 

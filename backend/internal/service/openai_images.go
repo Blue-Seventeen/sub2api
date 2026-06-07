@@ -90,6 +90,76 @@ type OpenAIImagesRequest struct {
 	bodyHash           string
 }
 
+type openAIImagesCanonicalMultipartPart struct {
+	Index       int    `json:"index"`
+	FieldName   string `json:"field_name"`
+	FileName    string `json:"file_name,omitempty"`
+	ContentType string `json:"content_type,omitempty"`
+	Value       string `json:"value,omitempty"`
+	DataSHA256  string `json:"data_sha256,omitempty"`
+	Size        int    `json:"size,omitempty"`
+}
+
+func HashOpenAIImagesUsageRequestPayload(body []byte, parsed *OpenAIImagesRequest) string {
+	if parsed == nil || !parsed.Multipart {
+		return HashUsageRequestPayload(body)
+	}
+	canonical, err := canonicalOpenAIImagesMultipartPayload(body, parsed.ContentType)
+	if err != nil {
+		return HashUsageRequestPayload(body)
+	}
+	return HashUsageRequestPayload(canonical)
+}
+
+func canonicalOpenAIImagesMultipartPayload(body []byte, contentType string) ([]byte, error) {
+	_, params, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return nil, fmt.Errorf("parse multipart content-type: %w", err)
+	}
+	boundary := strings.TrimSpace(params["boundary"])
+	if boundary == "" {
+		return nil, fmt.Errorf("multipart boundary is required")
+	}
+	reader := multipart.NewReader(bytes.NewReader(body), boundary)
+	parts := make([]openAIImagesCanonicalMultipartPart, 0)
+	for idx := 0; ; idx++ {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read multipart body: %w", err)
+		}
+		data, readErr := io.ReadAll(io.LimitReader(part, openAIImageMaxUploadPartSize))
+		_ = part.Close()
+		if readErr != nil {
+			return nil, fmt.Errorf("read multipart field %s: %w", part.FormName(), readErr)
+		}
+		item := openAIImagesCanonicalMultipartPart{
+			Index:       idx,
+			FieldName:   strings.TrimSpace(part.FormName()),
+			FileName:    strings.TrimSpace(part.FileName()),
+			ContentType: strings.TrimSpace(part.Header.Get("Content-Type")),
+			Size:        len(data),
+		}
+		if item.FileName == "" {
+			item.Value = string(data)
+		} else {
+			sum := sha256.Sum256(data)
+			item.DataSHA256 = hex.EncodeToString(sum[:])
+		}
+		parts = append(parts, item)
+	}
+	payload := struct {
+		Kind  string                               `json:"kind"`
+		Parts []openAIImagesCanonicalMultipartPart `json:"parts"`
+	}{
+		Kind:  "openai-images-multipart-v1",
+		Parts: parts,
+	}
+	return json.Marshal(payload)
+}
+
 func (r *OpenAIImagesRequest) ModerationBody() []byte {
 	if r == nil {
 		return nil

@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -76,6 +77,31 @@ func TestSanitizeAndTrimJSONPayload_PreservesTokenBudgetFields(t *testing.T) {
 	}
 }
 
+func TestSanitizeErrorBodyForStorage_RedactsTextValues(t *testing.T) {
+	t.Parallel()
+
+	jsonBody := `{"error":{"message":"Authorization: Bearer sk-secret-token access_token=plain-secret"},"other":"ok"}`
+	out, truncated := sanitizeErrorBodyForStorage(jsonBody, 10*1024)
+	if truncated {
+		t.Fatalf("did not expect truncation")
+	}
+	if out == "" {
+		t.Fatalf("expected sanitized JSON body")
+	}
+	if containsAny(out, "sk-secret-token", "plain-secret") {
+		t.Fatalf("expected JSON string values redacted, got %q", out)
+	}
+
+	textBody := "Authorization: Bearer sk-secret-token access_token=plain-secret"
+	out, truncated = sanitizeErrorBodyForStorage(textBody, 10*1024)
+	if truncated {
+		t.Fatalf("did not expect truncation")
+	}
+	if containsAny(out, "sk-secret-token", "plain-secret") {
+		t.Fatalf("expected non-JSON error body redacted, got %q", out)
+	}
+}
+
 func TestShrinkToEssentials_IncludesThinking(t *testing.T) {
 	t.Parallel()
 
@@ -96,4 +122,13 @@ func TestShrinkToEssentials_IncludesThinking(t *testing.T) {
 	if _, ok := out["thinking"]; !ok {
 		t.Fatalf("expected thinking to be included in essentials: %#v", out)
 	}
+}
+
+func containsAny(s string, needles ...string) bool {
+	for _, needle := range needles {
+		if strings.Contains(s, needle) {
+			return true
+		}
+	}
+	return false
 }

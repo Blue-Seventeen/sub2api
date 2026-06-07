@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"log/slog"
+	"strconv"
 	"sync"
 	"time"
 
@@ -46,6 +48,9 @@ type monitorRunnerSvc interface {
 type ChannelMonitorRunner struct {
 	svc            monitorRunnerSvc
 	settingService *SettingService
+	lockCache      LeaderLockCache
+	lockDB         *sql.DB
+	instanceID     string
 
 	pool         pond.Pool
 	parentCtx    context.Context
@@ -86,12 +91,22 @@ func newChannelMonitorRunner(svc monitorRunnerSvc, settingService *SettingServic
 	return &ChannelMonitorRunner{
 		svc:            svc,
 		settingService: settingService,
+		instanceID:     CurrentNodeID() + ":channel-monitor-runner",
 		pool:           pond.NewPool(monitorWorkerConcurrency),
 		parentCtx:      ctx,
 		parentCancel:   cancel,
 		tasks:          make(map[int64]*scheduledMonitor),
 		inFlight:       make(map[int64]struct{}),
 	}
+}
+
+// SetLeaderLock injects distributed lock backends for multi-instance deployments.
+func (r *ChannelMonitorRunner) SetLeaderLock(lockCache LeaderLockCache, db *sql.DB) {
+	if r == nil {
+		return
+	}
+	r.lockCache = lockCache
+	r.lockDB = db
 }
 
 // Start 加载所有 enabled monitor 并为每个建立独立定时任务。
@@ -240,10 +255,28 @@ func (r *ChannelMonitorRunner) fire(ctx context.Context, task *scheduledMonitor)
 			"monitor_id", task.id, "name", task.name)
 		return
 	}
+	lockCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	releaseLeader, ok := tryAcquireSingletonLeaderLock(
+		lockCtx,
+		r.lockCache,
+		r.lockDB,
+		"channel:monitor:runner:"+strconv.FormatInt(task.id, 10),
+		r.instanceID,
+		monitorRequestTimeout+monitorPingTimeout+monitorRunOneBuffer+30*time.Second,
+	)
+	cancel()
+	if !ok {
+		r.releaseInFlight(task.id)
+		slog.Debug("channel_monitor: skip lock held by peer",
+			"monitor_id", task.id, "name", task.name)
+		return
+	}
 	if _, ok := r.pool.TrySubmit(func() {
+		defer releaseLeader()
 		r.runOne(task.id, task.name)
 	}); !ok {
 		// 池满：丢弃本次检测，但必须释放已占用的 inFlight 槽，否则该 monitor 会被永久卡住。
+		releaseLeader()
 		r.releaseInFlight(task.id)
 		slog.Warn("channel_monitor: worker pool full, skip submission",
 			"monitor_id", task.id, "name", task.name)

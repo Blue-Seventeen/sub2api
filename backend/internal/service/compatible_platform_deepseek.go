@@ -12,10 +12,12 @@ func deepseekCompatibleProviderPreset() CompatibleProviderPreset {
 		DisplayName:    compatiblePlatformDisplayName(PlatformDeepSeek),
 		DefaultBaseURL: "https://api.deepseek.com",
 		DefaultModels: NormalizeCompatibleModelList([]claude.Model{
+			{ID: "deepseek-v4-flash", Type: "model", DisplayName: "DeepSeek V4 Flash"},
+			{ID: "deepseek-v4-pro", Type: "model", DisplayName: "DeepSeek V4 Pro"},
 			{ID: "deepseek-chat", Type: "model", DisplayName: "DeepSeek Chat"},
 			{ID: "deepseek-reasoner", Type: "model", DisplayName: "DeepSeek Reasoner"},
 		}),
-		DefaultTestModel:  "deepseek-chat",
+		DefaultTestModel:  "deepseek-v4-flash",
 		AuthMode:          CompatibleAuthBearer,
 		SupportsChat:      true,
 		SupportsResponses: false,
@@ -32,4 +34,16 @@ func deepseekCompatibleProviderPreset() CompatibleProviderPreset {
 		PatchChatBody:     normalizeTopPForCompatibleBody,
 		PatchMessagesBody: nil,
 	}
+}
+
+func deepseekNewAPIStyleCompatibleProviderPreset() CompatibleProviderPreset {
+	preset := deepseekCompatibleProviderPreset()
+	preset.BuildChatURL = func(baseURL, _ string) string {
+		return joinRelayCompatibleURL(baseURL, "/v1/chat/completions")
+	}
+	preset.BuildResponsesURL = func(baseURL, _ string) string {
+		return joinRelayCompatibleURL(baseURL, "/v1/chat/completions")
+	}
+	preset.PatchChatBody = normalizeNewAPIStyleCompatibleChatBody
+	return preset
 }

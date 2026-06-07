@@ -9160,17 +9160,20 @@ func (s *GatewayService) calculateRecordUsageCost(
 		return cost
 	}
 	if unitCount := resultBillableRequestCount(result); unitCount > 0 {
-		if resolved := s.resolveChannelPricing(ctx, billingModel, apiKey); resolved != nil &&
-			resolved.Mode == BillingModeToken &&
-			forwardResultHasTokenUsage(result) {
-			return s.calculateTokenCost(ctx, result, apiKey, billingModel, multiplier, opts)
+		if forwardResultHasTokenUsage(result) {
+			if resolved := s.resolveChannelPricing(ctx, billingModel, apiKey); resolved == nil || resolved.Mode == BillingModeToken {
+				if resolved == nil {
+					logger.LegacyPrintf("service.gateway", "new-api billable unit has token usage but no channel unit pricing; falling back to token pricing: model=%s request_count=%d task_count=%d unit_type=%s", billingModel, result.RequestCount, result.TaskCount, result.BillableUnitType)
+				}
+				return s.calculateTokenCost(ctx, result, apiKey, billingModel, multiplier, opts)
+			}
 		}
 		return s.calculateRequestUnitCost(ctx, result, apiKey, billingModel, multiplier, unitCount)
 	}
 
 	// 图片生成：渠道定价为 token 计费时走 token 路径，否则走图片计费
 	if result.ImageCount > 0 {
-		if resolved := s.resolveChannelPricing(ctx, billingModel, apiKey); resolved != nil && resolved.Mode == BillingModeToken {
+		if resolved := s.resolveChannelPricing(ctx, billingModel, apiKey); resolved != nil && resolved.Mode == BillingModeToken && forwardResultHasTokenUsage(result) {
 			return s.calculateTokenCost(ctx, result, apiKey, billingModel, multiplier, opts)
 		}
 		return s.calculateImageCost(ctx, result, apiKey, billingModel, imageMultiplier)
@@ -9310,7 +9313,7 @@ func (s *GatewayService) calculateImageCost(
 	multiplier float64,
 ) *CostBreakdown {
 	sizeTier := NormalizeImageBillingTierOrDefault(result.ImageSize)
-	if resolved := s.resolveChannelPricing(ctx, billingModel, apiKey); resolved != nil {
+	if resolved := s.resolveChannelPricing(ctx, billingModel, apiKey); resolved != nil && (resolved.Mode != BillingModeToken || forwardResultHasTokenUsage(result)) {
 		tokens := UsageTokens{
 			InputTokens:       result.Usage.InputTokens,
 			OutputTokens:      result.Usage.OutputTokens,

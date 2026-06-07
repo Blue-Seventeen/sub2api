@@ -5376,6 +5376,7 @@ export default {
         suggestAuth: '⚠️ 认证失败，建议：检查 API Key 是否有效 / 联系客户更新凭证',
         suggestPlatform: '🚨 平台错误，建议立即排查修复',
         suggestGeneric: '查看详情了解更多信息',
+        apiKeyName: 'Key 名称',
         apiKeyPrefix: 'Key 前缀',
         attemptedKeyPrefix: '尝试的 Key 前缀',
         deletedKeyOwner: '已删除 Key 所有者',

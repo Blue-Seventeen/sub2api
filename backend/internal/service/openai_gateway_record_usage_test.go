@@ -280,10 +280,12 @@ func expectedOpenAICost(t *testing.T, svc *OpenAIGatewayService, model string, u
 	t.Helper()
 
 	cost, err := svc.billingService.CalculateCost(model, UsageTokens{
-		InputTokens:         max(usage.InputTokens-usage.CacheReadInputTokens, 0),
-		OutputTokens:        usage.OutputTokens,
-		CacheCreationTokens: usage.CacheCreationInputTokens,
-		CacheReadTokens:     usage.CacheReadInputTokens,
+		InputTokens:           max(usage.InputTokens-usage.CacheReadInputTokens, 0),
+		OutputTokens:          usage.OutputTokens,
+		CacheCreationTokens:   usage.CacheCreationInputTokens,
+		CacheCreation5mTokens: usage.CacheCreation5mTokens,
+		CacheCreation1hTokens: usage.CacheCreation1hTokens,
+		CacheReadTokens:       usage.CacheReadInputTokens,
 	}, multiplier)
 	require.NoError(t, err)
 	return cost
@@ -479,6 +481,43 @@ func TestOpenAIGatewayServiceRecordUsage_ZeroUnifiedRateWritesZeroFinalRate(t *t
 	require.Equal(t, 0.0, usageRepo.lastLog.ActualCost)
 	require.Equal(t, 0.0, usageRepo.lastLog.RealActualCost)
 	require.Equal(t, 0.0, userRepo.lastAmount)
+}
+
+func TestOpenAIGatewayServiceRecordUsage_PreservesCacheCreationBreakdown(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	userRepo := &openAIRecordUsageUserRepoStub{}
+	subRepo := &openAIRecordUsageSubRepoStub{}
+	svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, subRepo, nil)
+
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID: "resp_cache_breakdown",
+			Usage: OpenAIUsage{
+				InputTokens:              40,
+				OutputTokens:             3,
+				CacheCreationInputTokens: 18,
+				CacheCreation5mTokens:    7,
+				CacheCreation1hTokens:    11,
+				CacheReadInputTokens:     5,
+			},
+			Model:    "gpt-5.1",
+			Duration: time.Second,
+		},
+		APIKey: &APIKey{
+			ID:    1021,
+			Group: &Group{RateMultiplier: 1},
+		},
+		User:    &User{ID: 2021},
+		Account: &Account{ID: 3021},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.Equal(t, 35, usageRepo.lastLog.InputTokens)
+	require.Equal(t, 18, usageRepo.lastLog.CacheCreationTokens)
+	require.Equal(t, 7, usageRepo.lastLog.CacheCreation5mTokens)
+	require.Equal(t, 11, usageRepo.lastLog.CacheCreation1hTokens)
+	require.Equal(t, 5, usageRepo.lastLog.CacheReadTokens)
 }
 
 func TestOpenAIGatewayServiceRecordUsage_IncludesEndpointMetadata(t *testing.T) {
@@ -1840,12 +1879,78 @@ func TestOpenAIGatewayServiceRecordUsage_ChannelImageBillingUsesImageCountAndInd
 	require.Equal(t, string(BillingModeImage), *usageRepo.lastLog.BillingMode)
 }
 
+func TestOpenAIGatewayServiceRecordUsage_ChannelTokenBillingWinsForImageTokens(t *testing.T) {
+	groupID := int64(125)
+	inputPrice := 0.001
+	outputPrice := 0.002
+	imageOutputPrice := 0.003
+	imagePrice := 0.01
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	svc := newOpenAIRecordUsageServiceForTest(usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
+	svc.resolver = newOpenAITokenChannelPricingResolverForTest(t, groupID, "gpt-image-2", inputPrice, outputPrice, imageOutputPrice)
+
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID: "resp_image_channel_token",
+			Model:     "gpt-image-2",
+			Usage: OpenAIUsage{
+				InputTokens:       100,
+				OutputTokens:      200,
+				ImageOutputTokens: 150,
+			},
+			ImageCount: 2,
+			ImageSize:  "1K",
+			Duration:   time.Second,
+		},
+		APIKey: &APIKey{
+			ID:      10125,
+			GroupID: i64p(groupID),
+			Group: &Group{
+				ID:             groupID,
+				RateMultiplier: 1.0,
+				ImagePrice1K:   &imagePrice,
+			},
+		},
+		User:    &User{ID: 20125},
+		Account: &Account{ID: 30125},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.NotNil(t, usageRepo.lastLog.BillingMode)
+	require.Equal(t, string(BillingModeToken), *usageRepo.lastLog.BillingMode)
+	require.Equal(t, 2, usageRepo.lastLog.ImageCount)
+	require.Equal(t, 150, usageRepo.lastLog.ImageOutputTokens)
+	require.InDelta(t, 0.100, usageRepo.lastLog.InputCost, 1e-12)
+	require.InDelta(t, 0.100, usageRepo.lastLog.OutputCost, 1e-12)
+	require.InDelta(t, 0.450, usageRepo.lastLog.ImageOutputCost, 1e-12)
+	require.InDelta(t, 0.650, usageRepo.lastLog.TotalCost, 1e-12)
+	require.InDelta(t, 0.650, usageRepo.lastLog.ActualCost, 1e-12)
+}
+
 func newOpenAIImageChannelPricingResolverForTest(t *testing.T, groupID int64, model string, price float64) *ModelPricingResolver {
 	t.Helper()
 	cache := newEmptyChannelCache()
 	cache.pricingByGroupModel[channelModelKey{groupID: groupID, model: model}] = &ChannelModelPricing{
 		BillingMode:     BillingModeImage,
 		PerRequestPrice: &price,
+	}
+	cache.channelByGroupID[groupID] = &Channel{ID: groupID, Status: StatusActive}
+	cache.groupPlatform[groupID] = ""
+	cache.loadedAt = time.Now()
+	cs := &ChannelService{}
+	cs.cache.Store(cache)
+	return NewModelPricingResolver(cs, NewBillingService(&config.Config{}, nil))
+}
+
+func newOpenAITokenChannelPricingResolverForTest(t *testing.T, groupID int64, model string, inputPrice, outputPrice, imageOutputPrice float64) *ModelPricingResolver {
+	t.Helper()
+	cache := newEmptyChannelCache()
+	cache.pricingByGroupModel[channelModelKey{groupID: groupID, model: model}] = &ChannelModelPricing{
+		BillingMode:      BillingModeToken,
+		InputPrice:       &inputPrice,
+		OutputPrice:      &outputPrice,
+		ImageOutputPrice: &imageOutputPrice,
 	}
 	cache.channelByGroupID[groupID] = &Channel{ID: groupID, Status: StatusActive}
 	cache.groupPlatform[groupID] = ""
@@ -1877,6 +1982,34 @@ func TestGatewayServiceCalculateRecordUsageCost_ChannelImageBillingUsesImageCoun
 	require.Equal(t, string(BillingModeImage), cost.BillingMode)
 	require.InDelta(t, 0.5, cost.TotalCost, 1e-12)
 	require.InDelta(t, 0.5, cost.ActualCost, 1e-12)
+}
+
+func TestGatewayServiceCalculateRecordUsageCost_TokenPricedImageWithoutUsageFallsBackToImageBilling(t *testing.T) {
+	groupID := int64(129)
+	imagePrice := 0.25
+	billingService := NewBillingService(&config.Config{}, nil)
+	svc := &GatewayService{
+		billingService: billingService,
+		resolver:       newOpenAITokenChannelPricingResolverForTest(t, groupID, "gemini-image", 0.001, 0.002, 0.003),
+	}
+
+	cost := svc.calculateRecordUsageCost(
+		context.Background(),
+		&ForwardResult{Model: "gemini-image", ImageCount: 2, ImageSize: "1K"},
+		&APIKey{
+			GroupID: i64p(groupID),
+			Group:   &Group{ID: groupID, ImagePrice1K: &imagePrice},
+		},
+		"gemini-image",
+		0.15,
+		1.5,
+		nil,
+	)
+
+	require.NotNil(t, cost)
+	require.Equal(t, string(BillingModeImage), cost.BillingMode)
+	require.InDelta(t, 0.5, cost.TotalCost, 1e-12)
+	require.InDelta(t, 0.75, cost.ActualCost, 1e-12)
 }
 
 func TestGatewayServiceCalculateRecordUsageCost_ChannelImageBillingUsesSizeTier(t *testing.T) {
@@ -1916,6 +2049,37 @@ func TestGatewayServiceCalculateRecordUsageCost_ChannelImageBillingUsesSizeTier(
 	require.Equal(t, string(BillingModeImage), cost.BillingMode)
 	require.InDelta(t, 0.80, cost.TotalCost, 1e-12)
 	require.InDelta(t, 0.80, cost.ActualCost, 1e-12)
+}
+
+func TestOpenAIGatewayCalculateUsageCost_NoChannelUnitPricingFallsBackToTokenUsage(t *testing.T) {
+	billing := NewBillingService(&config.Config{}, nil)
+	svc := &OpenAIGatewayService{
+		billingService: billing,
+		resolver:       NewModelPricingResolver(nil, billing),
+	}
+	tokens := UsageTokens{InputTokens: 1000, OutputTokens: 500}
+
+	cost, err := svc.calculateOpenAIRecordUsageCost(
+		context.Background(),
+		&OpenAIForwardResult{
+			RequestCount:     1,
+			BillableUnitType: BillableUnitTypeRequest,
+		},
+		&APIKey{},
+		[]string{"claude-sonnet-4"},
+		1.0,
+		1.0,
+		tokens,
+		"",
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, cost)
+	expected, err := billing.CalculateCostWithServiceTier("claude-sonnet-4", tokens, 1, "")
+	require.NoError(t, err)
+	require.Equal(t, string(BillingModeToken), cost.BillingMode)
+	require.InDelta(t, expected.TotalCost, cost.TotalCost, 1e-12)
+	require.Greater(t, cost.TotalCost, 0.0)
 }
 
 func TestGatewayServiceCalculateRecordUsageCost_ChannelImageBillingNormalizesMissingSizeTier(t *testing.T) {

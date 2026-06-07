@@ -56,10 +56,18 @@ func (m *mockQuotaDirtyCache) BatchGetUserPlatformQuotaCache(_ context.Context, 
 type mockQuotaSnapshotWriter struct {
 	receivedSnaps []UserPlatformQuotaSnapshot
 	returnErr     error
+	returnErrs    []error
+	callCount     int
 }
 
 func (m *mockQuotaSnapshotWriter) BatchSnapshotUsage(_ context.Context, snaps []UserPlatformQuotaSnapshot, _ time.Time) error {
 	m.receivedSnaps = append(m.receivedSnaps, snaps...)
+	if m.callCount < len(m.returnErrs) {
+		err := m.returnErrs[m.callCount]
+		m.callCount++
+		return err
+	}
+	m.callCount++
 	return m.returnErr
 }
 
@@ -120,6 +128,11 @@ func TestFlusher_PopSnapshotUpsert(t *testing.T) {
 
 	if len(writer.receivedSnaps) != 2 {
 		t.Fatalf("expected 2 snaps, got %d", len(writer.receivedSnaps))
+	}
+	for i, snap := range writer.receivedSnaps {
+		if snap.SnapshotTakenAt.IsZero() {
+			t.Fatalf("snapshot %d missing SnapshotTakenAt", i)
+		}
 	}
 	if f.metrics.FlushBatchSizeTotal.Load() != 2 {
 		t.Errorf("FlushBatchSizeTotal = %d, want 2", f.metrics.FlushBatchSizeTotal.Load())
@@ -214,17 +227,23 @@ func TestFlusher_UpsertFailReadds(t *testing.T) {
 // 场景 4: FKViolationDropsNoReadd — writer 返 ErrUserPlatformQuotaFKViolation → 不 Readd，FlushFKViolationTotal=1
 // ---------------------------------------------------------------------------
 
-func TestFlusher_FKViolationDropsNoReadd(t *testing.T) {
+func TestFlusher_FKViolationRecoversLiveKeysAndDropsDeletedKeys(t *testing.T) {
 	keys := []UserPlatformQuotaKey{
 		{UserID: 999, Platform: "anthropic"},
+		{UserID: 1, Platform: "openai"},
 	}
 	cache := &mockQuotaDirtyCache{
 		popSequence: [][]UserPlatformQuotaKey{keys},
 		getEntries: []*UserPlatformQuotaCacheEntry{
 			makeEntry(1.0, 2.0, 3.0),
+			makeEntry(4.0, 5.0, 6.0),
 		},
 	}
-	writer := &mockQuotaSnapshotWriter{returnErr: ErrUserPlatformQuotaFKViolation}
+	writer := &mockQuotaSnapshotWriter{returnErrs: []error{
+		ErrUserPlatformQuotaFKViolation,
+		ErrUserPlatformQuotaFKViolation,
+		nil,
+	}}
 	f := newTestFlusher(cache, writer)
 
 	f.flush()
@@ -236,10 +255,54 @@ func TestFlusher_FKViolationDropsNoReadd(t *testing.T) {
 		t.Errorf("FlushErrorTotal = %d, want 1", f.metrics.FlushErrorTotal.Load())
 	}
 	if len(cache.readdCalled) != 0 {
-		t.Errorf("Readd should NOT be called for FK violation (drop), got %d calls", len(cache.readdCalled))
+		t.Fatalf("Readd should not be called for deleted-user FK recovery, got %d calls", len(cache.readdCalled))
+	}
+	if writer.callCount != 3 {
+		t.Fatalf("BatchSnapshotUsage calls = %d, want 3", writer.callCount)
 	}
 	if f.metrics.DirtyReaddTotal.Load() != 0 {
-		t.Errorf("DirtyReaddTotal = %d, want 0 (FK violation drops)", f.metrics.DirtyReaddTotal.Load())
+		t.Errorf("DirtyReaddTotal = %d, want 0", f.metrics.DirtyReaddTotal.Load())
+	}
+	if f.metrics.FlushBatchSizeTotal.Load() != 1 {
+		t.Errorf("FlushBatchSizeTotal = %d, want 1 recovered row", f.metrics.FlushBatchSizeTotal.Load())
+	}
+}
+
+func TestFlusher_FKRecoveryReaddsRemainingKeysOnTransientError(t *testing.T) {
+	keys := []UserPlatformQuotaKey{
+		{UserID: 999, Platform: "anthropic"},
+		{UserID: 1, Platform: "openai"},
+		{UserID: 2, Platform: "gemini"},
+	}
+	cache := &mockQuotaDirtyCache{
+		popSequence: [][]UserPlatformQuotaKey{keys},
+		getEntries: []*UserPlatformQuotaCacheEntry{
+			makeEntry(1.0, 2.0, 3.0),
+			makeEntry(4.0, 5.0, 6.0),
+			makeEntry(7.0, 8.0, 9.0),
+		},
+	}
+	transientErr := errors.New("db timeout")
+	writer := &mockQuotaSnapshotWriter{returnErrs: []error{
+		ErrUserPlatformQuotaFKViolation,
+		ErrUserPlatformQuotaFKViolation,
+		transientErr,
+	}}
+	f := newTestFlusher(cache, writer)
+
+	f.flush()
+
+	if len(cache.readdCalled) != 1 {
+		t.Fatalf("Readd should be called for remaining keys after transient retry error, got %d calls", len(cache.readdCalled))
+	}
+	if len(cache.readdCalled[0]) != 2 {
+		t.Fatalf("Readd keys = %d, want 2", len(cache.readdCalled[0]))
+	}
+	if cache.readdCalled[0][0].UserID != 1 || cache.readdCalled[0][1].UserID != 2 {
+		t.Fatalf("Readd keys = %+v, want user 1 and 2", cache.readdCalled[0])
+	}
+	if f.metrics.DirtyReaddTotal.Load() != 2 {
+		t.Errorf("DirtyReaddTotal = %d, want 2", f.metrics.DirtyReaddTotal.Load())
 	}
 }
 

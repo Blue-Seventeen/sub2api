@@ -4,7 +4,7 @@
 # Copy this file to /etc/sub2api/config.yaml and modify as needed
 # 复制此文件到 /etc/sub2api/config.yaml 并根据需要修改
 #
-# Documentation / 文档: https://github.com/Wei-Shaw/sub2api
+# Documentation / 文档: https://github.com/Blue-Seventeen/sub2api
 
 # =============================================================================
 # Server Configuration
@@ -818,6 +818,15 @@ database:
   # Connection max idle time (minutes)
   # 空闲连接最大存活时间（分钟）
   conn_max_idle_time_minutes: 5
+  # Enable Redis write aggregation for user × platform quota usage.
+  # 启用用户 × 平台 quota Redis 写聚合回写（默认 false，保持历史同步 DB 写入行为）
+  user_platform_quota_flusher_enabled: false
+  # Flush interval in milliseconds.
+  # 批量回写间隔（毫秒）
+  user_platform_quota_flush_interval_ms: 2000
+  # Max records per flush batch.
+  # 单批最大回写条数
+  user_platform_quota_flush_batch_size: 1000
 
 # =============================================================================
 # Redis Configuration

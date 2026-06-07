@@ -261,3 +261,55 @@ func TestGetUserErrorRequestDetail_DeletedKeyOwnerAccess(t *testing.T) {
 		t.Fatalf("expected NotFound, got %v", err2)
 	}
 }
+
+func TestGetUserErrorRequestDetail_RejectsListExcludedRows(t *testing.T) {
+	ownerUID := int64(777)
+
+	cases := []struct {
+		name   string
+		detail *OpsErrorLogDetail
+	}{
+		{
+			name: "recovered upstream",
+			detail: &OpsErrorLogDetail{
+				OpsErrorLog: OpsErrorLog{
+					ID:         71,
+					Phase:      "upstream",
+					Type:       "upstream_error",
+					StatusCode: 503,
+					Message:    "upstream recovered",
+					UserID:     &ownerUID,
+				},
+				ClientStatusCode: intPtr(200),
+			},
+		},
+		{
+			name: "count tokens probe",
+			detail: &OpsErrorLogDetail{
+				OpsErrorLog: OpsErrorLog{
+					ID:         72,
+					Phase:      "upstream",
+					Type:       "upstream_error",
+					StatusCode: 400,
+					Message:    "count tokens failed",
+					UserID:     &ownerUID,
+				},
+				ClientStatusCode: intPtr(400),
+				IsCountTokens:    true,
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := &OpsService{opsRepo: &stubOpsRepoForUserErr{detailToReturn: tc.detail}}
+			got, err := svc.GetUserErrorRequestDetail(context.Background(), ownerUID, tc.detail.ID)
+			if err == nil || got != nil {
+				t.Fatalf("expected list-excluded detail to be hidden, got detail=%+v err=%v", got, err)
+			}
+			if !infraerrors.IsNotFound(err) {
+				t.Fatalf("expected NotFound, got %v", err)
+			}
+		})
+	}
+}

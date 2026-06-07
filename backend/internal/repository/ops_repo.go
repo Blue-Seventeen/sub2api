@@ -429,6 +429,8 @@ SELECT
   COALESCE(e.upstream_errors::text, ''),
   COALESCE(e.network_error_type, ''),
   e.is_business_limited,
+  COALESCE(e.is_count_tokens, false),
+  COALESCE(e.status_code, 0),
   e.user_id,
   COALESCE(u.email, ''),
   e.api_key_id,
@@ -473,6 +475,7 @@ LIMIT 1`
 	var out service.OpsErrorLogDetail
 	var statusCode sql.NullInt64
 	var upstreamStatusCode sql.NullInt64
+	var clientStatusCode sql.NullInt64
 	var resolvedAt sql.NullTime
 	var resolvedBy sql.NullInt64
 	var clientIP sql.NullString
@@ -514,6 +517,8 @@ LIMIT 1`
 		&out.UpstreamErrors,
 		&out.NetworkErrorType,
 		&out.IsBusinessLimited,
+		&out.IsCountTokens,
+		&clientStatusCode,
 		&userID,
 		&out.UserEmail,
 		&apiKeyID,
@@ -567,6 +572,10 @@ LIMIT 1`
 	if upstreamStatusCode.Valid && upstreamStatusCode.Int64 > 0 {
 		v := int(upstreamStatusCode.Int64)
 		out.UpstreamStatusCode = &v
+	}
+	if clientStatusCode.Valid {
+		v := int(clientStatusCode.Int64)
+		out.ClientStatusCode = &v
 	}
 	if userID.Valid {
 		v := userID.Int64

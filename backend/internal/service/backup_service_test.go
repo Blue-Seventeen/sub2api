@@ -336,6 +336,20 @@ func TestBackupService_LoadRecords_Corrupted(t *testing.T) {
 	require.Nil(t, records)
 }
 
+func TestBackupService_SaveRecordRejectsCorruptRecords(t *testing.T) {
+	repo := newMockSettingRepo()
+	const corruptRecords = "not valid json{{{"
+	_ = repo.Set(context.Background(), settingKeyBackupRecords, corruptRecords)
+	svc := newTestBackupService(repo, &mockDumper{}, newMockObjectStore())
+
+	err := svc.saveRecord(context.Background(), &BackupRecord{ID: "new", Status: "completed"})
+	require.ErrorIs(t, err, ErrBackupRecordsCorrupt)
+
+	raw, getErr := repo.GetValue(context.Background(), settingKeyBackupRecords)
+	require.NoError(t, getErr)
+	require.Equal(t, corruptRecords, raw)
+}
+
 func TestBackupService_CreateBackup_Streaming(t *testing.T) {
 	repo := newMockSettingRepo()
 	seedS3Config(t, repo)

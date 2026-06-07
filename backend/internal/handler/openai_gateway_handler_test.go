@@ -141,6 +141,46 @@ func TestOpenAIHandleStreamingAwareError_NonStreaming(t *testing.T) {
 	assert.Equal(t, "test error", errorObj["message"])
 }
 
+func TestOpenAIHandleFailoverExhausted_Images429Passthrough(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstreamBody := []byte(`{"error":{"type":"rate_limit_error","code":"rate_limit_exceeded","param":"image","message":"Rate limit reached for input-images per min","request_id":"req_img"}}`)
+
+	t.Run("images endpoint preserves upstream error body", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodPost, EndpointImagesGenerations, nil)
+		c.Set(ctxKeyInboundEndpoint, EndpointImagesGenerations)
+
+		h := &OpenAIGatewayHandler{}
+		h.handleFailoverExhausted(c, &service.UpstreamFailoverError{
+			StatusCode:   http.StatusTooManyRequests,
+			ResponseBody: upstreamBody,
+		}, false)
+
+		require.Equal(t, http.StatusTooManyRequests, w.Code)
+		require.JSONEq(t, string(upstreamBody), w.Body.String())
+		require.Contains(t, w.Header().Get("Content-Type"), "application/json")
+	})
+
+	t.Run("non image endpoint keeps generic mapping", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodPost, EndpointChatCompletions, nil)
+		c.Set(ctxKeyInboundEndpoint, EndpointChatCompletions)
+
+		h := &OpenAIGatewayHandler{}
+		h.handleFailoverExhausted(c, &service.UpstreamFailoverError{
+			StatusCode:   http.StatusTooManyRequests,
+			ResponseBody: upstreamBody,
+		}, false)
+
+		require.Equal(t, http.StatusTooManyRequests, w.Code)
+		require.Equal(t, "rate_limit_error", gjson.GetBytes(w.Body.Bytes(), "error.type").String())
+		require.Equal(t, "Upstream rate limit exceeded, please retry later", gjson.GetBytes(w.Body.Bytes(), "error.message").String())
+		require.False(t, gjson.GetBytes(w.Body.Bytes(), "error.request_id").Exists())
+	})
+}
+
 func TestReadRequestBodyWithPrealloc(t *testing.T) {
 	payload := `{"model":"gpt-5","input":"hello"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(payload))

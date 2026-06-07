@@ -214,6 +214,8 @@ type OpenAIUsage struct {
 	InputTokens              int `json:"input_tokens"`
 	OutputTokens             int `json:"output_tokens"`
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+	CacheCreation5mTokens    int `json:"cache_creation_5m_tokens,omitempty"`
+	CacheCreation1hTokens    int `json:"cache_creation_1h_tokens,omitempty"`
 	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
 	ImageOutputTokens        int `json:"image_output_tokens,omitempty"`
 }
@@ -553,6 +555,7 @@ func (s *OpenAIGatewayService) billingDeps() *billingDeps {
 		deferredService:       s.deferredService,
 		balanceNotifyService:  s.balanceNotifyService,
 		userPlatformQuotaRepo: s.userPlatformQuotaRepo,
+		cfg:                   s.cfg,
 	}
 }
 
@@ -5257,6 +5260,18 @@ func openAIUsageFromGJSON(value gjson.Result) (OpenAIUsage, bool) {
 			value.Get("prompt_tokens_details.cache_creation_input_tokens"),
 			value.Get("prompt_tokens_details.cache_creation_tokens"),
 		),
+		CacheCreation5mTokens: firstExistingGJSONInt(
+			value.Get("cache_creation_5m_tokens"),
+			value.Get("cache_creation.ephemeral_5m_input_tokens"),
+			value.Get("input_tokens_details.cache_creation.ephemeral_5m_input_tokens"),
+			value.Get("prompt_tokens_details.cache_creation.ephemeral_5m_input_tokens"),
+		),
+		CacheCreation1hTokens: firstExistingGJSONInt(
+			value.Get("cache_creation_1h_tokens"),
+			value.Get("cache_creation.ephemeral_1h_input_tokens"),
+			value.Get("input_tokens_details.cache_creation.ephemeral_1h_input_tokens"),
+			value.Get("prompt_tokens_details.cache_creation.ephemeral_1h_input_tokens"),
+		),
 		ImageOutputTokens: firstExistingGJSONInt(
 			value.Get("output_tokens_details.image_tokens"),
 			value.Get("completion_tokens_details.image_tokens"),
@@ -5875,11 +5890,13 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 
 	// Calculate cost
 	tokens := UsageTokens{
-		InputTokens:         actualInputTokens,
-		OutputTokens:        result.Usage.OutputTokens,
-		CacheCreationTokens: result.Usage.CacheCreationInputTokens,
-		CacheReadTokens:     result.Usage.CacheReadInputTokens,
-		ImageOutputTokens:   result.Usage.ImageOutputTokens,
+		InputTokens:           actualInputTokens,
+		OutputTokens:          result.Usage.OutputTokens,
+		CacheCreationTokens:   result.Usage.CacheCreationInputTokens,
+		CacheCreation5mTokens: result.Usage.CacheCreation5mTokens,
+		CacheCreation1hTokens: result.Usage.CacheCreation1hTokens,
+		CacheReadTokens:       result.Usage.CacheReadInputTokens,
+		ImageOutputTokens:     result.Usage.ImageOutputTokens,
 	}
 
 	// Get base group multiplier first, then apply user unified multiplier.
@@ -5988,6 +6005,8 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		InputTokens:             actualInputTokens,
 		OutputTokens:            result.Usage.OutputTokens,
 		CacheCreationTokens:     result.Usage.CacheCreationInputTokens,
+		CacheCreation5mTokens:   result.Usage.CacheCreation5mTokens,
+		CacheCreation1hTokens:   result.Usage.CacheCreation1hTokens,
 		CacheReadTokens:         result.Usage.CacheReadInputTokens,
 		ImageOutputTokens:       result.Usage.ImageOutputTokens,
 		ImageCount:              result.ImageCount,
@@ -6129,8 +6148,8 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 ) (*CostBreakdown, error) {
 	billingModel := firstUsageBillingModel(billingModels)
 	if result != nil && result.ImageCount > 0 {
-		// 渠道定价为 token 计费时走 token 路径，否则走图片计费
-		if resolved := s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey); resolved == nil || resolved.Mode != BillingModeToken {
+		// 渠道定价为 token 且上游返回 token usage 时走 token 路径，否则走图片计费。
+		if resolved := s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey); resolved == nil || resolved.Mode != BillingModeToken || !usageTokensHaveTokenUsage(tokens) {
 			return s.calculateOpenAIImageCost(ctx, billingModel, apiKey, result, imageMultiplier), nil
 		}
 	}
@@ -6200,7 +6219,7 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageTokenCost(
 		if unitCount > 0 {
 			if resolved := s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey); resolved != nil {
 				gid := apiKey.Group.ID
-				return s.billingService.CalculateCostUnified(CostInput{
+				input := CostInput{
 					Ctx:            ctx,
 					Model:          billingModel,
 					GroupID:        &gid,
@@ -6210,6 +6229,31 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageTokenCost(
 					ServiceTier:    serviceTier,
 					Resolver:       s.resolver,
 					Resolved:       resolved,
+				}
+				if resolved.Mode == BillingModeToken && usageTokensHaveTokenUsage(tokens) {
+					input.Tokens = tokens
+					input.RequestCount = 1
+					input.SizeTier = ""
+				}
+				return s.billingService.CalculateCostUnified(input)
+			}
+			if usageTokensHaveTokenUsage(tokens) {
+				logger.LegacyPrintf(
+					"service.openai_gateway",
+					"new-api billable unit has token usage but no channel unit pricing; falling back to token pricing: model=%s request_count=%d task_count=%d unit_type=%s",
+					billingModel,
+					result.RequestCount,
+					result.TaskCount,
+					result.BillableUnitType,
+				)
+				return s.billingService.CalculateCostUnified(CostInput{
+					Ctx:            ctx,
+					Model:          billingModel,
+					Tokens:         tokens,
+					RequestCount:   1,
+					RateMultiplier: multiplier,
+					ServiceTier:    serviceTier,
+					Resolver:       s.resolver,
 				})
 			}
 			logger.LegacyPrintf(
@@ -6224,6 +6268,22 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageTokenCost(
 		}
 	}
 	if result != nil && result.ImageCount > 0 {
+		if resolved := s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey); resolved != nil &&
+			resolved.Mode == BillingModeToken &&
+			usageTokensHaveTokenUsage(tokens) {
+			gid := apiKey.Group.ID
+			return s.billingService.CalculateCostUnified(CostInput{
+				Ctx:            ctx,
+				Model:          billingModel,
+				GroupID:        &gid,
+				Tokens:         tokens,
+				RequestCount:   1,
+				RateMultiplier: multiplier,
+				ServiceTier:    serviceTier,
+				Resolver:       s.resolver,
+				Resolved:       resolved,
+			})
+		}
 		return s.calculateOpenAIImageCost(ctx, billingModel, apiKey, result, multiplier), nil
 	}
 	if s.resolver != nil && apiKey.Group != nil {

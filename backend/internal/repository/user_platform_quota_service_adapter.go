@@ -108,6 +108,7 @@ func (a *userPlatformQuotaServiceAdapter) BatchSnapshotUsage(ctx context.Context
 			DailyWindowStart:   s.DailyWindowStart,
 			WeeklyWindowStart:  s.WeeklyWindowStart,
 			MonthlyWindowStart: s.MonthlyWindowStart,
+			SnapshotTakenAt:    s.SnapshotTakenAt,
 		}
 	}
 	err := a.inner.BatchSnapshotUsage(ctx, repoSnaps, now)
@@ -204,6 +205,7 @@ func (a *genericUserPlatformQuotaAdapter) BatchSnapshotUsage(ctx context.Context
 			DailyWindowStart:   s.DailyWindowStart,
 			WeeklyWindowStart:  s.WeeklyWindowStart,
 			MonthlyWindowStart: s.MonthlyWindowStart,
+			SnapshotTakenAt:    s.SnapshotTakenAt,
 		}
 	}
 	err := a.inner.BatchSnapshotUsage(ctx, repoSnaps, now)

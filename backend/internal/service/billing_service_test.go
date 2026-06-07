@@ -129,6 +129,24 @@ func TestGetModelPricing_CaseInsensitive(t *testing.T) {
 	require.Equal(t, p1.InputPricePerToken, p2.InputPricePerToken)
 }
 
+func TestGetModelPricing_DeepSeekV4AndAliases(t *testing.T) {
+	svc := newTestBillingService()
+
+	for _, model := range []string{"deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner"} {
+		pricing, err := svc.GetModelPricing(model)
+		require.NoError(t, err, model)
+		require.InDelta(t, 1.4e-7, pricing.InputPricePerToken, 1e-12, model)
+		require.InDelta(t, 2.8e-7, pricing.OutputPricePerToken, 1e-12, model)
+		require.InDelta(t, 2.8e-9, pricing.CacheReadPricePerToken, 1e-12, model)
+	}
+
+	pro, err := svc.GetModelPricing("deepseek-v4-pro")
+	require.NoError(t, err)
+	require.InDelta(t, 4.35e-7, pro.InputPricePerToken, 1e-12)
+	require.InDelta(t, 8.7e-7, pro.OutputPricePerToken, 1e-12)
+	require.InDelta(t, 3.625e-9, pro.CacheReadPricePerToken, 1e-12)
+}
+
 func TestGetModelPricing_UnknownClaudeModelFallsBackToSonnet(t *testing.T) {
 	svc := newTestBillingService()
 

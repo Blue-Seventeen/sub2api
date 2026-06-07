@@ -1,5 +1,12 @@
 # README-CUSTOM
 
+## 管理端在线更新源
+
+- 管理端在线更新检查必须继续跟踪官方 `Wei-Shaw/sub2api` 的 release。
+- 这个检查只作为官方上游发布时间信号，方便运维确认官方 Sub2API 何时发布新版本。
+- 部署脚本可以默认使用本 fork 进行构建和部署，但不得让 `SUB2API_REPO` 等部署仓库配置影响管理端在线更新源。
+- `backend/internal/service/update_service.go` 必须保持 `defaultUpdateRepo = "Wei-Shaw/sub2api"`。
+
 > 用途：记录本 fork 的**本地定制功能点**、**高风险文件**、**上游同步保护规则**。
 > 任何 AI / 人类在执行 `sync upstream`、合并 upstream tag、处理冲突、重跑代码生成之前，必须先阅读本文件。
 > 本文件是当前唯一的自定义能力保护文档。

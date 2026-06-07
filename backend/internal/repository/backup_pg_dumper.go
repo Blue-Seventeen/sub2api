@@ -54,17 +54,20 @@ func (d *PgDumper) Dump(ctx context.Context) (io.ReadCloser, error) {
 	return &cmdReadCloser{ReadCloser: stdout, cmd: cmd}, nil
 }
 
-// Restore executes psql to restore from a streaming reader
-func (d *PgDumper) Restore(ctx context.Context, data io.Reader) error {
-	args := []string{
+func (d *PgDumper) restoreArgs() []string {
+	return []string{
 		"-h", d.cfg.Host,
 		"-p", fmt.Sprintf("%d", d.cfg.Port),
 		"-U", d.cfg.User,
 		"-d", d.cfg.DBName,
 		"--single-transaction",
+		"-v", "ON_ERROR_STOP=1",
 	}
+}
 
-	cmd := exec.CommandContext(ctx, "psql", args...)
+// Restore executes psql to restore from a streaming reader
+func (d *PgDumper) Restore(ctx context.Context, data io.Reader) error {
+	cmd := exec.CommandContext(ctx, "psql", d.restoreArgs()...)
 	if d.cfg.Password != "" {
 		cmd.Env = append(cmd.Environ(), "PGPASSWORD="+d.cfg.Password)
 	}

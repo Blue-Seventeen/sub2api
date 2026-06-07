@@ -16,6 +16,8 @@ type newAPIStyleCompatibleDefinition struct {
 
 func newAPIStyleCompatibleProviderPresetForPlatform(platform string) (CompatibleProviderPreset, bool) {
 	switch strings.TrimSpace(platform) {
+	case PlatformDeepSeek:
+		return deepseekNewAPIStyleCompatibleProviderPreset(), true
 	case PlatformPerplexity:
 		return perplexityCompatibleProviderPreset(), true
 	case PlatformMistral:

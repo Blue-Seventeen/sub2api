@@ -37,7 +37,7 @@ FROM ${ALPINE_IMAGE}
 
 LABEL maintainer="Wei-Shaw <github.com/Wei-Shaw>"
 LABEL description="Sub2API - AI API Gateway Platform"
-LABEL org.opencontainers.image.source="https://github.com/Wei-Shaw/sub2api"
+LABEL org.opencontainers.image.source="https://github.com/Blue-Seventeen/sub2api"
 
 # Install runtime dependencies
 RUN apk add --no-cache \
@@ -67,6 +67,7 @@ WORKDIR /app
 
 # Copy pre-built binary from GoReleaser
 COPY sub2api /app/sub2api
+COPY backend/resources /app/resources
 COPY --from=mihomo-core /app/bin/mihomo /app/bin/mihomo
 
 # Create data directory

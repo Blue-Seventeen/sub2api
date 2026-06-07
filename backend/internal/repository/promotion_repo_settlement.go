@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 )
 
 func (r *promotionRepository) CreateManualPromotionCommission(ctx context.Context, record service.PromotionCommissionRecord, settleNow bool) (*service.PromotionCommissionRecord, error) {
@@ -390,79 +391,110 @@ func (r *promotionRepository) ListSettlablePromotionBusinessDates(ctx context.Co
 	return dates, rows.Err()
 }
 
-func (r *promotionRepository) SettlePromotionBusinessDate(ctx context.Context, businessDate time.Time, operatorUserID *int64, note string) error {
+func (r *promotionRepository) SettlePromotionBusinessDate(ctx context.Context, businessDate time.Time, operatorUserID *int64, note string) ([]int64, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	batchID, err := ensurePromotionBatchTx(ctx, tx, businessDate, operatorUserID, note)
-	if err != nil {
-		return err
-	}
 	rows, err := tx.QueryContext(ctx, `
-		SELECT beneficiary_user_id, COALESCE(SUM(amount), 0)
+		SELECT id, beneficiary_user_id, amount
 		FROM promotion_commission_records
 		WHERE business_date = $1::date
 		  AND status = 'pending'
-		GROUP BY beneficiary_user_id
+		ORDER BY id
+		FOR UPDATE
 	`, businessDate.Format("2006-01-02"))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
-	type beneficiarySettlement struct {
+	type lockedCommission struct {
+		id     int64
 		userID int64
 		amount float64
 	}
-	beneficiaries := make([]beneficiarySettlement, 0)
+	lockedRecords := make([]lockedCommission, 0)
+	commissionIDs := make([]int64, 0)
+	beneficiaryAmounts := make(map[int64]float64)
 	totalAmount := 0.0
 	for rows.Next() {
+		var id int64
 		var userID int64
 		var amount float64
-		if err := rows.Scan(&userID, &amount); err != nil {
-			return err
+		if err := rows.Scan(&id, &userID, &amount); err != nil {
+			return nil, err
 		}
-		beneficiaries = append(beneficiaries, beneficiarySettlement{userID: userID, amount: amount})
+		lockedRecords = append(lockedRecords, lockedCommission{id: id, userID: userID, amount: amount})
+		commissionIDs = append(commissionIDs, id)
+		beneficiaryAmounts[userID] += amount
+		totalAmount += amount
 	}
 	if err := rows.Err(); err != nil {
-		return err
+		return nil, err
 	}
 	if err := rows.Close(); err != nil {
-		return err
+		return nil, err
 	}
-	for _, beneficiary := range beneficiaries {
-		if err := r.applyUserBalanceDeltaTx(ctx, tx, beneficiary.userID, beneficiary.amount, fmt.Sprintf("promotion settlement %s", businessDate.Format("2006-01-02"))); err != nil {
-			return err
+	if len(lockedRecords) == 0 {
+		if err := tx.Commit(); err != nil {
+			return nil, err
 		}
-		totalAmount += beneficiary.amount
+		return nil, nil
 	}
-	res, err := tx.ExecContext(ctx, `
-		UPDATE promotion_commission_records
-		SET status = 'settled',
-		    settled_at = NOW(),
-		    settlement_batch_id = $2,
-		    updated_at = NOW()
-		WHERE business_date = $1::date
-		  AND status = 'pending'
-	`, businessDate.Format("2006-01-02"), batchID)
+	batchID, err := ensurePromotionBatchTx(ctx, tx, businessDate, operatorUserID, note)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	affected, _ := res.RowsAffected()
+	for userID, amount := range beneficiaryAmounts {
+		if err := r.applyUserBalanceDeltaTx(ctx, tx, userID, amount, fmt.Sprintf("promotion settlement %s", businessDate.Format("2006-01-02"))); err != nil {
+			return nil, err
+		}
+	}
+	affected := int64(0)
+	if len(commissionIDs) > 0 {
+		res, err := tx.ExecContext(ctx, `
+			UPDATE promotion_commission_records
+			SET status = 'settled',
+			    settled_at = NOW(),
+			    settlement_batch_id = $2,
+			    updated_at = NOW()
+			WHERE id = ANY($1)
+			  AND status = 'pending'
+		`, pq.Array(commissionIDs), batchID)
+		if err != nil {
+			return nil, err
+		}
+		affected, _ = res.RowsAffected()
+		if affected != int64(len(lockedRecords)) {
+			return nil, fmt.Errorf("promotion settlement locked %d records but updated %d", len(lockedRecords), affected)
+		}
+	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE promotion_settlement_batches
 		SET status = $2,
-		    total_records = $3,
-		    total_amount = $4,
+		    total_records = total_records + $3,
+		    total_amount = total_amount + $4,
 		    executed_at = NOW(),
 		    updated_at = NOW()
-		WHERE id = $1
+	WHERE id = $1
 	`, batchID, service.PromotionSettlementStatusSettled, affected, totalAmount); err != nil {
-		return err
+		return nil, err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	userIDs := make([]int64, 0, len(beneficiaryAmounts))
+	seenUserIDs := make(map[int64]struct{}, len(beneficiaryAmounts))
+	for _, record := range lockedRecords {
+		if _, ok := seenUserIDs[record.userID]; ok {
+			continue
+		}
+		seenUserIDs[record.userID] = struct{}{}
+		userIDs = append(userIDs, record.userID)
+	}
+	return userIDs, nil
 }
 
 func (r *promotionRepository) lockPromotionCommissionTx(ctx context.Context, tx *sql.Tx, commissionID int64) (*service.PromotionCommissionRecord, error) {

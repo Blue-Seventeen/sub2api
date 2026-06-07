@@ -286,13 +286,23 @@ func (s *NewAPIStyleGatewayService) Forward(
 	writeResponseHeaders(c, resp.Header)
 	if opts.Stream || isEventStream(resp.Header.Get("Content-Type")) {
 		captureAudioStream := isNewAPIStyleASRRoute(opts) || isNewAPIStyleTTSRoute(opts)
-		var streamCapture bytes.Buffer
+		captureStreamUsage := newAPIStyleShouldCaptureStreamUsage(opts)
+		var audioStreamCapture bytes.Buffer
+		var usageCapture *newAPIStyleSSEUsageCaptureWriter
 		streamReader := io.Reader(resp.Body)
-		if captureAudioStream {
-			streamReader = io.TeeReader(resp.Body, &limitedBufferWriter{
-				buffer: &streamCapture,
-				limit:  maxNewAPIStyleAudioStreamErrorCaptureBytes,
-			})
+		if captureAudioStream || captureStreamUsage {
+			writers := make([]io.Writer, 0, 2)
+			if captureAudioStream {
+				writers = append(writers, &tailBufferWriter{
+					buffer: &audioStreamCapture,
+					limit:  maxNewAPIStyleAudioStreamErrorCaptureBytes,
+				})
+			}
+			if captureStreamUsage {
+				usageCapture = &newAPIStyleSSEUsageCaptureWriter{}
+				writers = append(writers, usageCapture)
+			}
+			streamReader = io.TeeReader(resp.Body, io.MultiWriter(writers...))
 		}
 		if c != nil {
 			c.Status(resp.StatusCode)
@@ -304,11 +314,15 @@ func (s *NewAPIStyleGatewayService) Forward(
 			_, _ = io.Copy(io.Discard, streamReader)
 		}
 		if captureAudioStream {
-			if upstreamMsg, ok := newAPIStyleAudioUpstreamErrorPayload(opts, streamCapture.Bytes()); ok {
-				return nil, upstreamEndpoint, newAPIStyleAudioErrorPayloadResult(c, account, resp, upstreamReq, streamCapture.Bytes(), upstreamMsg)
+			if upstreamMsg, ok := newAPIStyleAudioUpstreamErrorPayload(opts, audioStreamCapture.Bytes()); ok {
+				return nil, upstreamEndpoint, newAPIStyleAudioErrorPayloadResult(c, account, resp, upstreamReq, audioStreamCapture.Bytes(), upstreamMsg)
 			}
 		}
-		s.applyUsageGuardrails(result, opts, nil)
+		if usageCapture != nil {
+			s.applyUsageGuardrailsWithParsedUsage(result, opts, nil, usageCapture.Usage())
+		} else {
+			s.applyUsageGuardrails(result, opts, audioStreamCapture.Bytes())
+		}
 		result.Duration = time.Since(start)
 		return result, upstreamEndpoint, nil
 	}
@@ -358,12 +372,18 @@ func OpenAIForwardResultFromForwardResult(result *ForwardResult) *OpenAIForwardR
 	if result == nil {
 		return nil
 	}
+	openAIInputTokens := result.Usage.InputTokens
+	if result.Usage.CacheReadInputTokens > 0 {
+		openAIInputTokens += result.Usage.CacheReadInputTokens
+	}
 	return &OpenAIForwardResult{
 		RequestID: result.RequestID,
 		Usage: OpenAIUsage{
-			InputTokens:              result.Usage.InputTokens,
+			InputTokens:              openAIInputTokens,
 			OutputTokens:             result.Usage.OutputTokens,
 			CacheCreationInputTokens: result.Usage.CacheCreationInputTokens,
+			CacheCreation5mTokens:    result.Usage.CacheCreation5mTokens,
+			CacheCreation1hTokens:    result.Usage.CacheCreation1hTokens,
 			CacheReadInputTokens:     result.Usage.CacheReadInputTokens,
 			ImageOutputTokens:        result.Usage.ImageOutputTokens,
 		},
@@ -812,15 +832,29 @@ func (s *NewAPIStyleGatewayService) applyUsageGuardrails(result *ForwardResult, 
 	if result == nil {
 		return
 	}
+	usage := ClaudeUsage{}
 	if len(respBody) > 0 {
-		usage := parseNewAPIStyleUsage(respBody)
+		usage = parseNewAPIStyleUsage(respBody)
+		if !claudeUsageHasAny(usage) {
+			usage = parseNewAPIStyleSSEUsage(respBody)
+		}
+	}
+	s.applyUsageGuardrailsWithParsedUsage(result, opts, respBody, usage)
+}
+
+func (s *NewAPIStyleGatewayService) applyUsageGuardrailsWithParsedUsage(result *ForwardResult, opts NewAPIStyleForwardOptions, respBody []byte, usage ClaudeUsage) {
+	if result == nil {
+		return
+	}
+	if claudeUsageHasAny(usage) {
 		result.Usage.InputTokens = usage.InputTokens
 		result.Usage.OutputTokens = usage.OutputTokens
 		result.Usage.CacheCreationInputTokens = usage.CacheCreationInputTokens
 		result.Usage.CacheReadInputTokens = usage.CacheReadInputTokens
+		result.Usage.CacheCreation5mTokens = usage.CacheCreation5mTokens
+		result.Usage.CacheCreation1hTokens = usage.CacheCreation1hTokens
 		result.Usage.ImageOutputTokens = usage.ImageOutputTokens
 	}
-
 	switch opts.Route {
 	case NewAPIStyleRouteImages, NewAPIStyleRouteQwenImage:
 		result.ImageCount = inferImageCount(opts.RequestBody, respBody)
@@ -858,6 +892,15 @@ func (s *NewAPIStyleGatewayService) applyUsageGuardrails(result *ForwardResult, 
 			result.RequestCount = 1
 			result.BillableUnitType = BillableUnitTypeRequest
 		}
+	}
+}
+
+func newAPIStyleShouldCaptureStreamUsage(opts NewAPIStyleForwardOptions) bool {
+	switch opts.Route {
+	case NewAPIStyleRouteChatCompletions, NewAPIStyleRouteMessages, NewAPIStyleRouteResponses:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -1018,6 +1061,72 @@ func (w *limitedBufferWriter) Write(p []byte) (int, error) {
 	return n, nil
 }
 
+type tailBufferWriter struct {
+	buffer *bytes.Buffer
+	limit  int
+}
+
+func (w *tailBufferWriter) Write(p []byte) (int, error) {
+	n := len(p)
+	if w == nil || w.buffer == nil || w.limit <= 0 {
+		return n, nil
+	}
+	if len(p) >= w.limit {
+		w.buffer.Reset()
+		_, _ = w.buffer.Write(p[len(p)-w.limit:])
+		return n, nil
+	}
+	overflow := w.buffer.Len() + len(p) - w.limit
+	if overflow > 0 {
+		current := append([]byte(nil), w.buffer.Bytes()...)
+		if overflow > len(current) {
+			overflow = len(current)
+		}
+		w.buffer.Reset()
+		_, _ = w.buffer.Write(current[overflow:])
+	}
+	_, _ = w.buffer.Write(p)
+	return n, nil
+}
+
+type newAPIStyleSSEUsageCaptureWriter struct {
+	pending string
+	usage   ClaudeUsage
+}
+
+func (w *newAPIStyleSSEUsageCaptureWriter) Write(p []byte) (int, error) {
+	n := len(p)
+	if w == nil || len(p) == 0 {
+		return n, nil
+	}
+	w.pending += string(p)
+	w.pending = strings.ReplaceAll(w.pending, "\r\n", "\n")
+	for {
+		idx := strings.Index(w.pending, "\n\n")
+		if idx < 0 {
+			if len(w.pending) > 64*1024 {
+				w.pending = w.pending[len(w.pending)-64*1024:]
+			}
+			return n, nil
+		}
+		event := w.pending[:idx]
+		w.pending = w.pending[idx+2:]
+		if usage := parseNewAPIStyleSSEUsageEvent(event); claudeUsageHasAny(usage) {
+			w.usage = mergeNewAPIStyleUsage(w.usage, usage)
+		}
+	}
+}
+
+func (w *newAPIStyleSSEUsageCaptureWriter) Usage() ClaudeUsage {
+	if w == nil {
+		return ClaudeUsage{}
+	}
+	if usage := parseNewAPIStyleSSEUsageEvent(w.pending); claudeUsageHasAny(usage) {
+		return mergeNewAPIStyleUsage(w.usage, usage)
+	}
+	return w.usage
+}
+
 func requestContainsAudioInput(body []byte, contentType string) bool {
 	if len(body) == 0 {
 		return false
@@ -1042,27 +1151,118 @@ func requestContainsAudioInput(body []byte, contentType string) bool {
 func parseNewAPIStyleUsage(body []byte) ClaudeUsage {
 	usage := gjson.GetBytes(body, "usage")
 	if !usage.Exists() {
+		usage = gjson.GetBytes(body, "response.usage")
+	}
+	if !usage.Exists() {
+		usage = gjson.GetBytes(body, "message.usage")
+	}
+	if !usage.Exists() {
 		return ClaudeUsage{}
 	}
-	input := int(firstPositiveInt(
-		usage.Get("input_tokens").Int(),
-		usage.Get("prompt_tokens").Int(),
-	))
 	cacheRead := int(firstPositiveInt(
 		usage.Get("cache_read_input_tokens").Int(),
+		usage.Get("cached_tokens").Int(),
 		usage.Get("prompt_tokens_details.cached_tokens").Int(),
 		usage.Get("input_tokens_details.cached_tokens").Int(),
 	))
-	if input >= cacheRead && cacheRead > 0 {
+	input := int(usage.Get("input_tokens").Int())
+	if input == 0 {
+		input = int(usage.Get("prompt_tokens").Int())
+	}
+	if usage.Get("input_tokens").Int() == 0 && input >= cacheRead && cacheRead > 0 {
 		input -= cacheRead
+	}
+	cacheCreation5m := int(usage.Get("cache_creation.ephemeral_5m_input_tokens").Int())
+	cacheCreation1h := int(usage.Get("cache_creation.ephemeral_1h_input_tokens").Int())
+	cacheCreation := int(firstPositiveInt(
+		usage.Get("cache_creation_input_tokens").Int(),
+		usage.Get("cache_creation_tokens").Int(),
+		usage.Get("input_tokens_details.cache_creation_input_tokens").Int(),
+		usage.Get("input_tokens_details.cache_creation_tokens").Int(),
+		usage.Get("prompt_tokens_details.cache_creation_input_tokens").Int(),
+		usage.Get("prompt_tokens_details.cache_creation_tokens").Int(),
+	))
+	if cacheCreation == 0 && (cacheCreation5m > 0 || cacheCreation1h > 0) {
+		cacheCreation = cacheCreation5m + cacheCreation1h
 	}
 	return ClaudeUsage{
 		InputTokens:              input,
 		OutputTokens:             int(firstPositiveInt(usage.Get("output_tokens").Int(), usage.Get("completion_tokens").Int())),
-		CacheCreationInputTokens: int(usage.Get("cache_creation_input_tokens").Int()),
+		CacheCreationInputTokens: cacheCreation,
 		CacheReadInputTokens:     cacheRead,
-		ImageOutputTokens:        int(usage.Get("image_output_tokens").Int()),
+		CacheCreation5mTokens:    cacheCreation5m,
+		CacheCreation1hTokens:    cacheCreation1h,
+		ImageOutputTokens: int(firstPositiveInt(
+			usage.Get("image_output_tokens").Int(),
+			usage.Get("output_tokens_details.image_tokens").Int(),
+			usage.Get("completion_tokens_details.image_tokens").Int(),
+		)),
 	}
+}
+
+func parseNewAPIStyleSSEUsage(body []byte) ClaudeUsage {
+	text := strings.ReplaceAll(string(body), "\r\n", "\n")
+	var out ClaudeUsage
+	for _, event := range strings.Split(text, "\n\n") {
+		if usage := parseNewAPIStyleSSEUsageEvent(event); claudeUsageHasAny(usage) {
+			out = mergeNewAPIStyleUsage(out, usage)
+		}
+	}
+	return out
+}
+
+func parseNewAPIStyleSSEUsageEvent(event string) ClaudeUsage {
+	var dataLines []string
+	for _, line := range strings.Split(event, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "" || data == "[DONE]" {
+			continue
+		}
+		dataLines = append(dataLines, data)
+	}
+	if len(dataLines) == 0 {
+		return ClaudeUsage{}
+	}
+	return parseNewAPIStyleUsage([]byte(strings.Join(dataLines, "\n")))
+}
+
+func mergeNewAPIStyleUsage(base, next ClaudeUsage) ClaudeUsage {
+	if next.InputTokens > 0 {
+		base.InputTokens = next.InputTokens
+	}
+	if next.OutputTokens > base.OutputTokens {
+		base.OutputTokens = next.OutputTokens
+	}
+	if next.CacheCreationInputTokens > base.CacheCreationInputTokens {
+		base.CacheCreationInputTokens = next.CacheCreationInputTokens
+	}
+	if next.CacheReadInputTokens > base.CacheReadInputTokens {
+		base.CacheReadInputTokens = next.CacheReadInputTokens
+	}
+	if next.CacheCreation5mTokens > base.CacheCreation5mTokens {
+		base.CacheCreation5mTokens = next.CacheCreation5mTokens
+	}
+	if next.CacheCreation1hTokens > base.CacheCreation1hTokens {
+		base.CacheCreation1hTokens = next.CacheCreation1hTokens
+	}
+	if next.ImageOutputTokens > base.ImageOutputTokens {
+		base.ImageOutputTokens = next.ImageOutputTokens
+	}
+	return base
+}
+
+func claudeUsageHasAny(usage ClaudeUsage) bool {
+	return usage.InputTokens > 0 ||
+		usage.OutputTokens > 0 ||
+		usage.CacheCreationInputTokens > 0 ||
+		usage.CacheReadInputTokens > 0 ||
+		usage.CacheCreation5mTokens > 0 ||
+		usage.CacheCreation1hTokens > 0 ||
+		usage.ImageOutputTokens > 0
 }
 
 func normalizeAliQwenImagesOpenAIResponse(account *Account, opts NewAPIStyleForwardOptions, body []byte) ([]byte, bool) {

@@ -272,7 +272,7 @@
                   <div class="inline-flex items-center gap-1">
                     <Icon name="arrowUp" size="sm" class="text-violet-500" />
                     <span class="font-medium text-gray-900 dark:text-white">{{
-                      (row.output_tokens ?? 0).toLocaleString()
+                      (hasImageOutputTokens(row) ? textOutputTokens(row) : (row.output_tokens ?? 0)).toLocaleString()
                     }}</span>
                   </div>
                 </div>
@@ -779,12 +779,6 @@ const onDateRangeChange = (range: {
   filters.value.start_date = range.startDate
   filters.value.end_date = range.endDate
   applyFilters()
-  errorPage.value = 1
-  if (activeTab.value === 'errors') {
-    loadErrors()
-  } else {
-    errorRows.value = []  // 失效，下次切到 errors tab 时按新日期重新加载
-  }
 }
 
 const pagination = reactive({
@@ -972,6 +966,12 @@ const applyFilters = () => {
   pagination.page = 1
   loadUsageLogs()
   loadUsageStats()
+  errorPage.value = 1
+  if (activeTab.value === 'errors') {
+    loadErrors()
+  } else {
+    errorRows.value = []
+  }
 }
 
 const resetFilters = () => {
@@ -991,6 +991,12 @@ const resetFilters = () => {
   pagination.page = 1
   loadUsageLogs()
   loadUsageStats()
+  errorPage.value = 1
+  if (activeTab.value === 'errors') {
+    loadErrors()
+  } else {
+    errorRows.value = []
+  }
 }
 
 const handlePageChange = (page: number) => {
@@ -1069,11 +1075,13 @@ const exportToCSV = async () => {
       'Output Tokens',
       'Cache Read Tokens',
       'Cache Creation Tokens',
+      'Image Output Tokens',
       'Billable Duration Seconds',
       'Billable Characters',
       'Rate Multiplier',
       'Billed Cost',
       'Original Cost',
+      'Image Output Cost',
       'First Token (ms)',
       'Duration (ms)'
     ]
@@ -1087,14 +1095,16 @@ const exportToCSV = async () => {
         getRequestTypeExportText(log),
         getBillingModeLabel(getDisplayBillingMode(log), t),
         log.input_tokens,
-        log.output_tokens,
+        textOutputTokens(log),
         log.cache_read_tokens,
         log.cache_creation_tokens,
+        log.image_output_tokens ?? 0,
         log.billable_duration_seconds,
         log.billable_character_count,
         log.rate_multiplier,
         (log.actual_cost ?? 0).toFixed(8),
         (log.total_cost ?? 0).toFixed(8),
+        (log.image_output_cost ?? 0).toFixed(8),
         log.first_token_ms ?? '',
         log.duration_ms
       ].map(escapeCSVValue)

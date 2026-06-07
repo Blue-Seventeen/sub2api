@@ -25,6 +25,7 @@ func TestOpsServiceRecordErrorBatch_SanitizesAndBatches(t *testing.T) {
 	detail := `{"authorization":"Bearer secret-token"}`
 	entries := []*OpsInsertErrorLogInput{
 		{
+			ErrorMessage:         "Authorization: Bearer sk-secret-token access_token=plain-secret",
 			ErrorBody:            `{"error":"bad","access_token":"secret"}`,
 			UpstreamStatusCode:   intPtr(-10),
 			UpstreamErrorMessage: strPtr(msg),
@@ -54,6 +55,8 @@ func TestOpsServiceRecordErrorBatch_SanitizesAndBatches(t *testing.T) {
 	first := captured[0]
 	require.Equal(t, "internal", first.ErrorPhase)
 	require.Equal(t, "api_error", first.ErrorType)
+	require.NotContains(t, first.ErrorMessage, "sk-secret-token")
+	require.NotContains(t, first.ErrorMessage, "plain-secret")
 	require.Nil(t, first.UpstreamStatusCode)
 	require.NotNil(t, first.UpstreamErrorMessage)
 	require.NotContains(t, *first.UpstreamErrorMessage, "secret-value")

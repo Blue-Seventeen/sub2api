@@ -260,6 +260,21 @@ func (s *BillingService) initFallbackPricing() {
 	}
 
 	// OpenAI GPT-5.4（业务指定价格）
+	s.fallbackPrices["deepseek-v4-flash"] = &ModelPricing{
+		InputPricePerToken:     1.4e-7,
+		OutputPricePerToken:    2.8e-7,
+		CacheReadPricePerToken: 2.8e-9,
+		SupportsCacheBreakdown: false,
+	}
+	s.fallbackPrices["deepseek-chat"] = s.fallbackPrices["deepseek-v4-flash"]
+	s.fallbackPrices["deepseek-reasoner"] = s.fallbackPrices["deepseek-v4-flash"]
+	s.fallbackPrices["deepseek-v4-pro"] = &ModelPricing{
+		InputPricePerToken:     4.35e-7,
+		OutputPricePerToken:    8.7e-7,
+		CacheReadPricePerToken: 3.625e-9,
+		SupportsCacheBreakdown: false,
+	}
+
 	s.fallbackPrices["gpt-5.4"] = &ModelPricing{
 		InputPricePerToken:             2.5e-6,  // $2.5 per MTok
 		InputPricePerTokenPriority:     5e-6,    // $5 per MTok
@@ -350,6 +365,21 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	}
 
 	// OpenAI 仅匹配已知 GPT-5/Codex 族，避免未知 OpenAI 型号误计价。
+	if strings.Contains(modelLower, "deepseek") {
+		switch {
+		case strings.Contains(modelLower, "v4-pro"):
+			return s.fallbackPrices["deepseek-v4-pro"]
+		case strings.Contains(modelLower, "v4-flash"):
+			return s.fallbackPrices["deepseek-v4-flash"]
+		case strings.Contains(modelLower, "reasoner"):
+			return s.fallbackPrices["deepseek-reasoner"]
+		case strings.Contains(modelLower, "chat"):
+			return s.fallbackPrices["deepseek-chat"]
+		default:
+			return s.fallbackPrices["deepseek-v4-flash"]
+		}
+	}
+
 	if normalized := normalizeKnownOpenAICodexModel(modelLower); normalized != "" {
 		switch normalized {
 		case "gpt-5.5":

@@ -46,6 +46,7 @@ type UserPlatformQuotaSnapshot struct {
 	DailyWindowStart   time.Time
 	WeeklyWindowStart  time.Time
 	MonthlyWindowStart time.Time
+	SnapshotTakenAt    time.Time
 }
 
 // UserPlatformQuotaRepository 定义用户平台配额的数据访问接口。
@@ -441,14 +442,12 @@ func insertLimitsRow(ctx context.Context, client *dbent.Client, userID int64, re
 const batchRows = 6000
 
 // BatchSnapshotUsage 用一条多行 UPSERT 把整批 usage 以绝对值覆盖写入（非累加）。
-// 每批最多 batchRows 行；$1=now 共用；每行 8 个 per-row 参（user_id, platform, 3×usage, 3×window_start）。
+// 每批最多 batchRows 行；$1=now 共用；每行 9 个 per-row 参（user_id, platform, 3×usage, 3×window_start, snapshot_taken_at）。
 // FK 违反（user_id 不存在）返回 ErrUserPlatformQuotaFKViolation。
 //
 // 注意:snapshots 超过 batchRows 会分多条 SQL 执行且【非单事务】——若某子批 FK 失败,
 // 先前子批已写入无法回滚。调用方(flusher)应保证单次 batchSize ≤ batchRows
 // (默认 flush_batch_size=1000 < 6000,安全)。
-// 另注:启用 flusher 后,本绝对值覆盖与 admin 直写 DB(ResetExpiredWindow/UpsertForUser)存在覆盖竞态,
-// 详见 service/user_platform_quota_flusher.go 中 flushOneBatch 的"已知竞态"注释。
 func (r *userPlatformQuotaRepository) BatchSnapshotUsage(ctx context.Context, snapshots []UserPlatformQuotaSnapshot, now time.Time) error {
 	if len(snapshots) == 0 {
 		return nil
@@ -468,24 +467,41 @@ func (r *userPlatformQuotaRepository) BatchSnapshotUsage(ctx context.Context, sn
 			"INSERT INTO user_platform_quotas" +
 				" (user_id, platform, daily_usage_usd, weekly_usage_usd, monthly_usage_usd," +
 				" daily_window_start, weekly_window_start, monthly_window_start, created_at, updated_at)" +
-				" VALUES ")
+				" SELECT v.user_id, v.platform, v.daily_usage_usd, v.weekly_usage_usd, v.monthly_usage_usd," +
+				" v.daily_window_start, v.weekly_window_start, v.monthly_window_start, $1, v.snapshot_taken_at" +
+				" FROM (VALUES ")
 
-		// $1 = now（共用）；每行 8 个 per-row 参，从 $2 起连续编号。
+		// $1 = now（created_at 共用）；每行 9 个 per-row 参，从 $2 起连续编号。
 		args := []any{now}
 		for i, s := range batch {
 			if i > 0 {
 				_, _ = sb.WriteString(",")
 			}
+			snapshotTakenAt := s.SnapshotTakenAt
+			if snapshotTakenAt.IsZero() {
+				snapshotTakenAt = now
+			}
 			b := len(args) // 当前 per-row 第一个参数的 0-based 索引，实际占位符 = b+1
-			fmt.Fprintf(&sb, "($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$1,$1)",
-				b+1, b+2, b+3, b+4, b+5, b+6, b+7, b+8)
+			fmt.Fprintf(&sb, "($%d::bigint,$%d::text,$%d::double precision,$%d::double precision,$%d::double precision,$%d::timestamptz,$%d::timestamptz,$%d::timestamptz,$%d::timestamptz)",
+				b+1, b+2, b+3, b+4, b+5, b+6, b+7, b+8, b+9)
 			args = append(args,
 				s.UserID, s.Platform,
 				s.DailyUsageUSD, s.WeeklyUsageUSD, s.MonthlyUsageUSD,
 				s.DailyWindowStart, s.WeeklyWindowStart, s.MonthlyWindowStart,
+				snapshotTakenAt,
 			)
 		}
 
+		_, _ = sb.WriteString(
+			") AS v(user_id, platform, daily_usage_usd, weekly_usage_usd, monthly_usage_usd," +
+				" daily_window_start, weekly_window_start, monthly_window_start, snapshot_taken_at)" +
+				" WHERE EXISTS (" +
+				"  SELECT 1 FROM user_platform_quotas q" +
+				"  WHERE q.user_id = v.user_id AND q.platform = v.platform AND q.deleted_at IS NULL" +
+				" ) OR NOT EXISTS (" +
+				"  SELECT 1 FROM user_platform_quotas q" +
+				"  WHERE q.user_id = v.user_id AND q.platform = v.platform" +
+				" )")
 		_, _ = sb.WriteString(
 			" ON CONFLICT (user_id, platform) WHERE deleted_at IS NULL DO UPDATE SET" +
 				"  daily_usage_usd      = EXCLUDED.daily_usage_usd," +
@@ -494,7 +510,8 @@ func (r *userPlatformQuotaRepository) BatchSnapshotUsage(ctx context.Context, sn
 				"  daily_window_start   = EXCLUDED.daily_window_start," +
 				"  weekly_window_start  = EXCLUDED.weekly_window_start," +
 				"  monthly_window_start = EXCLUDED.monthly_window_start," +
-				"  updated_at           = EXCLUDED.updated_at")
+				"  updated_at           = EXCLUDED.updated_at" +
+				" WHERE user_platform_quotas.updated_at <= EXCLUDED.updated_at")
 
 		if _, err := client.ExecContext(ctx, sb.String(), args...); err != nil {
 			var pqErr *pq.Error

@@ -96,6 +96,8 @@ type OpsErrorLogDetail struct {
 
 	// vNext metric semantics
 	IsBusinessLimited bool `json:"is_business_limited"`
+	IsCountTokens     bool `json:"-"`
+	ClientStatusCode  *int `json:"-"`
 
 	// Deleted key owner info (populated when INVALID_API_KEY and key was previously deleted)
 	AttemptedKeyPrefix    string `json:"attempted_key_prefix,omitempty"`

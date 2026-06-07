@@ -155,6 +155,7 @@ const formatResetTime = computed(() => {
   if (!props.resetsAt) return '-'
 
   const date = new Date(props.resetsAt)
+  if (Number.isNaN(date.getTime())) return '-'
   const diffMs = date.getTime() - now.value.getTime()
 
   if (diffMs <= 0) return '现在'

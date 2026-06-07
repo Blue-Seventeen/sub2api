@@ -2,7 +2,8 @@
 #
 # Sub2API Installation Script
 # Sub2API 安装脚本
-# Usage: curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/install.sh | bash
+# Usage: curl -sSL https://raw.githubusercontent.com/Blue-Seventeen/sub2api/main/deploy/install.sh | bash
+# Override SUB2API_REPO if you intentionally install from another fork.
 #
 
 set -e
@@ -30,8 +31,9 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-# Configuration
-GITHUB_REPO="Wei-Shaw/sub2api"
+# Configuration. Defaults to the current fork; do not silently install from
+# the official upstream unless SUB2API_REPO is explicitly set to that repo.
+GITHUB_REPO="${SUB2API_REPO:-Blue-Seventeen/sub2api}"
 INSTALL_DIR="/opt/sub2api"
 SERVICE_NAME="sub2api"
 SERVICE_USER="sub2api"
@@ -473,6 +475,14 @@ check_dependencies() {
         missing+=("tar")
     fi
 
+    if ! command -v pg_dump &> /dev/null; then
+        missing+=("pg_dump")
+    fi
+
+    if ! command -v psql &> /dev/null; then
+        missing+=("psql")
+    fi
+
     if [ ${#missing[@]} -gt 0 ]; then
         print_error "$(msg 'missing_deps'): ${missing[*]}"
         print_info "$(msg 'install_deps_first')"
@@ -617,6 +627,12 @@ download_and_extract() {
         cp -r "$TEMP_DIR/deploy/"* "$INSTALL_DIR/" 2>/dev/null || true
     fi
 
+    # Copy bundled runtime resources, such as offline model pricing fallback.
+    if [ -d "$TEMP_DIR/backend/resources" ]; then
+        mkdir -p "$INSTALL_DIR/resources"
+        cp -r "$TEMP_DIR/backend/resources/"* "$INSTALL_DIR/resources/" 2>/dev/null || true
+    fi
+
     print_success "$(msg 'binary_installed') $INSTALL_DIR/sub2api"
 }
 
@@ -670,7 +686,7 @@ install_service() {
     cat > /etc/systemd/system/sub2api.service << EOF
 [Unit]
 Description=Sub2API - AI API Gateway Platform
-Documentation=https://github.com/Wei-Shaw/sub2api
+Documentation=https://github.com/${GITHUB_REPO}
 After=network.target postgresql.service redis.service
 Wants=postgresql.service redis.service
 

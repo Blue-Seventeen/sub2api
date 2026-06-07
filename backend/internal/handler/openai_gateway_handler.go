@@ -1987,9 +1987,49 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 	upstreamMsg := service.ExtractUpstreamErrorMessage(responseBody)
 	service.SetOpsUpstreamError(c, statusCode, upstreamMsg, "")
 
+	if statusCode == http.StatusTooManyRequests && isOpenAIImagesInboundEndpoint(c) && h.tryPassthroughOpenAIUpstreamErrorBody(c, statusCode, responseBody, streamStarted) {
+		return
+	}
+
 	// 使用默认的错误映射
 	status, errType, errMsg := h.mapUpstreamError(statusCode)
 	h.handleStreamingAwareError(c, status, errType, errMsg, streamStarted)
+}
+
+func (h *OpenAIGatewayHandler) tryPassthroughOpenAIUpstreamErrorBody(c *gin.Context, statusCode int, responseBody []byte, streamStarted bool) bool {
+	if len(responseBody) == 0 || !gjson.ValidBytes(responseBody) {
+		return false
+	}
+	errObj := gjson.GetBytes(responseBody, "error")
+	if !errObj.IsObject() {
+		return false
+	}
+	message := strings.TrimSpace(gjson.GetBytes(responseBody, "error.message").String())
+	if message == "" {
+		message = strings.TrimSpace(service.ExtractUpstreamErrorMessage(responseBody))
+	}
+	errType := strings.TrimSpace(gjson.GetBytes(responseBody, "error.type").String())
+	if errType == "" {
+		_, errType, _ = h.mapUpstreamError(statusCode)
+	}
+	if streamStarted {
+		if message == "" {
+			_, _, message = h.mapUpstreamError(statusCode)
+		}
+		h.handleStreamingAwareError(c, statusCode, errType, message, true)
+		return true
+	}
+	c.Data(statusCode, "application/json; charset=utf-8", responseBody)
+	return true
+}
+
+func isOpenAIImagesInboundEndpoint(c *gin.Context) bool {
+	switch GetInboundEndpoint(c) {
+	case EndpointImagesGenerations, EndpointImagesEdits:
+		return true
+	default:
+		return false
+	}
 }
 
 // handleFailoverExhaustedSimple 简化版本，用于没有响应体的情况

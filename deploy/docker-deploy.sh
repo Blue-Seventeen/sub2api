@@ -20,8 +20,11 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# GitHub raw content base URL
-GITHUB_RAW_URL="https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy"
+# Deployment source. Defaults to the current fork; override SUB2API_REPO or
+# SUB2API_DEPLOY_REF if you intentionally want another repository/ref.
+SUB2API_REPO="${SUB2API_REPO:-Blue-Seventeen/sub2api}"
+SUB2API_DEPLOY_REF="${SUB2API_DEPLOY_REF:-main}"
+GITHUB_RAW_URL="https://raw.githubusercontent.com/${SUB2API_REPO}/${SUB2API_DEPLOY_REF}/deploy"
 
 # Print colored message
 print_info() {
@@ -57,6 +60,7 @@ main() {
     echo "  Sub2API Deployment Preparation"
     echo "=========================================="
     echo ""
+    print_info "Deployment source: ${SUB2API_REPO}@${SUB2API_DEPLOY_REF}"
 
     # Check if openssl is available
     if ! command_exists openssl; then

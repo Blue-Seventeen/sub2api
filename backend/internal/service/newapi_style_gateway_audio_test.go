@@ -115,6 +115,146 @@ func TestNewAPIStyleAudioForwardMapsOpenAIAndZhipuPaths(t *testing.T) {
 	}
 }
 
+func TestNewAPIStyleDeepSeekNewAPIChatUsesV1Path(t *testing.T) {
+	upstream := &httpUpstreamRecorder{resp: newAPIStyleAudioResponse("application/json", `{"id":"chatcmpl_test","model":"deepseek-chat","choices":[],"usage":{"prompt_tokens":3,"completion_tokens":5}}`)}
+	svc := &NewAPIStyleGatewayService{httpUpstream: upstream}
+
+	result, endpoint, err := svc.Forward(context.Background(), newAPIStyleTestContext(), newAPIStyleAudioAccount(PlatformDeepSeek, nil), NewAPIStyleForwardOptions{
+		Route:        NewAPIStyleRouteChatCompletions,
+		Method:       http.MethodPost,
+		RequestBody:  []byte(`{"model":"deepseek-chat","messages":[{"role":"user","content":"hi"}]}`),
+		InboundPath:  "/v1/chat/completions",
+		ContentType:  "application/json",
+		HeaderSource: http.Header{"Authorization": []string{"Bearer client-token"}},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "/v1/chat/completions", endpoint)
+	require.NotNil(t, upstream.lastReq)
+	require.Equal(t, "/v1/chat/completions", upstream.lastReq.URL.Path)
+	require.Equal(t, 3, result.Usage.InputTokens)
+	require.Equal(t, 5, result.Usage.OutputTokens)
+}
+
+func TestNewAPIStyleStreamParsesSSEUsage(t *testing.T) {
+	upstream := &httpUpstreamRecorder{resp: newAPIStyleAudioResponse("text/event-stream", strings.Join([]string{
+		`data: {"id":"chatcmpl_test","choices":[{"delta":{"content":"hi"}}]}`,
+		`data: {"id":"chatcmpl_test","choices":[],"usage":{"prompt_tokens":11,"completion_tokens":13,"prompt_tokens_details":{"cached_tokens":2}}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n\n"))}
+	svc := &NewAPIStyleGatewayService{httpUpstream: upstream}
+
+	result, _, err := svc.Forward(context.Background(), newAPIStyleTestContext(), newAPIStyleAudioAccount(PlatformDeepSeek, nil), NewAPIStyleForwardOptions{
+		Route:        NewAPIStyleRouteChatCompletions,
+		Method:       http.MethodPost,
+		Stream:       true,
+		RequestBody:  []byte(`{"model":"deepseek-chat","stream":true,"messages":[{"role":"user","content":"hi"}]}`),
+		InboundPath:  "/v1/chat/completions",
+		ContentType:  "application/json",
+		HeaderSource: http.Header{"Authorization": []string{"Bearer client-token"}},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 9, result.Usage.InputTokens)
+	require.Equal(t, 13, result.Usage.OutputTokens)
+	require.Equal(t, 2, result.Usage.CacheReadInputTokens)
+	require.False(t, result.UsageEstimated)
+}
+
+func TestNewAPIStyleStreamParsesAnthropicSSEUsageAcrossEvents(t *testing.T) {
+	body := strings.Join([]string{
+		`event: message_start`,
+		`data: {"type":"message_start","message":{"usage":{"input_tokens":17,"cache_read_input_tokens":3}}}`,
+		``,
+		`event: content_block_delta`,
+		`data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}`,
+		``,
+		`event: message_delta`,
+		`data: {"type":"message_delta","usage":{"output_tokens":19}}`,
+		``,
+	}, "\n")
+
+	usage := parseNewAPIStyleSSEUsage([]byte(body))
+
+	require.Equal(t, 17, usage.InputTokens)
+	require.Equal(t, 3, usage.CacheReadInputTokens)
+	require.Equal(t, 19, usage.OutputTokens)
+}
+
+func TestNewAPIStyleStreamParsesAnthropicSSEUsageDetails(t *testing.T) {
+	body := strings.Join([]string{
+		`event: message_start`,
+		`data: {"type":"message_start","message":{"usage":{"input_tokens":30,"cached_tokens":5,"cache_creation":{"ephemeral_5m_input_tokens":7,"ephemeral_1h_input_tokens":11}}}}`,
+		``,
+		`event: message_delta`,
+		`data: {"type":"message_delta","usage":{"output_tokens":40,"completion_tokens_details":{"image_tokens":12}}}`,
+		``,
+	}, "\n")
+
+	usage := parseNewAPIStyleSSEUsage([]byte(body))
+
+	require.Equal(t, 30, usage.InputTokens)
+	require.Equal(t, 5, usage.CacheReadInputTokens)
+	require.Equal(t, 18, usage.CacheCreationInputTokens)
+	require.Equal(t, 7, usage.CacheCreation5mTokens)
+	require.Equal(t, 11, usage.CacheCreation1hTokens)
+	require.Equal(t, 40, usage.OutputTokens)
+	require.Equal(t, 12, usage.ImageOutputTokens)
+}
+
+func TestNewAPIStyleUsageParsesOpenAIStyleDetailAliases(t *testing.T) {
+	usage := parseNewAPIStyleUsage([]byte(`{"usage":{"prompt_tokens":100,"completion_tokens":20,"cached_tokens":9,"cache_creation_tokens":4,"output_tokens_details":{"image_tokens":6}}}`))
+
+	require.Equal(t, 91, usage.InputTokens)
+	require.Equal(t, 9, usage.CacheReadInputTokens)
+	require.Equal(t, 4, usage.CacheCreationInputTokens)
+	require.Equal(t, 20, usage.OutputTokens)
+	require.Equal(t, 6, usage.ImageOutputTokens)
+}
+
+func TestNewAPIStyleUsageGuardrailsPreserveCacheBreakdownForOpenAIForwardResult(t *testing.T) {
+	svc := &NewAPIStyleGatewayService{}
+	result := &ForwardResult{}
+
+	svc.applyUsageGuardrailsWithParsedUsage(result, NewAPIStyleForwardOptions{Route: NewAPIStyleRouteChatCompletions}, nil, ClaudeUsage{
+		InputTokens:              30,
+		OutputTokens:             40,
+		CacheCreationInputTokens: 18,
+		CacheReadInputTokens:     5,
+		CacheCreation5mTokens:    7,
+		CacheCreation1hTokens:    11,
+		ImageOutputTokens:        12,
+	})
+
+	require.Equal(t, 30, result.Usage.InputTokens)
+	require.Equal(t, 18, result.Usage.CacheCreationInputTokens)
+	require.Equal(t, 7, result.Usage.CacheCreation5mTokens)
+	require.Equal(t, 11, result.Usage.CacheCreation1hTokens)
+
+	openAIResult := OpenAIForwardResultFromForwardResult(result)
+	require.NotNil(t, openAIResult)
+	require.Equal(t, 35, openAIResult.Usage.InputTokens)
+	require.Equal(t, 5, openAIResult.Usage.CacheReadInputTokens)
+	require.Equal(t, 18, openAIResult.Usage.CacheCreationInputTokens)
+	require.Equal(t, 7, openAIResult.Usage.CacheCreation5mTokens)
+	require.Equal(t, 11, openAIResult.Usage.CacheCreation1hTokens)
+	require.Equal(t, 12, openAIResult.Usage.ImageOutputTokens)
+}
+
+func TestNewAPIStyleSSEUsageCaptureWriterParsesSplitEvents(t *testing.T) {
+	writer := &newAPIStyleSSEUsageCaptureWriter{}
+	_, err := writer.Write([]byte("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":7}}}\n"))
+	require.NoError(t, err)
+	_, err = writer.Write([]byte("\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":5}}\n\n"))
+	require.NoError(t, err)
+
+	usage := writer.Usage()
+
+	require.Equal(t, 7, usage.InputTokens)
+	require.Equal(t, 5, usage.OutputTokens)
+}
+
 func TestNewAPIStyleAudioForwardPreservesTTSJSONBodyWithoutMapping(t *testing.T) {
 	body := []byte(`{"model":"glm-4-voice","input":"hello","voice":"tongtong","response_format":"wav","speed":1.1}`)
 	upstream := &httpUpstreamRecorder{resp: newAPIStyleAudioResponse("audio/wav", "RIFFxxxxWAVEaudio")}
@@ -590,6 +730,36 @@ func TestNewAPIStyleAudioTokenChannelPricingWinsOverRequestGuardrail(t *testing.
 	want := float64(119) * inputPrice
 	if cost != nil && math.Abs(cost.TotalCost-want) > 1e-12 {
 		t.Fatalf("total cost = %.12f, want %.12f", cost.TotalCost, want)
+	}
+}
+
+func TestNewAPIStyleAudioNoChannelPricingFallsBackToTokenUsage(t *testing.T) {
+	billing := NewBillingService(&config.Config{}, nil)
+	svc := &GatewayService{
+		billingService: billing,
+		resolver:       NewModelPricingResolver(nil, billing),
+	}
+	tokens := ClaudeUsage{InputTokens: 1000, OutputTokens: 500}
+
+	cost := svc.calculateRecordUsageCost(context.Background(), &ForwardResult{
+		Model:            "claude-sonnet-4",
+		Usage:            tokens,
+		RequestCount:     1,
+		BillableUnitType: BillableUnitTypeRequest,
+	}, &APIKey{}, "claude-sonnet-4", 1, 1, &recordUsageOpts{})
+
+	if cost == nil {
+		t.Fatalf("cost is nil")
+	}
+	expected, err := billing.CalculateCost("claude-sonnet-4", UsageTokens{InputTokens: tokens.InputTokens, OutputTokens: tokens.OutputTokens}, 1)
+	if err != nil {
+		t.Fatalf("expected cost: %v", err)
+	}
+	if cost.TotalCost <= 0 {
+		t.Fatalf("total cost = %.12f, want positive token fallback", cost.TotalCost)
+	}
+	if math.Abs(cost.TotalCost-expected.TotalCost) > 1e-12 {
+		t.Fatalf("total cost = %.12f, want %.12f", cost.TotalCost, expected.TotalCost)
 	}
 }
 

@@ -186,6 +186,7 @@ type PaymentService struct {
 	userRepo        UserRepository
 	groupRepo       GroupRepository
 	resumeService   *PaymentResumeService
+	billingCache    *BillingCacheService
 
 	notificationEmailService *NotificationEmailService
 }
@@ -198,6 +199,21 @@ func NewPaymentService(entClient *dbent.Client, registry *payment.Registry, load
 
 func (s *PaymentService) SetNotificationEmailService(notificationEmailService *NotificationEmailService) {
 	s.notificationEmailService = notificationEmailService
+}
+
+func (s *PaymentService) SetBillingCacheService(billingCache *BillingCacheService) {
+	s.billingCache = billingCache
+}
+
+func (s *PaymentService) invalidateUserBalanceCache(userID int64) {
+	if s == nil || s.billingCache == nil || userID <= 0 {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = s.billingCache.InvalidateUserBalance(ctx, userID)
+	}()
 }
 
 // --- Provider Registry ---

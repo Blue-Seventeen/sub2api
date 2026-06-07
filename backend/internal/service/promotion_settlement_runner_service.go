@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"sync"
 	"time"
 
@@ -9,11 +10,20 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 )
 
+const (
+	promotionSettlementRunnerLeaderLockKey = "promotion:settlement:runner:leader"
+	promotionSettlementRunnerLeaderLockTTL = 3 * time.Minute
+)
+
 // PromotionSettlementRunnerService periodically processes activation checks,
 // daily commission aggregation and automatic settlements.
 type PromotionSettlementRunnerService struct {
 	promotionService *PromotionService
 	cfg              *config.Config
+
+	lockCache  LeaderLockCache
+	lockDB     *sql.DB
+	instanceID string
 
 	ticker   *time.Ticker
 	started  bool
@@ -25,8 +35,17 @@ func NewPromotionSettlementRunnerService(promotionService *PromotionService, cfg
 	return &PromotionSettlementRunnerService{
 		promotionService: promotionService,
 		cfg:              cfg,
+		instanceID:       CurrentNodeID() + ":promotion-settlement-runner",
 		done:             make(chan struct{}),
 	}
+}
+
+func (s *PromotionSettlementRunnerService) SetLeaderLock(lockCache LeaderLockCache, db *sql.DB) {
+	if s == nil {
+		return
+	}
+	s.lockCache = lockCache
+	s.lockDB = db
 }
 
 func (s *PromotionSettlementRunnerService) Start() {
@@ -66,6 +85,11 @@ func (s *PromotionSettlementRunnerService) loop() {
 func (s *PromotionSettlementRunnerService) tick() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
+	release, ok := tryAcquireSingletonLeaderLock(ctx, s.lockCache, s.lockDB, promotionSettlementRunnerLeaderLockKey, s.instanceID, promotionSettlementRunnerLeaderLockTTL)
+	if !ok {
+		return
+	}
+	defer release()
 	if err := s.promotionService.ProcessSettlementTick(ctx, time.Now()); err != nil {
 		logger.LegacyPrintf("service.promotion_runner", "[PromotionRunner] tick failed: %v", err)
 	}

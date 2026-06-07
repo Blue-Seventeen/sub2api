@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"sync"
 	"time"
 
@@ -12,6 +13,11 @@ import (
 
 const scheduledTestDefaultMaxWorkers = 10
 
+const (
+	scheduledTestRunnerLeaderLockKey = "scheduled:test:runner:leader"
+	scheduledTestRunnerLeaderLockTTL = 6 * time.Minute
+)
+
 // ScheduledTestRunnerService periodically scans due test plans and executes them.
 type ScheduledTestRunnerService struct {
 	planRepo       ScheduledTestPlanRepository
@@ -19,6 +25,10 @@ type ScheduledTestRunnerService struct {
 	accountTestSvc *AccountTestService
 	rateLimitSvc   *RateLimitService
 	cfg            *config.Config
+
+	lockCache  LeaderLockCache
+	lockDB     *sql.DB
+	instanceID string
 
 	cron      *cron.Cron
 	startOnce sync.Once
@@ -39,7 +49,17 @@ func NewScheduledTestRunnerService(
 		accountTestSvc: accountTestSvc,
 		rateLimitSvc:   rateLimitSvc,
 		cfg:            cfg,
+		instanceID:     CurrentNodeID() + ":scheduled-test-runner",
 	}
+}
+
+// SetLeaderLock injects distributed lock backends for multi-instance deployments.
+func (s *ScheduledTestRunnerService) SetLeaderLock(lockCache LeaderLockCache, db *sql.DB) {
+	if s == nil {
+		return
+	}
+	s.lockCache = lockCache
+	s.lockDB = db
 }
 
 // Start begins the cron ticker (every minute).
@@ -90,6 +110,12 @@ func (s *ScheduledTestRunnerService) runScheduled() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
+
+	release, ok := tryAcquireSingletonLeaderLock(ctx, s.lockCache, s.lockDB, scheduledTestRunnerLeaderLockKey, s.instanceID, scheduledTestRunnerLeaderLockTTL)
+	if !ok {
+		return
+	}
+	defer release()
 
 	now := time.Now()
 	plans, err := s.planRepo.ListDue(ctx, now)

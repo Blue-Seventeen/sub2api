@@ -22,8 +22,8 @@ func TestDeepSeekCompatibleProviderPreset_Defaults(t *testing.T) {
 	if got := CompatibleDefaultBaseURL(PlatformDeepSeek); got != preset.DefaultBaseURL {
 		t.Fatalf("CompatibleDefaultBaseURL() = %q, want %q", got, preset.DefaultBaseURL)
 	}
-	if preset.DefaultTestModel != "deepseek-chat" {
-		t.Fatalf("DefaultTestModel = %q, want %q", preset.DefaultTestModel, "deepseek-chat")
+	if preset.DefaultTestModel != "deepseek-v4-flash" {
+		t.Fatalf("DefaultTestModel = %q, want %q", preset.DefaultTestModel, "deepseek-v4-flash")
 	}
 	if got := CompatibleDefaultTestModel(PlatformDeepSeek); got != preset.DefaultTestModel {
 		t.Fatalf("CompatibleDefaultTestModel() = %q, want %q", got, preset.DefaultTestModel)
@@ -40,11 +40,12 @@ func TestDeepSeekCompatibleProviderPreset_Defaults(t *testing.T) {
 	if preset.SupportsMessages == nil {
 		t.Fatal("SupportsMessages should not be nil")
 	}
-	if !preset.SupportsMessages("deepseek-chat") || !preset.SupportsMessages("deepseek-reasoner") {
+	if !preset.SupportsMessages("deepseek-v4-flash") || !preset.SupportsMessages("deepseek-v4-pro") ||
+		!preset.SupportsMessages("deepseek-chat") || !preset.SupportsMessages("deepseek-reasoner") {
 		t.Fatal("SupportsMessages should accept DeepSeek models")
 	}
 
-	wantModels := []string{"deepseek-chat", "deepseek-reasoner"}
+	wantModels := []string{"deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat", "deepseek-reasoner"}
 	if len(preset.DefaultModels) != len(wantModels) {
 		t.Fatalf("len(DefaultModels) = %d, want %d", len(preset.DefaultModels), len(wantModels))
 	}

@@ -610,8 +610,12 @@ func (s *PromotionService) processDueSettlements(ctx context.Context, now time.T
 		return err
 	}
 	for _, businessDate := range businessDates {
-		if err := s.repo.SettlePromotionBusinessDate(ctx, businessDate, nil, "auto settlement"); err != nil {
+		userIDs, err := s.repo.SettlePromotionBusinessDate(ctx, businessDate, nil, "auto settlement")
+		if err != nil {
 			return err
+		}
+		for _, userID := range userIDs {
+			s.invalidateUserBalanceCache(userID)
 		}
 	}
 	return nil

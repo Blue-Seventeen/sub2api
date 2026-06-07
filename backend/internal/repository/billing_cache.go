@@ -346,6 +346,12 @@ func userPlatformQuotaCacheKey(userID int64, platform string) string {
 	return fmt.Sprintf("billing:user_platform_quota:%d:%s", userID, platform)
 }
 
+func userPlatformQuotaMutationGuardKey(userID int64, platform string) string {
+	return fmt.Sprintf("billing:user_platform_quota:mutation:%d:%s", userID, platform)
+}
+
+const userPlatformQuotaMutationGuardSettleTTL = 10 * time.Second
+
 // parseUserPlatformQuotaHash 将 Redis HGETALL 返回的 map[string]string 反序列化为
 // *service.UserPlatformQuotaCacheEntry。空 map（key 不存在）返回 nil。
 // GetUserPlatformQuotaCache 和 BatchGetUserPlatformQuotaCache 共用此函数，确保解析逻辑一致。
@@ -418,13 +424,19 @@ func (c *billingCache) GetUserPlatformQuotaCache(ctx context.Context, userID int
 	return entry, true, nil
 }
 
+const setUserPlatformQuotaCacheScript = `
+if redis.call("EXISTS", KEYS[2]) ~= 0 then
+    return 0
+end
+redis.call("HMSET", KEYS[1], unpack(ARGV, 2))
+redis.call("EXPIRE", KEYS[1], ARGV[1])
+return 1
+`
+
 func (c *billingCache) SetUserPlatformQuotaCache(ctx context.Context, userID int64, platform string, entry *service.UserPlatformQuotaCacheEntry, ttl time.Duration) error {
 	if entry == nil {
 		return nil
 	}
-	key := userPlatformQuotaCacheKey(userID, platform)
-	pipe := c.rdb.TxPipeline()
-
 	// 浮点可空字段：nil → 空字符串（读取时 parseFloatPtr 返回 nil，表示无限额）
 	fmtFloatPtr := func(p *float64) string {
 		if p == nil {
@@ -440,7 +452,12 @@ func (c *billingCache) SetUserPlatformQuotaCache(ctx context.Context, userID int
 		return strconv.FormatInt(p.Unix(), 10)
 	}
 
-	pipe.HSet(ctx, key,
+	_, err := c.rdb.Eval(ctx, setUserPlatformQuotaCacheScript,
+		[]string{
+			userPlatformQuotaCacheKey(userID, platform),
+			userPlatformQuotaMutationGuardKey(userID, platform),
+		},
+		int(ttl.Seconds()),
 		"daily_usage", entry.DailyUsageUSD,
 		"weekly_usage", entry.WeeklyUsageUSD,
 		"monthly_usage", entry.MonthlyUsageUSD,
@@ -452,14 +469,38 @@ func (c *billingCache) SetUserPlatformQuotaCache(ctx context.Context, userID int
 		"daily_window_start", fmtTimePtr(entry.DailyWindowStart),
 		"weekly_window_start", fmtTimePtr(entry.WeeklyWindowStart),
 		"monthly_window_start", fmtTimePtr(entry.MonthlyWindowStart),
-	)
-	pipe.Expire(ctx, key, ttl)
-	_, err := pipe.Exec(ctx)
+	).Result()
 	return err
 }
 
 func (c *billingCache) DeleteUserPlatformQuotaCache(ctx context.Context, userID int64, platform string) error {
 	return c.rdb.Del(ctx, userPlatformQuotaCacheKey(userID, platform)).Err()
+}
+
+func (c *billingCache) BeginUserPlatformQuotaCacheMutation(ctx context.Context, userID int64, platform string, ttl time.Duration) error {
+	if ttl <= 0 {
+		ttl = time.Minute
+	}
+	// Do not delete the quota hash here. Admin mutations take a post-guard
+	// snapshot first so usage accumulated between preflush and guard begin is
+	// not lost.
+	return c.rdb.Set(ctx, userPlatformQuotaMutationGuardKey(userID, platform), "1", ttl).Err()
+}
+
+func (c *billingCache) EndUserPlatformQuotaCacheMutation(ctx context.Context, userID int64, platform string) error {
+	pipe := c.rdb.TxPipeline()
+	pipe.Del(ctx, userPlatformQuotaCacheKey(userID, platform))
+	pipe.Set(ctx, userPlatformQuotaMutationGuardKey(userID, platform), "1", userPlatformQuotaMutationGuardSettleTTL)
+	_, err := pipe.Exec(ctx)
+	return err
+}
+
+func (c *billingCache) IsUserPlatformQuotaMutationGuarded(ctx context.Context, userID int64, platform string) (bool, error) {
+	n, err := c.rdb.Exists(ctx, userPlatformQuotaMutationGuardKey(userID, platform)).Result()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 // updateUserPlatformQuotaUsageScript 缓存累加：EXISTS + schema_version 双重守卫。
@@ -474,6 +515,9 @@ func (c *billingCache) DeleteUserPlatformQuotaCache(ctx context.Context, userID 
 // ARGV[4] = dirty set member（空串则不 SADD）
 // ARGV[5] = 脏集兜底 TTL 秒
 const updateUserPlatformQuotaUsageScript = `
+if redis.call("EXISTS", KEYS[3]) ~= 0 then
+    return 0
+end
 if redis.call("EXISTS", KEYS[1]) == 0 then
     return 0
 end
@@ -512,7 +556,11 @@ func (c *billingCache) IncrUserPlatformQuotaUsageCache(ctx context.Context, user
 		member = userPlatformQuotaDirtyMember(userID, platform)
 	}
 	result, err := c.rdb.Eval(ctx, updateUserPlatformQuotaUsageScript,
-		[]string{userPlatformQuotaCacheKey(userID, platform), userPlatformQuotaDirtySetKey()},
+		[]string{
+			userPlatformQuotaCacheKey(userID, platform),
+			userPlatformQuotaDirtySetKey(),
+			userPlatformQuotaMutationGuardKey(userID, platform),
+		},
 		strconv.FormatFloat(cost, 'f', -1, 64),
 		int(ttl.Seconds()),
 		service.UserPlatformQuotaCacheSchemaV1,

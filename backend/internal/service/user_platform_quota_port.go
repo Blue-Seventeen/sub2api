@@ -26,6 +26,7 @@ type UserPlatformQuotaSnapshot struct {
 	DailyWindowStart   time.Time
 	WeeklyWindowStart  time.Time
 	MonthlyWindowStart time.Time
+	SnapshotTakenAt    time.Time
 }
 
 // UserPlatformQuotaRecord service 层传输结构体（与 repository 层解耦）。

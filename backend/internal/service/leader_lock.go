@@ -19,15 +19,16 @@ type LeaderLockCache interface {
 }
 
 // tryAcquireSingletonLeaderLock provides best-effort single-flight execution of a
-// periodic background job across multiple instances. It prefers the Redis-backed
-// LeaderLockCache and falls back to a Postgres advisory lock when the cache is
-// unavailable or errors, mirroring the approach used by the Ops background
-// services.
+// periodic background job across multiple instances. It uses a single lock domain
+// for all instances: Redis when LeaderLockCache is configured, otherwise a
+// Postgres advisory lock when a DB is configured.
 //
 // Semantics:
 //   - acquired      -> returns a non-nil release func and true; callers should
 //     defer the release once the job finishes.
 //   - held by peer  -> returns (nil, false); callers should skip this cycle.
+//   - cache error   -> returns (nil, false); callers skip this cycle rather than
+//     falling back to a second lock backend and risking split-brain.
 //   - no backend    -> when neither the cache nor a DB is configured (e.g. unit
 //     tests, or a single-instance deployment without Redis) it runs without
 //     gating, returning a no-op release and true, so the job is never silently
@@ -55,8 +56,9 @@ func tryAcquireSingletonLeaderLock(ctx context.Context, cache LeaderLockCache, d
 			}
 			return release, true
 		}
-		// Cache error: fall through to the DB advisory lock so a flaky Redis does
-		// not stampede the job across every instance.
+		// A configured cache defines the cluster-wide lock domain. Falling back to
+		// DB while peers may still use Redis can split leadership, so skip instead.
+		return nil, false
 	}
 
 	if db != nil {

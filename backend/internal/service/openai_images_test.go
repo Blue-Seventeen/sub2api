@@ -92,6 +92,52 @@ func TestOpenAIGatewayServiceParseOpenAIImagesRequest_MultipartEdit(t *testing.T
 	require.Equal(t, OpenAIImagesCapabilityNative, parsed.RequiredCapability)
 }
 
+func TestHashOpenAIImagesUsageRequestPayload_CanonicalizesMultipartBoundary(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	bodyA, parsedA := buildOpenAIImagesMultipartHashFixture(t, "openai-images-boundary-a", []byte("same-image-bytes"))
+	bodyB, parsedB := buildOpenAIImagesMultipartHashFixture(t, "openai-images-boundary-b", []byte("same-image-bytes"))
+	bodyC, parsedC := buildOpenAIImagesMultipartHashFixture(t, "openai-images-boundary-c", []byte("different-image-bytes"))
+
+	require.NotEqual(t, HashUsageRequestPayload(bodyA), HashUsageRequestPayload(bodyB))
+	require.Equal(t,
+		HashOpenAIImagesUsageRequestPayload(bodyA, parsedA),
+		HashOpenAIImagesUsageRequestPayload(bodyB, parsedB),
+	)
+	require.NotEqual(t,
+		HashOpenAIImagesUsageRequestPayload(bodyA, parsedA),
+		HashOpenAIImagesUsageRequestPayload(bodyC, parsedC),
+	)
+}
+
+func buildOpenAIImagesMultipartHashFixture(t *testing.T, boundary string, imageBytes []byte) ([]byte, *OpenAIImagesRequest) {
+	t.Helper()
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	require.NoError(t, writer.SetBoundary(boundary))
+	require.NoError(t, writer.WriteField("model", "gpt-image-2"))
+	require.NoError(t, writer.WriteField("prompt", "replace background"))
+	require.NoError(t, writer.WriteField("size", "1536x1024"))
+	part, err := writer.CreateFormFile("image", "source.png")
+	require.NoError(t, err)
+	_, err = part.Write(imageBytes)
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(body.Bytes()))
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = req
+
+	parsed, err := (&OpenAIGatewayService{}).ParseOpenAIImagesRequest(c, body.Bytes())
+	require.NoError(t, err)
+	require.True(t, parsed.Multipart)
+
+	return body.Bytes(), parsed
+}
+
 func TestOpenAIImagesRequestModerationBody_JSONEditIncludesInputImageURLs(t *testing.T) {
 	parsed := &OpenAIImagesRequest{
 		Endpoint:       openAIImagesEditsEndpoint,

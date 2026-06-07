@@ -11,6 +11,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/util/logredact"
 )
 
 var ErrOpsDisabled = infraerrors.NotFound("OPS_DISABLED", "Ops monitoring is disabled")
@@ -229,6 +230,8 @@ func (s *OpsService) prepareErrorLogInput(ctx context.Context, entry *OpsInsertE
 	if entry.ErrorType == "" {
 		entry.ErrorType = "api_error"
 	}
+
+	entry.ErrorMessage = truncateString(logredact.RedactText(strings.TrimSpace(entry.ErrorMessage), "key"), 2048)
 
 	// Sanitize + truncate error_body to avoid storing sensitive data.
 	if strings.TrimSpace(entry.ErrorBody) != "" {
@@ -452,7 +455,24 @@ func (s *OpsService) GetUserErrorRequestDetail(ctx context.Context, userID, id i
 	if !ownedDirectly && !ownedViaDeletedKey {
 		return nil, infraerrors.NotFound("OPS_ERROR_NOT_FOUND", "ops error log not found")
 	}
+	if !isUserVisibleErrorRequestDetail(detail) {
+		return nil, infraerrors.NotFound("OPS_ERROR_NOT_FOUND", "ops error log not found")
+	}
 	return ToUserErrorRequestDetail(detail), nil
+}
+
+func isUserVisibleErrorRequestDetail(detail *OpsErrorLogDetail) bool {
+	if detail == nil {
+		return false
+	}
+	if detail.IsCountTokens {
+		return false
+	}
+	clientStatus := detail.StatusCode
+	if detail.ClientStatusCode != nil {
+		clientStatus = *detail.ClientStatusCode
+	}
+	return clientStatus >= 400
 }
 
 // LookupDeletedKeyAudit 按明文 key 反查已删除 key 的原所有者;未命中或未启用返回 (nil, nil)。
@@ -575,6 +595,8 @@ func redactSensitiveJSON(v any) any {
 			out = append(out, redactSensitiveJSON(vv))
 		}
 		return out
+	case string:
+		return logredact.RedactText(t, "key")
 	default:
 		return v
 	}
@@ -798,9 +820,10 @@ func sanitizeErrorBodyForStorage(raw string, maxBytes int) (sanitized string, tr
 		return out, trunc
 	}
 
-	// Non-JSON: best-effort truncate.
-	if maxBytes > 0 && len(raw) > maxBytes {
-		return truncateString(raw, maxBytes), true
+	// Non-JSON: redact text patterns first, then best-effort truncate.
+	safe := logredact.RedactText(raw, "key")
+	if maxBytes > 0 && len(safe) > maxBytes {
+		return truncateString(safe, maxBytes), true
 	}
-	return raw, false
+	return safe, false
 }

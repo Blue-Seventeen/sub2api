@@ -229,7 +229,8 @@ describe('user UsageView tooltip', () => {
         cache_creation_cost: 0.000001,
         cache_read_cost: 0.069568,
         input_tokens: 4057,
-        output_tokens: 101,
+        output_tokens: 200,
+        image_output_tokens: 150,
         cache_creation_tokens: 4,
         cache_read_tokens: 278272,
         cache_creation_5m_tokens: 0,
@@ -303,6 +304,14 @@ describe('user UsageView tooltip', () => {
     expect(hasSortedExportQuery).toBe(true)
     expect(clickSpy).toHaveBeenCalled()
     expect(showSuccess).toHaveBeenCalled()
+    const csv = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result))
+      reader.onerror = () => reject(reader.error)
+      reader.readAsText(exportedBlob as Blob)
+    })
+    expect(csv).toContain('Image Output Tokens')
+    expect(csv).toContain(',4057,50,278272,4,150,')
 
     window.URL.createObjectURL = originalCreateObjectURL
     window.URL.revokeObjectURL = originalRevokeObjectURL
@@ -552,8 +561,8 @@ describe('user UsageView tooltip', () => {
           cache_creation_cost: 0,
           cache_read_cost: 0,
           input_tokens: 42,
-          output_tokens: 123,
-          image_output_tokens: 123,
+          output_tokens: 200,
+          image_output_tokens: 150,
           image_output_cost: 0.0123,
           cache_creation_tokens: 0,
           cache_read_tokens: 0,
@@ -601,7 +610,9 @@ describe('user UsageView tooltip', () => {
     const text = wrapper.text()
     expect(text).toContain('Token')
     expect(text).toContain('42')
-    expect(text).toContain('123')
+    expect(text).toContain('50')
+    expect(text).toContain('150')
+    expect(text).not.toContain('200')
     expect(text).not.toContain('1 images')
   })
 })

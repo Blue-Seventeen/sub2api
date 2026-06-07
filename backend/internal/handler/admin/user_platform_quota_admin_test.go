@@ -27,6 +27,8 @@ type upsertCapturingQuotaRepo struct {
 	upsertErr   error
 	resetCalls  []resetCall
 	resetErr    error
+	snapshots   []service.UserPlatformQuotaSnapshot
+	snapshotErr error
 }
 
 type upsertCall struct {
@@ -53,12 +55,29 @@ func (r *upsertCapturingQuotaRepo) ResetExpiredWindow(_ context.Context, userID 
 	r.resetCalls = append(r.resetCalls, resetCall{userID, platform, window, newStart})
 	return r.resetErr
 }
+func (r *upsertCapturingQuotaRepo) BatchSnapshotUsage(_ context.Context, snapshots []service.UserPlatformQuotaSnapshot, _ time.Time) error {
+	cloned := make([]service.UserPlatformQuotaSnapshot, len(snapshots))
+	copy(cloned, snapshots)
+	r.snapshots = append(r.snapshots, cloned...)
+	return r.snapshotErr
+}
 
 // billingCacheStub 实现 service.BillingCache 中本测试关心的 Delete 方法；其他方法 panic。
 type billingCacheStub struct {
 	service.BillingCache
-	deleteCalls []deleteCall
-	deleteErr   error
+	deleteCalls  []deleteCall
+	deleteErr    error
+	batchGetKeys []service.UserPlatformQuotaKey
+	batchEntries []*service.UserPlatformQuotaCacheEntry
+	batchSeq     [][]*service.UserPlatformQuotaCacheEntry
+	batchCalls   int
+	batchGetErr  error
+}
+
+type guardBillingCacheStub struct {
+	billingCacheStub
+	beginCalls []deleteCall
+	endCalls   []deleteCall
 }
 
 type deleteCall struct {
@@ -69,6 +88,35 @@ type deleteCall struct {
 func (b *billingCacheStub) DeleteUserPlatformQuotaCache(_ context.Context, userID int64, platform string) error {
 	b.deleteCalls = append(b.deleteCalls, deleteCall{userID, platform})
 	return b.deleteErr
+}
+
+func (b *billingCacheStub) BatchGetUserPlatformQuotaCache(_ context.Context, keys []service.UserPlatformQuotaKey) ([]*service.UserPlatformQuotaCacheEntry, error) {
+	b.batchGetKeys = append(b.batchGetKeys, keys...)
+	if b.batchGetErr != nil {
+		return nil, b.batchGetErr
+	}
+	entries := b.batchEntries
+	if len(b.batchSeq) > 0 {
+		idx := b.batchCalls
+		if idx >= len(b.batchSeq) {
+			idx = len(b.batchSeq) - 1
+		}
+		entries = b.batchSeq[idx]
+	}
+	b.batchCalls++
+	out := make([]*service.UserPlatformQuotaCacheEntry, len(keys))
+	copy(out, entries)
+	return out, nil
+}
+
+func (b *guardBillingCacheStub) BeginUserPlatformQuotaCacheMutation(_ context.Context, userID int64, platform string, _ time.Duration) error {
+	b.beginCalls = append(b.beginCalls, deleteCall{userID, platform})
+	return nil
+}
+
+func (b *guardBillingCacheStub) EndUserPlatformQuotaCacheMutation(_ context.Context, userID int64, platform string) error {
+	b.endCalls = append(b.endCalls, deleteCall{userID, platform})
+	return nil
 }
 
 func buildTestHandler(repo service.UserPlatformQuotaRepository, cache service.BillingCache) *UserHandler {
@@ -112,9 +160,98 @@ func TestUpdateUserPlatformQuotas_Success(t *testing.T) {
 	if repo.upsertCalls[0].userID != 42 || len(repo.upsertCalls[0].records) != 2 {
 		t.Errorf("unexpected upsert call: %+v", repo.upsertCalls[0])
 	}
-	// 缓存失效：请求中 2 个 platform + 软删除的 2 个 platform（gemini, antigravity）= 4 次
-	if len(cache.deleteCalls) != 4 {
-		t.Errorf("expected 4 cache delete calls, got %d: %+v", len(cache.deleteCalls), cache.deleteCalls)
+	// 缓存失效：写库前后各清一次全部 platform，防止 flusher 读到旧 Redis 快照后覆盖 admin 写入。
+	if len(cache.deleteCalls) != 8 {
+		t.Errorf("expected 8 cache delete calls, got %d: %+v", len(cache.deleteCalls), cache.deleteCalls)
+	}
+}
+
+func TestUpdateUserPlatformQuotas_UsesMutationGuardWhenAvailable(t *testing.T) {
+	repo := &upsertCapturingQuotaRepo{}
+	cache := &guardBillingCacheStub{}
+	h := buildTestHandler(repo, cache)
+
+	c, w := putReq(t, `{"quotas":[{"platform":"anthropic","daily_limit_usd":10}]}`)
+	h.UpdateUserPlatformQuotas(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if len(cache.beginCalls) != len(service.AllowedQuotaPlatforms) {
+		t.Fatalf("expected guard begin for all platforms, got %+v", cache.beginCalls)
+	}
+	if len(cache.endCalls) != len(service.AllowedQuotaPlatforms) {
+		t.Fatalf("expected guard end for all platforms, got %+v", cache.endCalls)
+	}
+	if len(cache.deleteCalls) != len(service.AllowedQuotaPlatforms) {
+		t.Fatalf("expected guarded cache delete after post-guard flush, got %+v", cache.deleteCalls)
+	}
+}
+
+func TestUpdateUserPlatformQuotas_FlushesCachedUsageBeforeMutationGuard(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &upsertCapturingQuotaRepo{}
+	cache := &guardBillingCacheStub{
+		billingCacheStub: billingCacheStub{
+			batchSeq: [][]*service.UserPlatformQuotaCacheEntry{
+				{
+					{
+						SchemaVersion:      service.UserPlatformQuotaCacheSchemaV1,
+						DailyUsageUSD:      1.25,
+						WeeklyUsageUSD:     2.5,
+						MonthlyUsageUSD:    3.75,
+						DailyWindowStart:   &now,
+						WeeklyWindowStart:  &now,
+						MonthlyWindowStart: &now,
+					},
+				},
+				{
+					{
+						SchemaVersion:      service.UserPlatformQuotaCacheSchemaV1,
+						DailyUsageUSD:      1.75,
+						WeeklyUsageUSD:     3.0,
+						MonthlyUsageUSD:    4.25,
+						DailyWindowStart:   &now,
+						WeeklyWindowStart:  &now,
+						MonthlyWindowStart: &now,
+					},
+				},
+			},
+		},
+	}
+	h := buildTestHandler(repo, cache)
+
+	c, w := putReq(t, `{"quotas":[{"platform":"anthropic","daily_limit_usd":10}]}`)
+	h.UpdateUserPlatformQuotas(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if len(cache.batchGetKeys) != len(service.AllowedQuotaPlatforms)*2 {
+		t.Fatalf("expected preflush and post-guard batch get for all platforms, got %+v", cache.batchGetKeys)
+	}
+	if len(repo.snapshots) != 2 {
+		t.Fatalf("expected preflush and post-guard cached usage snapshots, got %+v", repo.snapshots)
+	}
+	first := repo.snapshots[0]
+	if first.UserID != 42 || first.Platform != service.AllowedQuotaPlatforms[0] {
+		t.Fatalf("unexpected first snapshot key: %+v", first)
+	}
+	if first.DailyUsageUSD != 1.25 || first.WeeklyUsageUSD != 2.5 || first.MonthlyUsageUSD != 3.75 {
+		t.Fatalf("unexpected first snapshot usage: %+v", first)
+	}
+	second := repo.snapshots[1]
+	if second.UserID != 42 || second.Platform != service.AllowedQuotaPlatforms[0] {
+		t.Fatalf("unexpected second snapshot key: %+v", second)
+	}
+	if second.DailyUsageUSD != 1.75 || second.WeeklyUsageUSD != 3.0 || second.MonthlyUsageUSD != 4.25 {
+		t.Fatalf("unexpected second snapshot usage: %+v", second)
+	}
+	if len(cache.beginCalls) != len(service.AllowedQuotaPlatforms) {
+		t.Fatalf("expected guard begin after preflush, got %+v", cache.beginCalls)
+	}
+	if len(cache.deleteCalls) != len(service.AllowedQuotaPlatforms) {
+		t.Fatalf("expected guarded cache delete after post-guard flush, got %+v", cache.deleteCalls)
 	}
 }
 
@@ -212,10 +349,13 @@ func TestResetUserPlatformQuotaWindow_Success(t *testing.T) {
 		repo.resetCalls[0].window != "daily" {
 		t.Errorf("unexpected reset call: %+v", repo.resetCalls[0])
 	}
-	if len(cache.deleteCalls) != 1 ||
+	if len(cache.deleteCalls) != 2 ||
 		cache.deleteCalls[0].userID != 42 ||
 		cache.deleteCalls[0].platform != "anthropic" {
-		t.Errorf("expected 1 cache delete for anthropic, got %+v", cache.deleteCalls)
+		t.Errorf("expected 2 cache deletes for anthropic, got %+v", cache.deleteCalls)
+	}
+	if cache.deleteCalls[1].userID != 42 || cache.deleteCalls[1].platform != "anthropic" {
+		t.Errorf("expected second cache delete for anthropic, got %+v", cache.deleteCalls)
 	}
 }
 
