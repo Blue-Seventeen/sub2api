@@ -73,6 +73,16 @@ README-CUSTOM.md
 - 不要覆盖 Kimi / GLM / Claude Code / Codex / Cherry Studio 兼容链路。
 - 不要覆盖计费倍率、模型映射、使用记录成本字段。
 
+## Nginx 反向代理注意事项
+
+通过 Nginx 反向代理本服务并搭配 Codex CLI 使用时，需要在 Nginx 配置的 `http` 块中添加：
+
+```nginx
+underscores_in_headers on;
+```
+
+Nginx 默认会丢弃名称中含下划线的请求头，例如 `session_id`，这会导致多账号环境下的粘性会话路由失效。
+
 ## 免责声明
 
 本仓库是基于开源项目二次开发的自定义版本，仅用于自有部署和研究。使用者应自行确认上游服务条款、账号合规性、数据安全与部署安全。

@@ -122,7 +122,7 @@ func (h *CompatibleGatewayHandler) CountTokens(c *gin.Context) {
 		return
 	}
 
-	parsed, err := service.ParseGatewayRequest(body, domain.PlatformAnthropic)
+	parsed, err := service.ParseGatewayRequest(service.NewRequestBodyRef(body), domain.PlatformAnthropic)
 	if err != nil || strings.TrimSpace(parsed.Model) == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"type": "error",
@@ -436,24 +436,25 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 		requestPayloadHash := service.HashUsageRequestPayload(body)
 		inboundEndpoint := GetInboundEndpoint(c)
 		compat := compatibilityLogFields(c)
+		compatibleInputTokens := service.EstimateCompatibleInputTokensForPlatform(account.Platform, parsed)
 		h.base.submitMandatoryUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 			if err := h.base.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
-				Result:             result,
-				ParsedRequest:      parsed,
-				APIKey:             apiKey,
-				User:               apiKey.User,
-				Account:            account,
-				Subscription:       subscription,
-				InboundEndpoint:    inboundEndpoint,
-				UpstreamEndpoint:   upstreamEndpoint,
-				UserAgent:          userAgent,
-				IPAddress:          clientIP,
-				ClientProfile:      compat.ClientProfile,
-				CompatibilityRoute: compat.CompatibilityRoute,
-				FallbackChain:      compat.FallbackChain,
-				UpstreamTransport:  compat.UpstreamTransport,
-				RequestPayloadHash: requestPayloadHash,
-				APIKeyService:      h.base.apiKeyService,
+				Result:                result,
+				CompatibleInputTokens: compatibleInputTokens,
+				APIKey:                apiKey,
+				User:                  apiKey.User,
+				Account:               account,
+				Subscription:          subscription,
+				InboundEndpoint:       inboundEndpoint,
+				UpstreamEndpoint:      upstreamEndpoint,
+				UserAgent:             userAgent,
+				IPAddress:             clientIP,
+				ClientProfile:         compat.ClientProfile,
+				CompatibilityRoute:    compat.CompatibilityRoute,
+				FallbackChain:         compat.FallbackChain,
+				UpstreamTransport:     compat.UpstreamTransport,
+				RequestPayloadHash:    requestPayloadHash,
+				APIKeyService:         h.base.apiKeyService,
 			}); err != nil {
 				reqLog.Error("compatible.record_usage_failed", zap.Error(err), zap.Int64("account_id", account.ID))
 			}
@@ -476,7 +477,7 @@ func contentModerationProtocolForCompatibleRoute(route service.CompatibleRequest
 func parseCompatibleParsedRequest(body []byte, route service.CompatibleRequestRoute) (*service.ParsedRequest, error) {
 	switch route {
 	case service.CompatibleRouteMessages:
-		return service.ParseGatewayRequest(body, domain.PlatformAnthropic)
+		return service.ParseGatewayRequest(service.NewRequestBodyRef(body), domain.PlatformAnthropic)
 	case service.CompatibleRouteResponses:
 		var req apicompat.ResponsesRequest
 		if err := json.Unmarshal(body, &req); err != nil {
@@ -490,9 +491,9 @@ func parseCompatibleParsedRequest(body []byte, route service.CompatibleRequestRo
 		if err != nil {
 			return nil, err
 		}
-		return service.ParseGatewayRequest(anthropicBody, domain.PlatformAnthropic)
+		return service.ParseGatewayRequest(service.NewRequestBodyRef(anthropicBody), domain.PlatformAnthropic)
 	default:
-		return service.ParseGatewayRequest(body, domain.PlatformOpenAI)
+		return service.ParseGatewayRequest(service.NewRequestBodyRef(body), domain.PlatformOpenAI)
 	}
 }
 

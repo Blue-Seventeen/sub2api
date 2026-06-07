@@ -557,7 +557,6 @@ export interface SystemSettings {
   openai_codex_user_agent: string;
   openai_allow_claude_code_codex_plugin: boolean;
   web_search_emulation_enabled?: boolean;
-  openai_fast_policy_settings?: OpenAIFastPolicySettings;
 
   // Payment configuration
   payment_enabled: boolean;
@@ -603,6 +602,15 @@ export interface SystemSettings {
   // Available Channels feature switch
   available_channels_enabled: boolean;
   markdown_pages_enabled: boolean;
+
+  // Affiliate (邀请返利) feature switch
+  affiliate_enabled: boolean;
+
+  // OpenAI fast/flex policy
+  openai_fast_policy_settings?: OpenAIFastPolicySettings;
+
+  // Allow user view error requests
+  allow_user_view_error_requests: boolean;
 }
 
 export interface UpdateSettingsRequest {
@@ -779,7 +787,6 @@ export interface UpdateSettingsRequest {
   antigravity_user_agent_version?: string;
   openai_codex_user_agent?: string;
   openai_allow_claude_code_codex_plugin?: boolean;
-  openai_fast_policy_settings?: OpenAIFastPolicySettings;
   // Payment configuration
   payment_enabled?: boolean;
   risk_control_enabled?: boolean;
@@ -823,6 +830,14 @@ export interface UpdateSettingsRequest {
   // Available Channels feature switch
   available_channels_enabled?: boolean;
   markdown_pages_enabled?: boolean;
+
+  // Affiliate (邀请返利) feature switch
+  affiliate_enabled?: boolean;
+
+  // OpenAI fast/flex policy
+  openai_fast_policy_settings?: OpenAIFastPolicySettings;
+
+  allow_user_view_error_requests?: boolean;
 }
 
 /**

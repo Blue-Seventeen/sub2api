@@ -30,6 +30,7 @@ type User struct {
 	LastUsedAt           *time.Time
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
+	DeletedAt            *time.Time // 非 nil 表示用户已软删除
 
 	// UnifiedRateEnabled indicates whether the user's unified multiplier is enabled.
 	// 关闭时统一倍率按 1.0 处理。

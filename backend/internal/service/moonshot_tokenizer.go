@@ -164,11 +164,16 @@ func moonshotAllowedSpecialTokens() []string {
 }
 
 func buildMoonshotPromptFromParsedRequest(parsed *ParsedRequest) (string, int) {
-	messages := make([]moonshotPromptMessage, 0, len(parsed.Messages)+1)
+	var rawMessages []any
+	if err := parsed.DecodeMessages(&rawMessages); err != nil {
+		return "", 0
+	}
+
+	messages := make([]moonshotPromptMessage, 0, len(rawMessages)+1)
 	imageCount := 0
 
-	if parsed.HasSystem {
-		systemText, systemImages := flattenMoonshotContent(parsed.System)
+	if system, ok := parsed.SystemValue(); ok {
+		systemText, systemImages := flattenMoonshotContent(system)
 		imageCount += systemImages
 		messages = append(messages, moonshotPromptMessage{
 			Role:    "system",
@@ -176,7 +181,7 @@ func buildMoonshotPromptFromParsedRequest(parsed *ParsedRequest) (string, int) {
 		})
 	}
 
-	for _, raw := range parsed.Messages {
+	for _, raw := range rawMessages {
 		msg, images, ok := normalizeMoonshotPromptMessage(raw)
 		if !ok {
 			continue

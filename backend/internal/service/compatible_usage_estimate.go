@@ -15,16 +15,19 @@ func EstimateCompatibleInputTokens(parsed *ParsedRequest) int {
 	}
 	totalChars := 0
 	totalImages := 0
-	if parsed.HasSystem {
-		totalChars += estimateCompatibleChars(parsed.System, &totalImages)
+	if system, ok := parsed.SystemValue(); ok {
+		totalChars += estimateCompatibleChars(system, &totalImages)
 		totalChars += 16
 	}
-	for _, msg := range parsed.Messages {
-		totalChars += estimateCompatibleChars(msg, &totalImages)
-		totalChars += 12
+	var messages []any
+	if err := parsed.DecodeMessages(&messages); err == nil {
+		for _, msg := range messages {
+			totalChars += estimateCompatibleChars(msg, &totalImages)
+			totalChars += 12
+		}
 	}
 	if totalChars == 0 {
-		totalChars = len(parsed.Body)
+		totalChars = parsed.Body.Len()
 	}
 	tokens := totalChars/4 + 1 + totalImages*256
 	if tokens < 1 {

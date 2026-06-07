@@ -73,6 +73,16 @@ README-CUSTOM.md
 
 Do not overwrite the custom compatibility layer, usage-log enhancements, Promotion center, billing logic, or backup lock behavior without explicit confirmation.
 
+## Nginx Reverse Proxy Note
+
+When using Nginx as a reverse proxy with Codex CLI, add the following directive to the `http` block in the Nginx configuration:
+
+```nginx
+underscores_in_headers on;
+```
+
+Nginx drops headers containing underscores by default, for example `session_id`, which breaks sticky session routing in multi-account deployments.
+
 ## Disclaimer
 
 This is a custom fork for self-hosted use and research. Users are responsible for complying with upstream service terms, account policies, data security, and deployment security requirements.

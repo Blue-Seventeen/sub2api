@@ -120,6 +120,8 @@ var ProviderSet = wire.NewSet(
 	NewGeminiTokenCache,
 	NewProxyStickyStore,
 	NewRedisProxyActiveUsageStore,
+	wire.Bind(new(service.ProxyActiveUsageStore), new(*RedisProxyActiveUsageStore)),
+	NewLeaderLockCache,
 	ProvideSchedulerCache,
 	NewSchedulerOutboxRepository,
 	NewProxyLatencyCache,

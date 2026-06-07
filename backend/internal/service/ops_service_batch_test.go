@@ -32,10 +32,12 @@ func TestOpsServiceRecordErrorBatch_SanitizesAndBatches(t *testing.T) {
 			NetworkErrorType:     " request_body_timeout ",
 			UpstreamErrors: []*OpsUpstreamErrorEvent{
 				{
-					AccountID:          -2,
-					UpstreamStatusCode: 429,
-					Message:            " token leaked ",
-					Detail:             `{"refresh_token":"secret"}`,
+					AccountID:            -2,
+					UpstreamStatusCode:   429,
+					Message:              " token leaked ",
+					Detail:               `{"refresh_token":"secret"}`,
+					UpstreamRequestBody:  `{"api_key":"sk-secret","messages":[{"role":"user","content":"hello"}]}`,
+					UpstreamResponseBody: `{"access_token":"secret","error":"bad"}`,
 				},
 			},
 		},
@@ -64,6 +66,8 @@ func TestOpsServiceRecordErrorBatch_SanitizesAndBatches(t *testing.T) {
 	require.NotNil(t, first.UpstreamErrorsJSON)
 	require.NotContains(t, *first.UpstreamErrorsJSON, "secret")
 	require.Contains(t, *first.UpstreamErrorsJSON, "[REDACTED]")
+	require.Contains(t, *first.UpstreamErrorsJSON, "upstream_request_body")
+	require.Contains(t, *first.UpstreamErrorsJSON, "upstream_response_body")
 
 	second := captured[1]
 	require.Equal(t, "upstream", second.ErrorPhase)

@@ -150,11 +150,18 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 		return
 	}
 
-	parsedReq := &service.ParsedRequest{
-		Model:  model,
-		Stream: stream,
-		Body:   body,
+	parsedReq, err := service.ParseGatewayRequest(service.NewRequestBodyRef(body), "")
+	if err != nil {
+		parsedReq = &service.ParsedRequest{
+			Model:  model,
+			Stream: stream,
+			Body:   service.NewRequestBodyRef(body),
+		}
 	}
+	if parsedReq.Model == "" {
+		parsedReq.Model = model
+	}
+	parsedReq.Stream = stream
 	parsedReq.SessionContext = &service.SessionContext{
 		ClientIP:  ip.GetClientIP(c),
 		UserAgent: c.GetHeader("User-Agent"),
@@ -372,26 +379,27 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 			upstreamEndpoint = GetUpstreamEndpoint(c, account.Platform)
 		}
 		compat := compatibilityLogFields(c)
+		compatibleInputTokens := service.EstimateCompatibleInputTokensForPlatform(account.Platform, parsedReq)
 
 		h.base.submitMandatoryUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 			if err := h.base.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
-				Result:             result,
-				ParsedRequest:      parsedReq,
-				APIKey:             apiKey,
-				User:               apiKey.User,
-				Account:            account,
-				Subscription:       subscription,
-				InboundEndpoint:    inboundEndpoint,
-				UpstreamEndpoint:   upstreamEndpoint,
-				UserAgent:          userAgent,
-				IPAddress:          clientIP,
-				RequestPayloadHash: requestPayloadHash,
-				ClientProfile:      compat.ClientProfile,
-				CompatibilityRoute: compat.CompatibilityRoute,
-				FallbackChain:      compat.FallbackChain,
-				UpstreamTransport:  compat.UpstreamTransport,
-				APIKeyService:      h.base.apiKeyService,
-				ChannelUsageFields: channelMapping.ToUsageFields(model, result.UpstreamModel),
+				Result:                result,
+				CompatibleInputTokens: compatibleInputTokens,
+				APIKey:                apiKey,
+				User:                  apiKey.User,
+				Account:               account,
+				Subscription:          subscription,
+				InboundEndpoint:       inboundEndpoint,
+				UpstreamEndpoint:      upstreamEndpoint,
+				UserAgent:             userAgent,
+				IPAddress:             clientIP,
+				RequestPayloadHash:    requestPayloadHash,
+				ClientProfile:         compat.ClientProfile,
+				CompatibilityRoute:    compat.CompatibilityRoute,
+				FallbackChain:         compat.FallbackChain,
+				UpstreamTransport:     compat.UpstreamTransport,
+				APIKeyService:         h.base.apiKeyService,
+				ChannelUsageFields:    channelMapping.ToUsageFields(model, result.UpstreamModel),
 			}); err != nil {
 				logger.L().With(
 					zap.String("component", "handler.newapi_style"),

@@ -200,6 +200,16 @@ Sub2API 运行时主框架
 | Deploy | Docker / Docker Compose / Nginx |
 | Backup | S3-compatible object storage |
 
+## Nginx 反向代理注意事项
+
+通过 Nginx 反向代理本服务并搭配 Codex CLI 使用时，需要在 Nginx 配置的 `http` 块中添加：
+
+```nginx
+underscores_in_headers on;
+```
+
+Nginx 默认会丢弃名称中含下划线的请求头，例如 `session_id`，这会导致多账号环境下的粘性会话路由失效。
+
 ## 本地开发与测试
 
 后端测试：

@@ -4,6 +4,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -88,12 +89,41 @@ func TestUserPlatformQuotaCache_NilLimitSetThenGet(t *testing.T) {
 
 func TestUserPlatformQuotaCache_IncrMissIsNoop(t *testing.T) {
 	c, _ := newMiniRedisCache(t)
-	if err := c.IncrUserPlatformQuotaUsageCache(context.Background(), 1, "openai", 0.5, time.Minute); err != nil {
+	if err := c.IncrUserPlatformQuotaUsageCache(context.Background(), 1, "openai", 0.5, time.Minute, false); err != nil {
 		t.Fatal(err)
 	}
 	_, ok, _ := c.GetUserPlatformQuotaCache(context.Background(), 1, "openai")
 	if ok {
 		t.Error("expected key absent after no-op incr")
+	}
+}
+
+func TestUserPlatformQuotaCache_IncrMissWithDirtyReturnsNotReady(t *testing.T) {
+	c, mr := newMiniRedisCache(t)
+	err := c.IncrUserPlatformQuotaUsageCache(context.Background(), 1, "openai", 0.5, time.Minute, true)
+	if !errors.Is(err, service.ErrUserPlatformQuotaCacheNotReady) {
+		t.Fatalf("expected ErrUserPlatformQuotaCacheNotReady, got %v", err)
+	}
+	if mr.Exists(userPlatformQuotaDirtySetKey()) {
+		t.Fatal("cache miss must not dirty-mark a missing quota hash")
+	}
+}
+
+func TestUserPlatformQuotaCache_IncrOldSchemaWithDirtyReturnsNotReady(t *testing.T) {
+	c, mr := newMiniRedisCache(t)
+	ctx := context.Background()
+	if err := c.SetUserPlatformQuotaCache(ctx, 1, "openai", &service.UserPlatformQuotaCacheEntry{
+		DailyUsageUSD: 1,
+		// SchemaVersion 0 simulates an old cache entry.
+	}, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	err := c.IncrUserPlatformQuotaUsageCache(ctx, 1, "openai", 0.5, time.Minute, true)
+	if !errors.Is(err, service.ErrUserPlatformQuotaCacheNotReady) {
+		t.Fatalf("expected ErrUserPlatformQuotaCacheNotReady, got %v", err)
+	}
+	if mr.Exists(userPlatformQuotaDirtySetKey()) {
+		t.Fatal("old schema must not dirty-mark an unsafe quota hash")
 	}
 }
 
@@ -105,10 +135,10 @@ func TestUserPlatformQuotaCache_IncrHitAccumulates(t *testing.T) {
 		Version:       1,
 		SchemaVersion: service.UserPlatformQuotaCacheSchemaV1,
 	}, time.Minute)
-	if err := c.IncrUserPlatformQuotaUsageCache(ctx, 1, "openai", 0.5, time.Minute); err != nil {
+	if err := c.IncrUserPlatformQuotaUsageCache(ctx, 1, "openai", 0.5, time.Minute, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.IncrUserPlatformQuotaUsageCache(ctx, 1, "openai", 0.25, time.Minute); err != nil {
+	if err := c.IncrUserPlatformQuotaUsageCache(ctx, 1, "openai", 0.25, time.Minute, false); err != nil {
 		t.Fatal(err)
 	}
 	got, _, _ := c.GetUserPlatformQuotaCache(ctx, 1, "openai")

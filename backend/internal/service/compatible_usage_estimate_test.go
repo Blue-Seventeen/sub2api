@@ -5,17 +5,7 @@ package service
 import "testing"
 
 func TestEstimateCompatibleInputTokens(t *testing.T) {
-	parsed := &ParsedRequest{
-		Body:      []byte(`{"model":"Kimi-K2.5","messages":[{"role":"user","content":"hello"}],"system":"reply briefly"}`),
-		System:    "reply briefly",
-		HasSystem: true,
-		Messages: []any{
-			map[string]any{
-				"role":    "user",
-				"content": "hello",
-			},
-		},
-	}
+	parsed := mustParseCompatibleUsageEstimateRequest(t, `{"model":"Kimi-K2.5","messages":[{"role":"user","content":"hello"}],"system":"reply briefly"}`)
 
 	got := EstimateCompatibleInputTokens(parsed)
 	if got <= 0 {
@@ -24,17 +14,7 @@ func TestEstimateCompatibleInputTokens(t *testing.T) {
 }
 
 func TestEstimateMoonshotCompatibleInputTokens_UsesTokenizerModel(t *testing.T) {
-	parsed := &ParsedRequest{
-		Body:      []byte(`{"model":"Kimi-K2.5","messages":[{"role":"user","content":"hello there, please reply briefly"}],"system":"reply briefly"}`),
-		System:    "reply briefly",
-		HasSystem: true,
-		Messages: []any{
-			map[string]any{
-				"role":    "user",
-				"content": "hello there, please reply briefly",
-			},
-		},
-	}
+	parsed := mustParseCompatibleUsageEstimateRequest(t, `{"model":"Kimi-K2.5","messages":[{"role":"user","content":"hello there, please reply briefly"}],"system":"reply briefly"}`)
 
 	got := EstimateMoonshotCompatibleInputTokens(parsed)
 	if got != 14 {
@@ -43,4 +23,13 @@ func TestEstimateMoonshotCompatibleInputTokens_UsesTokenizerModel(t *testing.T) 
 	if fallback := EstimateCompatibleInputTokens(parsed); fallback == got {
 		t.Fatalf("moonshot tokenizer path should differ from generic fallback, both = %d", got)
 	}
+}
+
+func mustParseCompatibleUsageEstimateRequest(t *testing.T, body string) *ParsedRequest {
+	t.Helper()
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef([]byte(body)), PlatformOpenAI)
+	if err != nil {
+		t.Fatalf("ParseGatewayRequest() error = %v", err)
+	}
+	return parsed
 }

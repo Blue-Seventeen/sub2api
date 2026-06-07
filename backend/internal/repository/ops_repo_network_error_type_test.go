@@ -20,11 +20,11 @@ func TestOpsInsertErrorLogArgs_IncludesNetworkErrorType(t *testing.T) {
 
 	args := opsInsertErrorLogArgs(input)
 
-	require.Len(t, args, 42)
+	placeholderCount := strings.Count(insertOpsErrorLogSQL, "$")
+	require.Len(t, args, placeholderCount)
 	require.Contains(t, insertOpsErrorLogSQL, "network_error_type")
 	got, ok := args[35].(sql.NullString)
 	require.True(t, ok)
 	require.True(t, got.Valid)
 	require.Equal(t, "request_body_timeout", got.String)
-	require.Equal(t, 42, strings.Count(insertOpsErrorLogSQL, "$"))
 }

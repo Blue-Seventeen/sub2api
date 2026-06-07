@@ -87,15 +87,13 @@ func TestApplyCompatibleUsageFallbackAppliesToNewAPIOnlyPlatforms(t *testing.T) 
 		},
 		Model: "sonar",
 	}
-	parsed := &ParsedRequest{
-		Model: "sonar",
-		Messages: []any{
-			map[string]any{"role": "user", "content": "hello from new api style"},
-		},
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef([]byte(`{"model":"sonar","messages":[{"role":"user","content":"hello from new api style"}]}`)), PlatformOpenAI)
+	if err != nil {
+		t.Fatalf("ParseGatewayRequest() error = %v", err)
 	}
 	account := &Account{Platform: PlatformPerplexity}
 
-	applyCompatibleUsageFallback(result, account, nil, parsed)
+	applyCompatibleUsageFallback(result, account, nil, EstimateCompatibleInputTokensForPlatform(account.Platform, parsed))
 
 	if result.Usage.InputTokens <= 0 {
 		t.Fatalf("InputTokens = %d, want fallback estimate > 0", result.Usage.InputTokens)
@@ -107,15 +105,13 @@ func TestApplyCompatibleUsageFallbackAppliesToNewAPIOnlyPlatforms(t *testing.T) 
 
 func TestApplyCompatibleUsageFallbackDoesNotTouchNonCompatiblePlatforms(t *testing.T) {
 	result := &ForwardResult{Usage: ClaudeUsage{OutputTokens: 7}, Model: "claude-sonnet-4"}
-	parsed := &ParsedRequest{
-		Model: "claude-sonnet-4",
-		Messages: []any{
-			map[string]any{"role": "user", "content": "hello"},
-		},
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef([]byte(`{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hello"}]}`)), PlatformOpenAI)
+	if err != nil {
+		t.Fatalf("ParseGatewayRequest() error = %v", err)
 	}
 	account := &Account{Platform: PlatformAnthropic}
 
-	applyCompatibleUsageFallback(result, account, nil, parsed)
+	applyCompatibleUsageFallback(result, account, nil, EstimateCompatibleInputTokensForPlatform(account.Platform, parsed))
 
 	if result.Usage.InputTokens != 0 {
 		t.Fatalf("InputTokens = %d, want 0 for non-compatible platform", result.Usage.InputTokens)
