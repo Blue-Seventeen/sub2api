@@ -24,6 +24,8 @@ type Usage struct {
 	InputTokens              int
 	OutputTokens             int
 	CacheCreationInputTokens int
+	CacheCreation5mTokens    int
+	CacheCreation1hTokens    int
 	CacheReadInputTokens     int
 	ImageOutputTokens        int
 }
@@ -768,6 +770,27 @@ func parseUsageAndAccumulate(
 	if !cachedResult.Exists() {
 		cachedResult = gjson.GetBytes(message, "response.usage.prompt_tokens_details.cached_tokens")
 	}
+	if !cachedResult.Exists() {
+		cachedResult = gjson.GetBytes(message, "response.usage.cached_tokens")
+	}
+	cacheCreationResult := firstExistingUsageResult(
+		usageResult.Get("cache_creation_input_tokens"),
+		usageResult.Get("cache_creation_tokens"),
+		usageResult.Get("input_tokens_details.cache_creation_input_tokens"),
+		usageResult.Get("input_tokens_details.cache_creation_tokens"),
+		usageResult.Get("prompt_tokens_details.cache_creation_input_tokens"),
+		usageResult.Get("prompt_tokens_details.cache_creation_tokens"),
+	)
+	cacheCreation5mResult := firstExistingUsageResult(
+		usageResult.Get("cache_creation.ephemeral_5m_input_tokens"),
+		usageResult.Get("input_tokens_details.cache_creation.ephemeral_5m_input_tokens"),
+		usageResult.Get("prompt_tokens_details.cache_creation.ephemeral_5m_input_tokens"),
+	)
+	cacheCreation1hResult := firstExistingUsageResult(
+		usageResult.Get("cache_creation.ephemeral_1h_input_tokens"),
+		usageResult.Get("input_tokens_details.cache_creation.ephemeral_1h_input_tokens"),
+		usageResult.Get("prompt_tokens_details.cache_creation.ephemeral_1h_input_tokens"),
+	)
 	imageTokens := usageResult.Get("output_tokens_details.image_tokens").Int()
 	if imageTokens == 0 {
 		imageTokens = usageResult.Get("completion_tokens_details.image_tokens").Int()
@@ -776,7 +799,10 @@ func parseUsageAndAccumulate(
 	inputTokens, inputOK := parseUsageIntField(inputResult, true)
 	outputTokens, outputOK := parseUsageIntField(outputResult, true)
 	cachedTokens, cachedOK := parseUsageIntField(cachedResult, false)
-	if !inputOK || !outputOK || !cachedOK {
+	cacheCreationTokens, cacheCreationOK := parseUsageIntField(cacheCreationResult, false)
+	cacheCreation5mTokens, cacheCreation5mOK := parseUsageIntField(cacheCreation5mResult, false)
+	cacheCreation1hTokens, cacheCreation1hOK := parseUsageIntField(cacheCreation1hResult, false)
+	if !inputOK || !outputOK || !cachedOK || !cacheCreationOK || !cacheCreation5mOK || !cacheCreation1hOK {
 		recordUsageParseFailure()
 		if onParseFailure != nil {
 			onParseFailure(eventType, usageRaw)
@@ -784,10 +810,15 @@ func parseUsageAndAccumulate(
 		// 解析失败时不做部分字段累加，避免计费 usage 出现“半有效”状态。
 		return Usage{}
 	}
+	if cacheCreationTokens == 0 && (cacheCreation5mTokens > 0 || cacheCreation1hTokens > 0) {
+		cacheCreationTokens = cacheCreation5mTokens + cacheCreation1hTokens
+	}
 	parsedUsage := Usage{
 		InputTokens:              inputTokens,
 		OutputTokens:             outputTokens,
-		CacheCreationInputTokens: int(usageResult.Get("cache_creation_input_tokens").Int()),
+		CacheCreationInputTokens: cacheCreationTokens,
+		CacheCreation5mTokens:    cacheCreation5mTokens,
+		CacheCreation1hTokens:    cacheCreation1hTokens,
 		CacheReadInputTokens:     cachedTokens,
 		ImageOutputTokens:        int(imageTokens),
 	}
@@ -795,9 +826,20 @@ func parseUsageAndAccumulate(
 	state.usage.InputTokens += parsedUsage.InputTokens
 	state.usage.OutputTokens += parsedUsage.OutputTokens
 	state.usage.CacheCreationInputTokens += parsedUsage.CacheCreationInputTokens
+	state.usage.CacheCreation5mTokens += parsedUsage.CacheCreation5mTokens
+	state.usage.CacheCreation1hTokens += parsedUsage.CacheCreation1hTokens
 	state.usage.CacheReadInputTokens += parsedUsage.CacheReadInputTokens
 	state.usage.ImageOutputTokens += parsedUsage.ImageOutputTokens
 	return parsedUsage
+}
+
+func firstExistingUsageResult(results ...gjson.Result) gjson.Result {
+	for _, result := range results {
+		if result.Exists() {
+			return result
+		}
+	}
+	return gjson.Result{}
 }
 
 func parseUsageIntField(value gjson.Result, required bool) (int, bool) {

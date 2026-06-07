@@ -25,7 +25,7 @@
 | 项目 | 当前约定 |
 |---|---|
 | 当前主线 | `dev` |
-| 当前 upstream 基线 | 已同步到 `v0.1.133`，`backend/cmd/server/VERSION` 已对齐 `0.1.133` |
+| 当前 upstream 基线 | 已同步到 `v0.1.134`，`backend/cmd/server/VERSION` 已对齐 `0.1.134` |
 | 早期 fork 保护基线 | `2b72deb8fd45dc3a526bda2299b16df8d471107c` |
 | 部署策略 | `dev` 是真实可部署主线；`sub2api-custom-localtest` 仅用于本地测试 |
 | 架构原则 | 保留 Sub2API 的 Account / Group / Channel / 调度 / sticky / failover / billing，渐进吸收协议优先兼容内核 |
@@ -803,6 +803,7 @@ Protect files:
 ## 17. v0.1.133 升级兼容说明
 
 - 当前 `codex/sync-v0.1.133` 以 `codex/sync-v0.1.132` 为基线合入 upstream `v0.1.133`，`backend/cmd/server/VERSION` 对齐为 `0.1.133`；后续不得回退 v0.1.132 已保留的 Promotion、CompatibleGateway、usage fallback、统一倍率、AccountAutoOps、订阅管理和 `/admin/proxies` 自定义体系。
+- 当前 `codex/sync-v0.1.134` 已合入 upstream `v0.1.134`，`backend/cmd/server/VERSION` 对齐为 `0.1.134`；后续不得回退 v0.1.134 已吸收的失败请求追踪、图像 token 计费、用户平台配额 flusher、Responses/Chat bridge、OpenAI/Codex 兼容增强、leader lock 与请求体性能优化，同时必须保留本 fork 的 CompatibleGateway、NewAPI-style、mandatory usage/billing、Promotion、Kimi/Qwen/GLM/DeepSeek 自定义链路。
 - 本 fork 新增 Qwen/DashScope ASR 官方路径别名：`POST /compatible-mode/v1/chat/completions` 仅允许 Ali/Qwen 分组使用，进入后复用现有 CompatibleGateway/NewAPI-style 主链路、模型白名单、账号调度、mandatory usage/billing 和订阅扣费，不新增旁路计费逻辑。该路径用于让用户以 DashScope 官方 OpenAI-compatible 路径调用 `qwen3-asr*`，同时保留原 `/v1/chat/completions` 调用方式；`input_audio.data` 必须使用 URL 或 `data:audio/mpeg;base64,<base64>` Data URL，裸 Base64 在上游前返回明确 `400 invalid_request_error`，Ali NewAPI-style 分支也必须执行同样校验并补齐 `X-DashScope-SSE: enable`。嵌入前端绕过只允许精确该路径，不得扩大为整个 `/compatible-mode/` 前缀。
 - 本 fork 新增 Qwen/DashScope TTS 官方路径别名：`POST /api/v1/services/aigc/multimodal-generation/generation` 仅允许 Ali/Qwen 分组使用，用户请求体保持 DashScope 官方格式，例如 `{"model":"qwen3-tts-flash","input":{"text":"你好","voice":"Cherry","language_type":"Chinese"}}`；进入后必须复用现有 NewAPI-style 鉴权、分组模型白名单、账号调度、并发控制、active usage、mandatory usage/billing 和订阅扣费，不得新增旁路计费逻辑。该路径默认补齐 `X-DashScope-SSE: enable`，如客户端显式传入则按客户端值透传；响应保持官方 SSE/JSON 格式透传，不做 OpenAI `/v1/audio/speech` 格式转换。后续 upstream sync 不得把该路径合并回通用 `/audio` 路由或扩大为所有 compatible 平台的官方路径代理。
 - 本 fork 新增 Qwen/DashScope 图片生成支持：`/admin/accounts` 显式 `image` 测试支持 Ali/Qwen `qwen-image` probe；用户侧 `POST /v1/images/generations` 和根路径 `POST /images/generations` 对 Ali/Qwen 分组开放 OpenAI 风格入参，内部转换到 DashScope `POST /api/v1/services/aigc/multimodal-generation/generation`，响应规范化为 OpenAI images `data[].url` 形状，并复用现有 NewAPI-style 鉴权、分组模型白名单、账号调度、并发控制、active usage、mandatory usage/billing、订阅扣费和图片计费语义。`POST /api/v1/services/aigc/multimodal-generation/generation` 同时作为 Qwen 官方多模态路径别名：`qwen-image*` 按图片计费并透传 DashScope 请求/响应，`qwen3-tts*` 保持原 TTS 请求计费；不得扩大到非 Ali/Qwen 平台，也不得开放未验证的 `/v1/images/edits` 非 OpenAI 路径。

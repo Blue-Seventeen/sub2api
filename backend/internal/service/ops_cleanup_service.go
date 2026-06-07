@@ -507,8 +507,9 @@ func (s *OpsCleanupService) tryAcquireLeaderLock(ctx context.Context) (func(), b
 	key := opsCleanupLeaderLockKeyDefault
 	ttl := opsCleanupLeaderLockTTLDefault
 
-	// Prefer Redis leader lock when available, but avoid stampeding the DB when Redis is flaky by
-	// falling back to a DB advisory lock.
+	// A configured Redis lock is the cluster-wide lock domain. If Redis is
+	// unavailable, skip this cycle instead of falling back to DB and risking
+	// split leadership with peers that still use Redis.
 	if s.redisClient != nil {
 		ok, err := s.redisClient.SetNX(ctx, key, s.instanceID, ttl).Result()
 		if err == nil {
@@ -519,10 +520,10 @@ func (s *OpsCleanupService) tryAcquireLeaderLock(ctx context.Context) (func(), b
 				_, _ = opsCleanupReleaseScript.Run(ctx, s.redisClient, []string{key}, s.instanceID).Result()
 			}, true
 		}
-		// Redis error: fall back to DB advisory lock.
 		s.warnNoRedisOnce.Do(func() {
-			logger.LegacyPrintf("service.ops_cleanup", "[OpsCleanup] leader lock SetNX failed; falling back to DB advisory lock: %v", err)
+			logger.LegacyPrintf("service.ops_cleanup", "[OpsCleanup] leader lock SetNX failed; skipping this cycle to avoid split leadership: %v", err)
 		})
+		return nil, false
 	} else {
 		s.warnNoRedisOnce.Do(func() {
 			logger.LegacyPrintf("service.ops_cleanup", "[OpsCleanup] redis not configured; using DB advisory lock")

@@ -388,8 +388,9 @@ func (s *OpsAggregationService) tryAcquireLeaderLock(ctx context.Context, key st
 		ctx = context.Background()
 	}
 
-	// Prefer Redis leader lock when available (multi-instance), but avoid stampeding
-	// the DB when Redis is flaky by falling back to a DB advisory lock.
+	// A configured Redis lock is the cluster-wide lock domain. If Redis is
+	// unavailable, skip this cycle instead of falling back to DB and risking
+	// split leadership with peers that still use Redis.
 	if s.redisClient != nil {
 		ok, err := s.redisClient.SetNX(ctx, key, s.instanceID, ttl).Result()
 		if err == nil {
@@ -404,7 +405,8 @@ func (s *OpsAggregationService) tryAcquireLeaderLock(ctx context.Context, key st
 			}
 			return release, true
 		}
-		// Redis error: fall through to DB advisory lock.
+		s.maybeLogLockError(logPrefix, err)
+		return nil, false
 	}
 
 	release, ok := tryAcquireDBAdvisoryLock(ctx, s.db, hashAdvisoryLockID(key))
@@ -428,6 +430,21 @@ func (s *OpsAggregationService) maybeLogSkip(prefix string) {
 		prefix = "[OpsAggregation]"
 	}
 	logger.LegacyPrintf("service.ops_aggregation", "%s leader lock held by another instance; skipping", prefix)
+}
+
+func (s *OpsAggregationService) maybeLogLockError(prefix string, err error) {
+	s.skipLogMu.Lock()
+	defer s.skipLogMu.Unlock()
+
+	now := time.Now()
+	if !s.skipLogAt.IsZero() && now.Sub(s.skipLogAt) < time.Minute {
+		return
+	}
+	s.skipLogAt = now
+	if prefix == "" {
+		prefix = "[OpsAggregation]"
+	}
+	logger.LegacyPrintf("service.ops_aggregation", "%s leader lock SetNX failed; skipping this cycle to avoid split leadership: %v", prefix, err)
 }
 
 func utcFloorToHour(t time.Time) time.Time {

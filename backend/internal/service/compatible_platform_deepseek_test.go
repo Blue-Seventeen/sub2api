@@ -22,8 +22,8 @@ func TestDeepSeekCompatibleProviderPreset_Defaults(t *testing.T) {
 	if got := CompatibleDefaultBaseURL(PlatformDeepSeek); got != preset.DefaultBaseURL {
 		t.Fatalf("CompatibleDefaultBaseURL() = %q, want %q", got, preset.DefaultBaseURL)
 	}
-	if preset.DefaultTestModel != "deepseek-v4-flash" {
-		t.Fatalf("DefaultTestModel = %q, want %q", preset.DefaultTestModel, "deepseek-v4-flash")
+	if preset.DefaultTestModel != "deepseek-chat" {
+		t.Fatalf("DefaultTestModel = %q, want %q", preset.DefaultTestModel, "deepseek-chat")
 	}
 	if got := CompatibleDefaultTestModel(PlatformDeepSeek); got != preset.DefaultTestModel {
 		t.Fatalf("CompatibleDefaultTestModel() = %q, want %q", got, preset.DefaultTestModel)

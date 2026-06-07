@@ -868,14 +868,8 @@ func (c *OpsMetricsCollector) tryAcquireLeaderLock(ctx context.Context) (func(),
 
 	ok, err := c.redisClient.SetNX(ctx, opsMetricsCollectorLeaderLockKey, c.instanceID, opsMetricsCollectorLeaderLockTTL).Result()
 	if err != nil {
-		// Prefer fail-closed to avoid stampeding the database when Redis is flaky.
-		// Fallback to a DB advisory lock when Redis is present but unavailable.
-		release, ok := tryAcquireDBAdvisoryLock(ctx, c.db, opsMetricsCollectorAdvisoryLockID)
-		if !ok {
-			c.maybeLogSkip()
-			return nil, false
-		}
-		return release, true
+		c.maybeLogLockError(err)
+		return nil, false
 	}
 	if !ok {
 		c.maybeLogSkip()
@@ -900,6 +894,18 @@ func (c *OpsMetricsCollector) maybeLogSkip() {
 	}
 	c.skipLogAt = now
 	log.Printf("[OpsMetricsCollector] leader lock held by another instance; skipping")
+}
+
+func (c *OpsMetricsCollector) maybeLogLockError(err error) {
+	c.skipLogMu.Lock()
+	defer c.skipLogMu.Unlock()
+
+	now := time.Now()
+	if !c.skipLogAt.IsZero() && now.Sub(c.skipLogAt) < time.Minute {
+		return
+	}
+	c.skipLogAt = now
+	log.Printf("[OpsMetricsCollector] leader lock SetNX failed; skipping this cycle to avoid split leadership: %v", err)
 }
 
 func floatToIntPtr(v sql.NullFloat64) *int {

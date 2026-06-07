@@ -833,7 +833,7 @@ func TestOpenAIGatewayService_Forward_WSv2_ResponseDoneUsageParsed(t *testing.T)
 
 	captureConn := &openAIWSCaptureConn{
 		events: [][]byte{
-			[]byte(`{"type":"response.done","response":{"id":"resp_done_usage","model":"gpt-5.1","usage":{"input_tokens":13,"output_tokens":8,"input_tokens_details":{"cached_tokens":5},"cache_creation_input_tokens":2,"output_tokens_details":{"image_tokens":4}}}}`),
+			[]byte(`{"type":"response.done","response":{"id":"resp_done_usage","model":"gpt-5.1","usage":{"input_tokens":13,"output_tokens":8,"input_tokens_details":{"cached_tokens":5},"cache_creation":{"ephemeral_5m_input_tokens":4,"ephemeral_1h_input_tokens":5},"output_tokens_details":{"image_tokens":4}}}}`),
 		},
 	}
 	captureDialer := &openAIWSCaptureDialer{conn: captureConn}
@@ -872,7 +872,9 @@ func TestOpenAIGatewayService_Forward_WSv2_ResponseDoneUsageParsed(t *testing.T)
 	require.Equal(t, 13, result.Usage.InputTokens)
 	require.Equal(t, 8, result.Usage.OutputTokens)
 	require.Equal(t, 5, result.Usage.CacheReadInputTokens)
-	require.Equal(t, 2, result.Usage.CacheCreationInputTokens)
+	require.Equal(t, 9, result.Usage.CacheCreationInputTokens)
+	require.Equal(t, 4, result.Usage.CacheCreation5mTokens)
+	require.Equal(t, 5, result.Usage.CacheCreation1hTokens)
 	require.Equal(t, 4, result.Usage.ImageOutputTokens)
 }
 

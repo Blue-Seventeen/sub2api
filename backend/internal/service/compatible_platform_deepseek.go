@@ -17,7 +17,7 @@ func deepseekCompatibleProviderPreset() CompatibleProviderPreset {
 			{ID: "deepseek-chat", Type: "model", DisplayName: "DeepSeek Chat"},
 			{ID: "deepseek-reasoner", Type: "model", DisplayName: "DeepSeek Reasoner"},
 		}),
-		DefaultTestModel:  "deepseek-v4-flash",
+		DefaultTestModel:  "deepseek-chat",
 		AuthMode:          CompatibleAuthBearer,
 		SupportsChat:      true,
 		SupportsResponses: false,

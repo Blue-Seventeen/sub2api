@@ -413,30 +413,9 @@ func parseOpenAIWSResponseUsageFromCompletedEvent(message []byte, usage *OpenAIU
 		eventType != "response.incomplete" && eventType != "response.cancelled" && eventType != "response.canceled" {
 		return
 	}
-	usage.InputTokens = firstExistingGJSONInt(
-		gjson.GetBytes(message, "response.usage.input_tokens"),
-		gjson.GetBytes(message, "response.usage.prompt_tokens"),
-	)
-	usage.OutputTokens = firstExistingGJSONInt(
-		gjson.GetBytes(message, "response.usage.output_tokens"),
-		gjson.GetBytes(message, "response.usage.completion_tokens"),
-	)
-	usage.CacheReadInputTokens = firstExistingGJSONInt(
-		gjson.GetBytes(message, "response.usage.input_tokens_details.cached_tokens"),
-		gjson.GetBytes(message, "response.usage.prompt_tokens_details.cached_tokens"),
-		gjson.GetBytes(message, "response.usage.cached_tokens"),
-	)
-	usage.CacheCreationInputTokens = firstExistingGJSONInt(
-		gjson.GetBytes(message, "response.usage.cache_creation_input_tokens"),
-		gjson.GetBytes(message, "response.usage.cache_creation_tokens"),
-		gjson.GetBytes(message, "response.usage.input_tokens_details.cache_creation_input_tokens"),
-		gjson.GetBytes(message, "response.usage.input_tokens_details.cache_creation_tokens"),
-		gjson.GetBytes(message, "response.usage.prompt_tokens_details.cache_creation_input_tokens"),
-		gjson.GetBytes(message, "response.usage.prompt_tokens_details.cache_creation_tokens"),
-	)
-	usage.ImageOutputTokens = firstExistingGJSONInt(
-		gjson.GetBytes(message, "response.usage.output_tokens_details.image_tokens"),
-	)
+	if parsed, ok := openAIUsageFromGJSON(gjson.GetBytes(message, "response.usage")); ok {
+		*usage = parsed
+	}
 }
 
 func parseOpenAIWSErrorEventFields(message []byte) (code string, errType string, errMessage string) {
@@ -4224,24 +4203,9 @@ func populateOpenAIUsageFromResponseJSON(body []byte, usage *OpenAIUsage) {
 	if usage == nil || len(body) == 0 {
 		return
 	}
-	values := gjson.GetManyBytes(
-		body,
-		"usage.input_tokens",
-		"usage.output_tokens",
-		"usage.input_tokens_details.cached_tokens",
-		"usage.cache_creation_input_tokens",
-		"usage.cache_creation_tokens",
-		"usage.input_tokens_details.cache_creation_input_tokens",
-		"usage.input_tokens_details.cache_creation_tokens",
-		"usage.prompt_tokens_details.cache_creation_input_tokens",
-		"usage.prompt_tokens_details.cache_creation_tokens",
-		"usage.output_tokens_details.image_tokens",
-	)
-	usage.InputTokens = int(values[0].Int())
-	usage.OutputTokens = int(values[1].Int())
-	usage.CacheReadInputTokens = int(values[2].Int())
-	usage.CacheCreationInputTokens = firstExistingGJSONInt(values[3], values[4], values[5], values[6], values[7], values[8])
-	usage.ImageOutputTokens = int(values[9].Int())
+	if parsed, ok := openAIUsageFromGJSON(gjson.GetBytes(body, "usage")); ok {
+		*usage = parsed
+	}
 }
 
 func getOpenAIGroupIDFromContext(c *gin.Context) int64 {

@@ -2367,10 +2367,14 @@ func TestParseSSEUsage_SelectiveParsing(t *testing.T) {
 	require.Equal(t, 2, usage.CacheReadInputTokens)
 
 	// done 事件同样可能携带最终 usage
-	svc.parseSSEUsage(`{"type":"response.done","response":{"usage":{"input_tokens":13,"output_tokens":15,"input_tokens_details":{"cached_tokens":4}}}}`, usage)
+	svc.parseSSEUsage(`{"type":"response.done","response":{"usage":{"input_tokens":13,"output_tokens":15,"input_tokens_details":{"cached_tokens":4},"cache_creation":{"ephemeral_5m_input_tokens":7,"ephemeral_1h_input_tokens":10},"output_tokens_details":{"image_tokens":3}}}}`, usage)
 	require.Equal(t, 13, usage.InputTokens)
 	require.Equal(t, 15, usage.OutputTokens)
 	require.Equal(t, 4, usage.CacheReadInputTokens)
+	require.Equal(t, 17, usage.CacheCreationInputTokens)
+	require.Equal(t, 7, usage.CacheCreation5mTokens)
+	require.Equal(t, 10, usage.CacheCreation1hTokens)
+	require.Equal(t, 3, usage.ImageOutputTokens)
 
 	// 兼容部分 OpenAI-compatible chat / relay 事件沿用 prompt/completion 命名
 	svc.parseSSEUsage(`{"type":"response.completed","response":{"usage":{"prompt_tokens":21,"completion_tokens":34,"prompt_tokens_details":{"cached_tokens":5}}}}`, usage)

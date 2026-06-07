@@ -5162,30 +5162,9 @@ func (s *OpenAIGatewayService) parseSSEUsageBytes(data []byte, usage *OpenAIUsag
 		return
 	}
 
-	usage.InputTokens = firstExistingGJSONInt(
-		gjson.GetBytes(data, "response.usage.input_tokens"),
-		gjson.GetBytes(data, "response.usage.prompt_tokens"),
-	)
-	usage.OutputTokens = firstExistingGJSONInt(
-		gjson.GetBytes(data, "response.usage.output_tokens"),
-		gjson.GetBytes(data, "response.usage.completion_tokens"),
-	)
-	usage.CacheReadInputTokens = firstExistingGJSONInt(
-		gjson.GetBytes(data, "response.usage.input_tokens_details.cached_tokens"),
-		gjson.GetBytes(data, "response.usage.prompt_tokens_details.cached_tokens"),
-		gjson.GetBytes(data, "response.usage.cached_tokens"),
-	)
-	usage.CacheCreationInputTokens = firstExistingGJSONInt(
-		gjson.GetBytes(data, "response.usage.cache_creation_input_tokens"),
-		gjson.GetBytes(data, "response.usage.cache_creation_tokens"),
-		gjson.GetBytes(data, "response.usage.input_tokens_details.cache_creation_input_tokens"),
-		gjson.GetBytes(data, "response.usage.input_tokens_details.cache_creation_tokens"),
-		gjson.GetBytes(data, "response.usage.prompt_tokens_details.cache_creation_input_tokens"),
-		gjson.GetBytes(data, "response.usage.prompt_tokens_details.cache_creation_tokens"),
-	)
-	usage.ImageOutputTokens = firstExistingGJSONInt(
-		gjson.GetBytes(data, "response.usage.output_tokens_details.image_tokens"),
-	)
+	if parsed, ok := openAIUsageFromGJSON(gjson.GetBytes(data, "response.usage")); ok {
+		*usage = parsed
+	}
 }
 
 func extractOpenAIUsageFromJSONBytes(body []byte) (OpenAIUsage, bool) {
@@ -5238,7 +5217,7 @@ func openAIUsageFromGJSON(value gjson.Result) (OpenAIUsage, bool) {
 	if !value.Exists() || !value.IsObject() {
 		return OpenAIUsage{}, false
 	}
-	return OpenAIUsage{
+	usage := OpenAIUsage{
 		InputTokens: firstExistingGJSONInt(
 			value.Get("input_tokens"),
 			value.Get("prompt_tokens"),
@@ -5276,7 +5255,11 @@ func openAIUsageFromGJSON(value gjson.Result) (OpenAIUsage, bool) {
 			value.Get("output_tokens_details.image_tokens"),
 			value.Get("completion_tokens_details.image_tokens"),
 		),
-	}, true
+	}
+	if usage.CacheCreationInputTokens == 0 && (usage.CacheCreation5mTokens > 0 || usage.CacheCreation1hTokens > 0) {
+		usage.CacheCreationInputTokens = usage.CacheCreation5mTokens + usage.CacheCreation1hTokens
+	}
+	return usage, true
 }
 
 func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, originalModel, mappedModel string) (*openaiNonStreamingResult, error) {
