@@ -3089,6 +3089,8 @@ export default {
       assignSubscription: 'Assign Subscription',
       adjustSubscription: 'Adjust Subscription',
       revokeSubscription: 'Revoke Subscription',
+      restoreSubscription: 'Restore Subscription',
+      hardDeleteSubscription: 'Permanently Delete Subscription',
       allStatus: 'All Status',
       allGroups: 'All Groups',
       allPlatforms: 'All Platforms',
@@ -3152,6 +3154,7 @@ export default {
       adjust: 'Adjust',
       adjusting: 'Adjusting...',
       revoke: 'Revoke',
+      restore: 'Restore',
       resetQuota: 'Reset Quota',
       resetQuotaTitle: 'Reset Usage Quota',
       resetQuotaConfirm: "Select quota windows to reset for '{user}'. Selected windows will be zeroed and restarted from now.",
@@ -3170,17 +3173,25 @@ export default {
       subscriptionAssigned: 'Subscription assigned successfully',
       subscriptionAdjusted: 'Subscription adjusted successfully',
       subscriptionRevoked: 'Subscription revoked successfully',
+      subscriptionRestored: 'Subscription restored successfully',
+      subscriptionDeleted: 'Subscription deleted permanently',
       failedToLoad: 'Failed to load subscriptions',
       failedToAssign: 'Failed to assign subscription',
       failedToAdjust: 'Failed to adjust subscription',
       failedToRevoke: 'Failed to revoke subscription',
+      failedToRestore: 'Failed to restore subscription',
+      failedToDelete: 'Failed to permanently delete subscription',
       adjustWouldExpire: 'Remaining days after adjustment must be greater than 0',
       adjustOutOfRange: 'Adjustment days must be between -36500 and 36500',
       pleaseSelectUser: 'Please select a user',
       pleaseSelectGroup: 'Please select a group',
       validityDaysRequired: 'Please enter a valid number of days (at least 1)',
       revokeConfirm:
-        "Are you sure you want to revoke the subscription for '{user}'? This action cannot be undone.",
+        "Are you sure you want to revoke the subscription for '{user}'? It will move to Revoked and can be restored later.",
+      restoreConfirm:
+        "Restore the revoked subscription for '{user}'? It will be shown as Active or Expired based on its expiration time.",
+      hardDeleteConfirm:
+        "Permanently delete the subscription record for '{user}'? This is a hard delete and cannot be recovered.",
       guide: {
         title: 'Subscription Management Guide',
         subtitle: 'Subscription mode lets you assign time-based usage quotas to users, with daily/weekly/monthly/custom limits. Follow these steps to get started.',
@@ -3207,7 +3218,11 @@ export default {
           resetQuota: 'Reset Quota',
           resetQuotaDesc: 'Reset daily/weekly/monthly/custom usage to zero',
           revoke: 'Revoke',
-          revokeDesc: 'Immediately terminate the subscription (irreversible)'
+          revokeDesc: 'Immediately terminate the subscription and move it to Revoked',
+          restore: 'Restore',
+          restoreDesc: 'Restore a revoked subscription and reclassify it by expiration time',
+          hardDelete: 'Delete',
+          hardDeleteDesc: 'Hard delete revoked or expired subscription evidence when cleanup is required'
         },
         tip: 'Tip: Only groups with billing type "Subscription" and status "Active" appear in the group dropdown. If no options are available, create one in Group Management first.'
       }

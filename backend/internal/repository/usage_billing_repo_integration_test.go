@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -186,6 +187,220 @@ func TestUsageBillingRepositoryApply_StackedSubscriptionChargesEarliestAvailable
 	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT daily_usage_usd FROM user_subscriptions WHERE id = $1", available.ID).Scan(&availableDaily))
 	require.InDelta(t, dailyLimit, exhaustedDaily, 0.000001)
 	require.InDelta(t, 25, availableDaily, 0.000001)
+}
+
+func TestUsageBillingRepositoryApply_StackedSubscriptionConcurrentChargesDoNotDoubleSpend(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	repo := NewUsageBillingRepository(client, integrationDB)
+
+	dailyLimit := 10.0
+	user := mustCreateUser(t, client, &service.User{
+		Email:        fmt.Sprintf("usage-billing-stacked-concurrent-user-%d@example.com", time.Now().UnixNano()),
+		PasswordHash: "hash",
+	})
+	group := mustCreateGroup(t, client, &service.Group{
+		Name:             "usage-billing-stacked-concurrent-group-" + uuid.NewString(),
+		Platform:         service.PlatformAnthropic,
+		SubscriptionType: service.SubscriptionTypeSubscription,
+		DailyLimitUSD:    &dailyLimit,
+	})
+	apiKey := mustCreateApiKey(t, client, &service.APIKey{
+		UserID:  user.ID,
+		GroupID: &group.ID,
+		Key:     "sk-usage-billing-stacked-concurrent-" + uuid.NewString(),
+		Name:    "billing-stacked-concurrent",
+	})
+
+	now := time.Now().UTC()
+	first := mustCreateSubscription(t, client, &service.UserSubscription{
+		UserID:    user.ID,
+		GroupID:   group.ID,
+		StartsAt:  now.Add(-2 * time.Hour),
+		ExpiresAt: now.Add(24 * time.Hour),
+	})
+	second := mustCreateSubscription(t, client, &service.UserSubscription{
+		UserID:    user.ID,
+		GroupID:   group.ID,
+		StartsAt:  now.Add(-1 * time.Hour),
+		ExpiresAt: now.Add(24 * time.Hour),
+	})
+
+	const requests = 15
+	start := make(chan struct{})
+	errs := make(chan error, requests)
+	chargedIDs := make(chan int64, requests)
+	var wg sync.WaitGroup
+	for i := 0; i < requests; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			result, err := repo.Apply(ctx, &service.UsageBillingCommand{
+				RequestID:           fmt.Sprintf("%s-%d", uuid.NewString(), i),
+				APIKeyID:            apiKey.ID,
+				UserID:              user.ID,
+				SubscriptionUserID:  user.ID,
+				SubscriptionGroupID: group.ID,
+				SubscriptionCost:    1,
+			})
+			if err != nil {
+				errs <- err
+				return
+			}
+			if result == nil || !result.Applied || result.SubscriptionID == nil {
+				errs <- fmt.Errorf("unexpected billing result: %+v", result)
+				return
+			}
+			chargedIDs <- *result.SubscriptionID
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	close(chargedIDs)
+
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	chargedByCard := map[int64]int{}
+	for id := range chargedIDs {
+		chargedByCard[id]++
+	}
+	require.Equal(t, 10, chargedByCard[first.ID])
+	require.Equal(t, 5, chargedByCard[second.ID])
+
+	var firstDaily, secondDaily float64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT daily_usage_usd FROM user_subscriptions WHERE id = $1", first.ID).Scan(&firstDaily))
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT daily_usage_usd FROM user_subscriptions WHERE id = $1", second.ID).Scan(&secondDaily))
+	require.InDelta(t, dailyLimit, firstDaily, 0.000001)
+	require.InDelta(t, 5, secondDaily, 0.000001)
+}
+
+func TestUsageBillingRepositoryApply_StackedSubscriptionExpiredWindowReEnablesEarliestCard(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	repo := NewUsageBillingRepository(client, integrationDB)
+
+	dailyLimit := 10.0
+	user := mustCreateUser(t, client, &service.User{
+		Email:        fmt.Sprintf("usage-billing-stacked-reset-user-%d@example.com", time.Now().UnixNano()),
+		PasswordHash: "hash",
+	})
+	group := mustCreateGroup(t, client, &service.Group{
+		Name:             "usage-billing-stacked-reset-group-" + uuid.NewString(),
+		Platform:         service.PlatformAnthropic,
+		SubscriptionType: service.SubscriptionTypeSubscription,
+		DailyLimitUSD:    &dailyLimit,
+	})
+	apiKey := mustCreateApiKey(t, client, &service.APIKey{
+		UserID:  user.ID,
+		GroupID: &group.ID,
+		Key:     "sk-usage-billing-stacked-reset-" + uuid.NewString(),
+		Name:    "billing-stacked-reset",
+	})
+
+	now := time.Now().UTC()
+	expiredDailyWindow := now.Add(-25 * time.Hour)
+	first := mustCreateSubscription(t, client, &service.UserSubscription{
+		UserID:           user.ID,
+		GroupID:          group.ID,
+		StartsAt:         now.Add(-48 * time.Hour),
+		ExpiresAt:        now.Add(24 * time.Hour),
+		DailyUsageUSD:    dailyLimit,
+		DailyWindowStart: &expiredDailyWindow,
+	})
+	second := mustCreateSubscription(t, client, &service.UserSubscription{
+		UserID:        user.ID,
+		GroupID:       group.ID,
+		StartsAt:      now.Add(-1 * time.Hour),
+		ExpiresAt:     now.Add(24 * time.Hour),
+		DailyUsageUSD: 0,
+	})
+
+	result, err := repo.Apply(ctx, &service.UsageBillingCommand{
+		RequestID:           uuid.NewString(),
+		APIKeyID:            apiKey.ID,
+		UserID:              user.ID,
+		SubscriptionUserID:  user.ID,
+		SubscriptionGroupID: group.ID,
+		SubscriptionCost:    3,
+	})
+	require.NoError(t, err)
+	require.True(t, result.Applied)
+	require.NotNil(t, result.SubscriptionID)
+	require.Equal(t, first.ID, *result.SubscriptionID)
+
+	var firstDaily, secondDaily float64
+	var firstDailyWindow time.Time
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT daily_usage_usd, daily_window_start FROM user_subscriptions WHERE id = $1", first.ID).Scan(&firstDaily, &firstDailyWindow))
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT daily_usage_usd FROM user_subscriptions WHERE id = $1", second.ID).Scan(&secondDaily))
+	require.InDelta(t, 3, firstDaily, 0.000001)
+	require.InDelta(t, 0, secondDaily, 0.000001)
+	require.True(t, firstDailyWindow.After(expiredDailyWindow))
+}
+
+func TestUsageBillingRepositoryApply_StackedSubscriptionUsesCurrentGroupLimit(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	repo := NewUsageBillingRepository(client, integrationDB)
+
+	currentDailyLimit := 10.0
+	snapshotDailyLimit := 100.0
+	user := mustCreateUser(t, client, &service.User{
+		Email:        fmt.Sprintf("usage-billing-current-group-user-%d@example.com", time.Now().UnixNano()),
+		PasswordHash: "hash",
+	})
+	group := mustCreateGroup(t, client, &service.Group{
+		Name:             "usage-billing-current-group-" + uuid.NewString(),
+		Platform:         service.PlatformAnthropic,
+		SubscriptionType: service.SubscriptionTypeSubscription,
+		DailyLimitUSD:    &currentDailyLimit,
+	})
+	apiKey := mustCreateApiKey(t, client, &service.APIKey{
+		UserID:  user.ID,
+		GroupID: &group.ID,
+		Key:     "sk-usage-billing-current-group-" + uuid.NewString(),
+		Name:    "billing-current-group",
+	})
+
+	now := time.Now().UTC()
+	exhaustedByCurrentGroup := mustCreateSubscription(t, client, &service.UserSubscription{
+		UserID:                user.ID,
+		GroupID:               group.ID,
+		StartsAt:              now.Add(-2 * time.Hour),
+		ExpiresAt:             now.Add(24 * time.Hour),
+		DailyUsageUSD:         currentDailyLimit,
+		DailyLimitUSDSnapshot: &snapshotDailyLimit,
+	})
+	available := mustCreateSubscription(t, client, &service.UserSubscription{
+		UserID:                user.ID,
+		GroupID:               group.ID,
+		StartsAt:              now.Add(-1 * time.Hour),
+		ExpiresAt:             now.Add(24 * time.Hour),
+		DailyUsageUSD:         0,
+		DailyLimitUSDSnapshot: &snapshotDailyLimit,
+	})
+
+	result, err := repo.Apply(ctx, &service.UsageBillingCommand{
+		RequestID:           uuid.NewString(),
+		APIKeyID:            apiKey.ID,
+		UserID:              user.ID,
+		SubscriptionUserID:  user.ID,
+		SubscriptionGroupID: group.ID,
+		SubscriptionCost:    5,
+	})
+	require.NoError(t, err)
+	require.True(t, result.Applied)
+	require.NotNil(t, result.SubscriptionID)
+	require.Equal(t, available.ID, *result.SubscriptionID)
+
+	var exhaustedDaily, availableDaily float64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT daily_usage_usd FROM user_subscriptions WHERE id = $1", exhaustedByCurrentGroup.ID).Scan(&exhaustedDaily))
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT daily_usage_usd FROM user_subscriptions WHERE id = $1", available.ID).Scan(&availableDaily))
+	require.InDelta(t, currentDailyLimit, exhaustedDaily, 0.000001)
+	require.InDelta(t, 5, availableDaily, 0.000001)
 }
 
 func TestUsageBillingRepositoryApply_StackedSubscriptionRecordsPostSuccessOverage(t *testing.T) {

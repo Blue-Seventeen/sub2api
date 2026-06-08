@@ -468,6 +468,41 @@ func TestBillingCacheServiceFreshSubscriptionCheckNormalizesStackedDBWindows(t *
 	require.NoError(t, err)
 }
 
+func TestBillingCacheServiceSubscriptionCacheUsesCurrentGroupLimits(t *testing.T) {
+	now := time.Now()
+	snapshotLimit := 100.0
+	currentLimit := 50.0
+	group := &Group{
+		ID:               2,
+		SubscriptionType: SubscriptionTypeSubscription,
+		DailyLimitUSD:    &currentLimit,
+	}
+	repo := &billingCacheSubRepoStub{
+		subs: []UserSubscription{
+			{
+				ID:                    10,
+				UserID:                1,
+				GroupID:               group.ID,
+				Group:                 group,
+				Status:                SubscriptionStatusActive,
+				StartsAt:              now.Add(-time.Hour),
+				ExpiresAt:             now.Add(time.Hour),
+				DailyLimitUSDSnapshot: &snapshotLimit,
+			},
+		},
+	}
+	svc := NewBillingCacheService(nil, nil, repo, nil, nil, nil, &config.Config{}, nil)
+	t.Cleanup(svc.Stop)
+
+	data, err := svc.getSubscriptionFromDB(context.Background(), 1, group.ID)
+
+	require.NoError(t, err)
+	require.NotNil(t, data.DailyLimitUSD)
+	require.InDelta(t, currentLimit, *data.DailyLimitUSD, 0.000001)
+	require.NotNil(t, data.StackedAvailableUSD)
+	require.InDelta(t, currentLimit, *data.StackedAvailableUSD, 0.000001)
+}
+
 func TestBillingCacheServiceFreshSubscriptionCheckRefreshesExpiredStackedCacheWindow(t *testing.T) {
 	now := time.Now()
 	limit := 100.0

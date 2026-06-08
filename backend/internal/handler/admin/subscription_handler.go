@@ -278,6 +278,41 @@ func (h *SubscriptionHandler) Revoke(c *gin.Context) {
 	response.Success(c, gin.H{"message": "Subscription revoked successfully"})
 }
 
+// Restore handles restoring a revoked or soft-deleted subscription.
+// POST /api/v1/admin/subscriptions/:id/restore
+func (h *SubscriptionHandler) Restore(c *gin.Context) {
+	subscriptionID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid subscription ID")
+		return
+	}
+
+	subscription, err := h.subscriptionService.RestoreSubscription(c.Request.Context(), subscriptionID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, dto.UserSubscriptionFromServiceAdmin(subscription))
+}
+
+// HardDelete handles physically deleting a revoked, soft-deleted, or expired subscription.
+// DELETE /api/v1/admin/subscriptions/:id/hard-delete
+func (h *SubscriptionHandler) HardDelete(c *gin.Context) {
+	subscriptionID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid subscription ID")
+		return
+	}
+
+	if err := h.subscriptionService.HardDeleteSubscription(c.Request.Context(), subscriptionID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, gin.H{"message": "Subscription deleted permanently"})
+}
+
 // ListByGroup handles listing subscriptions for a specific group
 // GET /api/v1/admin/groups/:id/subscriptions
 func (h *SubscriptionHandler) ListByGroup(c *gin.Context) {

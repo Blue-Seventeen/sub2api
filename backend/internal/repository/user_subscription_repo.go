@@ -168,6 +168,29 @@ func (r *userSubscriptionRepository) ListActiveByUserIDAndGroupID(ctx context.Co
 	return userSubscriptionEntitiesToService(subs), nil
 }
 
+func (r *userSubscriptionRepository) ListActiveUserIDsByGroupID(ctx context.Context, groupID int64) ([]int64, error) {
+	client := clientFromContext(ctx, r.client)
+	rows, err := client.UserSubscription.Query().
+		Where(
+			usersubscription.GroupIDEQ(groupID),
+			usersubscription.StatusEQ(service.SubscriptionStatusActive),
+			usersubscription.ExpiresAtGT(time.Now()),
+		).
+		Unique(true).
+		Select(usersubscription.FieldUserID).
+		Ints(ctx)
+	if err != nil {
+		return nil, err
+	}
+	userIDs := make([]int64, 0, len(rows))
+	for _, id := range rows {
+		if id > 0 {
+			userIDs = append(userIDs, int64(id))
+		}
+	}
+	return userIDs, nil
+}
+
 func (r *userSubscriptionRepository) GetBySource(ctx context.Context, sourceType, sourceRefID string) (*service.UserSubscription, error) {
 	sourceType = strings.TrimSpace(sourceType)
 	sourceRefID = strings.TrimSpace(sourceRefID)
@@ -280,6 +303,29 @@ func (r *userSubscriptionRepository) Delete(ctx context.Context, id int64) error
 	return err
 }
 
+func (r *userSubscriptionRepository) Restore(ctx context.Context, id int64) error {
+	client := clientFromContext(ctx, r.client)
+	_, err := client.UserSubscription.UpdateOneID(id).
+		ClearDeletedAt().
+		SetStatus(service.SubscriptionStatusActive).
+		Save(mixins.SkipSoftDelete(ctx))
+	return translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
+}
+
+func (r *userSubscriptionRepository) HardDelete(ctx context.Context, id int64) error {
+	client := clientFromContext(ctx, r.client)
+	n, err := client.UserSubscription.Delete().
+		Where(usersubscription.IDEQ(id)).
+		Exec(mixins.SkipSoftDelete(ctx))
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return service.ErrSubscriptionNotFound
+	}
+	return nil
+}
+
 func (r *userSubscriptionRepository) ListByUserID(ctx context.Context, userID int64) ([]service.UserSubscription, error) {
 	client := clientFromContext(ctx, r.client)
 	subs, err := client.UserSubscription.Query().
@@ -377,15 +423,10 @@ func (r *userSubscriptionRepository) List(ctx context.Context, params pagination
 			usersubscription.ExpiresAtGT(now),
 		)
 	case service.SubscriptionStatusExpired:
-		// Expired: status is expired OR (status is active but already expired)
+		// Expired: non-deleted active/expired records whose expiration time has passed.
 		q = q.Where(
-			usersubscription.Or(
-				usersubscription.StatusEQ(service.SubscriptionStatusExpired),
-				usersubscription.And(
-					usersubscription.StatusEQ(service.SubscriptionStatusActive),
-					usersubscription.ExpiresAtLTE(now),
-				),
-			),
+			usersubscription.StatusIn(service.SubscriptionStatusActive, service.SubscriptionStatusExpired),
+			usersubscription.ExpiresAtLTE(now),
 		)
 	case service.SubscriptionStatusRevoked:
 		q = q.Where(usersubscription.Or(

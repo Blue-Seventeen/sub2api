@@ -91,6 +91,177 @@ func TestAggregateActiveSubscriptionsSumsUsageAndLimits(t *testing.T) {
 	require.InDelta(t, 200, *agg.Group.DailyLimitUSD, 0.000001)
 }
 
+func TestActiveSubscriptionEffectiveGroupUsesCurrentGroupLimits(t *testing.T) {
+	now := time.Now().UTC()
+	oldLimit := 100.0
+	currentLimit := 50.0
+	oldName := "historic"
+	sub := &UserSubscription{
+		ID:                    1,
+		GroupID:               20,
+		StartsAt:              now.Add(-time.Hour),
+		ExpiresAt:             now.Add(time.Hour),
+		Status:                SubscriptionStatusActive,
+		GroupNameSnapshot:     &oldName,
+		DailyLimitUSDSnapshot: &oldLimit,
+		Group: &Group{
+			ID:               20,
+			Name:             "current",
+			SubscriptionType: SubscriptionTypeSubscription,
+			DailyLimitUSD:    &currentLimit,
+		},
+	}
+
+	group := sub.EffectiveGroup(nil)
+
+	require.NotNil(t, group)
+	require.Equal(t, "current", group.Name)
+	require.NotNil(t, group.DailyLimitUSD)
+	require.InDelta(t, currentLimit, *group.DailyLimitUSD, 0.000001)
+	require.Same(t, sub.Group.DailyLimitUSD, sub.EffectiveDailyLimitUSD(nil))
+}
+
+func TestActiveSubscriptionEffectiveGroupReflectsRemovedLimits(t *testing.T) {
+	now := time.Now().UTC()
+	oldLimit := 100.0
+	sub := &UserSubscription{
+		ID:                    1,
+		GroupID:               20,
+		StartsAt:              now.Add(-time.Hour),
+		ExpiresAt:             now.Add(time.Hour),
+		Status:                SubscriptionStatusActive,
+		DailyLimitUSDSnapshot: &oldLimit,
+		Group: &Group{
+			ID:               20,
+			Name:             "current",
+			SubscriptionType: SubscriptionTypeSubscription,
+		},
+	}
+
+	group := sub.EffectiveGroup(nil)
+
+	require.NotNil(t, group)
+	require.Nil(t, group.DailyLimitUSD)
+	require.Nil(t, sub.EffectiveDailyLimitUSD(nil))
+}
+
+func TestAggregateActiveSubscriptionsUsesCurrentGroupAfterLimitRemoval(t *testing.T) {
+	now := time.Now().UTC()
+	oldLimit := 100.0
+	snapshotName := "historic"
+	group := &Group{
+		ID:               20,
+		Name:             "current",
+		SubscriptionType: SubscriptionTypeSubscription,
+	}
+	subs := []UserSubscription{
+		{
+			ID:                    1,
+			UserID:                10,
+			GroupID:               20,
+			StartsAt:              now.Add(-2 * time.Hour),
+			ExpiresAt:             now.Add(time.Hour),
+			Status:                SubscriptionStatusActive,
+			GroupNameSnapshot:     &snapshotName,
+			DailyLimitUSDSnapshot: &oldLimit,
+			Group:                 group,
+		},
+		{
+			ID:                    2,
+			UserID:                10,
+			GroupID:               20,
+			StartsAt:              now.Add(-time.Hour),
+			ExpiresAt:             now.Add(time.Hour),
+			Status:                SubscriptionStatusActive,
+			GroupNameSnapshot:     &snapshotName,
+			DailyLimitUSDSnapshot: &oldLimit,
+			Group:                 group,
+		},
+	}
+
+	agg := aggregateActiveSubscriptionsForDisplay(subs)
+
+	require.NotNil(t, agg)
+	require.True(t, agg.IsAggregate)
+	require.Nil(t, agg.DailyLimitUSDSnapshot)
+	require.NotNil(t, agg.Group)
+	require.Equal(t, "current", agg.Group.Name)
+	require.Nil(t, agg.Group.DailyLimitUSD)
+}
+
+func TestHistoricalSubscriptionEffectiveGroupUsesSnapshots(t *testing.T) {
+	now := time.Now().UTC()
+	snapshotLimit := 100.0
+	currentLimit := 50.0
+	snapshotName := "historic"
+	deletedAt := now.Add(-time.Minute)
+	tests := []struct {
+		name string
+		sub  UserSubscription
+	}{
+		{
+			name: "status expired",
+			sub: UserSubscription{
+				Status:    SubscriptionStatusExpired,
+				ExpiresAt: now.Add(time.Hour),
+			},
+		},
+		{
+			name: "active but expired by time",
+			sub: UserSubscription{
+				Status:    SubscriptionStatusActive,
+				ExpiresAt: now.Add(-time.Minute),
+			},
+		},
+		{
+			name: "revoked",
+			sub: UserSubscription{
+				Status:    SubscriptionStatusRevoked,
+				ExpiresAt: now.Add(time.Hour),
+			},
+		},
+		{
+			name: "soft deleted",
+			sub: UserSubscription{
+				Status:    SubscriptionStatusActive,
+				ExpiresAt: now.Add(time.Hour),
+				DeletedAt: &deletedAt,
+			},
+		},
+		{
+			name: "aggregate virtual card",
+			sub: UserSubscription{
+				Status:      SubscriptionStatusActive,
+				ExpiresAt:   now.Add(time.Hour),
+				IsAggregate: true,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sub := tt.sub
+			sub.GroupID = 20
+			sub.StartsAt = now.Add(-time.Hour)
+			sub.GroupNameSnapshot = &snapshotName
+			sub.DailyLimitUSDSnapshot = &snapshotLimit
+			sub.Group = &Group{
+				ID:               20,
+				Name:             "current",
+				SubscriptionType: SubscriptionTypeSubscription,
+				DailyLimitUSD:    &currentLimit,
+			}
+
+			group := sub.EffectiveGroup(nil)
+
+			require.NotNil(t, group)
+			require.Equal(t, snapshotName, group.Name)
+			require.NotNil(t, group.DailyLimitUSD)
+			require.InDelta(t, snapshotLimit, *group.DailyLimitUSD, 0.000001)
+		})
+	}
+}
+
 func TestAggregateActiveByGroupKeepsExpiredRecordsSeparate(t *testing.T) {
 	now := time.Now().UTC()
 	active1 := UserSubscription{ID: 1, UserID: 10, GroupID: 20, StartsAt: now.Add(-2 * time.Hour), ExpiresAt: now.Add(time.Hour), Status: SubscriptionStatusActive}
@@ -375,7 +546,7 @@ func TestGetActiveSubscriptionDoesNotCacheInFlightResultAfterInvalidation(t *tes
 func TestValidateAndCheckLimitsRejectsAggregateWithoutPerCardCapacity(t *testing.T) {
 	now := time.Now().UTC()
 	limit := 10.0
-	group := &Group{ID: 20, SubscriptionType: SubscriptionTypeSubscription}
+	group := &Group{ID: 20, SubscriptionType: SubscriptionTypeSubscription, DailyLimitUSD: &limit, WeeklyLimitUSD: &limit}
 	subs := []UserSubscription{
 		{
 			ID:                     1,

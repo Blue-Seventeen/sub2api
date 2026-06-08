@@ -224,13 +224,13 @@ func incrementUsageBillingSubscriptionStacked(ctx context.Context, tx *sql.Tx, u
 			us.weekly_window_start,
 			us.monthly_window_start,
 			us.custom_window_start,
-			COALESCE(us.daily_limit_usd_snapshot, g.daily_limit_usd),
-			COALESCE(us.weekly_limit_usd_snapshot, g.weekly_limit_usd),
-			COALESCE(us.monthly_limit_usd_snapshot, g.monthly_limit_usd),
-			COALESCE(us.custom_limit_hours_snapshot, g.custom_limit_hours),
-			COALESCE(us.custom_limit_usd_snapshot, g.custom_limit_usd)
+			g.daily_limit_usd,
+			g.weekly_limit_usd,
+			g.monthly_limit_usd,
+			g.custom_limit_hours,
+			g.custom_limit_usd
 		FROM user_subscriptions us
-		LEFT JOIN groups g ON us.group_id = g.id AND g.deleted_at IS NULL
+		JOIN groups g ON us.group_id = g.id AND g.deleted_at IS NULL
 		WHERE us.user_id = $1
 			AND us.group_id = $2
 			AND us.status = $3

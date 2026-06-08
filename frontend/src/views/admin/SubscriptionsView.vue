@@ -456,6 +456,22 @@
                 <Icon name="ban" size="sm" />
                 <span class="text-xs">{{ t('admin.subscriptions.revoke') }}</span>
               </button>
+              <button
+                v-if="row.status === 'revoked'"
+                @click="handleRestore(row)"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-900/20 dark:hover:text-green-400"
+              >
+                <Icon name="refresh" size="sm" />
+                <span class="text-xs">{{ t('admin.subscriptions.restore') }}</span>
+              </button>
+              <button
+                v-if="row.status === 'revoked' || row.status === 'expired'"
+                @click="handleHardDelete(row)"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+              >
+                <Icon name="trash" size="sm" />
+                <span class="text-xs">{{ t('common.delete') }}</span>
+              </button>
             </div>
           </template>
 
@@ -753,6 +769,29 @@
       @cancel="showRevokeDialog = false"
     />
 
+    <!-- Restore Confirmation Dialog -->
+    <ConfirmDialog
+      :show="showRestoreDialog"
+      :title="t('admin.subscriptions.restoreSubscription')"
+      :message="t('admin.subscriptions.restoreConfirm', { user: restoringSubscription?.user?.email })"
+      :confirm-text="t('admin.subscriptions.restore')"
+      :cancel-text="t('common.cancel')"
+      @confirm="confirmRestore"
+      @cancel="closeRestoreDialog"
+    />
+
+    <!-- Hard Delete Confirmation Dialog -->
+    <ConfirmDialog
+      :show="showHardDeleteDialog"
+      :title="t('admin.subscriptions.hardDeleteSubscription')"
+      :message="t('admin.subscriptions.hardDeleteConfirm', { user: hardDeletingSubscription?.user?.email })"
+      :confirm-text="t('common.delete')"
+      :cancel-text="t('common.cancel')"
+      :danger="true"
+      @confirm="confirmHardDelete"
+      @cancel="closeHardDeleteDialog"
+    />
+
     <!-- Reset Quota Selection Dialog -->
     <BaseDialog
       :show="showResetQuotaConfirm"
@@ -765,36 +804,48 @@
         <p class="text-sm text-gray-600 dark:text-gray-400">
           {{ t('admin.subscriptions.resetQuotaConfirm', { user: resettingSubscription?.user?.email }) }}
         </p>
-        <div class="space-y-2 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
-          <label class="flex items-center gap-3 text-sm text-gray-700 dark:text-gray-200">
-            <input v-model="resetQuotaForm.daily" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
-            <span>{{ t('admin.subscriptions.resetWindows.daily') }}</span>
+        <div class="grid gap-2 rounded-2xl border border-gray-200 bg-gray-50/70 p-2 dark:border-gray-700 dark:bg-dark-900/30">
+          <label :class="resetQuotaWindowOptionClass(resetQuotaForm.daily)">
+            <input v-model="resetQuotaForm.daily" type="checkbox" class="sr-only" />
+            <span :class="resetQuotaCheckboxClass(resetQuotaForm.daily)">
+              <Icon v-if="resetQuotaForm.daily" name="check" size="xs" :stroke-width="3" />
+            </span>
+            <span class="flex-1 font-medium">{{ t('admin.subscriptions.resetWindows.daily') }}</span>
           </label>
-          <label class="flex items-center gap-3 text-sm text-gray-700 dark:text-gray-200">
-            <input v-model="resetQuotaForm.weekly" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
-            <span>{{ t('admin.subscriptions.resetWindows.weekly') }}</span>
+          <label :class="resetQuotaWindowOptionClass(resetQuotaForm.weekly)">
+            <input v-model="resetQuotaForm.weekly" type="checkbox" class="sr-only" />
+            <span :class="resetQuotaCheckboxClass(resetQuotaForm.weekly)">
+              <Icon v-if="resetQuotaForm.weekly" name="check" size="xs" :stroke-width="3" />
+            </span>
+            <span class="flex-1 font-medium">{{ t('admin.subscriptions.resetWindows.weekly') }}</span>
           </label>
-          <label class="flex items-center gap-3 text-sm text-gray-700 dark:text-gray-200">
-            <input v-model="resetQuotaForm.monthly" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
-            <span>{{ t('admin.subscriptions.resetWindows.monthly') }}</span>
+          <label :class="resetQuotaWindowOptionClass(resetQuotaForm.monthly)">
+            <input v-model="resetQuotaForm.monthly" type="checkbox" class="sr-only" />
+            <span :class="resetQuotaCheckboxClass(resetQuotaForm.monthly)">
+              <Icon v-if="resetQuotaForm.monthly" name="check" size="xs" :stroke-width="3" />
+            </span>
+            <span class="flex-1 font-medium">{{ t('admin.subscriptions.resetWindows.monthly') }}</span>
           </label>
-          <label class="flex items-center gap-3 text-sm text-gray-700 dark:text-gray-200">
-            <input v-model="resetQuotaForm.custom" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
-            <span>{{ t('admin.subscriptions.resetWindows.custom') }}</span>
+          <label :class="resetQuotaWindowOptionClass(resetQuotaForm.custom)">
+            <input v-model="resetQuotaForm.custom" type="checkbox" class="sr-only" />
+            <span :class="resetQuotaCheckboxClass(resetQuotaForm.custom)">
+              <Icon v-if="resetQuotaForm.custom" name="check" size="xs" :stroke-width="3" />
+            </span>
+            <span class="flex-1 font-medium">{{ t('admin.subscriptions.resetWindows.custom') }}</span>
           </label>
         </div>
         <p class="input-hint">{{ t('admin.subscriptions.resetQuotaHint') }}</p>
       </form>
       <template #footer>
-        <div class="flex justify-end gap-3">
-          <button @click="closeResetQuotaDialog" type="button" class="btn btn-secondary" :disabled="resettingQuota">
+        <div class="grid w-full grid-cols-2 gap-3">
+          <button @click="closeResetQuotaDialog" type="button" class="btn btn-secondary w-full justify-center" :disabled="resettingQuota">
             {{ t('common.cancel') }}
           </button>
           <button
             type="submit"
             form="reset-quota-form"
             :disabled="resettingQuota || !hasSelectedResetWindow"
-            class="btn btn-primary"
+            class="btn btn-primary w-full justify-center"
           >
             {{ resettingQuota ? t('common.loading') : t('admin.subscriptions.resetQuota') }}
           </button>
@@ -924,7 +975,9 @@ const showGuideModal = ref(false)
 const guideActionRows = computed(() => [
   { action: t('admin.subscriptions.guide.actions.adjust'), desc: t('admin.subscriptions.guide.actions.adjustDesc') },
   { action: t('admin.subscriptions.guide.actions.resetQuota'), desc: t('admin.subscriptions.guide.actions.resetQuotaDesc') },
-  { action: t('admin.subscriptions.guide.actions.revoke'), desc: t('admin.subscriptions.guide.actions.revokeDesc') }
+  { action: t('admin.subscriptions.guide.actions.revoke'), desc: t('admin.subscriptions.guide.actions.revokeDesc') },
+  { action: t('admin.subscriptions.guide.actions.restore'), desc: t('admin.subscriptions.guide.actions.restoreDesc') },
+  { action: t('admin.subscriptions.guide.actions.hardDelete'), desc: t('admin.subscriptions.guide.actions.hardDeleteDesc') }
 ])
 
 // User column display mode: 'email' or 'username'
@@ -1103,12 +1156,16 @@ const pagination = reactive({
 const showAssignModal = ref(false)
 const showExtendModal = ref(false)
 const showRevokeDialog = ref(false)
+const showRestoreDialog = ref(false)
+const showHardDeleteDialog = ref(false)
 const showResetQuotaConfirm = ref(false)
 const submitting = ref(false)
 const resettingSubscription = ref<UserSubscription | null>(null)
 const resettingQuota = ref(false)
 const extendingSubscription = ref<UserSubscription | null>(null)
 const revokingSubscription = ref<UserSubscription | null>(null)
+const restoringSubscription = ref<UserSubscription | null>(null)
+const hardDeletingSubscription = ref<UserSubscription | null>(null)
 
 const assignForm = reactive({
   user_id: null as number | null,
@@ -1134,6 +1191,21 @@ const resetQuotaForm = reactive({
 const hasSelectedResetWindow = computed(() =>
   resetQuotaForm.daily || resetQuotaForm.weekly || resetQuotaForm.monthly || resetQuotaForm.custom
 )
+
+const resetQuotaWindowOptionClass = (selected: boolean): string[] => [
+  'flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-3 text-sm transition-all',
+  'focus-within:ring-2 focus-within:ring-primary-500/30',
+  selected
+    ? 'border-primary-300 bg-primary-50/90 text-primary-900 shadow-sm shadow-primary-500/10 dark:border-primary-700/70 dark:bg-primary-900/20 dark:text-primary-100'
+    : 'border-gray-200 bg-white text-gray-700 hover:border-primary-200 hover:bg-primary-50/50 dark:border-gray-700 dark:bg-dark-800 dark:text-gray-200 dark:hover:border-primary-700/60 dark:hover:bg-primary-900/10'
+]
+
+const resetQuotaCheckboxClass = (selected: boolean): string[] => [
+  'flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-all',
+  selected
+    ? 'border-primary-500 bg-primary-600 text-white shadow-sm shadow-primary-500/25'
+    : 'border-gray-300 bg-white text-transparent dark:border-gray-600 dark:bg-dark-700'
+]
 
 // Group options for filter (all groups)
 const groupOptions = computed(() => [
@@ -1488,6 +1560,56 @@ const confirmRevoke = async () => {
   } catch (error: any) {
     appStore.showError(error.response?.data?.detail || t('admin.subscriptions.failedToRevoke'))
     console.error('Error revoking subscription:', error)
+  }
+}
+
+const handleRestore = (subscription: UserSubscription) => {
+  restoringSubscription.value = subscription
+  showRestoreDialog.value = true
+}
+
+const closeRestoreDialog = () => {
+  showRestoreDialog.value = false
+  restoringSubscription.value = null
+}
+
+const confirmRestore = async () => {
+  if (!restoringSubscription.value) return
+
+  try {
+    await adminAPI.subscriptions.restore(restoringSubscription.value.id)
+    appStore.showSuccess(t('admin.subscriptions.subscriptionRestored'))
+    showRestoreDialog.value = false
+    restoringSubscription.value = null
+    loadSubscriptions()
+  } catch (error: any) {
+    appStore.showError(error.response?.data?.detail || t('admin.subscriptions.failedToRestore'))
+    console.error('Error restoring subscription:', error)
+  }
+}
+
+const handleHardDelete = (subscription: UserSubscription) => {
+  hardDeletingSubscription.value = subscription
+  showHardDeleteDialog.value = true
+}
+
+const closeHardDeleteDialog = () => {
+  showHardDeleteDialog.value = false
+  hardDeletingSubscription.value = null
+}
+
+const confirmHardDelete = async () => {
+  if (!hardDeletingSubscription.value) return
+
+  try {
+    await adminAPI.subscriptions.hardDelete(hardDeletingSubscription.value.id)
+    appStore.showSuccess(t('admin.subscriptions.subscriptionDeleted'))
+    showHardDeleteDialog.value = false
+    hardDeletingSubscription.value = null
+    loadSubscriptions()
+  } catch (error: any) {
+    appStore.showError(error.response?.data?.detail || t('admin.subscriptions.failedToDelete'))
+    console.error('Error permanently deleting subscription:', error)
   }
 }
 

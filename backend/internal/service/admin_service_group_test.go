@@ -6,6 +6,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/stretchr/testify/require"
 )
@@ -122,6 +123,36 @@ func (s *groupRepoStubForAdmin) GetAccountIDsByGroupIDs(_ context.Context, _ []i
 }
 
 func (s *groupRepoStubForAdmin) UpdateSortOrders(_ context.Context, _ []GroupSortOrderUpdate) error {
+	return nil
+}
+
+type activeSubscriptionUsersByGroupRepoStub struct {
+	UserSubscriptionRepository
+
+	groupID int64
+	userIDs []int64
+}
+
+func (s *activeSubscriptionUsersByGroupRepoStub) ListActiveUserIDsByGroupID(_ context.Context, groupID int64) ([]int64, error) {
+	s.groupID = groupID
+	out := make([]int64, len(s.userIDs))
+	copy(out, s.userIDs)
+	return out, nil
+}
+
+type subscriptionInvalidationCall struct {
+	userID  int64
+	groupID int64
+}
+
+type subscriptionInvalidationCacheStub struct {
+	billingCacheWorkerStub
+
+	invalidations []subscriptionInvalidationCall
+}
+
+func (s *subscriptionInvalidationCacheStub) InvalidateSubscriptionCache(_ context.Context, userID, groupID int64) error {
+	s.invalidations = append(s.invalidations, subscriptionInvalidationCall{userID: userID, groupID: groupID})
 	return nil
 }
 
@@ -514,6 +545,39 @@ func TestAdminService_UpdateGroup_InvalidatesAuthCacheOnRPMLimitChange(t *testin
 	require.NotNil(t, group)
 	require.Equal(t, 60, repo.updated.RPMLimit)
 	require.Equal(t, []int64{1}, invalidator.groupIDs, "分组 RPMLimit 写入 auth snapshot，变更后必须失效 API Key 认证缓存")
+}
+
+func TestAdminService_UpdateGroup_InvalidatesActiveSubscriptionCaches(t *testing.T) {
+	existingGroup := &Group{
+		ID:               1,
+		Name:             "existing-group",
+		Platform:         PlatformAnthropic,
+		Status:           StatusActive,
+		SubscriptionType: SubscriptionTypeSubscription,
+	}
+	repo := &groupRepoStubForAdmin{getByID: existingGroup}
+	subRepo := &activeSubscriptionUsersByGroupRepoStub{userIDs: []int64{10, 20}}
+	cache := &subscriptionInvalidationCacheStub{}
+	billingCache := NewBillingCacheService(cache, nil, nil, nil, nil, nil, &config.Config{}, nil)
+	t.Cleanup(billingCache.Stop)
+	svc := &adminServiceImpl{
+		groupRepo:           repo,
+		userSubRepo:         subRepo,
+		billingCacheService: billingCache,
+	}
+	limit := 50.0
+
+	group, err := svc.UpdateGroup(context.Background(), 1, &UpdateGroupInput{
+		DailyLimitUSD: &limit,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, group)
+	require.Equal(t, int64(1), subRepo.groupID)
+	require.Equal(t, []subscriptionInvalidationCall{
+		{userID: 10, groupID: 1},
+		{userID: 20, groupID: 1},
+	}, cache.invalidations)
 }
 
 func TestAdminService_CreateGroup_NormalizesMessagesDispatchModelConfig(t *testing.T) {

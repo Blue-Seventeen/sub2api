@@ -161,6 +161,40 @@ func (s *UserSubscriptionRepoSuite) TestDelete_Idempotent() {
 	s.Require().NoError(s.repo.Delete(s.ctx, 42424242), "Delete should be idempotent")
 }
 
+func (s *UserSubscriptionRepoSuite) TestRestoreClearsSoftDeleteAndSetsActive() {
+	user := s.mustCreateUser("restore-sub@test.com", service.RoleUser)
+	group := s.mustCreateGroup("g-restore")
+	sub := s.mustCreateSubscription(user.ID, group.ID, func(c *dbent.UserSubscriptionCreate) {
+		c.SetStatus(service.SubscriptionStatusRevoked)
+	})
+	s.Require().NoError(s.repo.Delete(s.ctx, sub.ID))
+
+	deleted, err := s.repo.GetByIDIncludeDeleted(s.ctx, sub.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(deleted.DeletedAt)
+
+	s.Require().NoError(s.repo.Restore(s.ctx, sub.ID))
+
+	restored, err := s.repo.GetByID(s.ctx, sub.ID)
+	s.Require().NoError(err)
+	s.Require().Nil(restored.DeletedAt)
+	s.Require().Equal(service.SubscriptionStatusActive, restored.Status)
+}
+
+func (s *UserSubscriptionRepoSuite) TestHardDeletePhysicallyDeletesSoftDeletedRecord() {
+	user := s.mustCreateUser("harddelete-sub@test.com", service.RoleUser)
+	group := s.mustCreateGroup("g-harddelete")
+	sub := s.mustCreateSubscription(user.ID, group.ID, func(c *dbent.UserSubscriptionCreate) {
+		c.SetStatus(service.SubscriptionStatusRevoked)
+	})
+	s.Require().NoError(s.repo.Delete(s.ctx, sub.ID))
+
+	s.Require().NoError(s.repo.HardDelete(s.ctx, sub.ID))
+
+	_, err := s.repo.GetByIDIncludeDeleted(s.ctx, sub.ID)
+	s.Require().Error(err)
+}
+
 // --- GetByUserIDAndGroupID / GetActiveByUserIDAndGroupID ---
 
 func (s *UserSubscriptionRepoSuite) TestGetByUserIDAndGroupID() {
@@ -352,6 +386,54 @@ func (s *UserSubscriptionRepoSuite) TestList_FilterByStatus() {
 	s.Require().NoError(err)
 	s.Require().Len(subs, 1)
 	s.Require().Equal(service.SubscriptionStatusExpired, subs[0].Status)
+}
+
+func (s *UserSubscriptionRepoSuite) TestList_FilterByStatusExpiredIncludesOnlyNonDeletedExpiredCards() {
+	user := s.mustCreateUser("expired-filter@test.com", service.RoleUser)
+	activeFutureGroup := s.mustCreateGroup("g-exp-filter-active-future")
+	activeExpiredGroup := s.mustCreateGroup("g-exp-filter-active-expired")
+	statusExpiredGroup := s.mustCreateGroup("g-exp-filter-status-expired")
+	futureStatusExpiredGroup := s.mustCreateGroup("g-exp-filter-future-status-expired")
+	revokedGroup := s.mustCreateGroup("g-exp-filter-revoked")
+	softDeletedGroup := s.mustCreateGroup("g-exp-filter-soft-deleted")
+
+	s.mustCreateSubscription(user.ID, activeFutureGroup.ID, func(c *dbent.UserSubscriptionCreate) {
+		c.SetStatus(service.SubscriptionStatusActive)
+		c.SetExpiresAt(time.Now().Add(24 * time.Hour))
+	})
+	activeExpired := s.mustCreateSubscription(user.ID, activeExpiredGroup.ID, func(c *dbent.UserSubscriptionCreate) {
+		c.SetStatus(service.SubscriptionStatusActive)
+		c.SetExpiresAt(time.Now().Add(-24 * time.Hour))
+	})
+	statusExpired := s.mustCreateSubscription(user.ID, statusExpiredGroup.ID, func(c *dbent.UserSubscriptionCreate) {
+		c.SetStatus(service.SubscriptionStatusExpired)
+		c.SetExpiresAt(time.Now().Add(-24 * time.Hour))
+	})
+	s.mustCreateSubscription(user.ID, futureStatusExpiredGroup.ID, func(c *dbent.UserSubscriptionCreate) {
+		c.SetStatus(service.SubscriptionStatusExpired)
+		c.SetExpiresAt(time.Now().Add(24 * time.Hour))
+	})
+	s.mustCreateSubscription(user.ID, revokedGroup.ID, func(c *dbent.UserSubscriptionCreate) {
+		c.SetStatus(service.SubscriptionStatusRevoked)
+		c.SetExpiresAt(time.Now().Add(-24 * time.Hour))
+	})
+	softDeleted := s.mustCreateSubscription(user.ID, softDeletedGroup.ID, func(c *dbent.UserSubscriptionCreate) {
+		c.SetStatus(service.SubscriptionStatusActive)
+		c.SetExpiresAt(time.Now().Add(-24 * time.Hour))
+	})
+	s.Require().NoError(s.repo.Delete(s.ctx, softDeleted.ID))
+
+	subs, page, err := s.repo.List(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 20}, nil, nil, service.SubscriptionStatusExpired, "", "", "")
+
+	s.Require().NoError(err)
+	s.Require().Equal(int64(2), page.Total)
+	ids := make(map[int64]bool, len(subs))
+	for _, sub := range subs {
+		ids[sub.ID] = true
+	}
+	s.Require().True(ids[activeExpired.ID])
+	s.Require().True(ids[statusExpired.ID])
+	s.Require().Len(ids, 2)
 }
 
 // --- Usage tracking ---

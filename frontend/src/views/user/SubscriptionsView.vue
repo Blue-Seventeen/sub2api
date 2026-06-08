@@ -298,7 +298,7 @@ import subscriptionsAPI from '@/api/subscriptions'
 import type { UserSubscription } from '@/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
-import { formatCurrencyAmount, formatDateOnly } from '@/utils/format'
+import { formatCurrencyAmount } from '@/utils/format'
 import { platformBorderClass, platformBadgeClass, platformButtonClass, platformDotClass, platformLabel } from '@/utils/platformColors'
 import {
   getRemainingDurationParts,
@@ -352,26 +352,32 @@ function getProgressBarClass(used: number | undefined, limit: number | null | un
   return 'bg-green-500'
 }
 
+function padDatePart(value: number): string {
+  return String(value).padStart(2, '0')
+}
+
+function formatPreciseDateTime(date: Date): string {
+  const year = date.getFullYear()
+  const month = padDatePart(date.getMonth() + 1)
+  const day = padDatePart(date.getDate())
+  const hours = padDatePart(date.getHours())
+  const minutes = padDatePart(date.getMinutes())
+  const seconds = padDatePart(date.getSeconds())
+  return `${year}/${month}/${day} ${hours}:${minutes}:${seconds}`
+}
+
 function formatExpirationDate(expiresAt: string): string {
   const now = new Date()
   const expires = new Date(expiresAt)
-  const diff = expires.getTime() - now.getTime()
-  const days = Math.ceil(diff / (1000 * 60 * 60 * 24))
+  if (Number.isNaN(expires.getTime())) return '-'
 
-  if (days < 0) {
+  const diff = expires.getTime() - now.getTime()
+
+  if (diff <= 0) {
     return t('userSubscriptions.status.expired')
   }
 
-  const dateStr = formatDateOnly(expires)
-
-  if (days === 0) {
-    return `${dateStr} (${t('common.today')})`
-  }
-  if (days === 1) {
-    return `${dateStr} (${t('common.tomorrow')})`
-  }
-
-  return t('userSubscriptions.daysRemaining', { days }) + ` (${dateStr})`
+  return formatPreciseDateTime(expires)
 }
 
 function getExpirationClass(expiresAt: string): string {

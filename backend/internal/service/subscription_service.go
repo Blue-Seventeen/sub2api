@@ -32,20 +32,23 @@ const subscriptionAssignLocalLockStripes = 256
 var subscriptionAssignLocalLocks [subscriptionAssignLocalLockStripes]sync.Mutex
 
 var (
-	ErrSubscriptionNotFound       = infraerrors.NotFound("SUBSCRIPTION_NOT_FOUND", "subscription not found")
-	ErrSubscriptionExpired        = infraerrors.Forbidden("SUBSCRIPTION_EXPIRED", "subscription has expired")
-	ErrSubscriptionSuspended      = infraerrors.Forbidden("SUBSCRIPTION_SUSPENDED", "subscription is suspended")
-	ErrSubscriptionAlreadyExists  = infraerrors.Conflict("SUBSCRIPTION_ALREADY_EXISTS", "subscription already exists for this user and group")
-	ErrSubscriptionAssignConflict = infraerrors.Conflict("SUBSCRIPTION_ASSIGN_CONFLICT", "subscription exists but request conflicts with existing assignment semantics")
-	ErrGroupNotSubscriptionType   = infraerrors.BadRequest("GROUP_NOT_SUBSCRIPTION_TYPE", "group is not a subscription type")
-	ErrInvalidInput               = infraerrors.BadRequest("INVALID_INPUT", "at least one of resetDaily, resetWeekly, resetMonthly, or resetCustom must be true")
-	ErrDailyLimitExceeded         = infraerrors.TooManyRequests("DAILY_LIMIT_EXCEEDED", "daily usage limit exceeded")
-	ErrWeeklyLimitExceeded        = infraerrors.TooManyRequests("WEEKLY_LIMIT_EXCEEDED", "weekly usage limit exceeded")
-	ErrMonthlyLimitExceeded       = infraerrors.TooManyRequests("MONTHLY_LIMIT_EXCEEDED", "monthly usage limit exceeded")
-	ErrCustomLimitExceeded        = infraerrors.TooManyRequests("CUSTOM_LIMIT_EXCEEDED", "custom usage limit exceeded")
-	ErrSubscriptionNilInput       = infraerrors.BadRequest("SUBSCRIPTION_NIL_INPUT", "subscription input cannot be nil")
-	ErrAdjustWouldExpire          = infraerrors.BadRequest("ADJUST_WOULD_EXPIRE", "adjustment would result in expired subscription (remaining days must be > 0)")
-	ErrAdjustNoFields             = infraerrors.BadRequest("INVALID_INPUT", "at least one adjustment field must be provided")
+	ErrSubscriptionNotFound            = infraerrors.NotFound("SUBSCRIPTION_NOT_FOUND", "subscription not found")
+	ErrSubscriptionExpired             = infraerrors.Forbidden("SUBSCRIPTION_EXPIRED", "subscription has expired")
+	ErrSubscriptionSuspended           = infraerrors.Forbidden("SUBSCRIPTION_SUSPENDED", "subscription is suspended")
+	ErrSubscriptionAlreadyExists       = infraerrors.Conflict("SUBSCRIPTION_ALREADY_EXISTS", "subscription already exists for this user and group")
+	ErrSubscriptionAssignConflict      = infraerrors.Conflict("SUBSCRIPTION_ASSIGN_CONFLICT", "subscription exists but request conflicts with existing assignment semantics")
+	ErrGroupNotSubscriptionType        = infraerrors.BadRequest("GROUP_NOT_SUBSCRIPTION_TYPE", "group is not a subscription type")
+	ErrInvalidInput                    = infraerrors.BadRequest("INVALID_INPUT", "at least one of resetDaily, resetWeekly, resetMonthly, or resetCustom must be true")
+	ErrDailyLimitExceeded              = infraerrors.TooManyRequests("DAILY_LIMIT_EXCEEDED", "daily usage limit exceeded")
+	ErrWeeklyLimitExceeded             = infraerrors.TooManyRequests("WEEKLY_LIMIT_EXCEEDED", "weekly usage limit exceeded")
+	ErrMonthlyLimitExceeded            = infraerrors.TooManyRequests("MONTHLY_LIMIT_EXCEEDED", "monthly usage limit exceeded")
+	ErrCustomLimitExceeded             = infraerrors.TooManyRequests("CUSTOM_LIMIT_EXCEEDED", "custom usage limit exceeded")
+	ErrSubscriptionNilInput            = infraerrors.BadRequest("SUBSCRIPTION_NIL_INPUT", "subscription input cannot be nil")
+	ErrAdjustWouldExpire               = infraerrors.BadRequest("ADJUST_WOULD_EXPIRE", "adjustment would result in expired subscription (remaining days must be > 0)")
+	ErrAdjustNoFields                  = infraerrors.BadRequest("INVALID_INPUT", "at least one adjustment field must be provided")
+	ErrSubscriptionRestoreInvalid      = infraerrors.BadRequest("SUBSCRIPTION_RESTORE_NOT_ALLOWED", "only revoked or soft-deleted subscriptions can be restored")
+	ErrSubscriptionRestoreGroupInvalid = infraerrors.BadRequest("SUBSCRIPTION_RESTORE_GROUP_INVALID", "subscription group is no longer active or subscription type")
+	ErrSubscriptionHardDeleteInvalid   = infraerrors.BadRequest("SUBSCRIPTION_HARD_DELETE_NOT_ALLOWED", "only revoked, soft-deleted, or expired subscriptions can be hard deleted")
 )
 
 // SubscriptionService 订阅服务
@@ -68,6 +71,12 @@ type SubscriptionService struct {
 type userSubscriptionHistoryRepository interface {
 	GetByIDIncludeDeleted(ctx context.Context, id int64) (*UserSubscription, error)
 	ListByUserIDIncludeDeleted(ctx context.Context, userID int64) ([]UserSubscription, error)
+}
+
+type userSubscriptionAdminMutationRepository interface {
+	GetByIDIncludeDeleted(ctx context.Context, id int64) (*UserSubscription, error)
+	Restore(ctx context.Context, id int64) error
+	HardDelete(ctx context.Context, id int64) error
 }
 
 // NewSubscriptionService 创建订阅服务
@@ -903,6 +912,77 @@ func (s *SubscriptionService) ExtendSubscription(ctx context.Context, subscripti
 	return s.userSubRepo.GetByID(ctx, subscriptionID)
 }
 
+// RestoreSubscription restores a revoked or soft-deleted subscription.
+func (s *SubscriptionService) RestoreSubscription(ctx context.Context, subscriptionID int64) (*UserSubscription, error) {
+	repo, ok := s.userSubRepo.(userSubscriptionAdminMutationRepository)
+	if !ok {
+		return nil, fmt.Errorf("subscription repository does not support restore")
+	}
+
+	var sub *UserSubscription
+	if err := s.withSubscriptionUpdateTx(ctx, func(txCtx context.Context) error {
+		var err error
+		sub, err = repo.GetByIDIncludeDeleted(txCtx, subscriptionID)
+		if err != nil {
+			return err
+		}
+		if sub.DeletedAt == nil && sub.Status != SubscriptionStatusRevoked {
+			return ErrSubscriptionRestoreInvalid
+		}
+		if sub.ExpiresAt.After(time.Now()) {
+			if s.groupRepo == nil {
+				return ErrSubscriptionRestoreGroupInvalid
+			}
+			group, groupErr := s.groupRepo.GetByID(txCtx, sub.GroupID)
+			if groupErr != nil || group == nil || group.Status != StatusActive || !group.IsSubscriptionType() {
+				return ErrSubscriptionRestoreGroupInvalid
+			}
+		}
+		if err := repo.Restore(txCtx, subscriptionID); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	s.invalidateSubscriptionCaches(sub.UserID, sub.GroupID)
+	restored, err := repo.GetByIDIncludeDeleted(ctx, subscriptionID)
+	if err != nil {
+		return nil, err
+	}
+	normalizeSubscriptionSnapshot(restored)
+	return restored, nil
+}
+
+// HardDeleteSubscription physically deletes a revoked, soft-deleted, or expired subscription record.
+func (s *SubscriptionService) HardDeleteSubscription(ctx context.Context, subscriptionID int64) error {
+	repo, ok := s.userSubRepo.(userSubscriptionAdminMutationRepository)
+	if !ok {
+		return fmt.Errorf("subscription repository does not support hard delete")
+	}
+
+	var sub *UserSubscription
+	if err := s.withSubscriptionUpdateTx(ctx, func(txCtx context.Context) error {
+		var err error
+		sub, err = repo.GetByIDIncludeDeleted(txCtx, subscriptionID)
+		if err != nil {
+			return err
+		}
+		isRevokedOrDeleted := sub.DeletedAt != nil || sub.Status == SubscriptionStatusRevoked
+		isExpired := !sub.ExpiresAt.After(time.Now())
+		if !isRevokedOrDeleted && !isExpired {
+			return ErrSubscriptionHardDeleteInvalid
+		}
+		return repo.HardDelete(txCtx, subscriptionID)
+	}); err != nil {
+		return err
+	}
+
+	s.invalidateSubscriptionCaches(sub.UserID, sub.GroupID)
+	return nil
+}
+
 func (s *SubscriptionService) AdjustSubscription(ctx context.Context, subscriptionID int64, input AdjustSubscriptionInput) (*UserSubscription, error) {
 	if input.Days == nil && input.DailyUsageUSD == nil && input.WeeklyUsageUSD == nil && input.MonthlyUsageUSD == nil && input.CustomUsageUSD == nil {
 		return nil, ErrAdjustNoFields
@@ -1274,6 +1354,14 @@ func aggregateActiveSubscriptionsInternal(subs []UserSubscription, normalizeWind
 	agg.SourceRefID = nil
 	agg.SourceRedeemCodeID = nil
 	agg.RedeemCodeSnapshot = nil
+	agg.GroupNameSnapshot = nil
+	agg.GroupPlatformSnapshot = nil
+	agg.GroupRateMultiplierSnapshot = nil
+	agg.DailyLimitUSDSnapshot = nil
+	agg.WeeklyLimitUSDSnapshot = nil
+	agg.MonthlyLimitUSDSnapshot = nil
+	agg.CustomLimitHoursSnapshot = nil
+	agg.CustomLimitUSDSnapshot = nil
 	agg.StackedAvailableUSD = aggregateStackedAvailable(normalized)
 	agg.AssignedBy = nil
 	agg.AssignedAt = time.Time{}

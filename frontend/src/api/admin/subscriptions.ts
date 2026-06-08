@@ -122,6 +122,28 @@ export async function revoke(id: number): Promise<{ message: string }> {
 }
 
 /**
+ * Restore a revoked subscription
+ * @param id - Subscription ID
+ * @returns Restored subscription
+ */
+export async function restore(id: number): Promise<UserSubscription> {
+  const { data } = await apiClient.post<UserSubscription>(`/admin/subscriptions/${id}/restore`)
+  return data
+}
+
+/**
+ * Permanently delete a revoked or expired subscription
+ * @param id - Subscription ID
+ * @returns Success confirmation
+ */
+export async function hardDelete(id: number): Promise<{ message: string }> {
+  const { data } = await apiClient.delete<{ message: string }>(
+    `/admin/subscriptions/${id}/hard-delete`
+  )
+  return data
+}
+
+/**
  * Reset daily, weekly, and/or monthly usage quota for a subscription
  * @param id - Subscription ID
  * @param options - Which windows to reset
@@ -188,6 +210,8 @@ export const subscriptionsAPI = {
   bulkAssign,
   extend,
   revoke,
+  restore,
+  hardDelete,
   resetQuota,
   listByGroup,
   listByUser

@@ -13,6 +13,7 @@ func TestUserSubscriptionFromService_HidesAdminSourceSnapshots(t *testing.T) {
 	redeemCode := "RC-SECRET"
 	groupName := "historic group"
 	limit := 100.0
+	currentLimit := 50.0
 	sub := &service.UserSubscription{
 		ID:                    1,
 		UserID:                2,
@@ -29,6 +30,7 @@ func TestUserSubscriptionFromService_HidesAdminSourceSnapshots(t *testing.T) {
 			ID:               3,
 			Name:             "current group",
 			SubscriptionType: service.SubscriptionTypeSubscription,
+			DailyLimitUSD:    &currentLimit,
 		},
 	}
 
@@ -36,8 +38,11 @@ func TestUserSubscriptionFromService_HidesAdminSourceSnapshots(t *testing.T) {
 	if userDTO.SourceType != nil || userDTO.SourceRefID != nil || userDTO.RedeemCodeSnapshot != nil {
 		t.Fatalf("user subscription DTO leaked source fields: %#v", userDTO)
 	}
-	if userDTO.Group == nil || userDTO.Group.Name != groupName {
-		t.Fatalf("user subscription DTO should still use effective snapshotted group, got %#v", userDTO.Group)
+	if userDTO.Group == nil || userDTO.Group.Name != "current group" {
+		t.Fatalf("active user subscription DTO should use current group, got %#v", userDTO.Group)
+	}
+	if userDTO.Group.DailyLimitUSD == nil || *userDTO.Group.DailyLimitUSD != currentLimit {
+		t.Fatalf("active user subscription DTO should use current group limit, got %#v", userDTO.Group)
 	}
 
 	adminDTO := UserSubscriptionFromServiceAdmin(sub)
@@ -49,6 +54,36 @@ func TestUserSubscriptionFromService_HidesAdminSourceSnapshots(t *testing.T) {
 	}
 	if adminDTO.GroupNameSnapshot == nil || *adminDTO.GroupNameSnapshot != groupName {
 		t.Fatalf("admin subscription DTO missing group_name_snapshot: %#v", adminDTO)
+	}
+}
+
+func TestUserSubscriptionFromService_HistoricalSubscriptionsUseSnapshots(t *testing.T) {
+	groupName := "historic group"
+	limit := 100.0
+	currentLimit := 50.0
+	sub := &service.UserSubscription{
+		ID:                    1,
+		UserID:                2,
+		GroupID:               3,
+		StartsAt:              time.Now().Add(-48 * time.Hour),
+		ExpiresAt:             time.Now().Add(-24 * time.Hour),
+		Status:                service.SubscriptionStatusExpired,
+		GroupNameSnapshot:     &groupName,
+		DailyLimitUSDSnapshot: &limit,
+		Group: &service.Group{
+			ID:               3,
+			Name:             "current group",
+			SubscriptionType: service.SubscriptionTypeSubscription,
+			DailyLimitUSD:    &currentLimit,
+		},
+	}
+
+	userDTO := UserSubscriptionFromService(sub)
+	if userDTO.Group == nil || userDTO.Group.Name != groupName {
+		t.Fatalf("historical user subscription DTO should use snapshot group, got %#v", userDTO.Group)
+	}
+	if userDTO.Group.DailyLimitUSD == nil || *userDTO.Group.DailyLimitUSD != limit {
+		t.Fatalf("historical user subscription DTO should use snapshot limit, got %#v", userDTO.Group)
 	}
 }
 
