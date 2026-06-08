@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"entgo.io/ent/dialect"
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -25,6 +26,10 @@ var MaxExpiresAt = time.Date(2099, 12, 31, 23, 59, 59, 0, time.UTC)
 
 // MaxValidityDays is the maximum allowed validity days for subscriptions (100 years)
 const MaxValidityDays = 36500
+
+const subscriptionAssignLocalLockStripes = 256
+
+var subscriptionAssignLocalLocks [subscriptionAssignLocalLockStripes]sync.Mutex
 
 var (
 	ErrSubscriptionNotFound       = infraerrors.NotFound("SUBSCRIPTION_NOT_FOUND", "subscription not found")
@@ -266,6 +271,15 @@ func (s *SubscriptionService) AssignSubscription(ctx context.Context, input *Ass
 //
 // 如果没有订阅：创建新订阅
 func (s *SubscriptionService) AssignOrExtendSubscription(ctx context.Context, input *AssignSubscriptionInput) (*UserSubscription, bool, error) {
+	if input == nil {
+		return nil, false, ErrSubscriptionNilInput
+	}
+	return s.withSerializedSubscriptionAssignment(ctx, input.UserID, input.GroupID, func(txCtx context.Context) (*UserSubscription, bool, error) {
+		return s.assignOrExtendSubscriptionLocked(txCtx, input)
+	})
+}
+
+func (s *SubscriptionService) assignOrExtendSubscriptionLocked(ctx context.Context, input *AssignSubscriptionInput) (*UserSubscription, bool, error) {
 	// 检查分组是否存在且为订阅类型
 	group, err := s.groupRepo.GetByID(ctx, input.GroupID)
 	if err != nil {
@@ -347,6 +361,74 @@ func (s *SubscriptionService) AssignOrExtendSubscription(ctx context.Context, in
 	}
 
 	return sub, false, nil // false 表示是新建
+}
+
+func (s *SubscriptionService) withSerializedSubscriptionAssignment(ctx context.Context, userID, groupID int64, fn func(context.Context) (*UserSubscription, bool, error)) (*UserSubscription, bool, error) {
+	localUnlock := lockSubscriptionAssignmentLocal(userID, groupID)
+	defer localUnlock()
+
+	if s.entClient == nil {
+		return fn(ctx)
+	}
+	if dbent.TxFromContext(ctx) != nil {
+		if err := s.lockSubscriptionAssignmentInDB(ctx, userID, groupID); err != nil {
+			return nil, false, err
+		}
+		return fn(ctx)
+	}
+
+	tx, err := s.entClient.Tx(ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf("begin subscription assignment transaction: %w", err)
+	}
+	txCtx := dbent.NewTxContext(ctx, tx)
+
+	if err := s.lockSubscriptionAssignmentInDB(txCtx, userID, groupID); err != nil {
+		_ = tx.Rollback()
+		return nil, false, err
+	}
+
+	sub, reused, err := fn(txCtx)
+	if err != nil {
+		_ = tx.Rollback()
+		return nil, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, false, fmt.Errorf("commit subscription assignment transaction: %w", err)
+	}
+	return sub, reused, nil
+}
+
+func lockSubscriptionAssignmentLocal(userID, groupID int64) func() {
+	key := subscriptionAssignmentLockKey(userID, groupID)
+	mu := &subscriptionAssignLocalLocks[uint64(key)%subscriptionAssignLocalLockStripes]
+	mu.Lock()
+	return mu.Unlock
+}
+
+func subscriptionAssignmentLockKey(userID, groupID int64) int64 {
+	h := uint64(1469598103934665603)
+	h ^= uint64(userID)
+	h *= 1099511628211
+	h ^= uint64(groupID)
+	h *= 1099511628211
+	h ^= 0x7375623261706921
+	return int64(h)
+}
+
+func (s *SubscriptionService) lockSubscriptionAssignmentInDB(ctx context.Context, userID, groupID int64) error {
+	if s.entClient == nil || s.entClient.Driver().Dialect() != dialect.Postgres {
+		return nil
+	}
+	client := s.entClient
+	if tx := dbent.TxFromContext(ctx); tx != nil {
+		client = tx.Client()
+	}
+	rows, err := client.QueryContext(ctx, "SELECT pg_advisory_xact_lock($1)", subscriptionAssignmentLockKey(userID, groupID))
+	if err != nil {
+		return fmt.Errorf("lock subscription assignment: %w", err)
+	}
+	return rows.Close()
 }
 
 func (s *SubscriptionService) AssignStackedSubscription(ctx context.Context, input *AssignSubscriptionInput) (*UserSubscription, bool, error) {
@@ -633,6 +715,15 @@ func (s *SubscriptionService) BulkAssignSubscription(ctx context.Context, input 
 }
 
 func (s *SubscriptionService) assignSubscriptionWithReuse(ctx context.Context, input *AssignSubscriptionInput) (*UserSubscription, bool, error) {
+	if input == nil {
+		return nil, false, ErrSubscriptionNilInput
+	}
+	return s.withSerializedSubscriptionAssignment(ctx, input.UserID, input.GroupID, func(txCtx context.Context) (*UserSubscription, bool, error) {
+		return s.assignSubscriptionWithReuseLocked(txCtx, input)
+	})
+}
+
+func (s *SubscriptionService) assignSubscriptionWithReuseLocked(ctx context.Context, input *AssignSubscriptionInput) (*UserSubscription, bool, error) {
 	// 检查分组是否存在且为订阅类型
 	group, err := s.groupRepo.GetByID(ctx, input.GroupID)
 	if err != nil {

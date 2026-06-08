@@ -495,7 +495,7 @@ func (s *BillingCacheService) GetSubscriptionStatus(ctx context.Context, userID,
 	cacheData, err := s.cache.GetSubscriptionCache(ctx, userID, groupID)
 	if err == nil && cacheData != nil {
 		data := s.convertFromPortsData(cacheData)
-		if !subscriptionCacheNeedsWindowRefresh(data, time.Now()) {
+		if !subscriptionCacheSchemaStale(data) && !subscriptionCacheNeedsWindowRefresh(data, time.Now()) {
 			return data, nil
 		}
 		_ = s.cache.InvalidateSubscriptionCache(ctx, userID, groupID)
@@ -610,6 +610,25 @@ func subscriptionCacheNeedsWindowRefresh(data *subscriptionCacheData, now time.T
 	}
 	if data.CustomLimitHours > 0 {
 		return subscriptionWindowExpired(data.CustomWindowStart, customSubscriptionWindowHours(data.CustomLimitHours), now)
+	}
+	return false
+}
+
+func subscriptionCacheSchemaStale(data *subscriptionCacheData) bool {
+	if data == nil {
+		return false
+	}
+	if data.DailyLimitUSD != nil && data.DailyWindowStart == nil {
+		return true
+	}
+	if data.WeeklyLimitUSD != nil && data.WeeklyWindowStart == nil {
+		return true
+	}
+	if data.MonthlyLimitUSD != nil && data.MonthlyWindowStart == nil {
+		return true
+	}
+	if data.CustomLimitUSD != nil && data.CustomLimitHours > 0 && data.CustomWindowStart == nil {
+		return true
 	}
 	return false
 }

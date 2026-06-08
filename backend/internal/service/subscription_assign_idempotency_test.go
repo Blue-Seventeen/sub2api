@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -141,6 +142,7 @@ func (userSubRepoNoop) BatchUpdateExpiredStatus(context.Context) (int64, error) 
 type subscriptionUserSubRepoStub struct {
 	userSubRepoNoop
 
+	mu             sync.Mutex
 	nextID         int64
 	byID           map[int64]*UserSubscription
 	byUserGroup    map[string]*UserSubscription
@@ -168,6 +170,9 @@ func (s *subscriptionUserSubRepoStub) sourceKey(sourceType, sourceRefID string) 
 }
 
 func (s *subscriptionUserSubRepoStub) seed(sub *UserSubscription) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if sub == nil {
 		return
 	}
@@ -186,11 +191,17 @@ func (s *subscriptionUserSubRepoStub) seed(sub *UserSubscription) {
 }
 
 func (s *subscriptionUserSubRepoStub) ExistsByUserIDAndGroupID(_ context.Context, userID, groupID int64) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	_, ok := s.byUserGroup[s.key(userID, groupID)]
 	return ok, nil
 }
 
 func (s *subscriptionUserSubRepoStub) GetByUserIDAndGroupID(_ context.Context, userID, groupID int64) (*UserSubscription, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	sub := s.byUserGroup[s.key(userID, groupID)]
 	if sub == nil {
 		return nil, ErrSubscriptionNotFound
@@ -200,6 +211,9 @@ func (s *subscriptionUserSubRepoStub) GetByUserIDAndGroupID(_ context.Context, u
 }
 
 func (s *subscriptionUserSubRepoStub) Create(_ context.Context, sub *UserSubscription) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if sub == nil {
 		return nil
 	}
@@ -221,6 +235,9 @@ func (s *subscriptionUserSubRepoStub) Create(_ context.Context, sub *UserSubscri
 }
 
 func (s *subscriptionUserSubRepoStub) GetBySource(_ context.Context, sourceType, sourceRefID string) (*UserSubscription, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	sub := s.bySource[s.sourceKey(sourceType, sourceRefID)]
 	if sub == nil {
 		return nil, ErrSubscriptionNotFound
@@ -230,6 +247,9 @@ func (s *subscriptionUserSubRepoStub) GetBySource(_ context.Context, sourceType,
 }
 
 func (s *subscriptionUserSubRepoStub) ListByUserIDAndGroupID(_ context.Context, userID, groupID int64) ([]UserSubscription, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	subs := s.byUserGroupAll[s.key(userID, groupID)]
 	out := make([]UserSubscription, 0, len(subs))
 	for _, sub := range subs {
@@ -243,6 +263,9 @@ func (s *subscriptionUserSubRepoStub) ListByUserIDAndGroupID(_ context.Context, 
 }
 
 func (s *subscriptionUserSubRepoStub) ListActiveByUserIDAndGroupID(_ context.Context, userID, groupID int64) ([]UserSubscription, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	subs := s.byUserGroupAll[s.key(userID, groupID)]
 	now := time.Now()
 	out := make([]UserSubscription, 0, len(subs))
@@ -257,6 +280,9 @@ func (s *subscriptionUserSubRepoStub) ListActiveByUserIDAndGroupID(_ context.Con
 }
 
 func (s *subscriptionUserSubRepoStub) GetByID(_ context.Context, id int64) (*UserSubscription, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	sub := s.byID[id]
 	if sub == nil {
 		return nil, ErrSubscriptionNotFound
@@ -266,6 +292,9 @@ func (s *subscriptionUserSubRepoStub) GetByID(_ context.Context, id int64) (*Use
 }
 
 func (s *subscriptionUserSubRepoStub) Update(_ context.Context, sub *UserSubscription) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if sub == nil {
 		return ErrSubscriptionNilInput
 	}
@@ -444,6 +473,56 @@ func TestAssignSubscriptionKeepsWorkingWhenIdempotencyStoreUnavailable(t *testin
 	require.NoError(t, err)
 	require.NotNil(t, sub)
 	require.Equal(t, 1, subRepo.createCalls, "semantic idempotent endpoint should not depend on idempotency store availability")
+}
+
+func TestAssignSubscriptionConcurrentKeepsNonStackedIdempotent(t *testing.T) {
+	groupRepo := &subscriptionGroupRepoStub{
+		group: &Group{ID: 1, SubscriptionType: SubscriptionTypeSubscription},
+	}
+	subRepo := newSubscriptionUserSubRepoStub()
+	svc := NewSubscriptionService(groupRepo, subRepo, nil, nil, nil)
+
+	const workers = 24
+	start := make(chan struct{})
+	errs := make(chan error, workers)
+	ids := make(chan int64, workers)
+
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer wg.Done()
+			<-start
+			sub, err := svc.AssignSubscription(context.Background(), &AssignSubscriptionInput{
+				UserID:       42,
+				GroupID:      1,
+				ValidityDays: 30,
+				Notes:        "manual",
+			})
+			if err != nil {
+				errs <- err
+				return
+			}
+			ids <- sub.ID
+		}()
+	}
+
+	close(start)
+	wg.Wait()
+	close(errs)
+	close(ids)
+
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	require.Equal(t, 1, subRepo.createCalls)
+
+	subs, err := subRepo.ListActiveByUserIDAndGroupID(context.Background(), 42, 1)
+	require.NoError(t, err)
+	require.Len(t, subs, 1)
+	for id := range ids {
+		require.Equal(t, subs[0].ID, id)
+	}
 }
 
 func TestAssignSubscription_NewSubscriptionWindowsStartAtRedeemTime(t *testing.T) {
