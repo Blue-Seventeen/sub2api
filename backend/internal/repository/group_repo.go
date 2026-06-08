@@ -623,8 +623,8 @@ func (r *groupRepository) DeleteCascade(ctx context.Context, id int64) ([]int64,
 
 	var affectedUserIDs []int64
 	if groupSvc.IsSubscriptionType() {
-		// 只查询未软删除的订阅，避免通知已取消订阅的用户
-		rows, err := exec.QueryContext(ctx, "SELECT user_id FROM user_subscriptions WHERE group_id = $1 AND deleted_at IS NULL", id)
+		// Only revoke currently active cards; expired historical evidence stays visible.
+		rows, err := exec.QueryContext(ctx, "SELECT DISTINCT user_id FROM user_subscriptions WHERE group_id = $1 AND deleted_at IS NULL AND status = $2 AND expires_at > NOW()", id, service.SubscriptionStatusActive)
 		if err != nil {
 			return nil, err
 		}
@@ -643,8 +643,7 @@ func (r *groupRepository) DeleteCascade(ctx context.Context, id int64) ([]int64,
 			return nil, err
 		}
 
-		// 软删除订阅：设置 deleted_at 而非硬删除
-		if _, err := exec.ExecContext(ctx, "UPDATE user_subscriptions SET deleted_at = NOW() WHERE group_id = $1 AND deleted_at IS NULL", id); err != nil {
+		if _, err := exec.ExecContext(ctx, "UPDATE user_subscriptions SET status = $2, deleted_at = NOW() WHERE group_id = $1 AND deleted_at IS NULL AND status = $3 AND expires_at > NOW()", id, service.SubscriptionStatusRevoked, service.SubscriptionStatusActive); err != nil {
 			return nil, err
 		}
 	}

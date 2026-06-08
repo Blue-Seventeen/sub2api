@@ -98,23 +98,25 @@ func (h *SubscriptionHandler) GetProgress(c *gin.Context) {
 		return
 	}
 
-	// Get all active subscriptions with progress
-	subscriptions, err := h.subscriptionService.ListActiveUserSubscriptions(c.Request.Context(), subject.UserID)
+	progresses, err := h.subscriptionService.GetUserSubscriptionsWithProgress(c.Request.Context(), subject.UserID)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 
-	result := make([]SubscriptionProgressInfo, 0, len(subscriptions))
-	for i := range subscriptions {
-		sub := &subscriptions[i]
-		progress, err := h.subscriptionService.GetSubscriptionProgress(c.Request.Context(), sub.ID)
-		if err != nil {
-			// Skip subscriptions with errors
-			continue
+	subscriptions, err := h.subscriptionService.ListActiveUserSubscriptions(c.Request.Context(), subject.UserID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	result := make([]SubscriptionProgressInfo, 0, len(progresses))
+	for i := range progresses {
+		progress := &progresses[i]
+		if i >= len(subscriptions) {
+			break
 		}
 		result = append(result, SubscriptionProgressInfo{
-			Subscription: dto.UserSubscriptionFromService(sub),
+			Subscription: dto.UserSubscriptionFromService(&subscriptions[i]),
 			Progress:     progress,
 		})
 	}
@@ -151,22 +153,25 @@ func (h *SubscriptionHandler) GetSummary(c *gin.Context) {
 			MonthlyUsedUSD: sub.MonthlyUsageUSD,
 			CustomUsedUSD:  sub.CustomUsageUSD,
 		}
+		if item.ID == 0 {
+			item.ID = sub.GroupID
+		}
 
-		// Add group info if preloaded
-		if sub.Group != nil {
-			item.GroupName = sub.Group.Name
-			if sub.Group.DailyLimitUSD != nil {
-				item.DailyLimitUSD = *sub.Group.DailyLimitUSD
+		// Add effective group info if preloaded or snapshotted
+		if effectiveGroup := sub.EffectiveGroup(sub.Group); effectiveGroup != nil {
+			item.GroupName = effectiveGroup.Name
+			if effectiveGroup.DailyLimitUSD != nil {
+				item.DailyLimitUSD = *effectiveGroup.DailyLimitUSD
 			}
-			if sub.Group.WeeklyLimitUSD != nil {
-				item.WeeklyLimitUSD = *sub.Group.WeeklyLimitUSD
+			if effectiveGroup.WeeklyLimitUSD != nil {
+				item.WeeklyLimitUSD = *effectiveGroup.WeeklyLimitUSD
 			}
-			if sub.Group.MonthlyLimitUSD != nil {
-				item.MonthlyLimitUSD = *sub.Group.MonthlyLimitUSD
+			if effectiveGroup.MonthlyLimitUSD != nil {
+				item.MonthlyLimitUSD = *effectiveGroup.MonthlyLimitUSD
 			}
-			if sub.Group.HasCustomLimit() {
-				item.CustomLimitUSD = *sub.Group.CustomLimitUSD
-				item.CustomHours = sub.Group.CustomLimitHours
+			if effectiveGroup.HasCustomLimit() {
+				item.CustomLimitUSD = *effectiveGroup.CustomLimitUSD
+				item.CustomHours = effectiveGroup.CustomLimitHours
 			}
 		}
 

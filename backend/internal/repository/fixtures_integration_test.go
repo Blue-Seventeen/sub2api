@@ -101,6 +101,12 @@ func mustCreateGroup(t *testing.T, client *dbent.Client, g *service.Group) *serv
 	if g.MonthlyLimitUSD != nil {
 		create.SetMonthlyLimitUsd(*g.MonthlyLimitUSD)
 	}
+	if g.CustomLimitHours != 0 {
+		create.SetCustomLimitHours(g.CustomLimitHours)
+	}
+	if g.CustomLimitUSD != nil {
+		create.SetCustomLimitUsd(*g.CustomLimitUSD)
+	}
 	if !g.CreatedAt.IsZero() {
 		create.SetCreatedAt(g.CreatedAt)
 	}
@@ -393,10 +399,59 @@ func mustCreateSubscription(t *testing.T, client *dbent.Client, s *service.UserS
 		SetNotes(s.Notes).
 		SetDailyUsageUsd(s.DailyUsageUSD).
 		SetWeeklyUsageUsd(s.WeeklyUsageUSD).
-		SetMonthlyUsageUsd(s.MonthlyUsageUSD)
+		SetMonthlyUsageUsd(s.MonthlyUsageUSD).
+		SetCustomUsageUsd(s.CustomUsageUSD)
 
 	if s.AssignedBy != nil {
 		create.SetAssignedBy(*s.AssignedBy)
+	}
+	if s.DailyWindowStart != nil {
+		create.SetDailyWindowStart(*s.DailyWindowStart)
+	}
+	if s.WeeklyWindowStart != nil {
+		create.SetWeeklyWindowStart(*s.WeeklyWindowStart)
+	}
+	if s.MonthlyWindowStart != nil {
+		create.SetMonthlyWindowStart(*s.MonthlyWindowStart)
+	}
+	if s.CustomWindowStart != nil {
+		create.SetCustomWindowStart(*s.CustomWindowStart)
+	}
+	if s.SourceType != nil {
+		create.SetSourceType(*s.SourceType)
+	}
+	if s.SourceRefID != nil {
+		create.SetSourceRefID(*s.SourceRefID)
+	}
+	if s.SourceRedeemCodeID != nil {
+		create.SetSourceRedeemCodeID(*s.SourceRedeemCodeID)
+	}
+	if s.RedeemCodeSnapshot != nil {
+		create.SetRedeemCodeSnapshot(*s.RedeemCodeSnapshot)
+	}
+	if s.GroupNameSnapshot != nil {
+		create.SetGroupNameSnapshot(*s.GroupNameSnapshot)
+	}
+	if s.GroupPlatformSnapshot != nil {
+		create.SetGroupPlatformSnapshot(*s.GroupPlatformSnapshot)
+	}
+	if s.GroupRateMultiplierSnapshot != nil {
+		create.SetGroupRateMultiplierSnapshot(*s.GroupRateMultiplierSnapshot)
+	}
+	if s.DailyLimitUSDSnapshot != nil {
+		create.SetDailyLimitUsdSnapshot(*s.DailyLimitUSDSnapshot)
+	}
+	if s.WeeklyLimitUSDSnapshot != nil {
+		create.SetWeeklyLimitUsdSnapshot(*s.WeeklyLimitUSDSnapshot)
+	}
+	if s.MonthlyLimitUSDSnapshot != nil {
+		create.SetMonthlyLimitUsdSnapshot(*s.MonthlyLimitUSDSnapshot)
+	}
+	if s.CustomLimitHoursSnapshot != nil {
+		create.SetCustomLimitHoursSnapshot(*s.CustomLimitHoursSnapshot)
+	}
+	if s.CustomLimitUSDSnapshot != nil {
+		create.SetCustomLimitUsdSnapshot(*s.CustomLimitUSDSnapshot)
 	}
 	if !s.CreatedAt.IsZero() {
 		create.SetCreatedAt(s.CreatedAt)

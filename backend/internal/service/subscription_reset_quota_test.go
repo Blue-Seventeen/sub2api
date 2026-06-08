@@ -220,6 +220,22 @@ func TestAdminResetQuota_ResetMonthlyOnly(t *testing.T) {
 	require.True(t, stub.resetMonthlyCalled, "应调用 ResetMonthlyUsage")
 }
 
+func TestAdminResetQuota_ResetCustomOnly(t *testing.T) {
+	stub := &resetQuotaUserSubRepoStub{
+		sub: &UserSubscription{ID: 11, UserID: 10, GroupID: 20},
+	}
+	svc := newResetQuotaSvc(stub)
+
+	result, err := svc.AdminResetQuota(context.Background(), 11, false, false, false, true)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.False(t, stub.resetDailyCalled)
+	require.False(t, stub.resetWeeklyCalled)
+	require.False(t, stub.resetMonthlyCalled)
+	require.True(t, stub.resetCustomCalled)
+}
+
 func TestAdminResetQuota_ResetMonthlyUsageError(t *testing.T) {
 	dbErr := errors.New("db error")
 	stub := &resetQuotaUserSubRepoStub{

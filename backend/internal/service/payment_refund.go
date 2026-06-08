@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -257,6 +256,8 @@ func (s *PaymentService) prepDeduct(ctx context.Context, o *dbent.PaymentOrder, 
 				p.SubscriptionID = sub.ID
 			} else if !force {
 				return &RefundResult{Success: false, Warning: "cannot find active subscription for deduction, use force", RequireForce: true}
+			} else {
+				p.SubDaysToDeduct = 0
 			}
 		}
 		return nil
@@ -295,23 +296,15 @@ func (s *PaymentService) ExecuteRefund(ctx context.Context, p *RefundPlan) (*Ref
 			p.BalanceToDeduct = 0
 		}
 	}
-	if p.DeductionType == payment.DeductionTypeSubscription && p.SubDaysToDeduct > 0 && p.SubscriptionID > 0 {
+	if p.DeductionType == payment.DeductionTypeSubscription && p.SubDaysToDeduct > 0 && p.Order != nil && p.Order.SubscriptionGroupID != nil {
 		if !s.hasAuditLog(ctx, p.OrderID, "REFUND_ROLLBACK_FAILED") {
-			_, err := s.subscriptionSvc.ExtendSubscription(ctx, p.SubscriptionID, -p.SubDaysToDeduct)
+			note := fmt.Sprintf("payment refund order %d deducted %d subscription days", p.OrderID, p.SubDaysToDeduct)
+			snapshots, err := s.subscriptionSvc.DeductSubscriptionDaysNewestWithSnapshots(ctx, p.Order.UserID, *p.Order.SubscriptionGroupID, p.SubDaysToDeduct, note)
 			if err != nil {
-				if errors.Is(err, ErrAdjustWouldExpire) {
-					// Deduction would expire the subscription — revoke it entirely
-					slog.Info("subscription deduction would expire, revoking", "orderID", p.OrderID, "subID", p.SubscriptionID, "days", p.SubDaysToDeduct)
-					if revokeErr := s.subscriptionSvc.RevokeSubscription(ctx, p.SubscriptionID); revokeErr != nil {
-						s.restoreStatus(ctx, p)
-						return nil, fmt.Errorf("revoke subscription: %w", revokeErr)
-					}
-				} else {
-					// Other errors (DB failure, not found) — abort refund
-					s.restoreStatus(ctx, p)
-					return nil, fmt.Errorf("deduct subscription days: %w", err)
-				}
+				s.restoreStatus(ctx, p)
+				return nil, fmt.Errorf("deduct subscription days: %w", err)
 			}
+			p.SubscriptionDeductionSnapshots = snapshots
 		} else {
 			slog.Warn("skipping subscription deduction on retry (previous rollback failed)", "orderID", p.OrderID)
 			p.SubDaysToDeduct = 0
@@ -420,9 +413,10 @@ func (s *PaymentService) RollbackRefund(ctx context.Context, p *RefundPlan, gErr
 		}
 		s.invalidateUserBalanceCache(p.Order.UserID)
 	}
-	if p.DeductionType == payment.DeductionTypeSubscription && p.SubDaysToDeduct > 0 && p.SubscriptionID > 0 {
-		if _, err := s.subscriptionSvc.ExtendSubscription(ctx, p.SubscriptionID, p.SubDaysToDeduct); err != nil {
-			slog.Error("[CRITICAL] subscription rollback failed", "orderID", p.OrderID, "subID", p.SubscriptionID, "days", p.SubDaysToDeduct, "error", err)
+	if p.DeductionType == payment.DeductionTypeSubscription && p.SubDaysToDeduct > 0 && p.Order != nil && p.Order.SubscriptionGroupID != nil {
+		err := s.subscriptionSvc.RestoreSubscriptionSnapshots(ctx, p.SubscriptionDeductionSnapshots)
+		if err != nil {
+			slog.Error("[CRITICAL] subscription rollback failed", "orderID", p.OrderID, "groupID", *p.Order.SubscriptionGroupID, "days", p.SubDaysToDeduct, "error", err)
 			s.writeAuditLog(ctx, p.OrderID, "REFUND_ROLLBACK_FAILED", "admin", map[string]any{"gatewayError": psErrMsg(gErr), "rollbackError": psErrMsg(err), "subDaysDeducted": p.SubDaysToDeduct})
 			return false
 		}

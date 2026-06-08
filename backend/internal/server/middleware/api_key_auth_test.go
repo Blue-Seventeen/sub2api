@@ -1155,7 +1155,26 @@ func (r *stubUserSubscriptionRepo) GetActiveByUserIDAndGroupID(ctx context.Conte
 	return nil, errors.New("not implemented")
 }
 
+func (r *stubUserSubscriptionRepo) ListActiveByUserIDAndGroupID(ctx context.Context, userID, groupID int64) ([]service.UserSubscription, error) {
+	if r.getActive != nil {
+		sub, err := r.getActive(ctx, userID, groupID)
+		if err != nil {
+			return nil, err
+		}
+		return []service.UserSubscription{*sub}, nil
+	}
+	return nil, errors.New("not implemented")
+}
+
+func (r *stubUserSubscriptionRepo) GetBySource(ctx context.Context, sourceType, sourceRefID string) (*service.UserSubscription, error) {
+	return nil, errors.New("not implemented")
+}
+
 func (r *stubUserSubscriptionRepo) Update(ctx context.Context, sub *service.UserSubscription) error {
+	return errors.New("not implemented")
+}
+
+func (r *stubUserSubscriptionRepo) UpdateMutableFields(ctx context.Context, subscriptionID int64, fields service.UserSubscriptionMutableFields) error {
 	return errors.New("not implemented")
 }
 

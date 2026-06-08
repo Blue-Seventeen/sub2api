@@ -963,7 +963,7 @@ func TestOpenAIGatewayServiceRecordUsage_GeneratesRequestIDWhenAllSourcesMissing
 	require.Equal(t, billingRepo.lastCmd.RequestID, usageRepo.lastLog.RequestID)
 }
 
-func TestOpenAIGatewayServiceRecordUsage_BillingErrorSkipsUsageLogWrite(t *testing.T) {
+func TestOpenAIGatewayServiceRecordUsage_BillingErrorStillWritesUsageLog(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{}
 	billingRepo := &openAIRecordUsageBillingRepoStub{err: errors.New("billing tx failed")}
 	userRepo := &openAIRecordUsageUserRepoStub{}
@@ -987,7 +987,13 @@ func TestOpenAIGatewayServiceRecordUsage_BillingErrorSkipsUsageLogWrite(t *testi
 
 	require.Error(t, err)
 	require.Equal(t, 1, billingRepo.calls)
-	require.Equal(t, 0, usageRepo.calls)
+	require.Equal(t, 1, usageRepo.calls)
+	require.NotNil(t, usageRepo.lastLog)
+	require.Equal(t, "resp_billing_fail:billing_failed", usageRepo.lastLog.RequestID)
+	require.Zero(t, usageRepo.lastLog.InputTokens)
+	require.Zero(t, usageRepo.lastLog.OutputTokens)
+	require.Zero(t, usageRepo.lastLog.TotalCost)
+	require.Zero(t, usageRepo.lastLog.ActualCost)
 }
 
 func TestOpenAIGatewayServiceRecordUsage_UpdatesAPIKeyQuotaWhenConfigured(t *testing.T) {
@@ -1489,10 +1495,36 @@ func TestOpenAIGatewayServiceRecordUsage_SubscriptionBillingSetsSubscriptionFiel
 	require.NoError(t, err)
 	require.NotNil(t, usageRepo.lastLog)
 	require.Equal(t, BillingTypeSubscription, usageRepo.lastLog.BillingType)
-	require.NotNil(t, usageRepo.lastLog.SubscriptionID)
-	require.Equal(t, subscription.ID, *usageRepo.lastLog.SubscriptionID)
+	require.Nil(t, usageRepo.lastLog.SubscriptionID)
 	require.Equal(t, 1, subRepo.incrementCalls)
 	require.Equal(t, 0, userRepo.deductCalls)
+}
+
+func TestOpenAIGatewayServiceRecordUsage_AggregateSubscriptionKeepsUsageLogSubscriptionIDNil(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	svc := newOpenAIRecordUsageServiceForTest(usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
+	svc.cfg.RunMode = config.RunModeSimple
+
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID: "resp_aggregate_subscription_log_id",
+			Usage:     OpenAIUsage{InputTokens: 10, OutputTokens: 5},
+			Model:     "gpt-5.1",
+			Duration:  time.Second,
+		},
+		APIKey: &APIKey{
+			ID:      101,
+			GroupID: i64p(88),
+			Group:   &Group{ID: 88, SubscriptionType: SubscriptionTypeSubscription, RateMultiplier: 1.0},
+		},
+		User:         &User{ID: 201},
+		Account:      &Account{ID: 301},
+		Subscription: &UserSubscription{ID: 0, IsAggregate: true},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.Nil(t, usageRepo.lastLog.SubscriptionID)
 }
 
 func TestOpenAIGatewayServiceRecordUsage_SimpleModeSkipsBillingAfterPersist(t *testing.T) {

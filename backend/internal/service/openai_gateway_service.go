@@ -6060,9 +6060,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	if apiKey.GroupID != nil {
 		usageLog.GroupID = apiKey.GroupID
 	}
-	if subscription != nil {
-		usageLog.SubscriptionID = &subscription.ID
-	}
+	usageLog.SubscriptionID = optionalSubscriptionID(subscription)
 
 	// 计算账号统计定价费用（使用最终上游模型匹配自定义规则）
 	if apiKey.GroupID != nil {
@@ -6109,6 +6107,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}()
 
 	if billingErr != nil {
+		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLogFailurePlaceholder(usageLog, "billing_failed"), "service.openai_gateway")
 		return billingErr
 	}
 	writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")

@@ -2013,7 +2013,16 @@ func (stubUserSubscriptionRepo) GetByUserIDAndGroupID(ctx context.Context, userI
 func (stubUserSubscriptionRepo) GetActiveByUserIDAndGroupID(ctx context.Context, userID, groupID int64) (*service.UserSubscription, error) {
 	return nil, errors.New("not implemented")
 }
+func (stubUserSubscriptionRepo) ListActiveByUserIDAndGroupID(ctx context.Context, userID, groupID int64) ([]service.UserSubscription, error) {
+	return nil, errors.New("not implemented")
+}
+func (stubUserSubscriptionRepo) GetBySource(ctx context.Context, sourceType, sourceRefID string) (*service.UserSubscription, error) {
+	return nil, errors.New("not implemented")
+}
 func (stubUserSubscriptionRepo) Update(ctx context.Context, sub *service.UserSubscription) error {
+	return errors.New("not implemented")
+}
+func (stubUserSubscriptionRepo) UpdateMutableFields(ctx context.Context, subscriptionID int64, fields service.UserSubscriptionMutableFields) error {
 	return errors.New("not implemented")
 }
 func (stubUserSubscriptionRepo) Delete(ctx context.Context, id int64) error {

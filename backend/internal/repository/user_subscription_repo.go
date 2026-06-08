@@ -3,10 +3,12 @@ package repository
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/group"
+	"github.com/Wei-Shaw/sub2api/ent/schema/mixins"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -38,7 +40,19 @@ func (r *userSubscriptionRepository) Create(ctx context.Context, sub *service.Us
 		SetWeeklyUsageUsd(sub.WeeklyUsageUSD).
 		SetMonthlyUsageUsd(sub.MonthlyUsageUSD).
 		SetCustomUsageUsd(sub.CustomUsageUSD).
-		SetNillableAssignedBy(sub.AssignedBy)
+		SetNillableAssignedBy(sub.AssignedBy).
+		SetNillableSourceType(sub.SourceType).
+		SetNillableSourceRefID(sub.SourceRefID).
+		SetNillableSourceRedeemCodeID(sub.SourceRedeemCodeID).
+		SetNillableRedeemCodeSnapshot(sub.RedeemCodeSnapshot).
+		SetNillableGroupNameSnapshot(sub.GroupNameSnapshot).
+		SetNillableGroupPlatformSnapshot(sub.GroupPlatformSnapshot).
+		SetNillableGroupRateMultiplierSnapshot(sub.GroupRateMultiplierSnapshot).
+		SetNillableDailyLimitUsdSnapshot(sub.DailyLimitUSDSnapshot).
+		SetNillableWeeklyLimitUsdSnapshot(sub.WeeklyLimitUSDSnapshot).
+		SetNillableMonthlyLimitUsdSnapshot(sub.MonthlyLimitUSDSnapshot).
+		SetNillableCustomLimitHoursSnapshot(sub.CustomLimitHoursSnapshot).
+		SetNillableCustomLimitUsdSnapshot(sub.CustomLimitUSDSnapshot)
 
 	if sub.StartsAt.IsZero() {
 		builder.SetStartsAt(time.Now())
@@ -75,16 +89,44 @@ func (r *userSubscriptionRepository) GetByID(ctx context.Context, id int64) (*se
 	return userSubscriptionEntityToService(m), nil
 }
 
+func (r *userSubscriptionRepository) GetByIDIncludeDeleted(ctx context.Context, id int64) (*service.UserSubscription, error) {
+	client := clientFromContext(ctx, r.client)
+	m, err := client.UserSubscription.Query().
+		Where(usersubscription.IDEQ(id)).
+		WithUser().
+		WithGroup().
+		WithAssignedByUser().
+		Only(mixins.SkipSoftDelete(ctx))
+	if err != nil {
+		return nil, translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
+	}
+	return userSubscriptionEntityToService(m), nil
+}
+
 func (r *userSubscriptionRepository) GetByUserIDAndGroupID(ctx context.Context, userID, groupID int64) (*service.UserSubscription, error) {
 	client := clientFromContext(ctx, r.client)
 	m, err := client.UserSubscription.Query().
 		Where(usersubscription.UserIDEQ(userID), usersubscription.GroupIDEQ(groupID)).
 		WithGroup().
-		Only(ctx)
+		Order(dbent.Desc(usersubscription.FieldCreatedAt)).
+		First(ctx)
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
 	}
 	return userSubscriptionEntityToService(m), nil
+}
+
+func (r *userSubscriptionRepository) ListByUserIDAndGroupID(ctx context.Context, userID, groupID int64) ([]service.UserSubscription, error) {
+	client := clientFromContext(ctx, r.client)
+	subs, err := client.UserSubscription.Query().
+		Where(usersubscription.UserIDEQ(userID), usersubscription.GroupIDEQ(groupID)).
+		WithGroup().
+		Order(dbent.Desc(usersubscription.FieldCreatedAt), dbent.Desc(usersubscription.FieldID)).
+		All(mixins.SkipSoftDelete(ctx))
+	if err != nil {
+		return nil, err
+	}
+	return userSubscriptionEntitiesToService(subs), nil
 }
 
 func (r *userSubscriptionRepository) GetActiveByUserIDAndGroupID(ctx context.Context, userID, groupID int64) (*service.UserSubscription, error) {
@@ -97,7 +139,49 @@ func (r *userSubscriptionRepository) GetActiveByUserIDAndGroupID(ctx context.Con
 			usersubscription.ExpiresAtGT(time.Now()),
 		).
 		WithGroup().
-		Only(ctx)
+		Order(dbent.Asc(usersubscription.FieldStartsAt), dbent.Asc(usersubscription.FieldID)).
+		First(ctx)
+	if err != nil {
+		return nil, translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
+	}
+	return userSubscriptionEntityToService(m), nil
+}
+
+func (r *userSubscriptionRepository) ListActiveByUserIDAndGroupID(ctx context.Context, userID, groupID int64) ([]service.UserSubscription, error) {
+	client := clientFromContext(ctx, r.client)
+	query := client.UserSubscription.Query().
+		Where(
+			usersubscription.UserIDEQ(userID),
+			usersubscription.GroupIDEQ(groupID),
+			usersubscription.StatusEQ(service.SubscriptionStatusActive),
+			usersubscription.ExpiresAtGT(time.Now()),
+		).
+		WithGroup().
+		Order(dbent.Asc(usersubscription.FieldStartsAt), dbent.Asc(usersubscription.FieldID))
+	if dbent.TxFromContext(ctx) != nil {
+		query = query.ForUpdate()
+	}
+	subs, err := query.All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return userSubscriptionEntitiesToService(subs), nil
+}
+
+func (r *userSubscriptionRepository) GetBySource(ctx context.Context, sourceType, sourceRefID string) (*service.UserSubscription, error) {
+	sourceType = strings.TrimSpace(sourceType)
+	sourceRefID = strings.TrimSpace(sourceRefID)
+	if sourceType == "" || sourceRefID == "" {
+		return nil, service.ErrSubscriptionNotFound
+	}
+	client := clientFromContext(ctx, r.client)
+	m, err := client.UserSubscription.Query().
+		Where(usersubscription.SourceTypeEQ(sourceType), usersubscription.SourceRefIDEQ(sourceRefID)).
+		WithUser().
+		WithGroup().
+		WithAssignedByUser().
+		Order(dbent.Desc(usersubscription.FieldCreatedAt)).
+		First(mixins.SkipSoftDelete(ctx))
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
 	}
@@ -126,7 +210,19 @@ func (r *userSubscriptionRepository) Update(ctx context.Context, sub *service.Us
 		SetCustomUsageUsd(sub.CustomUsageUSD).
 		SetNillableAssignedBy(sub.AssignedBy).
 		SetAssignedAt(sub.AssignedAt).
-		SetNotes(sub.Notes)
+		SetNotes(sub.Notes).
+		SetNillableSourceType(sub.SourceType).
+		SetNillableSourceRefID(sub.SourceRefID).
+		SetNillableSourceRedeemCodeID(sub.SourceRedeemCodeID).
+		SetNillableRedeemCodeSnapshot(sub.RedeemCodeSnapshot).
+		SetNillableGroupNameSnapshot(sub.GroupNameSnapshot).
+		SetNillableGroupPlatformSnapshot(sub.GroupPlatformSnapshot).
+		SetNillableGroupRateMultiplierSnapshot(sub.GroupRateMultiplierSnapshot).
+		SetNillableDailyLimitUsdSnapshot(sub.DailyLimitUSDSnapshot).
+		SetNillableWeeklyLimitUsdSnapshot(sub.WeeklyLimitUSDSnapshot).
+		SetNillableMonthlyLimitUsdSnapshot(sub.MonthlyLimitUSDSnapshot).
+		SetNillableCustomLimitHoursSnapshot(sub.CustomLimitHoursSnapshot).
+		SetNillableCustomLimitUsdSnapshot(sub.CustomLimitUSDSnapshot)
 
 	updated, err := builder.Save(ctx)
 	if err == nil {
@@ -134,6 +230,47 @@ func (r *userSubscriptionRepository) Update(ctx context.Context, sub *service.Us
 		return nil
 	}
 	return translatePersistenceError(err, service.ErrSubscriptionNotFound, service.ErrSubscriptionAlreadyExists)
+}
+
+func (r *userSubscriptionRepository) UpdateMutableFields(ctx context.Context, subscriptionID int64, fields service.UserSubscriptionMutableFields) error {
+	if subscriptionID <= 0 {
+		return service.ErrSubscriptionNotFound
+	}
+	if fields.ExpiresAt == nil &&
+		fields.Status == nil &&
+		fields.Notes == nil &&
+		fields.DailyUsageUSD == nil &&
+		fields.WeeklyUsageUSD == nil &&
+		fields.MonthlyUsageUSD == nil &&
+		fields.CustomUsageUSD == nil {
+		return nil
+	}
+
+	client := clientFromContext(ctx, r.client)
+	builder := client.UserSubscription.UpdateOneID(subscriptionID)
+	if fields.ExpiresAt != nil {
+		builder.SetExpiresAt(*fields.ExpiresAt)
+	}
+	if fields.Status != nil {
+		builder.SetStatus(*fields.Status)
+	}
+	if fields.Notes != nil {
+		builder.SetNotes(*fields.Notes)
+	}
+	if fields.DailyUsageUSD != nil {
+		builder.SetDailyUsageUsd(*fields.DailyUsageUSD)
+	}
+	if fields.WeeklyUsageUSD != nil {
+		builder.SetWeeklyUsageUsd(*fields.WeeklyUsageUSD)
+	}
+	if fields.MonthlyUsageUSD != nil {
+		builder.SetMonthlyUsageUsd(*fields.MonthlyUsageUSD)
+	}
+	if fields.CustomUsageUSD != nil {
+		builder.SetCustomUsageUsd(*fields.CustomUsageUSD)
+	}
+	_, err := builder.Save(ctx)
+	return translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
 }
 
 func (r *userSubscriptionRepository) Delete(ctx context.Context, id int64) error {
@@ -154,6 +291,20 @@ func (r *userSubscriptionRepository) ListByUserID(ctx context.Context, userID in
 		return nil, err
 	}
 	return userSubscriptionEntitiesToService(subs), nil
+}
+
+func (r *userSubscriptionRepository) ListByUserIDIncludeDeleted(ctx context.Context, userID int64) ([]service.UserSubscription, error) {
+	client := clientFromContext(ctx, r.client)
+	subs, err := client.UserSubscription.Query().
+		Where(usersubscription.UserIDEQ(userID)).
+		WithGroup().
+		Order(dbent.Desc(usersubscription.FieldCreatedAt)).
+		All(mixins.SkipSoftDelete(ctx))
+	if err != nil {
+		return nil, err
+	}
+	out := userSubscriptionEntitiesToService(subs)
+	return out, nil
 }
 
 func (r *userSubscriptionRepository) ListActiveByUserID(ctx context.Context, userID int64) ([]service.UserSubscription, error) {
@@ -198,6 +349,10 @@ func (r *userSubscriptionRepository) ListByGroupID(ctx context.Context, groupID 
 
 func (r *userSubscriptionRepository) List(ctx context.Context, params pagination.PaginationParams, userID, groupID *int64, status, platform, sortBy, sortOrder string) ([]service.UserSubscription, *pagination.PaginationResult, error) {
 	client := clientFromContext(ctx, r.client)
+	queryCtx := ctx
+	if status == service.SubscriptionStatusRevoked {
+		queryCtx = mixins.SkipSoftDelete(ctx)
+	}
 	q := client.UserSubscription.Query()
 	if userID != nil {
 		q = q.Where(usersubscription.UserIDEQ(*userID))
@@ -206,7 +361,10 @@ func (r *userSubscriptionRepository) List(ctx context.Context, params pagination
 		q = q.Where(usersubscription.GroupIDEQ(*groupID))
 	}
 	if platform != "" {
-		q = q.Where(usersubscription.HasGroupWith(group.PlatformEQ(platform)))
+		q = q.Where(usersubscription.Or(
+			usersubscription.HasGroupWith(group.PlatformEQ(platform)),
+			usersubscription.GroupPlatformSnapshotEQ(platform),
+		))
 	}
 
 	// Status filtering with real-time expiration check
@@ -229,6 +387,11 @@ func (r *userSubscriptionRepository) List(ctx context.Context, params pagination
 				),
 			),
 		)
+	case service.SubscriptionStatusRevoked:
+		q = q.Where(usersubscription.Or(
+			usersubscription.StatusEQ(service.SubscriptionStatusRevoked),
+			usersubscription.DeletedAtNotNil(),
+		))
 	case "":
 		// No filter
 	default:
@@ -236,7 +399,7 @@ func (r *userSubscriptionRepository) List(ctx context.Context, params pagination
 		q = q.Where(usersubscription.StatusEQ(status))
 	}
 
-	total, err := q.Clone().Count(ctx)
+	total, err := q.Clone().Count(queryCtx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -267,12 +430,18 @@ func (r *userSubscriptionRepository) List(ctx context.Context, params pagination
 	subs, err := q.
 		Offset(params.Offset()).
 		Limit(params.Limit()).
-		All(ctx)
+		All(queryCtx)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	return userSubscriptionEntitiesToService(subs), paginationResultFromTotal(int64(total), params), nil
+	out := userSubscriptionEntitiesToService(subs)
+	if status == service.SubscriptionStatusRevoked {
+		for i := range out {
+			out[i].Status = service.SubscriptionStatusRevoked
+		}
+	}
+	return out, paginationResultFromTotal(int64(total), params), nil
 }
 
 func (r *userSubscriptionRepository) ExistsByUserIDAndGroupID(ctx context.Context, userID, groupID int64) (bool, error) {
@@ -490,25 +659,38 @@ func userSubscriptionEntityToService(m *dbent.UserSubscription) *service.UserSub
 		return nil
 	}
 	out := &service.UserSubscription{
-		ID:                 m.ID,
-		UserID:             m.UserID,
-		GroupID:            m.GroupID,
-		StartsAt:           m.StartsAt,
-		ExpiresAt:          m.ExpiresAt,
-		Status:             m.Status,
-		DailyWindowStart:   m.DailyWindowStart,
-		WeeklyWindowStart:  m.WeeklyWindowStart,
-		MonthlyWindowStart: m.MonthlyWindowStart,
-		CustomWindowStart:  m.CustomWindowStart,
-		DailyUsageUSD:      m.DailyUsageUsd,
-		WeeklyUsageUSD:     m.WeeklyUsageUsd,
-		MonthlyUsageUSD:    m.MonthlyUsageUsd,
-		CustomUsageUSD:     m.CustomUsageUsd,
-		AssignedBy:         m.AssignedBy,
-		AssignedAt:         m.AssignedAt,
-		Notes:              derefString(m.Notes),
-		CreatedAt:          m.CreatedAt,
-		UpdatedAt:          m.UpdatedAt,
+		ID:                          m.ID,
+		UserID:                      m.UserID,
+		GroupID:                     m.GroupID,
+		StartsAt:                    m.StartsAt,
+		ExpiresAt:                   m.ExpiresAt,
+		Status:                      m.Status,
+		DailyWindowStart:            m.DailyWindowStart,
+		WeeklyWindowStart:           m.WeeklyWindowStart,
+		MonthlyWindowStart:          m.MonthlyWindowStart,
+		CustomWindowStart:           m.CustomWindowStart,
+		DailyUsageUSD:               m.DailyUsageUsd,
+		WeeklyUsageUSD:              m.WeeklyUsageUsd,
+		MonthlyUsageUSD:             m.MonthlyUsageUsd,
+		CustomUsageUSD:              m.CustomUsageUsd,
+		AssignedBy:                  m.AssignedBy,
+		AssignedAt:                  m.AssignedAt,
+		Notes:                       derefString(m.Notes),
+		SourceType:                  m.SourceType,
+		SourceRefID:                 m.SourceRefID,
+		SourceRedeemCodeID:          m.SourceRedeemCodeID,
+		RedeemCodeSnapshot:          m.RedeemCodeSnapshot,
+		GroupNameSnapshot:           m.GroupNameSnapshot,
+		GroupPlatformSnapshot:       m.GroupPlatformSnapshot,
+		GroupRateMultiplierSnapshot: m.GroupRateMultiplierSnapshot,
+		DailyLimitUSDSnapshot:       m.DailyLimitUsdSnapshot,
+		WeeklyLimitUSDSnapshot:      m.WeeklyLimitUsdSnapshot,
+		MonthlyLimitUSDSnapshot:     m.MonthlyLimitUsdSnapshot,
+		CustomLimitHoursSnapshot:    m.CustomLimitHoursSnapshot,
+		CustomLimitUSDSnapshot:      m.CustomLimitUsdSnapshot,
+		CreatedAt:                   m.CreatedAt,
+		UpdatedAt:                   m.UpdatedAt,
+		DeletedAt:                   m.DeletedAt,
 	}
 	if m.Edges.User != nil {
 		out.User = userEntityToService(m.Edges.User)

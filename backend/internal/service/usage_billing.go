@@ -22,6 +22,8 @@ type UsageBillingCommand struct {
 	UserID                  int64
 	AccountID               int64
 	SubscriptionID          *int64
+	SubscriptionUserID      int64
+	SubscriptionGroupID     int64
 	AccountType             string
 	Model                   string
 	ServiceTier             string
@@ -166,6 +168,7 @@ type UsageBillingApplyResult struct {
 	APIKeyQuotaExhausted bool
 	NewBalance           *float64           // post-deduction balance (nil = no balance deduction)
 	QuotaState           *AccountQuotaState // post-increment quota state (nil = no quota increment)
+	SubscriptionID       *int64             // actual subscription card selected for billing
 }
 
 type UsageBillingRepository interface {

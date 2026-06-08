@@ -26,8 +26,8 @@
       <!-- Subscriptions Grid -->
       <div v-else class="grid gap-6 lg:grid-cols-2">
         <div
-          v-for="subscription in subscriptions"
-          :key="subscription.id"
+          v-for="(subscription, index) in subscriptions"
+          :key="subscriptionKey(subscription, index)"
           class="overflow-hidden rounded-2xl border bg-white dark:bg-dark-800"
           :class="platformBorderClass(subscription.group?.platform || '')"
         >
@@ -314,6 +314,17 @@ const appStore = useAppStore()
 
 const subscriptions = ref<UserSubscription[]>([])
 const loading = ref(true)
+
+function subscriptionKey(subscription: UserSubscription, index: number): string {
+  return [
+    subscription.group_id,
+    subscription.id,
+    subscription.status,
+    subscription.starts_at ?? '',
+    subscription.expires_at ?? '',
+    index
+  ].join(':')
+}
 
 async function loadSubscriptions() {
   try {

@@ -86,6 +86,52 @@ func (UserSubscription) Fields() []ent.Field {
 			Optional().
 			Nillable().
 			SchemaType(map[string]string{dialect.Postgres: "text"}),
+		field.String("source_type").
+			MaxLen(32).
+			Optional().
+			Nillable(),
+		field.String("source_ref_id").
+			MaxLen(128).
+			Optional().
+			Nillable(),
+		field.Int64("source_redeem_code_id").
+			Optional().
+			Nillable(),
+		field.String("redeem_code_snapshot").
+			Optional().
+			Nillable().
+			SchemaType(map[string]string{dialect.Postgres: "text"}),
+		field.String("group_name_snapshot").
+			Optional().
+			Nillable().
+			SchemaType(map[string]string{dialect.Postgres: "text"}),
+		field.String("group_platform_snapshot").
+			MaxLen(50).
+			Optional().
+			Nillable(),
+		field.Float("group_rate_multiplier_snapshot").
+			Optional().
+			Nillable().
+			SchemaType(map[string]string{dialect.Postgres: "decimal(10,4)"}),
+		field.Float("daily_limit_usd_snapshot").
+			Optional().
+			Nillable().
+			SchemaType(map[string]string{dialect.Postgres: "decimal(20,10)"}),
+		field.Float("weekly_limit_usd_snapshot").
+			Optional().
+			Nillable().
+			SchemaType(map[string]string{dialect.Postgres: "decimal(20,10)"}),
+		field.Float("monthly_limit_usd_snapshot").
+			Optional().
+			Nillable().
+			SchemaType(map[string]string{dialect.Postgres: "decimal(20,10)"}),
+		field.Int("custom_limit_hours_snapshot").
+			Optional().
+			Nillable(),
+		field.Float("custom_limit_usd_snapshot").
+			Optional().
+			Nillable().
+			SchemaType(map[string]string{dialect.Postgres: "decimal(20,10)"}),
 	}
 }
 
@@ -122,5 +168,9 @@ func (UserSubscription) Indexes() []ent.Index {
 		// 见迁移文件 016_soft_delete_partial_unique_indexes.sql
 		index.Fields("user_id", "group_id"),
 		index.Fields("deleted_at"),
+		index.Fields("user_id", "group_id", "status", "expires_at", "deleted_at"),
+		index.Fields("user_id", "group_id", "status", "starts_at"),
+		index.Fields("source_type", "source_ref_id"),
+		index.Fields("source_redeem_code_id"),
 	}
 }

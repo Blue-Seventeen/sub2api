@@ -1654,6 +1654,8 @@ export interface UserSubscription {
   group_id: number
   status: 'active' | 'expired' | 'revoked'
   starts_at: string
+  is_aggregate?: boolean
+  subscription_count?: number
   daily_usage_usd: number
   weekly_usage_usd: number
   monthly_usage_usd: number
@@ -1662,6 +1664,18 @@ export interface UserSubscription {
   weekly_window_start: string | null
   monthly_window_start: string | null
   custom_window_start: string | null
+  source_type?: string | null
+  source_ref_id?: string | null
+  source_redeem_code_id?: number | null
+  redeem_code_snapshot?: string | null
+  group_name_snapshot?: string | null
+  group_platform_snapshot?: string | null
+  group_rate_multiplier_snapshot?: number | null
+  daily_limit_usd_snapshot?: number | null
+  weekly_limit_usd_snapshot?: number | null
+  monthly_limit_usd_snapshot?: number | null
+  custom_limit_hours_snapshot?: number | null
+  custom_limit_usd_snapshot?: number | null
   created_at: string
   updated_at: string
   expires_at: string | null
@@ -1703,7 +1717,11 @@ export interface BulkAssignSubscriptionRequest {
 }
 
 export interface ExtendSubscriptionRequest {
-  days: number
+  days?: number
+  daily_usage_usd?: number
+  weekly_usage_usd?: number
+  monthly_usage_usd?: number
+  custom_usage_usd?: number
 }
 
 // ==================== Query Parameters ====================

@@ -12,7 +12,10 @@ type UserSubscriptionRepository interface {
 	GetByID(ctx context.Context, id int64) (*UserSubscription, error)
 	GetByUserIDAndGroupID(ctx context.Context, userID, groupID int64) (*UserSubscription, error)
 	GetActiveByUserIDAndGroupID(ctx context.Context, userID, groupID int64) (*UserSubscription, error)
+	ListActiveByUserIDAndGroupID(ctx context.Context, userID, groupID int64) ([]UserSubscription, error)
+	GetBySource(ctx context.Context, sourceType, sourceRefID string) (*UserSubscription, error)
 	Update(ctx context.Context, sub *UserSubscription) error
+	UpdateMutableFields(ctx context.Context, subscriptionID int64, fields UserSubscriptionMutableFields) error
 	Delete(ctx context.Context, id int64) error
 
 	ListByUserID(ctx context.Context, userID int64) ([]UserSubscription, error)
@@ -33,4 +36,15 @@ type UserSubscriptionRepository interface {
 	IncrementUsage(ctx context.Context, id int64, costUSD float64) error
 
 	BatchUpdateExpiredStatus(ctx context.Context) (int64, error)
+}
+
+type UserSubscriptionMutableFields struct {
+	ExpiresAt *time.Time
+	Status    *string
+	Notes     *string
+
+	DailyUsageUSD   *float64
+	WeeklyUsageUSD  *float64
+	MonthlyUsageUSD *float64
+	CustomUsageUSD  *float64
 }

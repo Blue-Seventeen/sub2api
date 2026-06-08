@@ -1917,6 +1917,18 @@ var (
 		{Name: "custom_usage_usd", Type: field.TypeFloat64, Default: 0, SchemaType: map[string]string{"postgres": "decimal(20,10)"}},
 		{Name: "assigned_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
 		{Name: "notes", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "source_type", Type: field.TypeString, Nullable: true, Size: 32},
+		{Name: "source_ref_id", Type: field.TypeString, Nullable: true, Size: 128},
+		{Name: "source_redeem_code_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "redeem_code_snapshot", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "group_name_snapshot", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "group_platform_snapshot", Type: field.TypeString, Nullable: true, Size: 50},
+		{Name: "group_rate_multiplier_snapshot", Type: field.TypeFloat64, Nullable: true, SchemaType: map[string]string{"postgres": "decimal(10,4)"}},
+		{Name: "daily_limit_usd_snapshot", Type: field.TypeFloat64, Nullable: true, SchemaType: map[string]string{"postgres": "decimal(20,10)"}},
+		{Name: "weekly_limit_usd_snapshot", Type: field.TypeFloat64, Nullable: true, SchemaType: map[string]string{"postgres": "decimal(20,10)"}},
+		{Name: "monthly_limit_usd_snapshot", Type: field.TypeFloat64, Nullable: true, SchemaType: map[string]string{"postgres": "decimal(20,10)"}},
+		{Name: "custom_limit_hours_snapshot", Type: field.TypeInt, Nullable: true},
+		{Name: "custom_limit_usd_snapshot", Type: field.TypeFloat64, Nullable: true, SchemaType: map[string]string{"postgres": "decimal(20,10)"}},
 		{Name: "group_id", Type: field.TypeInt64},
 		{Name: "user_id", Type: field.TypeInt64},
 		{Name: "assigned_by", Type: field.TypeInt64, Nullable: true},
@@ -1929,19 +1941,19 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "user_subscriptions_groups_subscriptions",
-				Columns:    []*schema.Column{UserSubscriptionsColumns[17]},
+				Columns:    []*schema.Column{UserSubscriptionsColumns[29]},
 				RefColumns: []*schema.Column{GroupsColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
 			{
 				Symbol:     "user_subscriptions_users_subscriptions",
-				Columns:    []*schema.Column{UserSubscriptionsColumns[18]},
+				Columns:    []*schema.Column{UserSubscriptionsColumns[30]},
 				RefColumns: []*schema.Column{UsersColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
 			{
 				Symbol:     "user_subscriptions_users_assigned_subscriptions",
-				Columns:    []*schema.Column{UserSubscriptionsColumns[19]},
+				Columns:    []*schema.Column{UserSubscriptionsColumns[31]},
 				RefColumns: []*schema.Column{UsersColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
@@ -1950,12 +1962,12 @@ var (
 			{
 				Name:    "usersubscription_user_id",
 				Unique:  false,
-				Columns: []*schema.Column{UserSubscriptionsColumns[18]},
+				Columns: []*schema.Column{UserSubscriptionsColumns[30]},
 			},
 			{
 				Name:    "usersubscription_group_id",
 				Unique:  false,
-				Columns: []*schema.Column{UserSubscriptionsColumns[17]},
+				Columns: []*schema.Column{UserSubscriptionsColumns[29]},
 			},
 			{
 				Name:    "usersubscription_status",
@@ -1970,22 +1982,42 @@ var (
 			{
 				Name:    "usersubscription_user_id_status_expires_at",
 				Unique:  false,
-				Columns: []*schema.Column{UserSubscriptionsColumns[18], UserSubscriptionsColumns[6], UserSubscriptionsColumns[5]},
+				Columns: []*schema.Column{UserSubscriptionsColumns[30], UserSubscriptionsColumns[6], UserSubscriptionsColumns[5]},
 			},
 			{
 				Name:    "usersubscription_assigned_by",
 				Unique:  false,
-				Columns: []*schema.Column{UserSubscriptionsColumns[19]},
+				Columns: []*schema.Column{UserSubscriptionsColumns[31]},
 			},
 			{
 				Name:    "usersubscription_user_id_group_id",
 				Unique:  false,
-				Columns: []*schema.Column{UserSubscriptionsColumns[18], UserSubscriptionsColumns[17]},
+				Columns: []*schema.Column{UserSubscriptionsColumns[30], UserSubscriptionsColumns[29]},
 			},
 			{
 				Name:    "usersubscription_deleted_at",
 				Unique:  false,
 				Columns: []*schema.Column{UserSubscriptionsColumns[3]},
+			},
+			{
+				Name:    "usersubscription_user_id_group_id_status_expires_at_deleted_at",
+				Unique:  false,
+				Columns: []*schema.Column{UserSubscriptionsColumns[30], UserSubscriptionsColumns[29], UserSubscriptionsColumns[6], UserSubscriptionsColumns[5], UserSubscriptionsColumns[3]},
+			},
+			{
+				Name:    "usersubscription_user_id_group_id_status_starts_at",
+				Unique:  false,
+				Columns: []*schema.Column{UserSubscriptionsColumns[30], UserSubscriptionsColumns[29], UserSubscriptionsColumns[6], UserSubscriptionsColumns[4]},
+			},
+			{
+				Name:    "usersubscription_source_type_source_ref_id",
+				Unique:  false,
+				Columns: []*schema.Column{UserSubscriptionsColumns[17], UserSubscriptionsColumns[18]},
+			},
+			{
+				Name:    "usersubscription_source_redeem_code_id",
+				Unique:  false,
+				Columns: []*schema.Column{UserSubscriptionsColumns[19]},
 			},
 		},
 	}

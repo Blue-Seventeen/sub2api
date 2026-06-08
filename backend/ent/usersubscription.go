@@ -57,6 +57,30 @@ type UserSubscription struct {
 	AssignedAt time.Time `json:"assigned_at,omitempty"`
 	// Notes holds the value of the "notes" field.
 	Notes *string `json:"notes,omitempty"`
+	// SourceType holds the value of the "source_type" field.
+	SourceType *string `json:"source_type,omitempty"`
+	// SourceRefID holds the value of the "source_ref_id" field.
+	SourceRefID *string `json:"source_ref_id,omitempty"`
+	// SourceRedeemCodeID holds the value of the "source_redeem_code_id" field.
+	SourceRedeemCodeID *int64 `json:"source_redeem_code_id,omitempty"`
+	// RedeemCodeSnapshot holds the value of the "redeem_code_snapshot" field.
+	RedeemCodeSnapshot *string `json:"redeem_code_snapshot,omitempty"`
+	// GroupNameSnapshot holds the value of the "group_name_snapshot" field.
+	GroupNameSnapshot *string `json:"group_name_snapshot,omitempty"`
+	// GroupPlatformSnapshot holds the value of the "group_platform_snapshot" field.
+	GroupPlatformSnapshot *string `json:"group_platform_snapshot,omitempty"`
+	// GroupRateMultiplierSnapshot holds the value of the "group_rate_multiplier_snapshot" field.
+	GroupRateMultiplierSnapshot *float64 `json:"group_rate_multiplier_snapshot,omitempty"`
+	// DailyLimitUsdSnapshot holds the value of the "daily_limit_usd_snapshot" field.
+	DailyLimitUsdSnapshot *float64 `json:"daily_limit_usd_snapshot,omitempty"`
+	// WeeklyLimitUsdSnapshot holds the value of the "weekly_limit_usd_snapshot" field.
+	WeeklyLimitUsdSnapshot *float64 `json:"weekly_limit_usd_snapshot,omitempty"`
+	// MonthlyLimitUsdSnapshot holds the value of the "monthly_limit_usd_snapshot" field.
+	MonthlyLimitUsdSnapshot *float64 `json:"monthly_limit_usd_snapshot,omitempty"`
+	// CustomLimitHoursSnapshot holds the value of the "custom_limit_hours_snapshot" field.
+	CustomLimitHoursSnapshot *int `json:"custom_limit_hours_snapshot,omitempty"`
+	// CustomLimitUsdSnapshot holds the value of the "custom_limit_usd_snapshot" field.
+	CustomLimitUsdSnapshot *float64 `json:"custom_limit_usd_snapshot,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
 	// The values are being populated by the UserSubscriptionQuery when eager-loading is set.
 	Edges        UserSubscriptionEdges `json:"edges"`
@@ -125,11 +149,11 @@ func (*UserSubscription) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case usersubscription.FieldDailyUsageUsd, usersubscription.FieldWeeklyUsageUsd, usersubscription.FieldMonthlyUsageUsd, usersubscription.FieldCustomUsageUsd:
+		case usersubscription.FieldDailyUsageUsd, usersubscription.FieldWeeklyUsageUsd, usersubscription.FieldMonthlyUsageUsd, usersubscription.FieldCustomUsageUsd, usersubscription.FieldGroupRateMultiplierSnapshot, usersubscription.FieldDailyLimitUsdSnapshot, usersubscription.FieldWeeklyLimitUsdSnapshot, usersubscription.FieldMonthlyLimitUsdSnapshot, usersubscription.FieldCustomLimitUsdSnapshot:
 			values[i] = new(sql.NullFloat64)
-		case usersubscription.FieldID, usersubscription.FieldUserID, usersubscription.FieldGroupID, usersubscription.FieldAssignedBy:
+		case usersubscription.FieldID, usersubscription.FieldUserID, usersubscription.FieldGroupID, usersubscription.FieldAssignedBy, usersubscription.FieldSourceRedeemCodeID, usersubscription.FieldCustomLimitHoursSnapshot:
 			values[i] = new(sql.NullInt64)
-		case usersubscription.FieldStatus, usersubscription.FieldNotes:
+		case usersubscription.FieldStatus, usersubscription.FieldNotes, usersubscription.FieldSourceType, usersubscription.FieldSourceRefID, usersubscription.FieldRedeemCodeSnapshot, usersubscription.FieldGroupNameSnapshot, usersubscription.FieldGroupPlatformSnapshot:
 			values[i] = new(sql.NullString)
 		case usersubscription.FieldCreatedAt, usersubscription.FieldUpdatedAt, usersubscription.FieldDeletedAt, usersubscription.FieldStartsAt, usersubscription.FieldExpiresAt, usersubscription.FieldDailyWindowStart, usersubscription.FieldWeeklyWindowStart, usersubscription.FieldMonthlyWindowStart, usersubscription.FieldCustomWindowStart, usersubscription.FieldAssignedAt:
 			values[i] = new(sql.NullTime)
@@ -275,6 +299,90 @@ func (_m *UserSubscription) assignValues(columns []string, values []any) error {
 				_m.Notes = new(string)
 				*_m.Notes = value.String
 			}
+		case usersubscription.FieldSourceType:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field source_type", values[i])
+			} else if value.Valid {
+				_m.SourceType = new(string)
+				*_m.SourceType = value.String
+			}
+		case usersubscription.FieldSourceRefID:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field source_ref_id", values[i])
+			} else if value.Valid {
+				_m.SourceRefID = new(string)
+				*_m.SourceRefID = value.String
+			}
+		case usersubscription.FieldSourceRedeemCodeID:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field source_redeem_code_id", values[i])
+			} else if value.Valid {
+				_m.SourceRedeemCodeID = new(int64)
+				*_m.SourceRedeemCodeID = value.Int64
+			}
+		case usersubscription.FieldRedeemCodeSnapshot:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field redeem_code_snapshot", values[i])
+			} else if value.Valid {
+				_m.RedeemCodeSnapshot = new(string)
+				*_m.RedeemCodeSnapshot = value.String
+			}
+		case usersubscription.FieldGroupNameSnapshot:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field group_name_snapshot", values[i])
+			} else if value.Valid {
+				_m.GroupNameSnapshot = new(string)
+				*_m.GroupNameSnapshot = value.String
+			}
+		case usersubscription.FieldGroupPlatformSnapshot:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field group_platform_snapshot", values[i])
+			} else if value.Valid {
+				_m.GroupPlatformSnapshot = new(string)
+				*_m.GroupPlatformSnapshot = value.String
+			}
+		case usersubscription.FieldGroupRateMultiplierSnapshot:
+			if value, ok := values[i].(*sql.NullFloat64); !ok {
+				return fmt.Errorf("unexpected type %T for field group_rate_multiplier_snapshot", values[i])
+			} else if value.Valid {
+				_m.GroupRateMultiplierSnapshot = new(float64)
+				*_m.GroupRateMultiplierSnapshot = value.Float64
+			}
+		case usersubscription.FieldDailyLimitUsdSnapshot:
+			if value, ok := values[i].(*sql.NullFloat64); !ok {
+				return fmt.Errorf("unexpected type %T for field daily_limit_usd_snapshot", values[i])
+			} else if value.Valid {
+				_m.DailyLimitUsdSnapshot = new(float64)
+				*_m.DailyLimitUsdSnapshot = value.Float64
+			}
+		case usersubscription.FieldWeeklyLimitUsdSnapshot:
+			if value, ok := values[i].(*sql.NullFloat64); !ok {
+				return fmt.Errorf("unexpected type %T for field weekly_limit_usd_snapshot", values[i])
+			} else if value.Valid {
+				_m.WeeklyLimitUsdSnapshot = new(float64)
+				*_m.WeeklyLimitUsdSnapshot = value.Float64
+			}
+		case usersubscription.FieldMonthlyLimitUsdSnapshot:
+			if value, ok := values[i].(*sql.NullFloat64); !ok {
+				return fmt.Errorf("unexpected type %T for field monthly_limit_usd_snapshot", values[i])
+			} else if value.Valid {
+				_m.MonthlyLimitUsdSnapshot = new(float64)
+				*_m.MonthlyLimitUsdSnapshot = value.Float64
+			}
+		case usersubscription.FieldCustomLimitHoursSnapshot:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field custom_limit_hours_snapshot", values[i])
+			} else if value.Valid {
+				_m.CustomLimitHoursSnapshot = new(int)
+				*_m.CustomLimitHoursSnapshot = int(value.Int64)
+			}
+		case usersubscription.FieldCustomLimitUsdSnapshot:
+			if value, ok := values[i].(*sql.NullFloat64); !ok {
+				return fmt.Errorf("unexpected type %T for field custom_limit_usd_snapshot", values[i])
+			} else if value.Valid {
+				_m.CustomLimitUsdSnapshot = new(float64)
+				*_m.CustomLimitUsdSnapshot = value.Float64
+			}
 		default:
 			_m.selectValues.Set(columns[i], values[i])
 		}
@@ -400,6 +508,66 @@ func (_m *UserSubscription) String() string {
 	if v := _m.Notes; v != nil {
 		builder.WriteString("notes=")
 		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	if v := _m.SourceType; v != nil {
+		builder.WriteString("source_type=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	if v := _m.SourceRefID; v != nil {
+		builder.WriteString("source_ref_id=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	if v := _m.SourceRedeemCodeID; v != nil {
+		builder.WriteString("source_redeem_code_id=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.RedeemCodeSnapshot; v != nil {
+		builder.WriteString("redeem_code_snapshot=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	if v := _m.GroupNameSnapshot; v != nil {
+		builder.WriteString("group_name_snapshot=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	if v := _m.GroupPlatformSnapshot; v != nil {
+		builder.WriteString("group_platform_snapshot=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	if v := _m.GroupRateMultiplierSnapshot; v != nil {
+		builder.WriteString("group_rate_multiplier_snapshot=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.DailyLimitUsdSnapshot; v != nil {
+		builder.WriteString("daily_limit_usd_snapshot=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.WeeklyLimitUsdSnapshot; v != nil {
+		builder.WriteString("weekly_limit_usd_snapshot=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.MonthlyLimitUsdSnapshot; v != nil {
+		builder.WriteString("monthly_limit_usd_snapshot=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.CustomLimitHoursSnapshot; v != nil {
+		builder.WriteString("custom_limit_hours_snapshot=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.CustomLimitUsdSnapshot; v != nil {
+		builder.WriteString("custom_limit_usd_snapshot=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
 	}
 	builder.WriteByte(')')
 	return builder.String()

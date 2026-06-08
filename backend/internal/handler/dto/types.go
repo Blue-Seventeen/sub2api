@@ -593,6 +593,9 @@ type UserSubscription struct {
 	ExpiresAt time.Time `json:"expires_at"`
 	Status    string    `json:"status"`
 
+	IsAggregate       bool `json:"is_aggregate,omitempty"`
+	SubscriptionCount int  `json:"subscription_count,omitempty"`
+
 	DailyWindowStart   *time.Time `json:"daily_window_start"`
 	WeeklyWindowStart  *time.Time `json:"weekly_window_start"`
 	MonthlyWindowStart *time.Time `json:"monthly_window_start"`
@@ -602,6 +605,20 @@ type UserSubscription struct {
 	WeeklyUsageUSD  float64 `json:"weekly_usage_usd"`
 	MonthlyUsageUSD float64 `json:"monthly_usage_usd"`
 	CustomUsageUSD  float64 `json:"custom_usage_usd"`
+
+	SourceType         *string `json:"source_type,omitempty"`
+	SourceRefID        *string `json:"source_ref_id,omitempty"`
+	SourceRedeemCodeID *int64  `json:"source_redeem_code_id,omitempty"`
+	RedeemCodeSnapshot *string `json:"redeem_code_snapshot,omitempty"`
+
+	GroupNameSnapshot           *string  `json:"group_name_snapshot,omitempty"`
+	GroupPlatformSnapshot       *string  `json:"group_platform_snapshot,omitempty"`
+	GroupRateMultiplierSnapshot *float64 `json:"group_rate_multiplier_snapshot,omitempty"`
+	DailyLimitUSDSnapshot       *float64 `json:"daily_limit_usd_snapshot,omitempty"`
+	WeeklyLimitUSDSnapshot      *float64 `json:"weekly_limit_usd_snapshot,omitempty"`
+	MonthlyLimitUSDSnapshot     *float64 `json:"monthly_limit_usd_snapshot,omitempty"`
+	CustomLimitHoursSnapshot    *int     `json:"custom_limit_hours_snapshot,omitempty"`
+	CustomLimitUSDSnapshot      *float64 `json:"custom_limit_usd_snapshot,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

@@ -30,7 +30,19 @@ func (r *subscriptionExpiryRepoStub) GetActiveByUserIDAndGroupID(context.Context
 	return nil, ErrSubscriptionNotFound
 }
 
+func (r *subscriptionExpiryRepoStub) ListActiveByUserIDAndGroupID(context.Context, int64, int64) ([]UserSubscription, error) {
+	return nil, ErrSubscriptionNotFound
+}
+
+func (r *subscriptionExpiryRepoStub) GetBySource(context.Context, string, string) (*UserSubscription, error) {
+	return nil, ErrSubscriptionNotFound
+}
+
 func (r *subscriptionExpiryRepoStub) Update(context.Context, *UserSubscription) error {
+	return nil
+}
+
+func (r *subscriptionExpiryRepoStub) UpdateMutableFields(context.Context, int64, UserSubscriptionMutableFields) error {
 	return nil
 }
 

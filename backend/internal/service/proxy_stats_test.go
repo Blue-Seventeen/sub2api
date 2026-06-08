@@ -108,5 +108,8 @@ func TestGatewayServiceRecordUsage_RecordsProxyStatsBeforeBillingError(t *testin
 	require.True(t, proxyStatsRepo.last.Success)
 	require.Equal(t, proxyID, proxyStatsRepo.last.ProxyID)
 	require.Equal(t, "gateway_proxy_stat_billing_error", proxyStatsRepo.last.RequestID)
-	require.Equal(t, 0, usageRepo.calls)
+	require.Equal(t, 1, usageRepo.calls)
+	require.Equal(t, "gateway_proxy_stat_billing_error:billing_failed", usageRepo.lastLog.RequestID)
+	require.Zero(t, usageRepo.lastLog.InputTokens)
+	require.Zero(t, usageRepo.lastLog.OutputTokens)
 }

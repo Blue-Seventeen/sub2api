@@ -389,7 +389,7 @@ func TestGatewayServiceRecordUsage_GeneratesRequestIDWhenAllSourcesMissing(t *te
 	require.Equal(t, billingRepo.lastCmd.RequestID, usageRepo.lastLog.RequestID)
 }
 
-func TestGatewayServiceRecordUsage_DroppedUsageLogDoesNotSyncFallback(t *testing.T) {
+func TestGatewayServiceRecordUsage_DroppedUsageLogDoesNotUseSyncFallback(t *testing.T) {
 	usageRepo := &openAIRecordUsageBestEffortLogRepoStub{
 		bestEffortErr: MarkUsageLogCreateDropped(errors.New("usage log best-effort queue full")),
 	}
@@ -413,10 +413,37 @@ func TestGatewayServiceRecordUsage_DroppedUsageLogDoesNotSyncFallback(t *testing
 
 	require.NoError(t, err)
 	require.Equal(t, 1, usageRepo.bestEffortCalls)
-	require.Equal(t, 0, usageRepo.createCalls)
+	require.Zero(t, usageRepo.createCalls)
 }
 
-func TestGatewayServiceRecordUsage_BillingErrorSkipsUsageLogWrite(t *testing.T) {
+func TestGatewayServiceRecordUsage_BestEffortPersistenceErrorUsesSyncFallback(t *testing.T) {
+	usageRepo := &openAIRecordUsageBestEffortLogRepoStub{
+		bestEffortErr: errors.New("usage log writer failed"),
+	}
+	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
+	svc := newGatewayRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{})
+
+	err := svc.RecordUsage(context.Background(), &RecordUsageInput{
+		Result: &ForwardResult{
+			RequestID: "gateway_usage_log_fallback",
+			Usage: ClaudeUsage{
+				InputTokens:  10,
+				OutputTokens: 6,
+			},
+			Model:    "claude-sonnet-4",
+			Duration: time.Second,
+		},
+		APIKey:  &APIKey{ID: 509},
+		User:    &User{ID: 609},
+		Account: &Account{ID: 709},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, usageRepo.bestEffortCalls)
+	require.Equal(t, 1, usageRepo.createCalls)
+}
+
+func TestGatewayServiceRecordUsage_BillingErrorStillWritesUsageLog(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{}
 	billingRepo := &openAIRecordUsageBillingRepoStub{err: context.DeadlineExceeded}
 	userRepo := &openAIRecordUsageUserRepoStub{}
@@ -440,7 +467,13 @@ func TestGatewayServiceRecordUsage_BillingErrorSkipsUsageLogWrite(t *testing.T) 
 
 	require.Error(t, err)
 	require.Equal(t, 1, billingRepo.calls)
-	require.Equal(t, 0, usageRepo.calls)
+	require.Equal(t, 1, usageRepo.calls)
+	require.NotNil(t, usageRepo.lastLog)
+	require.Equal(t, "gateway_billing_fail:billing_failed", usageRepo.lastLog.RequestID)
+	require.Zero(t, usageRepo.lastLog.InputTokens)
+	require.Zero(t, usageRepo.lastLog.OutputTokens)
+	require.Zero(t, usageRepo.lastLog.TotalCost)
+	require.Zero(t, usageRepo.lastLog.ActualCost)
 }
 
 func TestGatewayServiceRecordUsage_ReasoningEffortPersisted(t *testing.T) {

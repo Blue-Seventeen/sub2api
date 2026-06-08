@@ -131,7 +131,23 @@ func (f fakeGoogleSubscriptionRepo) GetActiveByUserIDAndGroupID(ctx context.Cont
 	}
 	return nil, errors.New("not implemented")
 }
+func (f fakeGoogleSubscriptionRepo) ListActiveByUserIDAndGroupID(ctx context.Context, userID, groupID int64) ([]service.UserSubscription, error) {
+	if f.getActive != nil {
+		sub, err := f.getActive(ctx, userID, groupID)
+		if err != nil {
+			return nil, err
+		}
+		return []service.UserSubscription{*sub}, nil
+	}
+	return nil, errors.New("not implemented")
+}
+func (f fakeGoogleSubscriptionRepo) GetBySource(ctx context.Context, sourceType, sourceRefID string) (*service.UserSubscription, error) {
+	return nil, errors.New("not implemented")
+}
 func (f fakeGoogleSubscriptionRepo) Update(ctx context.Context, sub *service.UserSubscription) error {
+	return errors.New("not implemented")
+}
+func (f fakeGoogleSubscriptionRepo) UpdateMutableFields(ctx context.Context, subscriptionID int64, fields service.UserSubscriptionMutableFields) error {
 	return errors.New("not implemented")
 }
 func (f fakeGoogleSubscriptionRepo) Delete(ctx context.Context, id int64) error {

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	mathrand "math/rand"
 	"net"
 	"net/http"
@@ -8419,10 +8420,8 @@ func postUsageBilling(ctx context.Context, p *postUsageBillingParams, deps *bill
 		// Subscription usage tracked by ActualCost so the visible/user-facing
 		// subscription consumption keeps dev semantics.
 		if cost.ActualCost > 0 {
-			if err := deps.userSubRepo.IncrementUsage(billingCtx, p.Subscription.ID, cost.ActualCost); err != nil {
-				slog.Error("increment subscription usage failed", "subscription_id", p.Subscription.ID, "error", err)
-			}
-			deps.billingCacheService.QueueUpdateSubscriptionUsage(p.User.ID, *p.APIKey.GroupID, cost.ActualCost)
+			legacyIncrementSubscriptionUsage(billingCtx, p, deps, cost.ActualCost)
+			legacyInvalidateSubscriptionCache(billingCtx, p, deps)
 		}
 	} else {
 		if cost.RealActualCost > 0 {
@@ -8476,6 +8475,187 @@ func postUsageBilling(ctx context.Context, p *postUsageBillingParams, deps *bill
 	// cache updates. The legacy path does DB writes directly; the finalize path
 	// does cache queue + notifications. Notifications are dispatched separately
 	// by the caller after recording the usage log.
+}
+
+func legacyIncrementSubscriptionUsage(ctx context.Context, p *postUsageBillingParams, deps *billingDeps, costUSD float64) {
+	if p == nil || deps == nil || deps.userSubRepo == nil || costUSD <= 0 {
+		return
+	}
+
+	if p.Subscription != nil && p.Subscription.ID > 0 && !p.Subscription.IsAggregate {
+		if err := deps.userSubRepo.IncrementUsage(ctx, p.Subscription.ID, costUSD); err != nil {
+			slog.Error("increment subscription usage failed", "subscription_id", p.Subscription.ID, "error", err)
+		}
+		return
+	}
+
+	userID, groupID, ok := legacySubscriptionUserGroup(p)
+	if !ok {
+		slog.Error("increment aggregate subscription usage skipped: missing user or group")
+		return
+	}
+
+	subs, err := deps.userSubRepo.ListActiveByUserIDAndGroupID(ctx, userID, groupID)
+	if err != nil {
+		slog.Error("list active subscription cards failed", "user_id", userID, "group_id", groupID, "error", err)
+		return
+	}
+	remaining := costUSD
+	var overageTargetID int64
+	for i := range subs {
+		sub := &subs[i]
+		if sub.ID <= 0 || sub.IsAggregate {
+			continue
+		}
+		group := sub.EffectiveGroup(sub.Group)
+		if err := legacyPrepareSubscriptionWindow(ctx, deps.userSubRepo, sub, group); err != nil {
+			slog.Error("prepare subscription card window failed", "subscription_id", sub.ID, "error", err)
+			continue
+		}
+		if overageTargetID == 0 {
+			overageTargetID = sub.ID
+		}
+		available := legacySubscriptionAvailable(sub, group)
+		if available <= 0 {
+			continue
+		}
+		charge := remaining
+		if !math.IsInf(available, 1) && charge > available {
+			charge = available
+		}
+		if charge <= 0 {
+			continue
+		}
+		if err := deps.userSubRepo.IncrementUsage(ctx, sub.ID, charge); err != nil {
+			slog.Error("increment subscription usage failed", "subscription_id", sub.ID, "error", err)
+			continue
+		}
+		overageTargetID = sub.ID
+		remaining -= charge
+		if remaining <= 1e-9 {
+			return
+		}
+	}
+	if remaining > 1e-9 && overageTargetID > 0 {
+		if err := deps.userSubRepo.IncrementUsage(ctx, overageTargetID, remaining); err != nil {
+			slog.Error("increment subscription overage usage failed", "subscription_id", overageTargetID, "error", err)
+		}
+		return
+	}
+
+	slog.Error("increment aggregate subscription usage skipped: no available subscription card", "user_id", userID, "group_id", groupID)
+}
+
+func legacySubscriptionAvailable(sub *UserSubscription, group *Group) float64 {
+	if sub == nil {
+		return 0
+	}
+	available := math.Inf(1)
+	applyLimit := func(limit *float64, usage float64) {
+		if limit == nil || *limit <= 0 {
+			return
+		}
+		remaining := *limit - usage
+		if remaining < available {
+			available = remaining
+		}
+	}
+	applyLimit(sub.EffectiveDailyLimitUSD(group), sub.DailyUsageUSD)
+	applyLimit(sub.EffectiveWeeklyLimitUSD(group), sub.WeeklyUsageUSD)
+	applyLimit(sub.EffectiveMonthlyLimitUSD(group), sub.MonthlyUsageUSD)
+	if sub.EffectiveCustomLimitHours(group) > 0 {
+		applyLimit(sub.EffectiveCustomLimitUSD(group), sub.CustomUsageUSD)
+	}
+	if available < 0 {
+		return 0
+	}
+	return available
+}
+
+func legacySubscriptionUserGroup(p *postUsageBillingParams) (int64, int64, bool) {
+	if p == nil {
+		return 0, 0, false
+	}
+	var userID int64
+	var groupID int64
+	if p.User != nil {
+		userID = p.User.ID
+	}
+	if p.APIKey != nil && p.APIKey.GroupID != nil {
+		groupID = *p.APIKey.GroupID
+	}
+	if userID == 0 && p.Subscription != nil {
+		userID = p.Subscription.UserID
+	}
+	if groupID == 0 && p.Subscription != nil {
+		groupID = p.Subscription.GroupID
+	}
+	return userID, groupID, userID > 0 && groupID > 0
+}
+
+func legacyPrepareSubscriptionWindow(ctx context.Context, repo UserSubscriptionRepository, sub *UserSubscription, group *Group) error {
+	if repo == nil || sub == nil || sub.ID <= 0 {
+		return nil
+	}
+	now := time.Now()
+	if !sub.IsWindowActivated() {
+		windowStart := subscriptionWindowAnchor(sub, now)
+		if err := repo.ActivateWindows(ctx, sub.ID, windowStart); err != nil {
+			return err
+		}
+		sub.DailyWindowStart = &windowStart
+		sub.WeeklyWindowStart = &windowStart
+		sub.MonthlyWindowStart = &windowStart
+		sub.CustomWindowStart = &windowStart
+	}
+	if sub.NeedsDailyResetAt(now) {
+		windowStart := currentSubscriptionWindowStart(*sub.DailyWindowStart, subscriptionDailyWindow, now)
+		if err := repo.ResetDailyUsage(ctx, sub.ID, windowStart); err != nil {
+			return err
+		}
+		sub.DailyWindowStart = &windowStart
+		sub.DailyUsageUSD = 0
+	}
+	if sub.NeedsWeeklyResetAt(now) {
+		windowStart := currentSubscriptionWindowStart(*sub.WeeklyWindowStart, subscriptionWeeklyWindow, now)
+		if err := repo.ResetWeeklyUsage(ctx, sub.ID, windowStart); err != nil {
+			return err
+		}
+		sub.WeeklyWindowStart = &windowStart
+		sub.WeeklyUsageUSD = 0
+	}
+	if sub.NeedsMonthlyResetAt(now) {
+		windowStart := currentSubscriptionWindowStart(*sub.MonthlyWindowStart, subscriptionMonthlyWindow, now)
+		if err := repo.ResetMonthlyUsage(ctx, sub.ID, windowStart); err != nil {
+			return err
+		}
+		sub.MonthlyWindowStart = &windowStart
+		sub.MonthlyUsageUSD = 0
+	}
+	if sub.NeedsCustomResetAt(group, now) {
+		period := customSubscriptionWindowHours(sub.EffectiveCustomLimitHours(group))
+		windowStart := currentSubscriptionWindowStart(*sub.CustomWindowStart, period, now)
+		if err := repo.ResetCustomUsage(ctx, sub.ID, windowStart); err != nil {
+			return err
+		}
+		sub.CustomWindowStart = &windowStart
+		sub.CustomUsageUSD = 0
+	}
+	return nil
+}
+
+func legacyInvalidateSubscriptionCache(ctx context.Context, p *postUsageBillingParams, deps *billingDeps) {
+	if p == nil || deps == nil || deps.billingCacheService == nil || p.User == nil || p.APIKey == nil || p.APIKey.GroupID == nil {
+		return
+	}
+	_ = deps.billingCacheService.InvalidateSubscription(ctx, p.User.ID, *p.APIKey.GroupID)
+}
+
+func legacyUpdateSubscriptionUsageCache(p *postUsageBillingParams, deps *billingDeps, costUSD float64) {
+	if p == nil || deps == nil || deps.billingCacheService == nil || p.User == nil || p.APIKey == nil || p.APIKey.GroupID == nil || costUSD <= 0 {
+		return
+	}
+	deps.billingCacheService.QueueUpdateSubscriptionUsage(p.User.ID, *p.APIKey.GroupID, costUSD)
 }
 
 func resolveUsageBillingRequestID(ctx context.Context, upstreamRequestID string) string {
@@ -8549,7 +8729,15 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 	// Keep dev semantics: subscription usage follows user-facing ActualCost,
 	// while balance deduction follows admin real billed cost.
 	if p.IsSubscriptionBill && p.Subscription != nil && p.Cost.ActualCost > 0 {
-		cmd.SubscriptionID = &p.Subscription.ID
+		cmd.SubscriptionID = nil
+		cmd.SubscriptionUserID = p.Subscription.UserID
+		cmd.SubscriptionGroupID = p.Subscription.GroupID
+		if p.User != nil {
+			cmd.SubscriptionUserID = p.User.ID
+		}
+		if p.APIKey != nil && p.APIKey.GroupID != nil {
+			cmd.SubscriptionGroupID = *p.APIKey.GroupID
+		}
 		cmd.SubscriptionCost = p.Cost.ActualCost
 	} else if p.Cost.RealActualCost > 0 {
 		cmd.BalanceCost = p.Cost.RealActualCost
@@ -8607,6 +8795,9 @@ func applyUsageBilling(ctx context.Context, requestID string, usageLog *UsageLog
 			invalidator.InvalidateAuthCacheByKey(billingCtx, p.APIKey.Key)
 		}
 	}
+	if usageLog != nil && result.SubscriptionID != nil {
+		usageLog.SubscriptionID = result.SubscriptionID
+	}
 
 	finalizePostUsageBilling(billingCtx, p, deps, result)
 	return true, nil
@@ -8618,8 +8809,8 @@ func finalizePostUsageBilling(ctx context.Context, p *postUsageBillingParams, de
 	}
 
 	if p.IsSubscriptionBill {
-		if p.Cost.ActualCost > 0 && p.User != nil && p.APIKey != nil && p.APIKey.GroupID != nil {
-			deps.billingCacheService.QueueUpdateSubscriptionUsage(p.User.ID, *p.APIKey.GroupID, p.Cost.ActualCost)
+		if p.Cost.ActualCost > 0 {
+			legacyUpdateSubscriptionUsageCache(p, deps, p.Cost.ActualCost)
 		}
 	} else if p.Cost.RealActualCost > 0 && p.User != nil {
 		deps.billingCacheService.QueueDeductBalance(p.User.ID, p.Cost.RealActualCost)
@@ -8816,6 +9007,57 @@ func writeUsageLogBestEffort(ctx context.Context, repo UsageLogRepository, usage
 	if _, err := repo.Create(usageCtx, usageLog); err != nil {
 		logger.LegacyPrintf(logKey, "Create usage log failed: %v", err)
 	}
+}
+
+func usageLogFailurePlaceholder(usageLog *UsageLog, reason string) *UsageLog {
+	if usageLog == nil {
+		return nil
+	}
+	cp := *usageLog
+	cp.RequestID = failureUsageLogRequestID(usageLog.RequestID, reason)
+	cp.InputTokens = 0
+	cp.OutputTokens = 0
+	cp.CacheCreationTokens = 0
+	cp.CacheReadTokens = 0
+	cp.CacheCreation5mTokens = 0
+	cp.CacheCreation1hTokens = 0
+	cp.ImageOutputTokens = 0
+	cp.ImageCount = 0
+	cp.InputCost = 0
+	cp.OutputCost = 0
+	cp.CacheCreationCost = 0
+	cp.CacheReadCost = 0
+	cp.ImageOutputCost = 0
+	cp.TotalCost = 0
+	cp.ActualCost = 0
+	cp.RealActualCost = 0
+	cp.AccountStatsCost = nil
+	cp.RequestCount = 0
+	cp.TaskCount = 0
+	cp.BillableDurationSeconds = 0
+	cp.BillableCharacterCount = 0
+	cp.UsageEstimated = false
+	return &cp
+}
+
+func failureUsageLogRequestID(requestID, reason string) string {
+	requestID = strings.TrimSpace(requestID)
+	reason = strings.TrimSpace(reason)
+	if requestID == "" {
+		return ""
+	}
+	if reason == "" {
+		reason = "failed"
+	}
+	const maxRequestIDLen = 255
+	suffix := ":" + reason
+	if len(requestID)+len(suffix) <= maxRequestIDLen {
+		return requestID + suffix
+	}
+	if len(suffix) >= maxRequestIDLen {
+		return suffix[:maxRequestIDLen]
+	}
+	return requestID[:maxRequestIDLen-len(suffix)] + suffix
 }
 
 // recordUsageOpts 内部选项，参数化普通计费与长上下文计费的差异点。
@@ -9139,6 +9381,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	}, s.billingDeps(), s.usageBillingRepo)
 
 	if billingErr != nil {
+		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLogFailurePlaceholder(usageLog, "billing_failed"), "service.gateway")
 		return billingErr
 	}
 	writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.gateway")
@@ -9529,9 +9772,8 @@ func resolveBillingMode(result *ForwardResult, cost *CostBreakdown) *string {
 }
 
 func optionalSubscriptionID(subscription *UserSubscription) *int64 {
-	if subscription != nil {
-		return &subscription.ID
-	}
+	// The billing transaction resolves the exact card for both single-card and
+	// stacked subscription modes, then writes it back to the usage log.
 	return nil
 }
 

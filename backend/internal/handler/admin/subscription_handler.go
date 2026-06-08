@@ -56,7 +56,11 @@ type BulkAssignSubscriptionRequest struct {
 
 // AdjustSubscriptionRequest represents adjust subscription request (extend or shorten)
 type AdjustSubscriptionRequest struct {
-	Days int `json:"days" binding:"required,min=-36500,max=36500"` // negative to shorten, positive to extend
+	Days            *int     `json:"days"`
+	DailyUsageUSD   *float64 `json:"daily_usage_usd"`
+	WeeklyUsageUSD  *float64 `json:"weekly_usage_usd"`
+	MonthlyUsageUSD *float64 `json:"monthly_usage_usd"`
+	CustomUsageUSD  *float64 `json:"custom_usage_usd"`
 }
 
 // List handles listing all subscriptions with pagination and filters
@@ -105,7 +109,7 @@ func (h *SubscriptionHandler) GetByID(c *gin.Context) {
 		return
 	}
 
-	subscription, err := h.subscriptionService.GetByID(c.Request.Context(), subscriptionID)
+	subscription, err := h.subscriptionService.GetByIDIncludeDeleted(c.Request.Context(), subscriptionID)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -209,7 +213,13 @@ func (h *SubscriptionHandler) Extend(c *gin.Context) {
 		Body:           req,
 	}
 	executeAdminIdempotentJSON(c, "admin.subscriptions.extend", idempotencyPayload, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
-		subscription, execErr := h.subscriptionService.ExtendSubscription(ctx, subscriptionID, req.Days)
+		subscription, execErr := h.subscriptionService.AdjustSubscription(ctx, subscriptionID, service.AdjustSubscriptionInput{
+			Days:            req.Days,
+			DailyUsageUSD:   req.DailyUsageUSD,
+			WeeklyUsageUSD:  req.WeeklyUsageUSD,
+			MonthlyUsageUSD: req.MonthlyUsageUSD,
+			CustomUsageUSD:  req.CustomUsageUSD,
+		})
 		if execErr != nil {
 			return nil, execErr
 		}
@@ -301,7 +311,7 @@ func (h *SubscriptionHandler) ListByUser(c *gin.Context) {
 		return
 	}
 
-	subscriptions, err := h.subscriptionService.ListUserSubscriptions(c.Request.Context(), userID)
+	subscriptions, err := h.subscriptionService.ListUserSubscriptionRecords(c.Request.Context(), userID)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

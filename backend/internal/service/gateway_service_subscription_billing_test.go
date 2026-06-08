@@ -3,7 +3,9 @@
 package service
 
 import (
+	"context"
 	"testing"
+	"time"
 )
 
 // TestBuildUsageBillingCommand_SubscriptionAppliesRateMultiplier locks in the fix
@@ -82,4 +84,156 @@ func TestBuildUsageBillingCommand_SubscriptionAppliesRateMultiplier(t *testing.T
 			}
 		})
 	}
+}
+
+func TestBuildUsageBillingCommand_SubscriptionDefersCardSelectionToBillingTransaction(t *testing.T) {
+	t.Parallel()
+
+	groupID := int64(7)
+	p := &postUsageBillingParams{
+		Cost:               &CostBreakdown{ActualCost: 2.5},
+		User:               &User{ID: 100},
+		APIKey:             &APIKey{ID: 200, GroupID: &groupID},
+		Account:            &Account{ID: 300},
+		Subscription:       &UserSubscription{ID: 400, UserID: 999, GroupID: 888},
+		IsSubscriptionBill: true,
+	}
+
+	cmd := buildUsageBillingCommand("req-stacked", nil, p)
+
+	if cmd == nil {
+		t.Fatal("buildUsageBillingCommand returned nil")
+	}
+	if cmd.SubscriptionID != nil {
+		t.Fatalf("SubscriptionID = %v, want nil so stacked billing can select exact card", *cmd.SubscriptionID)
+	}
+	if cmd.SubscriptionUserID != 100 {
+		t.Fatalf("SubscriptionUserID = %d, want 100", cmd.SubscriptionUserID)
+	}
+	if cmd.SubscriptionGroupID != groupID {
+		t.Fatalf("SubscriptionGroupID = %d, want %d", cmd.SubscriptionGroupID, groupID)
+	}
+	if cmd.SubscriptionCost != 2.5 {
+		t.Fatalf("SubscriptionCost = %v, want 2.5", cmd.SubscriptionCost)
+	}
+}
+
+func TestLegacyIncrementSubscriptionUsage_AggregateSelectsAvailableCard(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	groupID := int64(7)
+	userID := int64(100)
+	dailyLimit := 10.0
+	repo := &legacyAggregateSubRepo{
+		subs: []UserSubscription{
+			{
+				ID:               1,
+				UserID:           userID,
+				GroupID:          groupID,
+				DailyUsageUSD:    10,
+				DailyWindowStart: &now,
+				Group:            &Group{ID: groupID, DailyLimitUSD: &dailyLimit},
+			},
+			{
+				ID:               2,
+				UserID:           userID,
+				GroupID:          groupID,
+				DailyUsageUSD:    3,
+				DailyWindowStart: &now,
+				Group:            &Group{ID: groupID, DailyLimitUSD: &dailyLimit},
+			},
+		},
+	}
+	p := &postUsageBillingParams{
+		Cost:               &CostBreakdown{ActualCost: 2},
+		User:               &User{ID: userID},
+		APIKey:             &APIKey{ID: 200, GroupID: &groupID},
+		Account:            &Account{ID: 300},
+		Subscription:       &UserSubscription{IsAggregate: true, UserID: userID, GroupID: groupID},
+		IsSubscriptionBill: true,
+	}
+
+	legacyIncrementSubscriptionUsage(context.Background(), p, &billingDeps{userSubRepo: repo}, p.Cost.ActualCost)
+
+	if repo.incrementID != 2 {
+		t.Fatalf("incremented subscription id = %d, want 2", repo.incrementID)
+	}
+	if repo.incrementCost != 2 {
+		t.Fatalf("increment cost = %v, want 2", repo.incrementCost)
+	}
+}
+
+func TestLegacyIncrementSubscriptionUsage_AggregateSplitsAcrossCards(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	groupID := int64(7)
+	userID := int64(100)
+	dailyLimit := 10.0
+	repo := &legacyAggregateSubRepo{
+		subs: []UserSubscription{
+			{
+				ID:               1,
+				UserID:           userID,
+				GroupID:          groupID,
+				DailyUsageUSD:    8,
+				DailyWindowStart: &now,
+				Group:            &Group{ID: groupID, DailyLimitUSD: &dailyLimit},
+			},
+			{
+				ID:               2,
+				UserID:           userID,
+				GroupID:          groupID,
+				DailyUsageUSD:    9,
+				DailyWindowStart: &now,
+				Group:            &Group{ID: groupID, DailyLimitUSD: &dailyLimit},
+			},
+		},
+	}
+	p := &postUsageBillingParams{
+		Cost:               &CostBreakdown{ActualCost: 3},
+		User:               &User{ID: userID},
+		APIKey:             &APIKey{ID: 200, GroupID: &groupID},
+		Account:            &Account{ID: 300},
+		Subscription:       &UserSubscription{IsAggregate: true, UserID: userID, GroupID: groupID},
+		IsSubscriptionBill: true,
+	}
+
+	legacyIncrementSubscriptionUsage(context.Background(), p, &billingDeps{userSubRepo: repo}, p.Cost.ActualCost)
+
+	if len(repo.incrementCalls) != 2 {
+		t.Fatalf("increment calls = %d, want 2", len(repo.incrementCalls))
+	}
+	if repo.incrementCalls[0].id != 1 || repo.incrementCalls[0].cost != 2 {
+		t.Fatalf("first increment = %+v, want id=1 cost=2", repo.incrementCalls[0])
+	}
+	if repo.incrementCalls[1].id != 2 || repo.incrementCalls[1].cost != 1 {
+		t.Fatalf("second increment = %+v, want id=2 cost=1", repo.incrementCalls[1])
+	}
+}
+
+type legacyIncrementCall struct {
+	id   int64
+	cost float64
+}
+
+type legacyAggregateSubRepo struct {
+	UserSubscriptionRepository
+
+	subs           []UserSubscription
+	incrementID    int64
+	incrementCost  float64
+	incrementCalls []legacyIncrementCall
+}
+
+func (r *legacyAggregateSubRepo) ListActiveByUserIDAndGroupID(context.Context, int64, int64) ([]UserSubscription, error) {
+	return r.subs, nil
+}
+
+func (r *legacyAggregateSubRepo) IncrementUsage(_ context.Context, id int64, costUSD float64) error {
+	r.incrementID = id
+	r.incrementCost = costUSD
+	r.incrementCalls = append(r.incrementCalls, legacyIncrementCall{id: id, cost: costUSD})
+	return nil
 }

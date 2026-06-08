@@ -433,7 +433,15 @@ func (s *PaymentService) doSub(ctx context.Context, o *dbent.PaymentOrder) error
 		slog.Info("subscription order note already applied, skipping duplicate extension", "orderID", o.ID, "groupID", gid)
 		return s.markCompleted(ctx, o, "SUBSCRIPTION_SUCCESS")
 	}
-	_, _, err = s.subscriptionSvc.AssignOrExtendSubscription(ctx, &AssignSubscriptionInput{UserID: o.UserID, GroupID: gid, ValidityDays: days, AssignedBy: 0, Notes: orderNote})
+	_, _, err = s.subscriptionSvc.AssignStackedSubscription(ctx, &AssignSubscriptionInput{
+		UserID:       o.UserID,
+		GroupID:      gid,
+		ValidityDays: days,
+		AssignedBy:   0,
+		Notes:        orderNote,
+		SourceType:   "payment_order",
+		SourceRefID:  strconv.FormatInt(o.ID, 10),
+	})
 	if err != nil {
 		return fmt.Errorf("assign subscription: %w", err)
 	}
@@ -444,17 +452,36 @@ func paymentSubscriptionOrderNote(orderID int64) string {
 	return fmt.Sprintf("payment order %d", orderID)
 }
 
+type userSubscriptionByUserGroupLister interface {
+	ListByUserIDAndGroupID(ctx context.Context, userID, groupID int64) ([]UserSubscription, error)
+}
+
 func (s *PaymentService) subscriptionOrderAlreadyApplied(ctx context.Context, userID, groupID int64, orderNote string) bool {
 	if s == nil || s.subscriptionSvc == nil || s.subscriptionSvc.userSubRepo == nil || strings.TrimSpace(orderNote) == "" {
 		return false
+	}
+	if sub, err := s.subscriptionSvc.userSubRepo.GetBySource(ctx, "payment_order", strings.TrimPrefix(strings.TrimSpace(orderNote), "payment order ")); err == nil && sub != nil {
+		return true
+	}
+	if repo, ok := s.subscriptionSvc.userSubRepo.(userSubscriptionByUserGroupLister); ok {
+		subs, err := repo.ListByUserIDAndGroupID(ctx, userID, groupID)
+		if err == nil {
+			return subscriptionNotesContainOrder(subs, orderNote)
+		}
 	}
 	sub, err := s.subscriptionSvc.userSubRepo.GetByUserIDAndGroupID(ctx, userID, groupID)
 	if err != nil || sub == nil {
 		return false
 	}
-	for _, line := range strings.Split(sub.Notes, "\n") {
-		if strings.TrimSpace(line) == orderNote {
-			return true
+	return subscriptionNotesContainOrder([]UserSubscription{*sub}, orderNote)
+}
+
+func subscriptionNotesContainOrder(subs []UserSubscription, orderNote string) bool {
+	for i := range subs {
+		for _, line := range strings.Split(subs[i].Notes, "\n") {
+			if strings.TrimSpace(line) == orderNote {
+				return true
+			}
 		}
 	}
 	return false

@@ -2386,6 +2386,18 @@ func init() {
 	usersubscriptionDescAssignedAt := usersubscriptionFields[14].Descriptor()
 	// usersubscription.DefaultAssignedAt holds the default value on creation for the assigned_at field.
 	usersubscription.DefaultAssignedAt = usersubscriptionDescAssignedAt.Default.(func() time.Time)
+	// usersubscriptionDescSourceType is the schema descriptor for source_type field.
+	usersubscriptionDescSourceType := usersubscriptionFields[16].Descriptor()
+	// usersubscription.SourceTypeValidator is a validator for the "source_type" field. It is called by the builders before save.
+	usersubscription.SourceTypeValidator = usersubscriptionDescSourceType.Validators[0].(func(string) error)
+	// usersubscriptionDescSourceRefID is the schema descriptor for source_ref_id field.
+	usersubscriptionDescSourceRefID := usersubscriptionFields[17].Descriptor()
+	// usersubscription.SourceRefIDValidator is a validator for the "source_ref_id" field. It is called by the builders before save.
+	usersubscription.SourceRefIDValidator = usersubscriptionDescSourceRefID.Validators[0].(func(string) error)
+	// usersubscriptionDescGroupPlatformSnapshot is the schema descriptor for group_platform_snapshot field.
+	usersubscriptionDescGroupPlatformSnapshot := usersubscriptionFields[21].Descriptor()
+	// usersubscription.GroupPlatformSnapshotValidator is a validator for the "group_platform_snapshot" field. It is called by the builders before save.
+	usersubscription.GroupPlatformSnapshotValidator = usersubscriptionDescGroupPlatformSnapshot.Validators[0].(func(string) error)
 }
 
 const (

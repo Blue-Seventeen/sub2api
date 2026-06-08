@@ -79,8 +79,17 @@ func (userSubRepoNoop) GetByUserIDAndGroupID(context.Context, int64, int64) (*Us
 func (userSubRepoNoop) GetActiveByUserIDAndGroupID(context.Context, int64, int64) (*UserSubscription, error) {
 	panic("unexpected GetActiveByUserIDAndGroupID call")
 }
+func (userSubRepoNoop) ListActiveByUserIDAndGroupID(context.Context, int64, int64) ([]UserSubscription, error) {
+	panic("unexpected ListActiveByUserIDAndGroupID call")
+}
+func (userSubRepoNoop) GetBySource(context.Context, string, string) (*UserSubscription, error) {
+	panic("unexpected GetBySource call")
+}
 func (userSubRepoNoop) Update(context.Context, *UserSubscription) error {
 	panic("unexpected Update call")
+}
+func (userSubRepoNoop) UpdateMutableFields(context.Context, int64, UserSubscriptionMutableFields) error {
+	panic("unexpected UpdateMutableFields call")
 }
 func (userSubRepoNoop) Delete(context.Context, int64) error { panic("unexpected Delete call") }
 func (userSubRepoNoop) ListByUserID(context.Context, int64) ([]UserSubscription, error) {
@@ -132,22 +141,30 @@ func (userSubRepoNoop) BatchUpdateExpiredStatus(context.Context) (int64, error) 
 type subscriptionUserSubRepoStub struct {
 	userSubRepoNoop
 
-	nextID      int64
-	byID        map[int64]*UserSubscription
-	byUserGroup map[string]*UserSubscription
-	createCalls int
+	nextID         int64
+	byID           map[int64]*UserSubscription
+	byUserGroup    map[string]*UserSubscription
+	byUserGroupAll map[string][]*UserSubscription
+	bySource       map[string]*UserSubscription
+	createCalls    int
 }
 
 func newSubscriptionUserSubRepoStub() *subscriptionUserSubRepoStub {
 	return &subscriptionUserSubRepoStub{
-		nextID:      1,
-		byID:        make(map[int64]*UserSubscription),
-		byUserGroup: make(map[string]*UserSubscription),
+		nextID:         1,
+		byID:           make(map[int64]*UserSubscription),
+		byUserGroup:    make(map[string]*UserSubscription),
+		byUserGroupAll: make(map[string][]*UserSubscription),
+		bySource:       make(map[string]*UserSubscription),
 	}
 }
 
 func (s *subscriptionUserSubRepoStub) key(userID, groupID int64) string {
 	return strconvFormatInt(userID) + ":" + strconvFormatInt(groupID)
+}
+
+func (s *subscriptionUserSubRepoStub) sourceKey(sourceType, sourceRefID string) string {
+	return sourceType + ":" + sourceRefID
 }
 
 func (s *subscriptionUserSubRepoStub) seed(sub *UserSubscription) {
@@ -160,7 +177,12 @@ func (s *subscriptionUserSubRepoStub) seed(sub *UserSubscription) {
 		s.nextID++
 	}
 	s.byID[cp.ID] = &cp
-	s.byUserGroup[s.key(cp.UserID, cp.GroupID)] = &cp
+	key := s.key(cp.UserID, cp.GroupID)
+	s.byUserGroup[key] = &cp
+	s.byUserGroupAll[key] = append(s.byUserGroupAll[key], &cp)
+	if cp.SourceType != nil && cp.SourceRefID != nil {
+		s.bySource[s.sourceKey(*cp.SourceType, *cp.SourceRefID)] = &cp
+	}
 }
 
 func (s *subscriptionUserSubRepoStub) ExistsByUserIDAndGroupID(_ context.Context, userID, groupID int64) (bool, error) {
@@ -189,8 +211,49 @@ func (s *subscriptionUserSubRepoStub) Create(_ context.Context, sub *UserSubscri
 	}
 	sub.ID = cp.ID
 	s.byID[cp.ID] = &cp
-	s.byUserGroup[s.key(cp.UserID, cp.GroupID)] = &cp
+	key := s.key(cp.UserID, cp.GroupID)
+	s.byUserGroup[key] = &cp
+	s.byUserGroupAll[key] = append(s.byUserGroupAll[key], &cp)
+	if cp.SourceType != nil && cp.SourceRefID != nil {
+		s.bySource[s.sourceKey(*cp.SourceType, *cp.SourceRefID)] = &cp
+	}
 	return nil
+}
+
+func (s *subscriptionUserSubRepoStub) GetBySource(_ context.Context, sourceType, sourceRefID string) (*UserSubscription, error) {
+	sub := s.bySource[s.sourceKey(sourceType, sourceRefID)]
+	if sub == nil {
+		return nil, ErrSubscriptionNotFound
+	}
+	cp := *sub
+	return &cp, nil
+}
+
+func (s *subscriptionUserSubRepoStub) ListByUserIDAndGroupID(_ context.Context, userID, groupID int64) ([]UserSubscription, error) {
+	subs := s.byUserGroupAll[s.key(userID, groupID)]
+	out := make([]UserSubscription, 0, len(subs))
+	for _, sub := range subs {
+		if sub == nil {
+			continue
+		}
+		cp := *sub
+		out = append(out, cp)
+	}
+	return out, nil
+}
+
+func (s *subscriptionUserSubRepoStub) ListActiveByUserIDAndGroupID(_ context.Context, userID, groupID int64) ([]UserSubscription, error) {
+	subs := s.byUserGroupAll[s.key(userID, groupID)]
+	now := time.Now()
+	out := make([]UserSubscription, 0, len(subs))
+	for _, sub := range subs {
+		if sub == nil || sub.Status != SubscriptionStatusActive || !sub.ExpiresAt.After(now) {
+			continue
+		}
+		cp := *sub
+		out = append(out, cp)
+	}
+	return out, nil
 }
 
 func (s *subscriptionUserSubRepoStub) GetByID(_ context.Context, id int64) (*UserSubscription, error) {
@@ -215,9 +278,52 @@ func (s *subscriptionUserSubRepoStub) Update(_ context.Context, sub *UserSubscri
 	s.byID[cp.ID] = &cp
 	if oldKey != s.key(cp.UserID, cp.GroupID) {
 		delete(s.byUserGroup, oldKey)
+		delete(s.byUserGroupAll, oldKey)
 	}
-	s.byUserGroup[s.key(cp.UserID, cp.GroupID)] = &cp
+	key := s.key(cp.UserID, cp.GroupID)
+	s.byUserGroup[key] = &cp
+	replaced := false
+	for i := range s.byUserGroupAll[key] {
+		if s.byUserGroupAll[key][i] != nil && s.byUserGroupAll[key][i].ID == cp.ID {
+			s.byUserGroupAll[key][i] = &cp
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		s.byUserGroupAll[key] = append(s.byUserGroupAll[key], &cp)
+	}
 	return nil
+}
+
+func (s *subscriptionUserSubRepoStub) UpdateMutableFields(_ context.Context, id int64, fields UserSubscriptionMutableFields) error {
+	existing := s.byID[id]
+	if existing == nil {
+		return ErrSubscriptionNotFound
+	}
+	cp := *existing
+	if fields.ExpiresAt != nil {
+		cp.ExpiresAt = *fields.ExpiresAt
+	}
+	if fields.Status != nil {
+		cp.Status = *fields.Status
+	}
+	if fields.Notes != nil {
+		cp.Notes = *fields.Notes
+	}
+	if fields.DailyUsageUSD != nil {
+		cp.DailyUsageUSD = *fields.DailyUsageUSD
+	}
+	if fields.WeeklyUsageUSD != nil {
+		cp.WeeklyUsageUSD = *fields.WeeklyUsageUSD
+	}
+	if fields.MonthlyUsageUSD != nil {
+		cp.MonthlyUsageUSD = *fields.MonthlyUsageUSD
+	}
+	if fields.CustomUsageUSD != nil {
+		cp.CustomUsageUSD = *fields.CustomUsageUSD
+	}
+	return s.Update(context.Background(), &cp)
 }
 
 func TestAssignSubscriptionReuseWhenSemanticsMatch(t *testing.T) {

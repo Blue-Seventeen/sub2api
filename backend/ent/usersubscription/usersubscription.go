@@ -53,6 +53,30 @@ const (
 	FieldAssignedAt = "assigned_at"
 	// FieldNotes holds the string denoting the notes field in the database.
 	FieldNotes = "notes"
+	// FieldSourceType holds the string denoting the source_type field in the database.
+	FieldSourceType = "source_type"
+	// FieldSourceRefID holds the string denoting the source_ref_id field in the database.
+	FieldSourceRefID = "source_ref_id"
+	// FieldSourceRedeemCodeID holds the string denoting the source_redeem_code_id field in the database.
+	FieldSourceRedeemCodeID = "source_redeem_code_id"
+	// FieldRedeemCodeSnapshot holds the string denoting the redeem_code_snapshot field in the database.
+	FieldRedeemCodeSnapshot = "redeem_code_snapshot"
+	// FieldGroupNameSnapshot holds the string denoting the group_name_snapshot field in the database.
+	FieldGroupNameSnapshot = "group_name_snapshot"
+	// FieldGroupPlatformSnapshot holds the string denoting the group_platform_snapshot field in the database.
+	FieldGroupPlatformSnapshot = "group_platform_snapshot"
+	// FieldGroupRateMultiplierSnapshot holds the string denoting the group_rate_multiplier_snapshot field in the database.
+	FieldGroupRateMultiplierSnapshot = "group_rate_multiplier_snapshot"
+	// FieldDailyLimitUsdSnapshot holds the string denoting the daily_limit_usd_snapshot field in the database.
+	FieldDailyLimitUsdSnapshot = "daily_limit_usd_snapshot"
+	// FieldWeeklyLimitUsdSnapshot holds the string denoting the weekly_limit_usd_snapshot field in the database.
+	FieldWeeklyLimitUsdSnapshot = "weekly_limit_usd_snapshot"
+	// FieldMonthlyLimitUsdSnapshot holds the string denoting the monthly_limit_usd_snapshot field in the database.
+	FieldMonthlyLimitUsdSnapshot = "monthly_limit_usd_snapshot"
+	// FieldCustomLimitHoursSnapshot holds the string denoting the custom_limit_hours_snapshot field in the database.
+	FieldCustomLimitHoursSnapshot = "custom_limit_hours_snapshot"
+	// FieldCustomLimitUsdSnapshot holds the string denoting the custom_limit_usd_snapshot field in the database.
+	FieldCustomLimitUsdSnapshot = "custom_limit_usd_snapshot"
 	// EdgeUser holds the string denoting the user edge name in mutations.
 	EdgeUser = "user"
 	// EdgeGroup holds the string denoting the group edge name in mutations.
@@ -115,6 +139,18 @@ var Columns = []string{
 	FieldAssignedBy,
 	FieldAssignedAt,
 	FieldNotes,
+	FieldSourceType,
+	FieldSourceRefID,
+	FieldSourceRedeemCodeID,
+	FieldRedeemCodeSnapshot,
+	FieldGroupNameSnapshot,
+	FieldGroupPlatformSnapshot,
+	FieldGroupRateMultiplierSnapshot,
+	FieldDailyLimitUsdSnapshot,
+	FieldWeeklyLimitUsdSnapshot,
+	FieldMonthlyLimitUsdSnapshot,
+	FieldCustomLimitHoursSnapshot,
+	FieldCustomLimitUsdSnapshot,
 }
 
 // ValidColumn reports if the column name is valid (part of the table columns).
@@ -155,6 +191,12 @@ var (
 	DefaultCustomUsageUsd float64
 	// DefaultAssignedAt holds the default value on creation for the "assigned_at" field.
 	DefaultAssignedAt func() time.Time
+	// SourceTypeValidator is a validator for the "source_type" field. It is called by the builders before save.
+	SourceTypeValidator func(string) error
+	// SourceRefIDValidator is a validator for the "source_ref_id" field. It is called by the builders before save.
+	SourceRefIDValidator func(string) error
+	// GroupPlatformSnapshotValidator is a validator for the "group_platform_snapshot" field. It is called by the builders before save.
+	GroupPlatformSnapshotValidator func(string) error
 )
 
 // OrderOption defines the ordering options for the UserSubscription queries.
@@ -258,6 +300,66 @@ func ByAssignedAt(opts ...sql.OrderTermOption) OrderOption {
 // ByNotes orders the results by the notes field.
 func ByNotes(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldNotes, opts...).ToFunc()
+}
+
+// BySourceType orders the results by the source_type field.
+func BySourceType(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldSourceType, opts...).ToFunc()
+}
+
+// BySourceRefID orders the results by the source_ref_id field.
+func BySourceRefID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldSourceRefID, opts...).ToFunc()
+}
+
+// BySourceRedeemCodeID orders the results by the source_redeem_code_id field.
+func BySourceRedeemCodeID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldSourceRedeemCodeID, opts...).ToFunc()
+}
+
+// ByRedeemCodeSnapshot orders the results by the redeem_code_snapshot field.
+func ByRedeemCodeSnapshot(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldRedeemCodeSnapshot, opts...).ToFunc()
+}
+
+// ByGroupNameSnapshot orders the results by the group_name_snapshot field.
+func ByGroupNameSnapshot(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldGroupNameSnapshot, opts...).ToFunc()
+}
+
+// ByGroupPlatformSnapshot orders the results by the group_platform_snapshot field.
+func ByGroupPlatformSnapshot(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldGroupPlatformSnapshot, opts...).ToFunc()
+}
+
+// ByGroupRateMultiplierSnapshot orders the results by the group_rate_multiplier_snapshot field.
+func ByGroupRateMultiplierSnapshot(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldGroupRateMultiplierSnapshot, opts...).ToFunc()
+}
+
+// ByDailyLimitUsdSnapshot orders the results by the daily_limit_usd_snapshot field.
+func ByDailyLimitUsdSnapshot(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldDailyLimitUsdSnapshot, opts...).ToFunc()
+}
+
+// ByWeeklyLimitUsdSnapshot orders the results by the weekly_limit_usd_snapshot field.
+func ByWeeklyLimitUsdSnapshot(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldWeeklyLimitUsdSnapshot, opts...).ToFunc()
+}
+
+// ByMonthlyLimitUsdSnapshot orders the results by the monthly_limit_usd_snapshot field.
+func ByMonthlyLimitUsdSnapshot(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldMonthlyLimitUsdSnapshot, opts...).ToFunc()
+}
+
+// ByCustomLimitHoursSnapshot orders the results by the custom_limit_hours_snapshot field.
+func ByCustomLimitHoursSnapshot(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCustomLimitHoursSnapshot, opts...).ToFunc()
+}
+
+// ByCustomLimitUsdSnapshot orders the results by the custom_limit_usd_snapshot field.
+func ByCustomLimitUsdSnapshot(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCustomLimitUsdSnapshot, opts...).ToFunc()
 }
 
 // ByUserField orders the results by user field.

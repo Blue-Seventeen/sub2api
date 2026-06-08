@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"testing"
 	"time"
@@ -207,4 +208,54 @@ func TestValidateRefundProviderResponseAcceptsPending(t *testing.T) {
 	require.NoError(t, validateRefundProviderResponse(&payment.RefundResponse{Status: payment.ProviderStatusSuccess}))
 	require.Error(t, validateRefundProviderResponse(&payment.RefundResponse{Status: payment.ProviderStatusFailed}))
 	require.Error(t, validateRefundProviderResponse(nil))
+}
+
+func TestRollbackRefundRestoresSubscriptionSnapshotsWithoutCreatingCard(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(20)
+	now := time.Now().UTC()
+	original := UserSubscription{
+		ID:              1,
+		UserID:          10,
+		GroupID:         groupID,
+		StartsAt:        now.Add(-time.Hour),
+		ExpiresAt:       now.Add(48 * time.Hour),
+		Status:          SubscriptionStatusActive,
+		DailyUsageUSD:   7,
+		WeeklyUsageUSD:  8,
+		MonthlyUsageUSD: 9,
+		CustomUsageUSD:  10,
+		Notes:           "original",
+	}
+	repo := newSubscriptionUserSubRepoStub()
+	repo.seed(&original)
+	mutated := original
+	mutated.Status = SubscriptionStatusExpired
+	mutated.ExpiresAt = now
+	mutated.Notes = "deducted"
+	mutated.DailyUsageUSD = 99
+	mutated.CustomUsageUSD = 88
+	require.NoError(t, repo.Update(ctx, &mutated))
+
+	subSvc := NewSubscriptionService(groupRepoNoop{}, repo, nil, nil, nil)
+	svc := &PaymentService{subscriptionSvc: subSvc}
+	ok := svc.RollbackRefund(ctx, &RefundPlan{
+		OrderID:         99,
+		Order:           &dbent.PaymentOrder{ID: 99, UserID: original.UserID, SubscriptionGroupID: &groupID},
+		DeductionType:   payment.DeductionTypeSubscription,
+		SubDaysToDeduct: 1,
+		SubscriptionDeductionSnapshots: []UserSubscription{
+			original,
+		},
+	}, errors.New("gateway failed"))
+
+	require.True(t, ok)
+	require.Equal(t, 0, repo.createCalls)
+	restored, err := repo.GetByID(ctx, original.ID)
+	require.NoError(t, err)
+	require.Equal(t, original.ExpiresAt, restored.ExpiresAt)
+	require.Equal(t, original.Status, restored.Status)
+	require.Equal(t, original.Notes, restored.Notes)
+	require.InDelta(t, 99, restored.DailyUsageUSD, 0.000001)
+	require.InDelta(t, 88, restored.CustomUsageUSD, 0.000001)
 }

@@ -213,6 +213,12 @@
             <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
           </template>
 
+          <template #cell-redeem_code="{ row }">
+            <span class="text-sm text-gray-700 dark:text-gray-300">
+              {{ row.redeem_code_snapshot || '-' }}
+            </span>
+          </template>
+
           <template #cell-usage="{ row }">
             <div class="min-w-[280px] space-y-2">
               <!-- Daily Usage -->
@@ -436,7 +442,7 @@
               <button
                 v-if="row.status === 'active'"
                 @click="handleResetQuota(row)"
-                :disabled="resettingQuota && resettingSubscription?.id === row.id"
+                :disabled="resettingQuota"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-orange-50 hover:text-orange-600 dark:hover:bg-orange-900/20 dark:hover:text-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Icon name="refresh" size="sm" />
@@ -615,7 +621,7 @@
     <BaseDialog
       :show="showExtendModal"
       :title="t('admin.subscriptions.adjustSubscription')"
-      width="narrow"
+      width="wide"
       @close="closeExtendModal"
     >
       <form
@@ -654,12 +660,68 @@
             <input
               v-model.number="extendForm.days"
               type="number"
-              required
+              :min="ADJUST_DAYS_MIN"
+              :max="ADJUST_DAYS_MAX"
+              step="1"
               class="input text-center"
               :placeholder="t('admin.subscriptions.adjustDaysPlaceholder')"
             />
           </div>
           <p class="input-hint">{{ t('admin.subscriptions.adjustHint') }}</p>
+        </div>
+        <div>
+          <div class="mb-3">
+            <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
+              {{ t('admin.subscriptions.adjustUsageTitle') }}
+            </h3>
+            <p class="input-hint">{{ t('admin.subscriptions.adjustUsageHint') }}</p>
+          </div>
+          <div class="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label class="input-label">{{ t('admin.subscriptions.form.dailyUsage') }}</label>
+              <input
+                v-model.number="extendForm.daily_usage_usd"
+                type="number"
+                min="0"
+                step="0.000001"
+                class="input"
+                :placeholder="formatCurrencyAmount(extendingSubscription.daily_usage_usd ?? 0)"
+              />
+            </div>
+            <div>
+              <label class="input-label">{{ t('admin.subscriptions.form.weeklyUsage') }}</label>
+              <input
+                v-model.number="extendForm.weekly_usage_usd"
+                type="number"
+                min="0"
+                step="0.000001"
+                class="input"
+                :placeholder="formatCurrencyAmount(extendingSubscription.weekly_usage_usd ?? 0)"
+              />
+            </div>
+            <div>
+              <label class="input-label">{{ t('admin.subscriptions.form.monthlyUsage') }}</label>
+              <input
+                v-model.number="extendForm.monthly_usage_usd"
+                type="number"
+                min="0"
+                step="0.000001"
+                class="input"
+                :placeholder="formatCurrencyAmount(extendingSubscription.monthly_usage_usd ?? 0)"
+              />
+            </div>
+            <div>
+              <label class="input-label">{{ t('admin.subscriptions.form.customUsage') }}</label>
+              <input
+                v-model.number="extendForm.custom_usage_usd"
+                type="number"
+                min="0"
+                step="0.000001"
+                class="input"
+                :placeholder="formatCurrencyAmount(extendingSubscription.custom_usage_usd ?? 0)"
+              />
+            </div>
+          </div>
         </div>
       </form>
       <template #footer>
@@ -691,16 +753,54 @@
       @cancel="showRevokeDialog = false"
     />
 
-    <!-- Reset Quota Confirmation Dialog -->
-    <ConfirmDialog
+    <!-- Reset Quota Selection Dialog -->
+    <BaseDialog
       :show="showResetQuotaConfirm"
       :title="t('admin.subscriptions.resetQuotaTitle')"
-      :message="t('admin.subscriptions.resetQuotaConfirm', { user: resettingSubscription?.user?.email })"
-      :confirm-text="t('admin.subscriptions.resetQuota')"
-      :cancel-text="t('common.cancel')"
-      @confirm="confirmResetQuota"
-      @cancel="showResetQuotaConfirm = false"
-    />
+      width="narrow"
+      :close-on-escape="!resettingQuota"
+      @close="closeResetQuotaDialog"
+    >
+      <form id="reset-quota-form" class="space-y-4" @submit.prevent="confirmResetQuota">
+        <p class="text-sm text-gray-600 dark:text-gray-400">
+          {{ t('admin.subscriptions.resetQuotaConfirm', { user: resettingSubscription?.user?.email }) }}
+        </p>
+        <div class="space-y-2 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+          <label class="flex items-center gap-3 text-sm text-gray-700 dark:text-gray-200">
+            <input v-model="resetQuotaForm.daily" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+            <span>{{ t('admin.subscriptions.resetWindows.daily') }}</span>
+          </label>
+          <label class="flex items-center gap-3 text-sm text-gray-700 dark:text-gray-200">
+            <input v-model="resetQuotaForm.weekly" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+            <span>{{ t('admin.subscriptions.resetWindows.weekly') }}</span>
+          </label>
+          <label class="flex items-center gap-3 text-sm text-gray-700 dark:text-gray-200">
+            <input v-model="resetQuotaForm.monthly" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+            <span>{{ t('admin.subscriptions.resetWindows.monthly') }}</span>
+          </label>
+          <label class="flex items-center gap-3 text-sm text-gray-700 dark:text-gray-200">
+            <input v-model="resetQuotaForm.custom" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+            <span>{{ t('admin.subscriptions.resetWindows.custom') }}</span>
+          </label>
+        </div>
+        <p class="input-hint">{{ t('admin.subscriptions.resetQuotaHint') }}</p>
+      </form>
+      <template #footer>
+        <div class="flex justify-end gap-3">
+          <button @click="closeResetQuotaDialog" type="button" class="btn btn-secondary" :disabled="resettingQuota">
+            {{ t('common.cancel') }}
+          </button>
+          <button
+            type="submit"
+            form="reset-quota-form"
+            :disabled="resettingQuota || !hasSelectedResetWindow"
+            class="btn btn-primary"
+          >
+            {{ resettingQuota ? t('common.loading') : t('admin.subscriptions.resetQuota') }}
+          </button>
+        </div>
+      </template>
+    </BaseDialog>
     <!-- Subscription Guide Modal -->
     <teleport to="body">
       <transition name="modal">
@@ -788,7 +888,7 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
-import type { UserSubscription, Group, GroupPlatform, SubscriptionType } from '@/types'
+import type { UserSubscription, Group, GroupPlatform, SubscriptionType, ExtendSubscriptionRequest } from '@/types'
 import type { SimpleUser } from '@/api/admin/usage'
 import type { Column } from '@/components/common/types'
 import { formatCurrencyAmount, formatDateOnly } from '@/utils/format'
@@ -866,6 +966,7 @@ const allColumns = computed<Column[]>(() => [
     class: 'w-[260px] min-w-[220px] max-w-[320px]'
   },
   { key: 'group', label: t('admin.subscriptions.columns.group'), sortable: false, class: 'min-w-[160px]' },
+  { key: 'redeem_code', label: t('admin.subscriptions.columns.redeemCode'), sortable: false, class: 'min-w-[150px]' },
   { key: 'usage', label: t('admin.subscriptions.columns.usage'), sortable: false, class: 'min-w-[320px]' },
   { key: 'starts_at', label: t('admin.subscriptions.columns.starts'), sortable: true, class: 'min-w-[180px]' },
   { key: 'expires_at', label: t('admin.subscriptions.columns.expires'), sortable: true, class: 'min-w-[180px]' },
@@ -882,12 +983,15 @@ const toggleableColumns = computed(() =>
 const hiddenColumns = reactive<Set<string>>(new Set())
 
 // Default hidden columns
-const DEFAULT_HIDDEN_COLUMNS: string[] = ['starts_at']
+const DEFAULT_HIDDEN_COLUMNS: string[] = ['starts_at', 'redeem_code']
+const MIGRATED_HIDDEN_COLUMNS_BY_VERSION: Record<string, string[]> = {
+  '3': ['redeem_code']
+}
 
 // localStorage key
 const HIDDEN_COLUMNS_KEY = 'subscription-hidden-columns'
 const HIDDEN_COLUMNS_VERSION_KEY = 'subscription-hidden-columns-version'
-const HIDDEN_COLUMNS_VERSION = '2'
+const HIDDEN_COLUMNS_VERSION = '3'
 
 // Load saved column settings
 const loadSavedColumns = () => {
@@ -896,8 +1000,9 @@ const loadSavedColumns = () => {
     if (saved) {
       const parsed = JSON.parse(saved) as string[]
       parsed.forEach(key => hiddenColumns.add(key))
-      if (localStorage.getItem(HIDDEN_COLUMNS_VERSION_KEY) !== HIDDEN_COLUMNS_VERSION) {
-        DEFAULT_HIDDEN_COLUMNS.forEach(key => hiddenColumns.add(key))
+      const storedVersion = localStorage.getItem(HIDDEN_COLUMNS_VERSION_KEY)
+      if (storedVersion !== HIDDEN_COLUMNS_VERSION) {
+        MIGRATED_HIDDEN_COLUMNS_BY_VERSION[HIDDEN_COLUMNS_VERSION]?.forEach(key => hiddenColumns.add(key))
         saveColumnsToStorage()
       }
     } else {
@@ -956,6 +1061,8 @@ const subscriptions = ref<UserSubscription[]>([])
 const groups = ref<Group[]>([])
 const loading = ref(false)
 let abortController: AbortController | null = null
+const ADJUST_DAYS_MIN = -36500
+const ADJUST_DAYS_MAX = 36500
 
 // Toolbar user filter (fuzzy search -> select user_id)
 const filterUserKeyword = ref('')
@@ -1010,8 +1117,23 @@ const assignForm = reactive({
 })
 
 const extendForm = reactive({
-  days: 30
+  days: null as number | null,
+  daily_usage_usd: null as number | null,
+  weekly_usage_usd: null as number | null,
+  monthly_usage_usd: null as number | null,
+  custom_usage_usd: null as number | null
 })
+
+const resetQuotaForm = reactive({
+  daily: true,
+  weekly: true,
+  monthly: true,
+  custom: true
+})
+
+const hasSelectedResetWindow = computed(() =>
+  resetQuotaForm.daily || resetQuotaForm.weekly || resetQuotaForm.monthly || resetQuotaForm.custom
+)
 
 // Group options for filter (all groups)
 const groupOptions = computed(() => [
@@ -1264,33 +1386,80 @@ const handleAssignSubscription = async () => {
 
 const handleExtend = (subscription: UserSubscription) => {
   extendingSubscription.value = subscription
-  extendForm.days = 30
+  resetExtendForm()
   showExtendModal.value = true
 }
 
 const closeExtendModal = () => {
   showExtendModal.value = false
   extendingSubscription.value = null
+  resetExtendForm()
+}
+
+const resetExtendForm = () => {
+  extendForm.days = null
+  extendForm.daily_usage_usd = null
+  extendForm.weekly_usage_usd = null
+  extendForm.monthly_usage_usd = null
+  extendForm.custom_usage_usd = null
+}
+
+const optionalNumber = (value: unknown): number | undefined => {
+  if (value === null || value === undefined || value === '') return undefined
+  const num = Number(value)
+  return Number.isFinite(num) ? num : undefined
 }
 
 const handleExtendSubscription = async () => {
   if (!extendingSubscription.value) return
 
-  // 前端验证：调整后的过期时间必须在未来
-  if (extendingSubscription.value.expires_at) {
-    const expiresAt = new Date(extendingSubscription.value.expires_at)
-    const newExpiresAt = new Date(expiresAt.getTime() + extendForm.days * 24 * 60 * 60 * 1000)
-    if (newExpiresAt <= new Date()) {
-      appStore.showError(t('admin.subscriptions.adjustWouldExpire'))
+  const request: ExtendSubscriptionRequest = {}
+  const days = optionalNumber(extendForm.days)
+  const dailyUsage = optionalNumber(extendForm.daily_usage_usd)
+  const weeklyUsage = optionalNumber(extendForm.weekly_usage_usd)
+  const monthlyUsage = optionalNumber(extendForm.monthly_usage_usd)
+  const customUsage = optionalNumber(extendForm.custom_usage_usd)
+
+  if (days === undefined && dailyUsage === undefined && weeklyUsage === undefined && monthlyUsage === undefined && customUsage === undefined) {
+    appStore.showError(t('admin.subscriptions.adjustAtLeastOne'))
+    return
+  }
+  for (const usage of [dailyUsage, weeklyUsage, monthlyUsage, customUsage]) {
+    if (usage !== undefined && usage < 0) {
+      appStore.showError(t('admin.subscriptions.invalidUsage'))
       return
     }
   }
 
+  if (days !== undefined && (days < ADJUST_DAYS_MIN || days > ADJUST_DAYS_MAX)) {
+    appStore.showError(t('admin.subscriptions.adjustOutOfRange'))
+    return
+  }
+  if (days === 0) {
+    appStore.showError(t('admin.subscriptions.adjustDaysNonZero'))
+    return
+  }
+
+  // Keep client validation aligned with backend: expired cards revive from now + days.
+  if (days !== undefined && extendingSubscription.value.expires_at) {
+    const now = new Date()
+    const expiresAt = new Date(extendingSubscription.value.expires_at)
+    const base = expiresAt > now ? expiresAt : now
+    const newExpiresAt = new Date(base.getTime() + days * 24 * 60 * 60 * 1000)
+    if (newExpiresAt <= now) {
+      appStore.showError(t('admin.subscriptions.adjustWouldExpire'))
+      return
+    }
+  }
+  if (days !== undefined) request.days = days
+  if (dailyUsage !== undefined) request.daily_usage_usd = dailyUsage
+  if (weeklyUsage !== undefined) request.weekly_usage_usd = weeklyUsage
+  if (monthlyUsage !== undefined) request.monthly_usage_usd = monthlyUsage
+  if (customUsage !== undefined) request.custom_usage_usd = customUsage
+
   submitting.value = true
   try {
-    await adminAPI.subscriptions.extend(extendingSubscription.value.id, {
-      days: extendForm.days
-    })
+    await adminAPI.subscriptions.extend(extendingSubscription.value.id, request)
     appStore.showSuccess(t('admin.subscriptions.subscriptionAdjusted'))
     closeExtendModal()
     loadSubscriptions()
@@ -1323,19 +1492,38 @@ const confirmRevoke = async () => {
 }
 
 const handleResetQuota = (subscription: UserSubscription) => {
+  if (resettingQuota.value) return
   resettingSubscription.value = subscription
+  resetQuotaForm.daily = true
+  resetQuotaForm.weekly = true
+  resetQuotaForm.monthly = true
+  resetQuotaForm.custom = true
   showResetQuotaConfirm.value = true
+}
+
+const closeResetQuotaDialog = () => {
+  if (resettingQuota.value) return
+  showResetQuotaConfirm.value = false
+  resettingSubscription.value = null
 }
 
 const confirmResetQuota = async () => {
   if (!resettingSubscription.value) return
   if (resettingQuota.value) return
+  if (!hasSelectedResetWindow.value) {
+    appStore.showError(t('admin.subscriptions.resetQuotaAtLeastOne'))
+    return
+  }
   resettingQuota.value = true
   try {
-    await adminAPI.subscriptions.resetQuota(resettingSubscription.value.id, { daily: true, weekly: true, monthly: true, custom: true })
+    await adminAPI.subscriptions.resetQuota(resettingSubscription.value.id, {
+      daily: resetQuotaForm.daily,
+      weekly: resetQuotaForm.weekly,
+      monthly: resetQuotaForm.monthly,
+      custom: resetQuotaForm.custom
+    })
     appStore.showSuccess(t('admin.subscriptions.quotaResetSuccess'))
-    showResetQuotaConfirm.value = false
-    resettingSubscription.value = null
+    closeResetQuotaDialog()
     await loadSubscriptions()
   } catch (error: any) {
     appStore.showError(error.response?.data?.detail || t('admin.subscriptions.failedToResetQuota'))

@@ -735,6 +735,13 @@ func UserSubscriptionFromService(sub *service.UserSubscription) *UserSubscriptio
 		return nil
 	}
 	out := userSubscriptionFromServiceBase(sub)
+	if sub.IsAggregate {
+		if out.ID == 0 {
+			out.ID = sub.GroupID
+		}
+		out.IsAggregate = false
+		out.SubscriptionCount = 0
+	}
 	return &out
 }
 
@@ -744,8 +751,21 @@ func UserSubscriptionFromServiceAdmin(sub *service.UserSubscription) *AdminUserS
 	if sub == nil {
 		return nil
 	}
+	base := userSubscriptionFromServiceBase(sub)
+	base.SourceType = sub.SourceType
+	base.SourceRefID = sub.SourceRefID
+	base.SourceRedeemCodeID = sub.SourceRedeemCodeID
+	base.RedeemCodeSnapshot = sub.RedeemCodeSnapshot
+	base.GroupNameSnapshot = sub.GroupNameSnapshot
+	base.GroupPlatformSnapshot = sub.GroupPlatformSnapshot
+	base.GroupRateMultiplierSnapshot = sub.GroupRateMultiplierSnapshot
+	base.DailyLimitUSDSnapshot = sub.DailyLimitUSDSnapshot
+	base.WeeklyLimitUSDSnapshot = sub.WeeklyLimitUSDSnapshot
+	base.MonthlyLimitUSDSnapshot = sub.MonthlyLimitUSDSnapshot
+	base.CustomLimitHoursSnapshot = sub.CustomLimitHoursSnapshot
+	base.CustomLimitUSDSnapshot = sub.CustomLimitUSDSnapshot
 	return &AdminUserSubscription{
-		UserSubscription: userSubscriptionFromServiceBase(sub),
+		UserSubscription: base,
 		AssignedBy:       sub.AssignedBy,
 		AssignedAt:       sub.AssignedAt,
 		Notes:            sub.Notes,
@@ -761,6 +781,8 @@ func userSubscriptionFromServiceBase(sub *service.UserSubscription) UserSubscrip
 		StartsAt:           sub.StartsAt,
 		ExpiresAt:          sub.ExpiresAt,
 		Status:             sub.Status,
+		IsAggregate:        sub.IsAggregate,
+		SubscriptionCount:  sub.SubscriptionCount,
 		DailyWindowStart:   sub.DailyWindowStart,
 		WeeklyWindowStart:  sub.WeeklyWindowStart,
 		MonthlyWindowStart: sub.MonthlyWindowStart,
@@ -772,8 +794,26 @@ func userSubscriptionFromServiceBase(sub *service.UserSubscription) UserSubscrip
 		CreatedAt:          sub.CreatedAt,
 		UpdatedAt:          sub.UpdatedAt,
 		User:               UserFromServiceShallow(sub.User),
-		Group:              GroupFromServiceShallow(sub.Group),
+		Group:              subscriptionGroupFromService(sub),
 	}
+}
+
+func subscriptionGroupFromService(sub *service.UserSubscription) *Group {
+	if sub == nil {
+		return nil
+	}
+	if sub.Group == nil &&
+		sub.GroupNameSnapshot == nil &&
+		sub.GroupPlatformSnapshot == nil &&
+		sub.GroupRateMultiplierSnapshot == nil &&
+		sub.DailyLimitUSDSnapshot == nil &&
+		sub.WeeklyLimitUSDSnapshot == nil &&
+		sub.MonthlyLimitUSDSnapshot == nil &&
+		sub.CustomLimitHoursSnapshot == nil &&
+		sub.CustomLimitUSDSnapshot == nil {
+		return nil
+	}
+	return GroupFromServiceShallow(sub.EffectiveGroup(sub.Group))
 }
 
 func BulkAssignResultFromService(r *service.BulkAssignResult) *BulkAssignResult {

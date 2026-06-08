@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
 	"math/rand/v2"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -38,6 +40,7 @@ var (
 	ErrCustomLimitExceeded        = infraerrors.TooManyRequests("CUSTOM_LIMIT_EXCEEDED", "custom usage limit exceeded")
 	ErrSubscriptionNilInput       = infraerrors.BadRequest("SUBSCRIPTION_NIL_INPUT", "subscription input cannot be nil")
 	ErrAdjustWouldExpire          = infraerrors.BadRequest("ADJUST_WOULD_EXPIRE", "adjustment would result in expired subscription (remaining days must be > 0)")
+	ErrAdjustNoFields             = infraerrors.BadRequest("INVALID_INPUT", "at least one adjustment field must be provided")
 )
 
 // SubscriptionService 订阅服务
@@ -48,12 +51,18 @@ type SubscriptionService struct {
 	entClient           *dbent.Client
 
 	// L1 缓存：加速中间件热路径的订阅查询
-	subCacheL1     *ristretto.Cache
-	subCacheGroup  singleflight.Group
-	subCacheTTL    time.Duration
-	subCacheJitter int // 抖动百分比
+	subCacheL1       *ristretto.Cache
+	subCacheGroup    singleflight.Group
+	subCacheVersions sync.Map
+	subCacheTTL      time.Duration
+	subCacheJitter   int // 抖动百分比
 
 	maintenanceQueue *SubscriptionMaintenanceQueue
+}
+
+type userSubscriptionHistoryRepository interface {
+	GetByIDIncludeDeleted(ctx context.Context, id int64) (*UserSubscription, error)
+	ListByUserIDIncludeDeleted(ctx context.Context, userID int64) ([]UserSubscription, error)
 }
 
 // NewSubscriptionService 创建订阅服务
@@ -66,6 +75,10 @@ func NewSubscriptionService(groupRepo GroupRepository, userSubRepo UserSubscript
 	}
 	svc.initSubCache(cfg)
 	svc.initMaintenanceQueue(cfg)
+	if billingCacheService != nil {
+		billingCacheService.SetSubscriptionL1Invalidator(svc.InvalidateSubCache)
+		billingCacheService.SetSubscriptionL1UsageUpdater(svc.IncrementSubCacheUsage)
+	}
 	return svc
 }
 
@@ -118,6 +131,34 @@ func subCacheKey(userID, groupID int64) string {
 	return "sub:" + strconv.FormatInt(userID, 10) + ":" + strconv.FormatInt(groupID, 10)
 }
 
+type invalidatedSubCacheEntry struct{}
+
+type subCacheEntry struct {
+	sub     *UserSubscription
+	version uint64
+}
+
+func (s *SubscriptionService) subCacheVersion(key string) uint64 {
+	if s == nil {
+		return 0
+	}
+	v, ok := s.subCacheVersions.Load(key)
+	if !ok {
+		return 0
+	}
+	n, ok := v.(uint64)
+	if !ok {
+		return 0
+	}
+	return n
+}
+
+func (s *SubscriptionService) bumpSubCacheVersion(key string) uint64 {
+	next := s.subCacheVersion(key) + 1
+	s.subCacheVersions.Store(key, next)
+	return next
+}
+
 // jitteredTTL 为 TTL 添加抖动，避免集中过期
 func (s *SubscriptionService) jitteredTTL(ttl time.Duration) time.Duration {
 	if ttl <= 0 || s.subCacheJitter <= 0 {
@@ -140,16 +181,73 @@ func (s *SubscriptionService) InvalidateSubCache(userID, groupID int64) {
 	if s.subCacheL1 == nil {
 		return
 	}
-	s.subCacheL1.Del(subCacheKey(userID, groupID))
+	key := subCacheKey(userID, groupID)
+	s.bumpSubCacheVersion(key)
+	s.subCacheL1.Del(key)
+	_ = s.subCacheL1.SetWithTTL(key, invalidatedSubCacheEntry{}, 1, time.Second)
+	s.subCacheL1.Wait()
+}
+
+func (s *SubscriptionService) IncrementSubCacheUsage(userID, groupID int64, costUSD float64) {
+	if s == nil || s.subCacheL1 == nil || costUSD <= 0 {
+		return
+	}
+	key := subCacheKey(userID, groupID)
+	v, ok := s.subCacheL1.Get(key)
+	if !ok {
+		return
+	}
+	entry, ok := v.(*subCacheEntry)
+	if !ok || entry == nil || entry.sub == nil || entry.version != s.subCacheVersion(key) {
+		return
+	}
+	cp := *entry.sub
+	cp.DailyUsageUSD += costUSD
+	cp.WeeklyUsageUSD += costUSD
+	cp.MonthlyUsageUSD += costUSD
+	cp.CustomUsageUSD += costUSD
+	if cp.StackedAvailableUSD != nil {
+		remaining := *cp.StackedAvailableUSD - costUSD
+		if remaining < 0 {
+			remaining = 0
+		}
+		cp.StackedAvailableUSD = &remaining
+	}
+	_ = s.subCacheL1.SetWithTTL(key, &subCacheEntry{sub: &cp, version: entry.version}, 1, s.jitteredTTL(s.subCacheTTL))
+	s.subCacheL1.Wait()
+}
+
+func (s *SubscriptionService) invalidateSubscriptionCaches(userID, groupID int64) {
+	s.InvalidateSubCache(userID, groupID)
+	if s.billingCacheService == nil {
+		return
+	}
+	go func() {
+		cacheCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = s.billingCacheService.InvalidateSubscription(cacheCtx, userID, groupID)
+	}()
 }
 
 // AssignSubscriptionInput 分配订阅输入
 type AssignSubscriptionInput struct {
-	UserID       int64
-	GroupID      int64
-	ValidityDays int
-	AssignedBy   int64
-	Notes        string
+	UserID             int64
+	GroupID            int64
+	ValidityDays       int
+	AssignedBy         int64
+	Notes              string
+	SourceType         string
+	SourceRefID        string
+	SourceRedeemCodeID *int64
+	RedeemCodeSnapshot string
+}
+
+type AdjustSubscriptionInput struct {
+	Days            *int
+	DailyUsageUSD   *float64
+	WeeklyUsageUSD  *float64
+	MonthlyUsageUSD *float64
+	CustomUsageUSD  *float64
 }
 
 // AssignSubscription 分配订阅给用户（不允许重复分配）
@@ -251,6 +349,30 @@ func (s *SubscriptionService) AssignOrExtendSubscription(ctx context.Context, in
 	return sub, false, nil // false 表示是新建
 }
 
+func (s *SubscriptionService) AssignStackedSubscription(ctx context.Context, input *AssignSubscriptionInput) (*UserSubscription, bool, error) {
+	if input == nil {
+		return nil, false, ErrSubscriptionNilInput
+	}
+	group, err := s.groupRepo.GetByID(ctx, input.GroupID)
+	if err != nil {
+		return nil, false, fmt.Errorf("group not found: %w", err)
+	}
+	if !group.IsSubscriptionType() {
+		return nil, false, ErrGroupNotSubscriptionType
+	}
+	if strings.TrimSpace(input.SourceType) != "" && strings.TrimSpace(input.SourceRefID) != "" {
+		if existing, getErr := s.userSubRepo.GetBySource(ctx, input.SourceType, input.SourceRefID); getErr == nil && existing != nil {
+			return existing, true, nil
+		}
+	}
+	sub, err := s.createSubscriptionWithGroup(ctx, input, group)
+	if err != nil {
+		return nil, false, err
+	}
+	s.invalidateSubscriptionCaches(input.UserID, input.GroupID)
+	return sub, false, nil
+}
+
 func (s *SubscriptionService) updateExistingSubscriptionTerm(
 	ctx context.Context,
 	existingSub *UserSubscription,
@@ -293,6 +415,9 @@ func (s *SubscriptionService) updateExistingSubscriptionTerm(
 
 func (s *SubscriptionService) withSubscriptionUpdateTx(ctx context.Context, fn func(context.Context) error) error {
 	if s.entClient == nil {
+		return fn(ctx)
+	}
+	if dbent.TxFromContext(ctx) != nil {
 		return fn(ctx)
 	}
 
@@ -346,6 +471,14 @@ func appendSubscriptionNotes(existingNotes, newNotes string) string {
 
 // createSubscription 创建新订阅（内部方法）
 func (s *SubscriptionService) createSubscription(ctx context.Context, input *AssignSubscriptionInput) (*UserSubscription, error) {
+	group, err := s.groupRepo.GetByID(ctx, input.GroupID)
+	if err != nil {
+		return nil, fmt.Errorf("group not found: %w", err)
+	}
+	return s.createSubscriptionWithGroup(ctx, input, group)
+}
+
+func (s *SubscriptionService) createSubscriptionWithGroup(ctx context.Context, input *AssignSubscriptionInput, group *Group) (*UserSubscription, error) {
 	validityDays := input.ValidityDays
 	if validityDays <= 0 {
 		validityDays = 30
@@ -379,6 +512,8 @@ func (s *SubscriptionService) createSubscription(ctx context.Context, input *Ass
 		CreatedAt:          now,
 		UpdatedAt:          now,
 	}
+	applySubscriptionSource(sub, input)
+	snapshotSubscriptionGroup(sub, group)
 	// 只有当 AssignedBy > 0 时才设置（0 表示系统分配，如兑换码）
 	if input.AssignedBy > 0 {
 		sub.AssignedBy = &input.AssignedBy
@@ -393,6 +528,55 @@ func (s *SubscriptionService) createSubscription(ctx context.Context, input *Ass
 }
 
 // BulkAssignSubscriptionInput 批量分配订阅输入
+func applySubscriptionSource(sub *UserSubscription, input *AssignSubscriptionInput) {
+	if sub == nil || input == nil {
+		return
+	}
+	if sourceType := strings.TrimSpace(input.SourceType); sourceType != "" {
+		sub.SourceType = &sourceType
+	}
+	if sourceRefID := strings.TrimSpace(input.SourceRefID); sourceRefID != "" {
+		sub.SourceRefID = &sourceRefID
+	}
+	if input.SourceRedeemCodeID != nil {
+		v := *input.SourceRedeemCodeID
+		sub.SourceRedeemCodeID = &v
+	}
+	if redeemCode := strings.TrimSpace(input.RedeemCodeSnapshot); redeemCode != "" {
+		sub.RedeemCodeSnapshot = &redeemCode
+	}
+}
+
+func snapshotSubscriptionGroup(sub *UserSubscription, group *Group) {
+	if sub == nil || group == nil {
+		return
+	}
+	name := group.Name
+	sub.GroupNameSnapshot = &name
+	platform := group.Platform
+	sub.GroupPlatformSnapshot = &platform
+	rate := group.RateMultiplier
+	sub.GroupRateMultiplierSnapshot = &rate
+	if group.DailyLimitUSD != nil {
+		v := *group.DailyLimitUSD
+		sub.DailyLimitUSDSnapshot = &v
+	}
+	if group.WeeklyLimitUSD != nil {
+		v := *group.WeeklyLimitUSD
+		sub.WeeklyLimitUSDSnapshot = &v
+	}
+	if group.MonthlyLimitUSD != nil {
+		v := *group.MonthlyLimitUSD
+		sub.MonthlyLimitUSDSnapshot = &v
+	}
+	hours := group.CustomLimitHours
+	sub.CustomLimitHoursSnapshot = &hours
+	if group.CustomLimitUSD != nil {
+		v := *group.CustomLimitUSD
+		sub.CustomLimitUSDSnapshot = &v
+	}
+}
+
 type BulkAssignSubscriptionInput struct {
 	UserIDs      []int64
 	GroupID      int64
@@ -532,13 +716,18 @@ func normalizeAssignValidityDays(days int) int {
 
 // RevokeSubscription 撤销订阅
 func (s *SubscriptionService) RevokeSubscription(ctx context.Context, subscriptionID int64) error {
-	// 先获取订阅信息用于失效缓存
-	sub, err := s.userSubRepo.GetByID(ctx, subscriptionID)
-	if err != nil {
-		return err
-	}
-
-	if err := s.userSubRepo.Delete(ctx, subscriptionID); err != nil {
+	var sub *UserSubscription
+	if err := s.withSubscriptionUpdateTx(ctx, func(txCtx context.Context) error {
+		var err error
+		sub, err = s.userSubRepo.GetByID(txCtx, subscriptionID)
+		if err != nil {
+			return err
+		}
+		if err := s.userSubRepo.UpdateStatus(txCtx, subscriptionID, SubscriptionStatusRevoked); err != nil {
+			return err
+		}
+		return s.userSubRepo.Delete(txCtx, subscriptionID)
+	}); err != nil {
 		return err
 	}
 
@@ -623,7 +812,253 @@ func (s *SubscriptionService) ExtendSubscription(ctx context.Context, subscripti
 	return s.userSubRepo.GetByID(ctx, subscriptionID)
 }
 
+func (s *SubscriptionService) AdjustSubscription(ctx context.Context, subscriptionID int64, input AdjustSubscriptionInput) (*UserSubscription, error) {
+	if input.Days == nil && input.DailyUsageUSD == nil && input.WeeklyUsageUSD == nil && input.MonthlyUsageUSD == nil && input.CustomUsageUSD == nil {
+		return nil, ErrAdjustNoFields
+	}
+	for _, usage := range []*float64{input.DailyUsageUSD, input.WeeklyUsageUSD, input.MonthlyUsageUSD, input.CustomUsageUSD} {
+		if usage != nil && *usage < 0 {
+			return nil, infraerrors.BadRequest("INVALID_USAGE", "usage values must be non-negative")
+		}
+	}
+	if input.Days != nil {
+		if *input.Days == 0 {
+			return nil, infraerrors.BadRequest("INVALID_DAYS", "days must be non-zero when provided")
+		}
+		if *input.Days > MaxValidityDays || *input.Days < -MaxValidityDays {
+			return nil, infraerrors.BadRequest("INVALID_DAYS", "days is out of allowed range")
+		}
+	}
+	sub, err := s.userSubRepo.GetByID(ctx, subscriptionID)
+	if err != nil {
+		return nil, ErrSubscriptionNotFound
+	}
+	fields := UserSubscriptionMutableFields{}
+	if input.Days != nil {
+		days := *input.Days
+		now := time.Now()
+		isExpired := !sub.ExpiresAt.After(now)
+		if isExpired && days < 0 {
+			return nil, infraerrors.BadRequest("CANNOT_SHORTEN_EXPIRED", "cannot shorten an expired subscription")
+		}
+		var newExpiresAt time.Time
+		if isExpired {
+			newExpiresAt = now.AddDate(0, 0, days)
+		} else {
+			newExpiresAt = sub.ExpiresAt.AddDate(0, 0, days)
+		}
+		if newExpiresAt.After(MaxExpiresAt) {
+			newExpiresAt = MaxExpiresAt
+		}
+		if !newExpiresAt.After(now) {
+			return nil, ErrAdjustWouldExpire
+		}
+		fields.ExpiresAt = &newExpiresAt
+		if sub.Status == SubscriptionStatusExpired {
+			status := SubscriptionStatusActive
+			fields.Status = &status
+		}
+	}
+	if input.DailyUsageUSD != nil {
+		fields.DailyUsageUSD = input.DailyUsageUSD
+	}
+	if input.WeeklyUsageUSD != nil {
+		fields.WeeklyUsageUSD = input.WeeklyUsageUSD
+	}
+	if input.MonthlyUsageUSD != nil {
+		fields.MonthlyUsageUSD = input.MonthlyUsageUSD
+	}
+	if input.CustomUsageUSD != nil {
+		fields.CustomUsageUSD = input.CustomUsageUSD
+	}
+	if err := s.userSubRepo.UpdateMutableFields(ctx, subscriptionID, fields); err != nil {
+		return nil, err
+	}
+	s.InvalidateSubCache(sub.UserID, sub.GroupID)
+	if s.subCacheL1 != nil {
+		s.subCacheL1.Wait()
+	}
+	if s.billingCacheService != nil {
+		_ = s.billingCacheService.InvalidateSubscription(ctx, sub.UserID, sub.GroupID)
+	}
+	return s.userSubRepo.GetByID(ctx, subscriptionID)
+}
+
+func (s *SubscriptionService) DeductSubscriptionDaysNewest(ctx context.Context, userID, groupID int64, days int, note string) error {
+	_, err := s.DeductSubscriptionDaysNewestWithSnapshots(ctx, userID, groupID, days, note)
+	return err
+}
+
+func (s *SubscriptionService) DeductSubscriptionDaysNewestWithSnapshots(ctx context.Context, userID, groupID int64, days int, note string) ([]UserSubscription, error) {
+	if days <= 0 {
+		return nil, nil
+	}
+	var snapshots []UserSubscription
+	err := s.withSubscriptionUpdateTx(ctx, func(txCtx context.Context) error {
+		subs, err := s.userSubRepo.ListActiveByUserIDAndGroupID(txCtx, userID, groupID)
+		if err != nil {
+			return err
+		}
+		if len(subs) == 0 {
+			return ErrSubscriptionNotFound
+		}
+		remainingToDeduct := days
+		now := time.Now()
+		trimmedNote := strings.TrimSpace(note)
+		for i := len(subs) - 1; i >= 0 && remainingToDeduct > 0; i-- {
+			sub := subs[i]
+			updated := sub
+			remainingDays := int(sub.ExpiresAt.Sub(now).Hours()/24) + 1
+			if remainingDays < 1 {
+				remainingDays = 1
+			}
+			if remainingToDeduct >= remainingDays {
+				updated.Status = SubscriptionStatusExpired
+				updated.ExpiresAt = now
+				if trimmedNote != "" {
+					updated.Notes = appendSubscriptionNotes(sub.Notes, trimmedNote)
+				}
+				snapshots = append(snapshots, cloneUserSubscription(sub))
+				if err := s.userSubRepo.Update(txCtx, &updated); err != nil {
+					return err
+				}
+				remainingToDeduct -= remainingDays
+				continue
+			}
+			newExpiresAt := sub.ExpiresAt.AddDate(0, 0, -remainingToDeduct)
+			if !newExpiresAt.After(now) {
+				newExpiresAt = now
+			}
+			updated.ExpiresAt = newExpiresAt
+			if trimmedNote != "" {
+				updated.Notes = appendSubscriptionNotes(sub.Notes, trimmedNote)
+			}
+			snapshots = append(snapshots, cloneUserSubscription(sub))
+			if err := s.userSubRepo.Update(txCtx, &updated); err != nil {
+				return err
+			}
+			remainingToDeduct = 0
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	s.InvalidateSubCache(userID, groupID)
+	if s.billingCacheService != nil {
+		_ = s.billingCacheService.InvalidateSubscription(ctx, userID, groupID)
+	}
+	return snapshots, nil
+}
+
+func (s *SubscriptionService) RestoreSubscriptionSnapshots(ctx context.Context, snapshots []UserSubscription) error {
+	if len(snapshots) == 0 {
+		return nil
+	}
+	type pair struct {
+		userID  int64
+		groupID int64
+	}
+	seen := make(map[pair]struct{}, len(snapshots))
+	err := s.withSubscriptionUpdateTx(ctx, func(txCtx context.Context) error {
+		for i := range snapshots {
+			snapshot := cloneUserSubscription(snapshots[i])
+			if snapshot.ID <= 0 {
+				continue
+			}
+			current, err := s.userSubRepo.GetByID(txCtx, snapshot.ID)
+			if err != nil {
+				return err
+			}
+			fields := UserSubscriptionMutableFields{
+				Status:    &snapshot.Status,
+				ExpiresAt: &snapshot.ExpiresAt,
+				Notes:     &snapshot.Notes,
+			}
+			if err := s.userSubRepo.UpdateMutableFields(txCtx, snapshot.ID, fields); err != nil {
+				return err
+			}
+			seen[pair{userID: current.UserID, groupID: current.GroupID}] = struct{}{}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	for key := range seen {
+		s.InvalidateSubCache(key.userID, key.groupID)
+		if s.billingCacheService != nil {
+			_ = s.billingCacheService.InvalidateSubscription(ctx, key.userID, key.groupID)
+		}
+	}
+	return nil
+}
+
 // GetByID 根据ID获取订阅
+func cloneUserSubscription(sub UserSubscription) UserSubscription {
+	cp := sub
+	cp.StackedAvailableUSD = cloneSubscriptionFloat64Ptr(sub.StackedAvailableUSD)
+	cp.DailyWindowStart = cloneSubscriptionTimePtr(sub.DailyWindowStart)
+	cp.WeeklyWindowStart = cloneSubscriptionTimePtr(sub.WeeklyWindowStart)
+	cp.MonthlyWindowStart = cloneSubscriptionTimePtr(sub.MonthlyWindowStart)
+	cp.CustomWindowStart = cloneSubscriptionTimePtr(sub.CustomWindowStart)
+	cp.AssignedBy = cloneSubscriptionInt64Ptr(sub.AssignedBy)
+	cp.SourceType = cloneSubscriptionStringPtr(sub.SourceType)
+	cp.SourceRefID = cloneSubscriptionStringPtr(sub.SourceRefID)
+	cp.SourceRedeemCodeID = cloneSubscriptionInt64Ptr(sub.SourceRedeemCodeID)
+	cp.RedeemCodeSnapshot = cloneSubscriptionStringPtr(sub.RedeemCodeSnapshot)
+	cp.GroupNameSnapshot = cloneSubscriptionStringPtr(sub.GroupNameSnapshot)
+	cp.GroupPlatformSnapshot = cloneSubscriptionStringPtr(sub.GroupPlatformSnapshot)
+	cp.GroupRateMultiplierSnapshot = cloneSubscriptionFloat64Ptr(sub.GroupRateMultiplierSnapshot)
+	cp.DailyLimitUSDSnapshot = cloneSubscriptionFloat64Ptr(sub.DailyLimitUSDSnapshot)
+	cp.WeeklyLimitUSDSnapshot = cloneSubscriptionFloat64Ptr(sub.WeeklyLimitUSDSnapshot)
+	cp.MonthlyLimitUSDSnapshot = cloneSubscriptionFloat64Ptr(sub.MonthlyLimitUSDSnapshot)
+	cp.CustomLimitHoursSnapshot = cloneSubscriptionIntPtr(sub.CustomLimitHoursSnapshot)
+	cp.CustomLimitUSDSnapshot = cloneSubscriptionFloat64Ptr(sub.CustomLimitUSDSnapshot)
+	cp.DeletedAt = cloneSubscriptionTimePtr(sub.DeletedAt)
+	return cp
+}
+
+func cloneSubscriptionTimePtr(v *time.Time) *time.Time {
+	if v == nil {
+		return nil
+	}
+	cp := *v
+	return &cp
+}
+
+func cloneSubscriptionStringPtr(v *string) *string {
+	if v == nil {
+		return nil
+	}
+	cp := *v
+	return &cp
+}
+
+func cloneSubscriptionFloat64Ptr(v *float64) *float64 {
+	if v == nil {
+		return nil
+	}
+	cp := *v
+	return &cp
+}
+
+func cloneSubscriptionInt64Ptr(v *int64) *int64 {
+	if v == nil {
+		return nil
+	}
+	cp := *v
+	return &cp
+}
+
+func cloneSubscriptionIntPtr(v *int) *int {
+	if v == nil {
+		return nil
+	}
+	cp := *v
+	return &cp
+}
+
 func (s *SubscriptionService) GetByID(ctx context.Context, id int64) (*UserSubscription, error) {
 	sub, err := s.userSubRepo.GetByID(ctx, id)
 	if err != nil {
@@ -631,6 +1066,18 @@ func (s *SubscriptionService) GetByID(ctx context.Context, id int64) (*UserSubsc
 	}
 	normalizeSubscriptionSnapshot(sub)
 	return sub, nil
+}
+
+func (s *SubscriptionService) GetByIDIncludeDeleted(ctx context.Context, id int64) (*UserSubscription, error) {
+	if repo, ok := s.userSubRepo.(userSubscriptionHistoryRepository); ok {
+		sub, err := repo.GetByIDIncludeDeleted(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		normalizeSubscriptionSnapshot(sub)
+		return sub, nil
+	}
+	return s.GetByID(ctx, id)
 }
 
 // GetActiveSubscription 获取用户对特定分组的有效订阅
@@ -642,8 +1089,8 @@ func (s *SubscriptionService) GetActiveSubscription(ctx context.Context, userID,
 	// L1 缓存命中：返回浅拷贝
 	if s.subCacheL1 != nil {
 		if v, ok := s.subCacheL1.Get(key); ok {
-			if sub, ok := v.(*UserSubscription); ok {
-				cp := *sub
+			if entry, ok := v.(*subCacheEntry); ok && entry != nil && entry.sub != nil && entry.version == s.subCacheVersion(key) {
+				cp := *entry.sub
 				return &cp, nil
 			}
 		}
@@ -651,37 +1098,371 @@ func (s *SubscriptionService) GetActiveSubscription(ctx context.Context, userID,
 
 	// singleflight 防止并发击穿
 	value, err, _ := s.subCacheGroup.Do(key, func() (any, error) {
-		sub, err := s.userSubRepo.GetActiveByUserIDAndGroupID(ctx, userID, groupID)
+		cacheVersion := s.subCacheVersion(key)
+		subs, err := s.userSubRepo.ListActiveByUserIDAndGroupID(ctx, userID, groupID)
 		if err != nil {
 			return nil, err // 直接透传 repo 已翻译的错误（NotFound → ErrSubscriptionNotFound，其他错误原样返回）
 		}
 		// 写入 L1 缓存
-		if s.subCacheL1 != nil {
-			_ = s.subCacheL1.SetWithTTL(key, sub, 1, s.jitteredTTL(s.subCacheTTL))
+		if len(subs) == 0 {
+			return nil, ErrSubscriptionNotFound
 		}
-		return sub, nil
+		sub := aggregateActiveSubscriptionsForDisplay(subs)
+		entry := &subCacheEntry{sub: sub, version: cacheVersion}
+		if s.subCacheL1 != nil {
+			_ = s.subCacheL1.SetWithTTL(key, entry, 1, s.jitteredTTL(s.subCacheTTL))
+		}
+		return entry, nil
 	})
 	if err != nil {
 		return nil, err
 	}
 	// singleflight 返回的也是缓存指针，需要浅拷贝
-	sub, ok := value.(*UserSubscription)
-	if !ok || sub == nil {
+	entry, ok := value.(*subCacheEntry)
+	if !ok || entry == nil || entry.sub == nil {
 		return nil, ErrSubscriptionNotFound
+	}
+	if entry.version != s.subCacheVersion(key) {
+		return s.loadActiveSubscriptionFresh(ctx, userID, groupID, key)
+	}
+	sub := entry.sub
+	cp := *sub
+	return &cp, nil
+}
+
+func (s *SubscriptionService) loadActiveSubscriptionFresh(ctx context.Context, userID, groupID int64, key string) (*UserSubscription, error) {
+	subs, err := s.userSubRepo.ListActiveByUserIDAndGroupID(ctx, userID, groupID)
+	if err != nil {
+		return nil, err
+	}
+	if len(subs) == 0 {
+		return nil, ErrSubscriptionNotFound
+	}
+	sub := aggregateActiveSubscriptionsForDisplay(subs)
+	if sub == nil {
+		return nil, ErrSubscriptionNotFound
+	}
+	version := s.subCacheVersion(key)
+	if s.subCacheL1 != nil {
+		_ = s.subCacheL1.SetWithTTL(key, &subCacheEntry{sub: sub, version: version}, 1, s.jitteredTTL(s.subCacheTTL))
 	}
 	cp := *sub
 	return &cp, nil
 }
 
 // ListUserSubscriptions 获取用户的所有订阅
+func aggregateActiveSubscriptions(subs []UserSubscription) *UserSubscription {
+	return aggregateActiveSubscriptionsInternal(subs, false)
+}
+
+func aggregateActiveSubscriptionsForDisplay(subs []UserSubscription) *UserSubscription {
+	return aggregateActiveSubscriptionsInternal(subs, true)
+}
+
+func aggregateActiveSubscriptionsInternal(subs []UserSubscription, normalizeWindows bool) *UserSubscription {
+	if len(subs) == 0 {
+		return nil
+	}
+	now := time.Now()
+	normalized := make([]UserSubscription, 0, len(subs))
+	for i := range subs {
+		sub := subs[i]
+		if normalizeWindows {
+			normalizeSubscriptionWindowsAt(&sub, now)
+		}
+		normalized = append(normalized, sub)
+	}
+	if len(normalized) == 1 {
+		return &normalized[0]
+	}
+	agg := normalized[0]
+	agg.ID = 0
+	agg.IsAggregate = true
+	agg.SubscriptionCount = len(normalized)
+	agg.SourceType = nil
+	agg.SourceRefID = nil
+	agg.SourceRedeemCodeID = nil
+	agg.RedeemCodeSnapshot = nil
+	agg.StackedAvailableUSD = aggregateStackedAvailable(normalized)
+	agg.AssignedBy = nil
+	agg.AssignedAt = time.Time{}
+	agg.AssignedByUser = nil
+	agg.Notes = ""
+	agg.StartsAt = normalized[0].StartsAt
+	agg.ExpiresAt = normalized[0].ExpiresAt
+	agg.DailyUsageUSD = 0
+	agg.WeeklyUsageUSD = 0
+	agg.MonthlyUsageUSD = 0
+	agg.CustomUsageUSD = 0
+
+	dailyLimit, dailyUnlimited := aggregateLimit(normalized, func(sub *UserSubscription) *float64 { return sub.EffectiveDailyLimitUSD(sub.Group) })
+	weeklyLimit, weeklyUnlimited := aggregateLimit(normalized, func(sub *UserSubscription) *float64 { return sub.EffectiveWeeklyLimitUSD(sub.Group) })
+	monthlyLimit, monthlyUnlimited := aggregateLimit(normalized, func(sub *UserSubscription) *float64 { return sub.EffectiveMonthlyLimitUSD(sub.Group) })
+	customLimit, customUnlimited := aggregateLimit(normalized, func(sub *UserSubscription) *float64 { return sub.EffectiveCustomLimitUSD(sub.Group) })
+	customHours := aggregateCustomHours(normalized)
+
+	for i := range normalized {
+		sub := &normalized[i]
+		if sub.StartsAt.Before(agg.StartsAt) {
+			agg.StartsAt = sub.StartsAt
+		}
+		if sub.ExpiresAt.After(agg.ExpiresAt) {
+			agg.ExpiresAt = sub.ExpiresAt
+		}
+		agg.DailyUsageUSD += sub.DailyUsageUSD
+		agg.WeeklyUsageUSD += sub.WeeklyUsageUSD
+		agg.MonthlyUsageUSD += sub.MonthlyUsageUSD
+		agg.CustomUsageUSD += sub.CustomUsageUSD
+	}
+
+	if !dailyUnlimited {
+		agg.DailyLimitUSDSnapshot = dailyLimit
+	}
+	if !weeklyUnlimited {
+		agg.WeeklyLimitUSDSnapshot = weeklyLimit
+	}
+	if !monthlyUnlimited {
+		agg.MonthlyLimitUSDSnapshot = monthlyLimit
+	}
+	if !customUnlimited {
+		agg.CustomLimitUSDSnapshot = customLimit
+	}
+	if customHours > 0 {
+		agg.CustomLimitHoursSnapshot = &customHours
+	}
+	agg.DailyWindowStart = aggregateWindowStart(normalized, "daily")
+	agg.WeeklyWindowStart = aggregateWindowStart(normalized, "weekly")
+	agg.MonthlyWindowStart = aggregateWindowStart(normalized, "monthly")
+	agg.CustomWindowStart = aggregateWindowStart(normalized, "custom")
+	agg.Group = agg.EffectiveGroup(agg.Group)
+	return &agg
+}
+
+func aggregateStackedAvailable(subs []UserSubscription) *float64 {
+	var total float64
+	for i := range subs {
+		available := subscriptionBillingAvailable(&subs[i])
+		if math.IsInf(available, 1) {
+			return nil
+		}
+		total += available
+	}
+	return &total
+}
+
+func subscriptionBillingAvailable(sub *UserSubscription) float64 {
+	if sub == nil {
+		return 0
+	}
+	group := sub.EffectiveGroup(sub.Group)
+	available := math.Inf(1)
+	applyLimit := func(limit *float64, usage float64) {
+		if limit == nil || *limit <= 0 {
+			return
+		}
+		remaining := *limit - usage
+		if remaining < available {
+			available = remaining
+		}
+	}
+	applyLimit(sub.EffectiveDailyLimitUSD(group), sub.DailyUsageUSD)
+	applyLimit(sub.EffectiveWeeklyLimitUSD(group), sub.WeeklyUsageUSD)
+	applyLimit(sub.EffectiveMonthlyLimitUSD(group), sub.MonthlyUsageUSD)
+	if sub.EffectiveCustomLimitHours(group) > 0 {
+		applyLimit(sub.EffectiveCustomLimitUSD(group), sub.CustomUsageUSD)
+	}
+	if available < 0 {
+		return 0
+	}
+	return available
+}
+
+func aggregateLimit(subs []UserSubscription, get func(*UserSubscription) *float64) (*float64, bool) {
+	var sum float64
+	for i := range subs {
+		limit := get(&subs[i])
+		if limit == nil || *limit <= 0 {
+			return nil, true
+		}
+		sum += *limit
+	}
+	return &sum, false
+}
+
+func aggregateCustomHours(subs []UserSubscription) int {
+	hours := 0
+	for i := range subs {
+		h := subs[i].EffectiveCustomLimitHours(subs[i].Group)
+		if h <= 0 {
+			continue
+		}
+		if hours == 0 || h < hours {
+			hours = h
+		}
+	}
+	return hours
+}
+
+func aggregateWindowStart(subs []UserSubscription, window string) *time.Time {
+	var fallback *time.Time
+	var chosen *time.Time
+	var chosenReset time.Time
+	for i := range subs {
+		sub := &subs[i]
+		start, usage, reset := subscriptionWindowInfo(sub, window)
+		if start == nil {
+			continue
+		}
+		if fallback == nil || start.Before(*fallback) {
+			v := *start
+			fallback = &v
+		}
+		if usage <= 0 || reset == nil {
+			continue
+		}
+		if chosen == nil || reset.Before(chosenReset) {
+			v := *start
+			chosen = &v
+			chosenReset = *reset
+		}
+	}
+	if chosen != nil {
+		return chosen
+	}
+	return fallback
+}
+
+func subscriptionWindowInfo(sub *UserSubscription, window string) (*time.Time, float64, *time.Time) {
+	switch window {
+	case "daily":
+		return sub.DailyWindowStart, sub.DailyUsageUSD, sub.DailyResetTime()
+	case "weekly":
+		return sub.WeeklyWindowStart, sub.WeeklyUsageUSD, sub.WeeklyResetTime()
+	case "monthly":
+		return sub.MonthlyWindowStart, sub.MonthlyUsageUSD, sub.MonthlyResetTime()
+	case "custom":
+		return sub.CustomWindowStart, sub.CustomUsageUSD, sub.CustomResetTime(sub.Group)
+	default:
+		return nil, 0, nil
+	}
+}
+
+func aggregateActiveByGroup(subs []UserSubscription) []UserSubscription {
+	return aggregateActiveByGroupInternal(subs, false)
+}
+
+func aggregateActiveByGroupForDisplay(subs []UserSubscription) []UserSubscription {
+	return aggregateActiveByGroupInternal(subs, true)
+}
+
+func aggregateUserVisibleByGroupForDisplay(subs []UserSubscription) []UserSubscription {
+	return aggregateByGroupAndStatusForDisplay(subs, true)
+}
+
+func aggregateActiveByGroupInternal(subs []UserSubscription, normalizeWindows bool) []UserSubscription {
+	if len(subs) == 0 {
+		return subs
+	}
+	now := time.Now()
+	grouped := make(map[int64][]UserSubscription)
+	order := make([]int64, 0)
+	for i := range subs {
+		sub := subs[i]
+		if sub.Status == SubscriptionStatusActive && sub.ExpiresAt.After(now) {
+			if _, ok := grouped[sub.GroupID]; !ok {
+				order = append(order, sub.GroupID)
+			}
+			grouped[sub.GroupID] = append(grouped[sub.GroupID], sub)
+			continue
+		}
+		key := -sub.ID
+		order = append(order, key)
+		grouped[key] = []UserSubscription{sub}
+	}
+	out := make([]UserSubscription, 0, len(order))
+	for _, key := range order {
+		items := grouped[key]
+		if key > 0 {
+			var agg *UserSubscription
+			if normalizeWindows {
+				agg = aggregateActiveSubscriptionsForDisplay(items)
+			} else {
+				agg = aggregateActiveSubscriptions(items)
+			}
+			if agg != nil {
+				out = append(out, *agg)
+			}
+			continue
+		}
+		out = append(out, items[0])
+	}
+	return out
+}
+
+func aggregateByGroupAndStatusForDisplay(subs []UserSubscription, normalizeWindows bool) []UserSubscription {
+	if len(subs) == 0 {
+		return subs
+	}
+	now := time.Now()
+	grouped := make(map[string][]UserSubscription)
+	order := make([]string, 0, len(subs))
+	for i := range subs {
+		sub := subs[i]
+		status := sub.Status
+		if status == SubscriptionStatusActive && !sub.ExpiresAt.After(now) {
+			status = SubscriptionStatusExpired
+			sub.Status = status
+		}
+		key := fmt.Sprintf("%d:%s", sub.GroupID, status)
+		if _, ok := grouped[key]; !ok {
+			order = append(order, key)
+		}
+		grouped[key] = append(grouped[key], sub)
+	}
+	out := make([]UserSubscription, 0, len(order))
+	for _, key := range order {
+		items := grouped[key]
+		var agg *UserSubscription
+		isActiveBucket := len(items) > 0 && items[0].Status == SubscriptionStatusActive && items[0].ExpiresAt.After(now)
+		if normalizeWindows && isActiveBucket {
+			agg = aggregateActiveSubscriptionsForDisplay(items)
+		} else {
+			agg = aggregateActiveSubscriptions(items)
+		}
+		if agg != nil {
+			if agg.Status == SubscriptionStatusActive && !agg.ExpiresAt.After(now) {
+				agg.Status = SubscriptionStatusExpired
+			}
+			out = append(out, *agg)
+		}
+	}
+	return out
+}
+
+func (s *SubscriptionService) ListUserSubscriptionRecords(ctx context.Context, userID int64) ([]UserSubscription, error) {
+	var (
+		subs []UserSubscription
+		err  error
+	)
+	if repo, ok := s.userSubRepo.(userSubscriptionHistoryRepository); ok {
+		subs, err = repo.ListByUserIDIncludeDeleted(ctx, userID)
+	} else {
+		subs, err = s.userSubRepo.ListByUserID(ctx, userID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	normalizeSubscriptionStatus(subs)
+	return subs, nil
+}
+
 func (s *SubscriptionService) ListUserSubscriptions(ctx context.Context, userID int64) ([]UserSubscription, error) {
 	subs, err := s.userSubRepo.ListByUserID(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
-	normalizeExpiredWindows(subs)
 	normalizeSubscriptionStatus(subs)
-	return subs, nil
+	return aggregateUserVisibleByGroupForDisplay(subs), nil
 }
 
 // ListActiveUserSubscriptions 获取用户的所有有效订阅
@@ -690,8 +1471,7 @@ func (s *SubscriptionService) ListActiveUserSubscriptions(ctx context.Context, u
 	if err != nil {
 		return nil, err
 	}
-	normalizeExpiredWindows(subs)
-	return subs, nil
+	return aggregateActiveByGroupForDisplay(subs), nil
 }
 
 // ListGroupSubscriptions 获取分组的所有订阅
@@ -701,7 +1481,6 @@ func (s *SubscriptionService) ListGroupSubscriptions(ctx context.Context, groupI
 	if err != nil {
 		return nil, nil, err
 	}
-	normalizeExpiredWindows(subs)
 	normalizeSubscriptionStatus(subs)
 	return subs, pag, nil
 }
@@ -713,7 +1492,6 @@ func (s *SubscriptionService) List(ctx context.Context, page, pageSize int, user
 	if err != nil {
 		return nil, nil, err
 	}
-	normalizeExpiredWindows(subs)
 	normalizeSubscriptionStatus(subs)
 	return subs, pag, nil
 }
@@ -731,10 +1509,17 @@ func normalizeSubscriptionSnapshot(sub *UserSubscription) {
 	if sub == nil {
 		return
 	}
+	if sub.DeletedAt != nil {
+		sub.Status = SubscriptionStatusRevoked
+		return
+	}
 	now := time.Now()
-	normalizeSubscriptionWindowsAt(sub, now)
 	if sub.Status == SubscriptionStatusActive && !sub.ExpiresAt.After(now) {
 		sub.Status = SubscriptionStatusExpired
+		return
+	}
+	if sub.Status == SubscriptionStatusActive {
+		normalizeSubscriptionWindowsAt(sub, now)
 	}
 }
 
@@ -760,8 +1545,9 @@ func normalizeSubscriptionWindowsAt(sub *UserSubscription, now time.Time) {
 		sub.MonthlyWindowStart = &windowStart
 		sub.MonthlyUsageUSD = 0
 	}
-	if sub.Group != nil && sub.NeedsCustomResetAt(sub.Group, now) {
-		windowStart := currentSubscriptionWindowStart(*sub.CustomWindowStart, customSubscriptionWindow(sub.Group), now)
+	if effectiveGroup := sub.EffectiveGroup(sub.Group); sub.NeedsCustomResetAt(effectiveGroup, now) {
+		period := customSubscriptionWindowHours(sub.EffectiveCustomLimitHours(effectiveGroup))
+		windowStart := currentSubscriptionWindowStart(*sub.CustomWindowStart, period, now)
 		sub.CustomWindowStart = &windowStart
 		sub.CustomUsageUSD = 0
 	}
@@ -773,6 +1559,10 @@ func normalizeSubscriptionStatus(subs []UserSubscription) {
 	now := time.Now()
 	for i := range subs {
 		sub := &subs[i]
+		if sub.DeletedAt != nil {
+			sub.Status = SubscriptionStatusRevoked
+			continue
+		}
 		if sub.Status == SubscriptionStatusActive && !sub.ExpiresAt.After(now) {
 			sub.Status = SubscriptionStatusExpired
 		}
@@ -930,14 +1720,18 @@ func (s *SubscriptionService) CheckAndResetWindows(ctx context.Context, sub *Use
 		group := sub.Group
 		if group == nil && s.groupRepo != nil {
 			loaded, err := s.groupRepo.GetByID(ctx, sub.GroupID)
-			if err != nil {
+			if err != nil && !sub.HasGroupSnapshot() {
 				return err
 			}
-			group = loaded
+			if err == nil {
+				group = loaded
+			}
 		}
-		if sub.NeedsCustomResetAt(group, now) {
+		effectiveGroup := sub.EffectiveGroup(group)
+		if sub.NeedsCustomResetAt(effectiveGroup, now) {
 			oldWindowStart := *sub.CustomWindowStart
-			windowStart := currentSubscriptionWindowStart(oldWindowStart, customSubscriptionWindow(group), now)
+			period := customSubscriptionWindowHours(sub.EffectiveCustomLimitHours(effectiveGroup))
+			windowStart := currentSubscriptionWindowStart(oldWindowStart, period, now)
 			if roller, ok := s.userSubRepo.(customUsageWindowRoller); ok && !sub.UpdatedAt.IsZero() {
 				if _, err := roller.RollCustomUsageWindow(ctx, sub.ID, oldWindowStart, windowStart, sub.CustomUsageUSD, sub.UpdatedAt); err != nil {
 					return err
@@ -986,6 +1780,10 @@ func (s *SubscriptionService) CheckUsageLimits(ctx context.Context, sub *UserSub
 // 仅做内存检查，不触发 DB 写入。窗口重置的 DB 写入由 DoWindowMaintenance 异步完成。
 // 返回 needsMaintenance 表示是否需要异步执行窗口维护。
 func (s *SubscriptionService) ValidateAndCheckLimits(sub *UserSubscription, group *Group) (needsMaintenance bool, err error) {
+	if sub == nil {
+		return false, ErrSubscriptionNotFound
+	}
+	group = sub.EffectiveGroup(group)
 	// 1. 验证订阅状态
 	if sub.Status == SubscriptionStatusExpired {
 		return false, ErrSubscriptionExpired
@@ -997,6 +1795,24 @@ func (s *SubscriptionService) ValidateAndCheckLimits(sub *UserSubscription, grou
 		return false, ErrSubscriptionExpired
 	}
 	now := time.Now()
+	if sub.IsAggregate {
+		if sub.StackedAvailableUSD != nil && *sub.StackedAvailableUSD <= 0 {
+			return false, ErrDailyLimitExceeded
+		}
+		if !sub.CheckDailyLimit(group, 0) {
+			return false, ErrDailyLimitExceeded
+		}
+		if !sub.CheckWeeklyLimit(group, 0) {
+			return false, ErrWeeklyLimitExceeded
+		}
+		if !sub.CheckMonthlyLimit(group, 0) {
+			return false, ErrMonthlyLimitExceeded
+		}
+		if !sub.CheckCustomLimit(group, 0) {
+			return false, ErrCustomLimitExceeded
+		}
+		return false, nil
+	}
 
 	// 2. 内存中修正过期窗口的用量，确保 CheckUsageLimits 不会误拒绝用户
 	//    实际的 DB 窗口重置由 DoWindowMaintenance 异步完成
@@ -1060,6 +1876,19 @@ func (s *SubscriptionService) DoWindowMaintenance(sub *UserSubscription) {
 }
 
 func (s *SubscriptionService) doWindowMaintenance(sub *UserSubscription) {
+	if sub == nil {
+		return
+	}
+	if sub.IsAggregate {
+		s.InvalidateSubCache(sub.UserID, sub.GroupID)
+		if s.billingCacheService != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = s.billingCacheService.InvalidateSubscription(ctx, sub.UserID, sub.GroupID)
+		}
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -1138,6 +1967,7 @@ func (s *SubscriptionService) GetSubscriptionProgress(ctx context.Context, subsc
 			return nil, err
 		}
 	}
+	group = sub.EffectiveGroup(group)
 
 	return s.calculateProgress(sub, group), nil
 }
@@ -1145,7 +1975,7 @@ func (s *SubscriptionService) GetSubscriptionProgress(ctx context.Context, subsc
 // calculateProgress 根据已加载的订阅和分组数据计算使用进度（纯内存计算，无 DB 查询）
 func (s *SubscriptionService) calculateProgress(sub *UserSubscription, group *Group) *SubscriptionProgress {
 	progress := &SubscriptionProgress{
-		ID:            sub.ID,
+		ID:            subscriptionDisplayID(sub),
 		GroupName:     group.Name,
 		ExpiresAt:     sub.ExpiresAt,
 		ExpiresInDays: sub.DaysRemaining(),
@@ -1255,10 +2085,19 @@ func (s *SubscriptionService) calculateProgress(sub *UserSubscription, group *Gr
 	return progress
 }
 
+func subscriptionDisplayID(sub *UserSubscription) int64 {
+	if sub == nil {
+		return 0
+	}
+	if sub.ID > 0 {
+		return sub.ID
+	}
+	return sub.GroupID
+}
+
 // GetUserSubscriptionsWithProgress 获取用户所有订阅及进度
 func (s *SubscriptionService) GetUserSubscriptionsWithProgress(ctx context.Context, userID int64) ([]SubscriptionProgress, error) {
-	// ListActiveByUserID 已使用 .WithGroup() eager-load Group 关联，1 次查询获取所有数据
-	subs, err := s.userSubRepo.ListActiveByUserID(ctx, userID)
+	subs, err := s.ListActiveUserSubscriptions(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -1266,7 +2105,7 @@ func (s *SubscriptionService) GetUserSubscriptionsWithProgress(ctx context.Conte
 	progresses := make([]SubscriptionProgress, 0, len(subs))
 	for i := range subs {
 		sub := &subs[i]
-		group := sub.Group
+		group := sub.EffectiveGroup(sub.Group)
 		if group == nil {
 			continue
 		}

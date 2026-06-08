@@ -49,6 +49,13 @@ type subscriptionCacheData struct {
 	MonthlyUsage float64
 	CustomUsage  float64
 	Version      int64
+
+	DailyLimitUSD       *float64
+	WeeklyLimitUSD      *float64
+	MonthlyLimitUSD     *float64
+	CustomLimitUSD      *float64
+	CustomLimitHours    int
+	StackedAvailableUSD *float64
 }
 
 // 缓存写入任务类型
@@ -114,14 +121,17 @@ type BillingCacheService struct {
 	circuitBreaker        *billingCircuitBreaker
 	userPlatformQuotaRepo UserPlatformQuotaRepository
 
-	cacheWriteChan         chan cacheWriteTask
-	cacheWriteWg           sync.WaitGroup
-	cacheWriteStopOnce     sync.Once
-	cacheWriteMu           sync.RWMutex
-	stopped                atomic.Bool
-	balanceLoadSF          singleflight.Group
-	rateLimitResetInFlight sync.Map
-	quotaLoadSF            singleflight.Group
+	cacheWriteChan             chan cacheWriteTask
+	cacheWriteWg               sync.WaitGroup
+	cacheWriteStopOnce         sync.Once
+	cacheWriteMu               sync.RWMutex
+	stopped                    atomic.Bool
+	balanceLoadSF              singleflight.Group
+	rateLimitResetInFlight     sync.Map
+	quotaLoadSF                singleflight.Group
+	subscriptionInvalidatorMu  sync.RWMutex
+	subscriptionL1Invalidator  func(userID, groupID int64)
+	subscriptionL1UsageUpdater func(userID, groupID int64, costUSD float64)
 	// 丢弃日志节流计数器（减少高负载下日志噪音）
 	cacheWriteDropFullCount     uint64
 	cacheWriteDropFullLastLog   int64
@@ -195,6 +205,48 @@ func (s *BillingCacheService) Stop() {
 		}
 		s.cacheWriteMu.Unlock()
 	})
+}
+
+func (s *BillingCacheService) SetSubscriptionL1Invalidator(fn func(userID, groupID int64)) {
+	if s == nil {
+		return
+	}
+	s.subscriptionInvalidatorMu.Lock()
+	defer s.subscriptionInvalidatorMu.Unlock()
+	s.subscriptionL1Invalidator = fn
+}
+
+func (s *BillingCacheService) SetSubscriptionL1UsageUpdater(fn func(userID, groupID int64, costUSD float64)) {
+	if s == nil {
+		return
+	}
+	s.subscriptionInvalidatorMu.Lock()
+	defer s.subscriptionInvalidatorMu.Unlock()
+	s.subscriptionL1UsageUpdater = fn
+}
+
+func (s *BillingCacheService) invalidateSubscriptionL1(userID, groupID int64) {
+	if s == nil {
+		return
+	}
+	s.subscriptionInvalidatorMu.RLock()
+	fn := s.subscriptionL1Invalidator
+	s.subscriptionInvalidatorMu.RUnlock()
+	if fn != nil {
+		fn(userID, groupID)
+	}
+}
+
+func (s *BillingCacheService) updateSubscriptionL1Usage(userID, groupID int64, costUSD float64) {
+	if s == nil || costUSD <= 0 {
+		return
+	}
+	s.subscriptionInvalidatorMu.RLock()
+	fn := s.subscriptionL1UsageUpdater
+	s.subscriptionInvalidatorMu.RUnlock()
+	if fn != nil {
+		fn(userID, groupID, costUSD)
+	}
 }
 
 func (s *BillingCacheService) startCacheWriteWorkers() {
@@ -460,43 +512,65 @@ func (s *BillingCacheService) GetSubscriptionStatus(ctx context.Context, userID,
 
 func (s *BillingCacheService) convertFromPortsData(data *SubscriptionCacheData) *subscriptionCacheData {
 	return &subscriptionCacheData{
-		Status:       data.Status,
-		ExpiresAt:    data.ExpiresAt,
-		DailyUsage:   data.DailyUsage,
-		WeeklyUsage:  data.WeeklyUsage,
-		MonthlyUsage: data.MonthlyUsage,
-		CustomUsage:  data.CustomUsage,
-		Version:      data.Version,
+		Status:              data.Status,
+		ExpiresAt:           data.ExpiresAt,
+		DailyUsage:          data.DailyUsage,
+		WeeklyUsage:         data.WeeklyUsage,
+		MonthlyUsage:        data.MonthlyUsage,
+		CustomUsage:         data.CustomUsage,
+		Version:             data.Version,
+		DailyLimitUSD:       data.DailyLimitUSD,
+		WeeklyLimitUSD:      data.WeeklyLimitUSD,
+		MonthlyLimitUSD:     data.MonthlyLimitUSD,
+		CustomLimitUSD:      data.CustomLimitUSD,
+		CustomLimitHours:    data.CustomLimitHours,
+		StackedAvailableUSD: data.StackedAvailableUSD,
 	}
 }
 
 func (s *BillingCacheService) convertToPortsData(data *subscriptionCacheData) *SubscriptionCacheData {
 	return &SubscriptionCacheData{
-		Status:       data.Status,
-		ExpiresAt:    data.ExpiresAt,
-		DailyUsage:   data.DailyUsage,
-		WeeklyUsage:  data.WeeklyUsage,
-		MonthlyUsage: data.MonthlyUsage,
-		CustomUsage:  data.CustomUsage,
-		Version:      data.Version,
+		Status:              data.Status,
+		ExpiresAt:           data.ExpiresAt,
+		DailyUsage:          data.DailyUsage,
+		WeeklyUsage:         data.WeeklyUsage,
+		MonthlyUsage:        data.MonthlyUsage,
+		CustomUsage:         data.CustomUsage,
+		Version:             data.Version,
+		DailyLimitUSD:       data.DailyLimitUSD,
+		WeeklyLimitUSD:      data.WeeklyLimitUSD,
+		MonthlyLimitUSD:     data.MonthlyLimitUSD,
+		CustomLimitUSD:      data.CustomLimitUSD,
+		CustomLimitHours:    data.CustomLimitHours,
+		StackedAvailableUSD: data.StackedAvailableUSD,
 	}
 }
 
 // getSubscriptionFromDB 从数据库获取订阅数据
 func (s *BillingCacheService) getSubscriptionFromDB(ctx context.Context, userID, groupID int64) (*subscriptionCacheData, error) {
-	sub, err := s.subRepo.GetActiveByUserIDAndGroupID(ctx, userID, groupID)
+	subs, err := s.subRepo.ListActiveByUserIDAndGroupID(ctx, userID, groupID)
 	if err != nil {
 		return nil, fmt.Errorf("get subscription: %w", err)
 	}
+	sub := aggregateActiveSubscriptionsForDisplay(subs)
+	if sub == nil {
+		return nil, fmt.Errorf("get subscription: %w", ErrSubscriptionNotFound)
+	}
 
 	return &subscriptionCacheData{
-		Status:       sub.Status,
-		ExpiresAt:    sub.ExpiresAt,
-		DailyUsage:   sub.DailyUsageUSD,
-		WeeklyUsage:  sub.WeeklyUsageUSD,
-		MonthlyUsage: sub.MonthlyUsageUSD,
-		CustomUsage:  sub.CustomUsageUSD,
-		Version:      sub.UpdatedAt.Unix(),
+		Status:              sub.Status,
+		ExpiresAt:           sub.ExpiresAt,
+		DailyUsage:          sub.DailyUsageUSD,
+		WeeklyUsage:         sub.WeeklyUsageUSD,
+		MonthlyUsage:        sub.MonthlyUsageUSD,
+		CustomUsage:         sub.CustomUsageUSD,
+		Version:             sub.UpdatedAt.Unix(),
+		DailyLimitUSD:       sub.EffectiveDailyLimitUSD(sub.Group),
+		WeeklyLimitUSD:      sub.EffectiveWeeklyLimitUSD(sub.Group),
+		MonthlyLimitUSD:     sub.EffectiveMonthlyLimitUSD(sub.Group),
+		CustomLimitUSD:      sub.EffectiveCustomLimitUSD(sub.Group),
+		CustomLimitHours:    sub.EffectiveCustomLimitHours(sub.Group),
+		StackedAvailableUSD: aggregateStackedAvailable(subs),
 	}, nil
 }
 
@@ -512,6 +586,11 @@ func (s *BillingCacheService) setSubscriptionCache(ctx context.Context, userID, 
 
 // UpdateSubscriptionUsage 更新订阅用量缓存（同步调用）
 func (s *BillingCacheService) UpdateSubscriptionUsage(ctx context.Context, userID, groupID int64, costUSD float64) error {
+	s.updateSubscriptionL1Usage(userID, groupID, costUSD)
+	return s.updateSubscriptionUsageRedis(ctx, userID, groupID, costUSD)
+}
+
+func (s *BillingCacheService) updateSubscriptionUsageRedis(ctx context.Context, userID, groupID int64, costUSD float64) error {
 	if s.cache == nil {
 		return nil
 	}
@@ -520,6 +599,7 @@ func (s *BillingCacheService) UpdateSubscriptionUsage(ctx context.Context, userI
 
 // QueueUpdateSubscriptionUsage 异步更新订阅用量缓存
 func (s *BillingCacheService) QueueUpdateSubscriptionUsage(userID, groupID int64, costUSD float64) {
+	s.updateSubscriptionL1Usage(userID, groupID, costUSD)
 	if s.cache == nil {
 		return
 	}
@@ -532,15 +612,12 @@ func (s *BillingCacheService) QueueUpdateSubscriptionUsage(userID, groupID int64
 	}) {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), cacheWriteTimeout)
-	defer cancel()
-	if err := s.UpdateSubscriptionUsage(ctx, userID, groupID, costUSD); err != nil {
-		logger.LegacyPrintf("service.billing_cache", "Warning: update subscription cache fallback failed for user %d group %d: %v", userID, groupID, err)
-	}
+	logger.LegacyPrintf("service.billing_cache", "Warning: dropped async subscription cache usage update for user %d group %d", userID, groupID)
 }
 
 // InvalidateSubscription 失效指定订阅缓存
 func (s *BillingCacheService) InvalidateSubscription(ctx context.Context, userID, groupID int64) error {
+	s.invalidateSubscriptionL1(userID, groupID)
 	if s.cache == nil {
 		return nil
 	}
@@ -746,6 +823,17 @@ func (s *BillingCacheService) IncrementUserPlatformQuotaUsage(userID int64, plat
 // 订阅模式：检查缓存用量未超过限额（Group限额从参数传入）
 // platform 为请求的目标平台（如 "anthropic"），传空串 "" 时跳过 user × platform quota 检查。
 func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user *User, apiKey *APIKey, group *Group, subscription *UserSubscription, platform string) error {
+	return s.checkBillingEligibility(ctx, user, apiKey, group, subscription, platform, false)
+}
+
+// CheckBillingEligibilityFreshSubscription rechecks subscription quota from the
+// current cache/DB state. Use this after concurrency waits; the middleware
+// subscription snapshot may be stale by then.
+func (s *BillingCacheService) CheckBillingEligibilityFreshSubscription(ctx context.Context, user *User, apiKey *APIKey, group *Group, platform string) error {
+	return s.checkBillingEligibility(ctx, user, apiKey, group, nil, platform, true)
+}
+
+func (s *BillingCacheService) checkBillingEligibility(ctx context.Context, user *User, apiKey *APIKey, group *Group, subscription *UserSubscription, platform string, freshSubscription bool) error {
 	// 简易模式：跳过所有计费检查
 	if s.cfg.RunMode == config.RunModeSimple {
 		return nil
@@ -755,12 +843,12 @@ func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user 
 	}
 
 	// 判断计费模式
-	isSubscriptionMode := group != nil && group.IsSubscriptionType() && subscription != nil
+	isSubscriptionMode := group != nil && group.IsSubscriptionType() && (subscription != nil || freshSubscription)
 	userID := int64(0)
 	if user != nil {
 		userID = user.ID
 	}
-	if !isSubscriptionMode && userID <= 0 {
+	if (!isSubscriptionMode || freshSubscription) && userID <= 0 {
 		return ErrBillingUserInvalid
 	}
 	effectiveMultiplier := s.resolveEffectiveGroupRateMultiplier(ctx, userID, group)
@@ -920,6 +1008,49 @@ func (s *BillingCacheService) checkBalanceEligibility(ctx context.Context, userI
 
 // checkSubscriptionEligibility 检查订阅模式资格
 func (s *BillingCacheService) checkSubscriptionEligibility(ctx context.Context, userID int64, group *Group, subscription *UserSubscription) error {
+	now := time.Now()
+	if subscription != nil {
+		effectiveGroup := subscription.EffectiveGroup(group)
+		if subscription.Status != SubscriptionStatusActive {
+			return ErrSubscriptionInvalid
+		}
+		if !subscription.ExpiresAt.After(now) {
+			return ErrSubscriptionInvalid
+		}
+
+		sub := *subscription
+		if sub.NeedsDailyResetAt(now) {
+			sub.DailyUsageUSD = 0
+		}
+		if sub.NeedsWeeklyResetAt(now) {
+			sub.WeeklyUsageUSD = 0
+		}
+		if sub.NeedsMonthlyResetAt(now) {
+			sub.MonthlyUsageUSD = 0
+		}
+		if sub.NeedsCustomResetAt(effectiveGroup, now) {
+			sub.CustomUsageUSD = 0
+		}
+		if limit := sub.EffectiveDailyLimitUSD(effectiveGroup); hasPositiveLimit(limit) && sub.DailyUsageUSD >= *limit {
+			return ErrDailyLimitExceeded
+		}
+		if limit := sub.EffectiveWeeklyLimitUSD(effectiveGroup); hasPositiveLimit(limit) && sub.WeeklyUsageUSD >= *limit {
+			return ErrWeeklyLimitExceeded
+		}
+		if limit := sub.EffectiveMonthlyLimitUSD(effectiveGroup); hasPositiveLimit(limit) && sub.MonthlyUsageUSD >= *limit {
+			return ErrMonthlyLimitExceeded
+		}
+		if limit := sub.EffectiveCustomLimitUSD(effectiveGroup); sub.EffectiveCustomLimitHours(effectiveGroup) > 0 && hasPositiveLimit(limit) && sub.CustomUsageUSD >= *limit {
+			return ErrCustomLimitExceeded
+		}
+		if s.circuitBreaker != nil {
+			s.circuitBreaker.OnSuccess()
+		}
+		return nil
+	}
+	if group == nil {
+		return ErrSubscriptionInvalid
+	}
 	// 获取订阅缓存数据
 	subData, err := s.GetSubscriptionStatus(ctx, userID, group.ID)
 	if err != nil {
@@ -938,10 +1069,32 @@ func (s *BillingCacheService) checkSubscriptionEligibility(ctx context.Context, 
 		return ErrSubscriptionInvalid
 	}
 
-	now := time.Now()
 	// 检查是否过期
 	if now.After(subData.ExpiresAt) {
 		return ErrSubscriptionInvalid
+	}
+
+	if subData.StackedAvailableUSD != nil {
+		if *subData.StackedAvailableUSD <= 0 {
+			return ErrDailyLimitExceeded
+		}
+		return nil
+	}
+
+	if hasPositiveLimit(subData.DailyLimitUSD) && subData.DailyUsage >= *subData.DailyLimitUSD {
+		return ErrDailyLimitExceeded
+	}
+	if hasPositiveLimit(subData.WeeklyLimitUSD) && subData.WeeklyUsage >= *subData.WeeklyLimitUSD {
+		return ErrWeeklyLimitExceeded
+	}
+	if hasPositiveLimit(subData.MonthlyLimitUSD) && subData.MonthlyUsage >= *subData.MonthlyLimitUSD {
+		return ErrMonthlyLimitExceeded
+	}
+	if subData.CustomLimitHours > 0 && hasPositiveLimit(subData.CustomLimitUSD) && subData.CustomUsage >= *subData.CustomLimitUSD {
+		return ErrCustomLimitExceeded
+	}
+	if subData.DailyLimitUSD != nil || subData.WeeklyLimitUSD != nil || subData.MonthlyLimitUSD != nil || subData.CustomLimitUSD != nil || subData.CustomLimitHours > 0 {
+		return nil
 	}
 
 	// 检查限额（使用传入的Group限额配置）。如果中间件中的订阅快照已经判断

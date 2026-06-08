@@ -17,6 +17,10 @@ type UserSubscription struct {
 	ExpiresAt time.Time
 	Status    string
 
+	IsAggregate         bool
+	SubscriptionCount   int
+	StackedAvailableUSD *float64
+
 	DailyWindowStart   *time.Time
 	WeeklyWindowStart  *time.Time
 	MonthlyWindowStart *time.Time
@@ -31,8 +35,23 @@ type UserSubscription struct {
 	AssignedAt time.Time
 	Notes      string
 
+	SourceType         *string
+	SourceRefID        *string
+	SourceRedeemCodeID *int64
+	RedeemCodeSnapshot *string
+
+	GroupNameSnapshot           *string
+	GroupPlatformSnapshot       *string
+	GroupRateMultiplierSnapshot *float64
+	DailyLimitUSDSnapshot       *float64
+	WeeklyLimitUSDSnapshot      *float64
+	MonthlyLimitUSDSnapshot     *float64
+	CustomLimitHoursSnapshot    *int
+	CustomLimitUSDSnapshot      *float64
+
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	DeletedAt *time.Time
 
 	User           *User
 	Group          *Group
@@ -102,10 +121,14 @@ func (s *UserSubscription) NeedsMonthlyResetAt(now time.Time) bool {
 }
 
 func (s *UserSubscription) NeedsCustomResetAt(group *Group, now time.Time) bool {
-	if s.CustomWindowStart == nil || group == nil || !group.HasCustomLimit() {
+	if s.CustomWindowStart == nil {
 		return false
 	}
-	return subscriptionWindowExpired(s.CustomWindowStart, customSubscriptionWindow(group), now)
+	period := customSubscriptionWindowHours(s.EffectiveCustomLimitHours(group))
+	if period <= 0 || !hasPositiveLimit(s.EffectiveCustomLimitUSD(group)) {
+		return false
+	}
+	return subscriptionWindowExpired(s.CustomWindowStart, period, now)
 }
 
 func (s *UserSubscription) DailyResetTime() *time.Time {
@@ -137,10 +160,14 @@ func (s *UserSubscription) MonthlyResetTime() *time.Time {
 }
 
 func (s *UserSubscription) CustomResetTime(group *Group) *time.Time {
-	if s.CustomWindowStart == nil || group == nil || !group.HasCustomLimit() {
+	if s.CustomWindowStart == nil {
 		return nil
 	}
-	t := s.CustomWindowStart.Add(customSubscriptionWindow(group))
+	period := customSubscriptionWindowHours(s.EffectiveCustomLimitHours(group))
+	if period <= 0 || !hasPositiveLimit(s.EffectiveCustomLimitUSD(group)) {
+		return nil
+	}
+	t := s.CustomWindowStart.Add(period)
 	return &t
 }
 
@@ -148,9 +175,15 @@ func customSubscriptionWindow(group *Group) time.Duration {
 	if group == nil || group.CustomLimitHours <= 0 {
 		return 0
 	}
-	hours := group.CustomLimitHours
+	return customSubscriptionWindowHours(group.CustomLimitHours)
+}
+
+func customSubscriptionWindowHours(hours int) time.Duration {
 	if hours > maxCustomLimitHours {
 		hours = maxCustomLimitHours
+	}
+	if hours <= 0 {
+		return 0
 	}
 	return time.Duration(hours) * time.Hour
 }
@@ -163,31 +196,35 @@ func subscriptionWindowExpired(start *time.Time, period time.Duration, now time.
 }
 
 func (s *UserSubscription) CheckDailyLimit(group *Group, additionalCost float64) bool {
-	if !group.HasDailyLimit() {
+	limit := s.EffectiveDailyLimitUSD(group)
+	if !hasPositiveLimit(limit) {
 		return true
 	}
-	return s.DailyUsageUSD+additionalCost <= *group.DailyLimitUSD
+	return s.DailyUsageUSD+additionalCost <= *limit
 }
 
 func (s *UserSubscription) CheckWeeklyLimit(group *Group, additionalCost float64) bool {
-	if !group.HasWeeklyLimit() {
+	limit := s.EffectiveWeeklyLimitUSD(group)
+	if !hasPositiveLimit(limit) {
 		return true
 	}
-	return s.WeeklyUsageUSD+additionalCost <= *group.WeeklyLimitUSD
+	return s.WeeklyUsageUSD+additionalCost <= *limit
 }
 
 func (s *UserSubscription) CheckMonthlyLimit(group *Group, additionalCost float64) bool {
-	if !group.HasMonthlyLimit() {
+	limit := s.EffectiveMonthlyLimitUSD(group)
+	if !hasPositiveLimit(limit) {
 		return true
 	}
-	return s.MonthlyUsageUSD+additionalCost <= *group.MonthlyLimitUSD
+	return s.MonthlyUsageUSD+additionalCost <= *limit
 }
 
 func (s *UserSubscription) CheckCustomLimit(group *Group, additionalCost float64) bool {
-	if !group.HasCustomLimit() {
+	limit := s.EffectiveCustomLimitUSD(group)
+	if s.EffectiveCustomLimitHours(group) <= 0 || !hasPositiveLimit(limit) {
 		return true
 	}
-	return s.CustomUsageUSD+additionalCost <= *group.CustomLimitUSD
+	return s.CustomUsageUSD+additionalCost <= *limit
 }
 
 func (s *UserSubscription) CheckAllLimits(group *Group, additionalCost float64) (daily, weekly, monthly, custom bool) {
@@ -196,4 +233,97 @@ func (s *UserSubscription) CheckAllLimits(group *Group, additionalCost float64) 
 	monthly = s.CheckMonthlyLimit(group, additionalCost)
 	custom = s.CheckCustomLimit(group, additionalCost)
 	return
+}
+
+func (s *UserSubscription) EffectiveDailyLimitUSD(group *Group) *float64 {
+	if s != nil && s.DailyLimitUSDSnapshot != nil {
+		return s.DailyLimitUSDSnapshot
+	}
+	if group == nil {
+		return nil
+	}
+	return group.DailyLimitUSD
+}
+
+func (s *UserSubscription) EffectiveWeeklyLimitUSD(group *Group) *float64 {
+	if s != nil && s.WeeklyLimitUSDSnapshot != nil {
+		return s.WeeklyLimitUSDSnapshot
+	}
+	if group == nil {
+		return nil
+	}
+	return group.WeeklyLimitUSD
+}
+
+func (s *UserSubscription) EffectiveMonthlyLimitUSD(group *Group) *float64 {
+	if s != nil && s.MonthlyLimitUSDSnapshot != nil {
+		return s.MonthlyLimitUSDSnapshot
+	}
+	if group == nil {
+		return nil
+	}
+	return group.MonthlyLimitUSD
+}
+
+func (s *UserSubscription) EffectiveCustomLimitHours(group *Group) int {
+	if s != nil && s.CustomLimitHoursSnapshot != nil {
+		return *s.CustomLimitHoursSnapshot
+	}
+	if group == nil {
+		return 0
+	}
+	return group.CustomLimitHours
+}
+
+func (s *UserSubscription) EffectiveCustomLimitUSD(group *Group) *float64 {
+	if s != nil && s.CustomLimitUSDSnapshot != nil {
+		return s.CustomLimitUSDSnapshot
+	}
+	if group == nil {
+		return nil
+	}
+	return group.CustomLimitUSD
+}
+
+func (s *UserSubscription) HasGroupSnapshot() bool {
+	return s != nil &&
+		(s.GroupNameSnapshot != nil ||
+			s.GroupPlatformSnapshot != nil ||
+			s.GroupRateMultiplierSnapshot != nil ||
+			s.DailyLimitUSDSnapshot != nil ||
+			s.WeeklyLimitUSDSnapshot != nil ||
+			s.MonthlyLimitUSDSnapshot != nil ||
+			s.CustomLimitHoursSnapshot != nil ||
+			s.CustomLimitUSDSnapshot != nil)
+}
+
+func (s *UserSubscription) EffectiveGroup(group *Group) *Group {
+	if group == nil {
+		group = s.Group
+	}
+	if group == nil {
+		group = &Group{ID: s.GroupID}
+	}
+	out := *group
+	if s.GroupNameSnapshot != nil {
+		out.Name = *s.GroupNameSnapshot
+	}
+	if s.GroupPlatformSnapshot != nil {
+		out.Platform = *s.GroupPlatformSnapshot
+	}
+	if s.GroupRateMultiplierSnapshot != nil {
+		out.RateMultiplier = *s.GroupRateMultiplierSnapshot
+	}
+	out.DailyLimitUSD = s.EffectiveDailyLimitUSD(group)
+	out.WeeklyLimitUSD = s.EffectiveWeeklyLimitUSD(group)
+	out.MonthlyLimitUSD = s.EffectiveMonthlyLimitUSD(group)
+	out.CustomLimitHours = s.EffectiveCustomLimitHours(group)
+	out.CustomLimitUSD = s.EffectiveCustomLimitUSD(group)
+	out.SubscriptionType = SubscriptionTypeSubscription
+	out.Hydrated = true
+	return &out
+}
+
+func hasPositiveLimit(limit *float64) bool {
+	return limit != nil && *limit > 0
 }

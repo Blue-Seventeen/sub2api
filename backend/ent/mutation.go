@@ -53021,42 +53021,61 @@ func (m *UserPlatformQuotaMutation) ResetEdge(name string) error {
 // UserSubscriptionMutation represents an operation that mutates the UserSubscription nodes in the graph.
 type UserSubscriptionMutation struct {
 	config
-	op                      Op
-	typ                     string
-	id                      *int64
-	created_at              *time.Time
-	updated_at              *time.Time
-	deleted_at              *time.Time
-	starts_at               *time.Time
-	expires_at              *time.Time
-	status                  *string
-	daily_window_start      *time.Time
-	weekly_window_start     *time.Time
-	monthly_window_start    *time.Time
-	custom_window_start     *time.Time
-	daily_usage_usd         *float64
-	adddaily_usage_usd      *float64
-	weekly_usage_usd        *float64
-	addweekly_usage_usd     *float64
-	monthly_usage_usd       *float64
-	addmonthly_usage_usd    *float64
-	custom_usage_usd        *float64
-	addcustom_usage_usd     *float64
-	assigned_at             *time.Time
-	notes                   *string
-	clearedFields           map[string]struct{}
-	user                    *int64
-	cleareduser             bool
-	group                   *int64
-	clearedgroup            bool
-	assigned_by_user        *int64
-	clearedassigned_by_user bool
-	usage_logs              map[int64]struct{}
-	removedusage_logs       map[int64]struct{}
-	clearedusage_logs       bool
-	done                    bool
-	oldValue                func(context.Context) (*UserSubscription, error)
-	predicates              []predicate.UserSubscription
+	op                                Op
+	typ                               string
+	id                                *int64
+	created_at                        *time.Time
+	updated_at                        *time.Time
+	deleted_at                        *time.Time
+	starts_at                         *time.Time
+	expires_at                        *time.Time
+	status                            *string
+	daily_window_start                *time.Time
+	weekly_window_start               *time.Time
+	monthly_window_start              *time.Time
+	custom_window_start               *time.Time
+	daily_usage_usd                   *float64
+	adddaily_usage_usd                *float64
+	weekly_usage_usd                  *float64
+	addweekly_usage_usd               *float64
+	monthly_usage_usd                 *float64
+	addmonthly_usage_usd              *float64
+	custom_usage_usd                  *float64
+	addcustom_usage_usd               *float64
+	assigned_at                       *time.Time
+	notes                             *string
+	source_type                       *string
+	source_ref_id                     *string
+	source_redeem_code_id             *int64
+	addsource_redeem_code_id          *int64
+	redeem_code_snapshot              *string
+	group_name_snapshot               *string
+	group_platform_snapshot           *string
+	group_rate_multiplier_snapshot    *float64
+	addgroup_rate_multiplier_snapshot *float64
+	daily_limit_usd_snapshot          *float64
+	adddaily_limit_usd_snapshot       *float64
+	weekly_limit_usd_snapshot         *float64
+	addweekly_limit_usd_snapshot      *float64
+	monthly_limit_usd_snapshot        *float64
+	addmonthly_limit_usd_snapshot     *float64
+	custom_limit_hours_snapshot       *int
+	addcustom_limit_hours_snapshot    *int
+	custom_limit_usd_snapshot         *float64
+	addcustom_limit_usd_snapshot      *float64
+	clearedFields                     map[string]struct{}
+	user                              *int64
+	cleareduser                       bool
+	group                             *int64
+	clearedgroup                      bool
+	assigned_by_user                  *int64
+	clearedassigned_by_user           bool
+	usage_logs                        map[int64]struct{}
+	removedusage_logs                 map[int64]struct{}
+	clearedusage_logs                 bool
+	done                              bool
+	oldValue                          func(context.Context) (*UserSubscription, error)
+	predicates                        []predicate.UserSubscription
 }
 
 var _ ent.Mutation = (*UserSubscriptionMutation)(nil)
@@ -54012,6 +54031,741 @@ func (m *UserSubscriptionMutation) ResetNotes() {
 	delete(m.clearedFields, usersubscription.FieldNotes)
 }
 
+// SetSourceType sets the "source_type" field.
+func (m *UserSubscriptionMutation) SetSourceType(s string) {
+	m.source_type = &s
+}
+
+// SourceType returns the value of the "source_type" field in the mutation.
+func (m *UserSubscriptionMutation) SourceType() (r string, exists bool) {
+	v := m.source_type
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSourceType returns the old "source_type" field's value of the UserSubscription entity.
+// If the UserSubscription object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserSubscriptionMutation) OldSourceType(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSourceType is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSourceType requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSourceType: %w", err)
+	}
+	return oldValue.SourceType, nil
+}
+
+// ClearSourceType clears the value of the "source_type" field.
+func (m *UserSubscriptionMutation) ClearSourceType() {
+	m.source_type = nil
+	m.clearedFields[usersubscription.FieldSourceType] = struct{}{}
+}
+
+// SourceTypeCleared returns if the "source_type" field was cleared in this mutation.
+func (m *UserSubscriptionMutation) SourceTypeCleared() bool {
+	_, ok := m.clearedFields[usersubscription.FieldSourceType]
+	return ok
+}
+
+// ResetSourceType resets all changes to the "source_type" field.
+func (m *UserSubscriptionMutation) ResetSourceType() {
+	m.source_type = nil
+	delete(m.clearedFields, usersubscription.FieldSourceType)
+}
+
+// SetSourceRefID sets the "source_ref_id" field.
+func (m *UserSubscriptionMutation) SetSourceRefID(s string) {
+	m.source_ref_id = &s
+}
+
+// SourceRefID returns the value of the "source_ref_id" field in the mutation.
+func (m *UserSubscriptionMutation) SourceRefID() (r string, exists bool) {
+	v := m.source_ref_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSourceRefID returns the old "source_ref_id" field's value of the UserSubscription entity.
+// If the UserSubscription object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserSubscriptionMutation) OldSourceRefID(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSourceRefID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSourceRefID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSourceRefID: %w", err)
+	}
+	return oldValue.SourceRefID, nil
+}
+
+// ClearSourceRefID clears the value of the "source_ref_id" field.
+func (m *UserSubscriptionMutation) ClearSourceRefID() {
+	m.source_ref_id = nil
+	m.clearedFields[usersubscription.FieldSourceRefID] = struct{}{}
+}
+
+// SourceRefIDCleared returns if the "source_ref_id" field was cleared in this mutation.
+func (m *UserSubscriptionMutation) SourceRefIDCleared() bool {
+	_, ok := m.clearedFields[usersubscription.FieldSourceRefID]
+	return ok
+}
+
+// ResetSourceRefID resets all changes to the "source_ref_id" field.
+func (m *UserSubscriptionMutation) ResetSourceRefID() {
+	m.source_ref_id = nil
+	delete(m.clearedFields, usersubscription.FieldSourceRefID)
+}
+
+// SetSourceRedeemCodeID sets the "source_redeem_code_id" field.
+func (m *UserSubscriptionMutation) SetSourceRedeemCodeID(i int64) {
+	m.source_redeem_code_id = &i
+	m.addsource_redeem_code_id = nil
+}
+
+// SourceRedeemCodeID returns the value of the "source_redeem_code_id" field in the mutation.
+func (m *UserSubscriptionMutation) SourceRedeemCodeID() (r int64, exists bool) {
+	v := m.source_redeem_code_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSourceRedeemCodeID returns the old "source_redeem_code_id" field's value of the UserSubscription entity.
+// If the UserSubscription object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserSubscriptionMutation) OldSourceRedeemCodeID(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSourceRedeemCodeID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSourceRedeemCodeID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSourceRedeemCodeID: %w", err)
+	}
+	return oldValue.SourceRedeemCodeID, nil
+}
+
+// AddSourceRedeemCodeID adds i to the "source_redeem_code_id" field.
+func (m *UserSubscriptionMutation) AddSourceRedeemCodeID(i int64) {
+	if m.addsource_redeem_code_id != nil {
+		*m.addsource_redeem_code_id += i
+	} else {
+		m.addsource_redeem_code_id = &i
+	}
+}
+
+// AddedSourceRedeemCodeID returns the value that was added to the "source_redeem_code_id" field in this mutation.
+func (m *UserSubscriptionMutation) AddedSourceRedeemCodeID() (r int64, exists bool) {
+	v := m.addsource_redeem_code_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearSourceRedeemCodeID clears the value of the "source_redeem_code_id" field.
+func (m *UserSubscriptionMutation) ClearSourceRedeemCodeID() {
+	m.source_redeem_code_id = nil
+	m.addsource_redeem_code_id = nil
+	m.clearedFields[usersubscription.FieldSourceRedeemCodeID] = struct{}{}
+}
+
+// SourceRedeemCodeIDCleared returns if the "source_redeem_code_id" field was cleared in this mutation.
+func (m *UserSubscriptionMutation) SourceRedeemCodeIDCleared() bool {
+	_, ok := m.clearedFields[usersubscription.FieldSourceRedeemCodeID]
+	return ok
+}
+
+// ResetSourceRedeemCodeID resets all changes to the "source_redeem_code_id" field.
+func (m *UserSubscriptionMutation) ResetSourceRedeemCodeID() {
+	m.source_redeem_code_id = nil
+	m.addsource_redeem_code_id = nil
+	delete(m.clearedFields, usersubscription.FieldSourceRedeemCodeID)
+}
+
+// SetRedeemCodeSnapshot sets the "redeem_code_snapshot" field.
+func (m *UserSubscriptionMutation) SetRedeemCodeSnapshot(s string) {
+	m.redeem_code_snapshot = &s
+}
+
+// RedeemCodeSnapshot returns the value of the "redeem_code_snapshot" field in the mutation.
+func (m *UserSubscriptionMutation) RedeemCodeSnapshot() (r string, exists bool) {
+	v := m.redeem_code_snapshot
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRedeemCodeSnapshot returns the old "redeem_code_snapshot" field's value of the UserSubscription entity.
+// If the UserSubscription object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserSubscriptionMutation) OldRedeemCodeSnapshot(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRedeemCodeSnapshot is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRedeemCodeSnapshot requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRedeemCodeSnapshot: %w", err)
+	}
+	return oldValue.RedeemCodeSnapshot, nil
+}
+
+// ClearRedeemCodeSnapshot clears the value of the "redeem_code_snapshot" field.
+func (m *UserSubscriptionMutation) ClearRedeemCodeSnapshot() {
+	m.redeem_code_snapshot = nil
+	m.clearedFields[usersubscription.FieldRedeemCodeSnapshot] = struct{}{}
+}
+
+// RedeemCodeSnapshotCleared returns if the "redeem_code_snapshot" field was cleared in this mutation.
+func (m *UserSubscriptionMutation) RedeemCodeSnapshotCleared() bool {
+	_, ok := m.clearedFields[usersubscription.FieldRedeemCodeSnapshot]
+	return ok
+}
+
+// ResetRedeemCodeSnapshot resets all changes to the "redeem_code_snapshot" field.
+func (m *UserSubscriptionMutation) ResetRedeemCodeSnapshot() {
+	m.redeem_code_snapshot = nil
+	delete(m.clearedFields, usersubscription.FieldRedeemCodeSnapshot)
+}
+
+// SetGroupNameSnapshot sets the "group_name_snapshot" field.
+func (m *UserSubscriptionMutation) SetGroupNameSnapshot(s string) {
+	m.group_name_snapshot = &s
+}
+
+// GroupNameSnapshot returns the value of the "group_name_snapshot" field in the mutation.
+func (m *UserSubscriptionMutation) GroupNameSnapshot() (r string, exists bool) {
+	v := m.group_name_snapshot
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldGroupNameSnapshot returns the old "group_name_snapshot" field's value of the UserSubscription entity.
+// If the UserSubscription object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserSubscriptionMutation) OldGroupNameSnapshot(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldGroupNameSnapshot is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldGroupNameSnapshot requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldGroupNameSnapshot: %w", err)
+	}
+	return oldValue.GroupNameSnapshot, nil
+}
+
+// ClearGroupNameSnapshot clears the value of the "group_name_snapshot" field.
+func (m *UserSubscriptionMutation) ClearGroupNameSnapshot() {
+	m.group_name_snapshot = nil
+	m.clearedFields[usersubscription.FieldGroupNameSnapshot] = struct{}{}
+}
+
+// GroupNameSnapshotCleared returns if the "group_name_snapshot" field was cleared in this mutation.
+func (m *UserSubscriptionMutation) GroupNameSnapshotCleared() bool {
+	_, ok := m.clearedFields[usersubscription.FieldGroupNameSnapshot]
+	return ok
+}
+
+// ResetGroupNameSnapshot resets all changes to the "group_name_snapshot" field.
+func (m *UserSubscriptionMutation) ResetGroupNameSnapshot() {
+	m.group_name_snapshot = nil
+	delete(m.clearedFields, usersubscription.FieldGroupNameSnapshot)
+}
+
+// SetGroupPlatformSnapshot sets the "group_platform_snapshot" field.
+func (m *UserSubscriptionMutation) SetGroupPlatformSnapshot(s string) {
+	m.group_platform_snapshot = &s
+}
+
+// GroupPlatformSnapshot returns the value of the "group_platform_snapshot" field in the mutation.
+func (m *UserSubscriptionMutation) GroupPlatformSnapshot() (r string, exists bool) {
+	v := m.group_platform_snapshot
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldGroupPlatformSnapshot returns the old "group_platform_snapshot" field's value of the UserSubscription entity.
+// If the UserSubscription object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserSubscriptionMutation) OldGroupPlatformSnapshot(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldGroupPlatformSnapshot is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldGroupPlatformSnapshot requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldGroupPlatformSnapshot: %w", err)
+	}
+	return oldValue.GroupPlatformSnapshot, nil
+}
+
+// ClearGroupPlatformSnapshot clears the value of the "group_platform_snapshot" field.
+func (m *UserSubscriptionMutation) ClearGroupPlatformSnapshot() {
+	m.group_platform_snapshot = nil
+	m.clearedFields[usersubscription.FieldGroupPlatformSnapshot] = struct{}{}
+}
+
+// GroupPlatformSnapshotCleared returns if the "group_platform_snapshot" field was cleared in this mutation.
+func (m *UserSubscriptionMutation) GroupPlatformSnapshotCleared() bool {
+	_, ok := m.clearedFields[usersubscription.FieldGroupPlatformSnapshot]
+	return ok
+}
+
+// ResetGroupPlatformSnapshot resets all changes to the "group_platform_snapshot" field.
+func (m *UserSubscriptionMutation) ResetGroupPlatformSnapshot() {
+	m.group_platform_snapshot = nil
+	delete(m.clearedFields, usersubscription.FieldGroupPlatformSnapshot)
+}
+
+// SetGroupRateMultiplierSnapshot sets the "group_rate_multiplier_snapshot" field.
+func (m *UserSubscriptionMutation) SetGroupRateMultiplierSnapshot(f float64) {
+	m.group_rate_multiplier_snapshot = &f
+	m.addgroup_rate_multiplier_snapshot = nil
+}
+
+// GroupRateMultiplierSnapshot returns the value of the "group_rate_multiplier_snapshot" field in the mutation.
+func (m *UserSubscriptionMutation) GroupRateMultiplierSnapshot() (r float64, exists bool) {
+	v := m.group_rate_multiplier_snapshot
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldGroupRateMultiplierSnapshot returns the old "group_rate_multiplier_snapshot" field's value of the UserSubscription entity.
+// If the UserSubscription object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserSubscriptionMutation) OldGroupRateMultiplierSnapshot(ctx context.Context) (v *float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldGroupRateMultiplierSnapshot is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldGroupRateMultiplierSnapshot requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldGroupRateMultiplierSnapshot: %w", err)
+	}
+	return oldValue.GroupRateMultiplierSnapshot, nil
+}
+
+// AddGroupRateMultiplierSnapshot adds f to the "group_rate_multiplier_snapshot" field.
+func (m *UserSubscriptionMutation) AddGroupRateMultiplierSnapshot(f float64) {
+	if m.addgroup_rate_multiplier_snapshot != nil {
+		*m.addgroup_rate_multiplier_snapshot += f
+	} else {
+		m.addgroup_rate_multiplier_snapshot = &f
+	}
+}
+
+// AddedGroupRateMultiplierSnapshot returns the value that was added to the "group_rate_multiplier_snapshot" field in this mutation.
+func (m *UserSubscriptionMutation) AddedGroupRateMultiplierSnapshot() (r float64, exists bool) {
+	v := m.addgroup_rate_multiplier_snapshot
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearGroupRateMultiplierSnapshot clears the value of the "group_rate_multiplier_snapshot" field.
+func (m *UserSubscriptionMutation) ClearGroupRateMultiplierSnapshot() {
+	m.group_rate_multiplier_snapshot = nil
+	m.addgroup_rate_multiplier_snapshot = nil
+	m.clearedFields[usersubscription.FieldGroupRateMultiplierSnapshot] = struct{}{}
+}
+
+// GroupRateMultiplierSnapshotCleared returns if the "group_rate_multiplier_snapshot" field was cleared in this mutation.
+func (m *UserSubscriptionMutation) GroupRateMultiplierSnapshotCleared() bool {
+	_, ok := m.clearedFields[usersubscription.FieldGroupRateMultiplierSnapshot]
+	return ok
+}
+
+// ResetGroupRateMultiplierSnapshot resets all changes to the "group_rate_multiplier_snapshot" field.
+func (m *UserSubscriptionMutation) ResetGroupRateMultiplierSnapshot() {
+	m.group_rate_multiplier_snapshot = nil
+	m.addgroup_rate_multiplier_snapshot = nil
+	delete(m.clearedFields, usersubscription.FieldGroupRateMultiplierSnapshot)
+}
+
+// SetDailyLimitUsdSnapshot sets the "daily_limit_usd_snapshot" field.
+func (m *UserSubscriptionMutation) SetDailyLimitUsdSnapshot(f float64) {
+	m.daily_limit_usd_snapshot = &f
+	m.adddaily_limit_usd_snapshot = nil
+}
+
+// DailyLimitUsdSnapshot returns the value of the "daily_limit_usd_snapshot" field in the mutation.
+func (m *UserSubscriptionMutation) DailyLimitUsdSnapshot() (r float64, exists bool) {
+	v := m.daily_limit_usd_snapshot
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldDailyLimitUsdSnapshot returns the old "daily_limit_usd_snapshot" field's value of the UserSubscription entity.
+// If the UserSubscription object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserSubscriptionMutation) OldDailyLimitUsdSnapshot(ctx context.Context) (v *float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldDailyLimitUsdSnapshot is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldDailyLimitUsdSnapshot requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldDailyLimitUsdSnapshot: %w", err)
+	}
+	return oldValue.DailyLimitUsdSnapshot, nil
+}
+
+// AddDailyLimitUsdSnapshot adds f to the "daily_limit_usd_snapshot" field.
+func (m *UserSubscriptionMutation) AddDailyLimitUsdSnapshot(f float64) {
+	if m.adddaily_limit_usd_snapshot != nil {
+		*m.adddaily_limit_usd_snapshot += f
+	} else {
+		m.adddaily_limit_usd_snapshot = &f
+	}
+}
+
+// AddedDailyLimitUsdSnapshot returns the value that was added to the "daily_limit_usd_snapshot" field in this mutation.
+func (m *UserSubscriptionMutation) AddedDailyLimitUsdSnapshot() (r float64, exists bool) {
+	v := m.adddaily_limit_usd_snapshot
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearDailyLimitUsdSnapshot clears the value of the "daily_limit_usd_snapshot" field.
+func (m *UserSubscriptionMutation) ClearDailyLimitUsdSnapshot() {
+	m.daily_limit_usd_snapshot = nil
+	m.adddaily_limit_usd_snapshot = nil
+	m.clearedFields[usersubscription.FieldDailyLimitUsdSnapshot] = struct{}{}
+}
+
+// DailyLimitUsdSnapshotCleared returns if the "daily_limit_usd_snapshot" field was cleared in this mutation.
+func (m *UserSubscriptionMutation) DailyLimitUsdSnapshotCleared() bool {
+	_, ok := m.clearedFields[usersubscription.FieldDailyLimitUsdSnapshot]
+	return ok
+}
+
+// ResetDailyLimitUsdSnapshot resets all changes to the "daily_limit_usd_snapshot" field.
+func (m *UserSubscriptionMutation) ResetDailyLimitUsdSnapshot() {
+	m.daily_limit_usd_snapshot = nil
+	m.adddaily_limit_usd_snapshot = nil
+	delete(m.clearedFields, usersubscription.FieldDailyLimitUsdSnapshot)
+}
+
+// SetWeeklyLimitUsdSnapshot sets the "weekly_limit_usd_snapshot" field.
+func (m *UserSubscriptionMutation) SetWeeklyLimitUsdSnapshot(f float64) {
+	m.weekly_limit_usd_snapshot = &f
+	m.addweekly_limit_usd_snapshot = nil
+}
+
+// WeeklyLimitUsdSnapshot returns the value of the "weekly_limit_usd_snapshot" field in the mutation.
+func (m *UserSubscriptionMutation) WeeklyLimitUsdSnapshot() (r float64, exists bool) {
+	v := m.weekly_limit_usd_snapshot
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldWeeklyLimitUsdSnapshot returns the old "weekly_limit_usd_snapshot" field's value of the UserSubscription entity.
+// If the UserSubscription object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserSubscriptionMutation) OldWeeklyLimitUsdSnapshot(ctx context.Context) (v *float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldWeeklyLimitUsdSnapshot is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldWeeklyLimitUsdSnapshot requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldWeeklyLimitUsdSnapshot: %w", err)
+	}
+	return oldValue.WeeklyLimitUsdSnapshot, nil
+}
+
+// AddWeeklyLimitUsdSnapshot adds f to the "weekly_limit_usd_snapshot" field.
+func (m *UserSubscriptionMutation) AddWeeklyLimitUsdSnapshot(f float64) {
+	if m.addweekly_limit_usd_snapshot != nil {
+		*m.addweekly_limit_usd_snapshot += f
+	} else {
+		m.addweekly_limit_usd_snapshot = &f
+	}
+}
+
+// AddedWeeklyLimitUsdSnapshot returns the value that was added to the "weekly_limit_usd_snapshot" field in this mutation.
+func (m *UserSubscriptionMutation) AddedWeeklyLimitUsdSnapshot() (r float64, exists bool) {
+	v := m.addweekly_limit_usd_snapshot
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearWeeklyLimitUsdSnapshot clears the value of the "weekly_limit_usd_snapshot" field.
+func (m *UserSubscriptionMutation) ClearWeeklyLimitUsdSnapshot() {
+	m.weekly_limit_usd_snapshot = nil
+	m.addweekly_limit_usd_snapshot = nil
+	m.clearedFields[usersubscription.FieldWeeklyLimitUsdSnapshot] = struct{}{}
+}
+
+// WeeklyLimitUsdSnapshotCleared returns if the "weekly_limit_usd_snapshot" field was cleared in this mutation.
+func (m *UserSubscriptionMutation) WeeklyLimitUsdSnapshotCleared() bool {
+	_, ok := m.clearedFields[usersubscription.FieldWeeklyLimitUsdSnapshot]
+	return ok
+}
+
+// ResetWeeklyLimitUsdSnapshot resets all changes to the "weekly_limit_usd_snapshot" field.
+func (m *UserSubscriptionMutation) ResetWeeklyLimitUsdSnapshot() {
+	m.weekly_limit_usd_snapshot = nil
+	m.addweekly_limit_usd_snapshot = nil
+	delete(m.clearedFields, usersubscription.FieldWeeklyLimitUsdSnapshot)
+}
+
+// SetMonthlyLimitUsdSnapshot sets the "monthly_limit_usd_snapshot" field.
+func (m *UserSubscriptionMutation) SetMonthlyLimitUsdSnapshot(f float64) {
+	m.monthly_limit_usd_snapshot = &f
+	m.addmonthly_limit_usd_snapshot = nil
+}
+
+// MonthlyLimitUsdSnapshot returns the value of the "monthly_limit_usd_snapshot" field in the mutation.
+func (m *UserSubscriptionMutation) MonthlyLimitUsdSnapshot() (r float64, exists bool) {
+	v := m.monthly_limit_usd_snapshot
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldMonthlyLimitUsdSnapshot returns the old "monthly_limit_usd_snapshot" field's value of the UserSubscription entity.
+// If the UserSubscription object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserSubscriptionMutation) OldMonthlyLimitUsdSnapshot(ctx context.Context) (v *float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldMonthlyLimitUsdSnapshot is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldMonthlyLimitUsdSnapshot requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldMonthlyLimitUsdSnapshot: %w", err)
+	}
+	return oldValue.MonthlyLimitUsdSnapshot, nil
+}
+
+// AddMonthlyLimitUsdSnapshot adds f to the "monthly_limit_usd_snapshot" field.
+func (m *UserSubscriptionMutation) AddMonthlyLimitUsdSnapshot(f float64) {
+	if m.addmonthly_limit_usd_snapshot != nil {
+		*m.addmonthly_limit_usd_snapshot += f
+	} else {
+		m.addmonthly_limit_usd_snapshot = &f
+	}
+}
+
+// AddedMonthlyLimitUsdSnapshot returns the value that was added to the "monthly_limit_usd_snapshot" field in this mutation.
+func (m *UserSubscriptionMutation) AddedMonthlyLimitUsdSnapshot() (r float64, exists bool) {
+	v := m.addmonthly_limit_usd_snapshot
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearMonthlyLimitUsdSnapshot clears the value of the "monthly_limit_usd_snapshot" field.
+func (m *UserSubscriptionMutation) ClearMonthlyLimitUsdSnapshot() {
+	m.monthly_limit_usd_snapshot = nil
+	m.addmonthly_limit_usd_snapshot = nil
+	m.clearedFields[usersubscription.FieldMonthlyLimitUsdSnapshot] = struct{}{}
+}
+
+// MonthlyLimitUsdSnapshotCleared returns if the "monthly_limit_usd_snapshot" field was cleared in this mutation.
+func (m *UserSubscriptionMutation) MonthlyLimitUsdSnapshotCleared() bool {
+	_, ok := m.clearedFields[usersubscription.FieldMonthlyLimitUsdSnapshot]
+	return ok
+}
+
+// ResetMonthlyLimitUsdSnapshot resets all changes to the "monthly_limit_usd_snapshot" field.
+func (m *UserSubscriptionMutation) ResetMonthlyLimitUsdSnapshot() {
+	m.monthly_limit_usd_snapshot = nil
+	m.addmonthly_limit_usd_snapshot = nil
+	delete(m.clearedFields, usersubscription.FieldMonthlyLimitUsdSnapshot)
+}
+
+// SetCustomLimitHoursSnapshot sets the "custom_limit_hours_snapshot" field.
+func (m *UserSubscriptionMutation) SetCustomLimitHoursSnapshot(i int) {
+	m.custom_limit_hours_snapshot = &i
+	m.addcustom_limit_hours_snapshot = nil
+}
+
+// CustomLimitHoursSnapshot returns the value of the "custom_limit_hours_snapshot" field in the mutation.
+func (m *UserSubscriptionMutation) CustomLimitHoursSnapshot() (r int, exists bool) {
+	v := m.custom_limit_hours_snapshot
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCustomLimitHoursSnapshot returns the old "custom_limit_hours_snapshot" field's value of the UserSubscription entity.
+// If the UserSubscription object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserSubscriptionMutation) OldCustomLimitHoursSnapshot(ctx context.Context) (v *int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCustomLimitHoursSnapshot is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCustomLimitHoursSnapshot requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCustomLimitHoursSnapshot: %w", err)
+	}
+	return oldValue.CustomLimitHoursSnapshot, nil
+}
+
+// AddCustomLimitHoursSnapshot adds i to the "custom_limit_hours_snapshot" field.
+func (m *UserSubscriptionMutation) AddCustomLimitHoursSnapshot(i int) {
+	if m.addcustom_limit_hours_snapshot != nil {
+		*m.addcustom_limit_hours_snapshot += i
+	} else {
+		m.addcustom_limit_hours_snapshot = &i
+	}
+}
+
+// AddedCustomLimitHoursSnapshot returns the value that was added to the "custom_limit_hours_snapshot" field in this mutation.
+func (m *UserSubscriptionMutation) AddedCustomLimitHoursSnapshot() (r int, exists bool) {
+	v := m.addcustom_limit_hours_snapshot
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearCustomLimitHoursSnapshot clears the value of the "custom_limit_hours_snapshot" field.
+func (m *UserSubscriptionMutation) ClearCustomLimitHoursSnapshot() {
+	m.custom_limit_hours_snapshot = nil
+	m.addcustom_limit_hours_snapshot = nil
+	m.clearedFields[usersubscription.FieldCustomLimitHoursSnapshot] = struct{}{}
+}
+
+// CustomLimitHoursSnapshotCleared returns if the "custom_limit_hours_snapshot" field was cleared in this mutation.
+func (m *UserSubscriptionMutation) CustomLimitHoursSnapshotCleared() bool {
+	_, ok := m.clearedFields[usersubscription.FieldCustomLimitHoursSnapshot]
+	return ok
+}
+
+// ResetCustomLimitHoursSnapshot resets all changes to the "custom_limit_hours_snapshot" field.
+func (m *UserSubscriptionMutation) ResetCustomLimitHoursSnapshot() {
+	m.custom_limit_hours_snapshot = nil
+	m.addcustom_limit_hours_snapshot = nil
+	delete(m.clearedFields, usersubscription.FieldCustomLimitHoursSnapshot)
+}
+
+// SetCustomLimitUsdSnapshot sets the "custom_limit_usd_snapshot" field.
+func (m *UserSubscriptionMutation) SetCustomLimitUsdSnapshot(f float64) {
+	m.custom_limit_usd_snapshot = &f
+	m.addcustom_limit_usd_snapshot = nil
+}
+
+// CustomLimitUsdSnapshot returns the value of the "custom_limit_usd_snapshot" field in the mutation.
+func (m *UserSubscriptionMutation) CustomLimitUsdSnapshot() (r float64, exists bool) {
+	v := m.custom_limit_usd_snapshot
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCustomLimitUsdSnapshot returns the old "custom_limit_usd_snapshot" field's value of the UserSubscription entity.
+// If the UserSubscription object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserSubscriptionMutation) OldCustomLimitUsdSnapshot(ctx context.Context) (v *float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCustomLimitUsdSnapshot is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCustomLimitUsdSnapshot requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCustomLimitUsdSnapshot: %w", err)
+	}
+	return oldValue.CustomLimitUsdSnapshot, nil
+}
+
+// AddCustomLimitUsdSnapshot adds f to the "custom_limit_usd_snapshot" field.
+func (m *UserSubscriptionMutation) AddCustomLimitUsdSnapshot(f float64) {
+	if m.addcustom_limit_usd_snapshot != nil {
+		*m.addcustom_limit_usd_snapshot += f
+	} else {
+		m.addcustom_limit_usd_snapshot = &f
+	}
+}
+
+// AddedCustomLimitUsdSnapshot returns the value that was added to the "custom_limit_usd_snapshot" field in this mutation.
+func (m *UserSubscriptionMutation) AddedCustomLimitUsdSnapshot() (r float64, exists bool) {
+	v := m.addcustom_limit_usd_snapshot
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearCustomLimitUsdSnapshot clears the value of the "custom_limit_usd_snapshot" field.
+func (m *UserSubscriptionMutation) ClearCustomLimitUsdSnapshot() {
+	m.custom_limit_usd_snapshot = nil
+	m.addcustom_limit_usd_snapshot = nil
+	m.clearedFields[usersubscription.FieldCustomLimitUsdSnapshot] = struct{}{}
+}
+
+// CustomLimitUsdSnapshotCleared returns if the "custom_limit_usd_snapshot" field was cleared in this mutation.
+func (m *UserSubscriptionMutation) CustomLimitUsdSnapshotCleared() bool {
+	_, ok := m.clearedFields[usersubscription.FieldCustomLimitUsdSnapshot]
+	return ok
+}
+
+// ResetCustomLimitUsdSnapshot resets all changes to the "custom_limit_usd_snapshot" field.
+func (m *UserSubscriptionMutation) ResetCustomLimitUsdSnapshot() {
+	m.custom_limit_usd_snapshot = nil
+	m.addcustom_limit_usd_snapshot = nil
+	delete(m.clearedFields, usersubscription.FieldCustomLimitUsdSnapshot)
+}
+
 // ClearUser clears the "user" edge to the User entity.
 func (m *UserSubscriptionMutation) ClearUser() {
 	m.cleareduser = true
@@ -54194,7 +54948,7 @@ func (m *UserSubscriptionMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UserSubscriptionMutation) Fields() []string {
-	fields := make([]string, 0, 19)
+	fields := make([]string, 0, 31)
 	if m.created_at != nil {
 		fields = append(fields, usersubscription.FieldCreatedAt)
 	}
@@ -54252,6 +55006,42 @@ func (m *UserSubscriptionMutation) Fields() []string {
 	if m.notes != nil {
 		fields = append(fields, usersubscription.FieldNotes)
 	}
+	if m.source_type != nil {
+		fields = append(fields, usersubscription.FieldSourceType)
+	}
+	if m.source_ref_id != nil {
+		fields = append(fields, usersubscription.FieldSourceRefID)
+	}
+	if m.source_redeem_code_id != nil {
+		fields = append(fields, usersubscription.FieldSourceRedeemCodeID)
+	}
+	if m.redeem_code_snapshot != nil {
+		fields = append(fields, usersubscription.FieldRedeemCodeSnapshot)
+	}
+	if m.group_name_snapshot != nil {
+		fields = append(fields, usersubscription.FieldGroupNameSnapshot)
+	}
+	if m.group_platform_snapshot != nil {
+		fields = append(fields, usersubscription.FieldGroupPlatformSnapshot)
+	}
+	if m.group_rate_multiplier_snapshot != nil {
+		fields = append(fields, usersubscription.FieldGroupRateMultiplierSnapshot)
+	}
+	if m.daily_limit_usd_snapshot != nil {
+		fields = append(fields, usersubscription.FieldDailyLimitUsdSnapshot)
+	}
+	if m.weekly_limit_usd_snapshot != nil {
+		fields = append(fields, usersubscription.FieldWeeklyLimitUsdSnapshot)
+	}
+	if m.monthly_limit_usd_snapshot != nil {
+		fields = append(fields, usersubscription.FieldMonthlyLimitUsdSnapshot)
+	}
+	if m.custom_limit_hours_snapshot != nil {
+		fields = append(fields, usersubscription.FieldCustomLimitHoursSnapshot)
+	}
+	if m.custom_limit_usd_snapshot != nil {
+		fields = append(fields, usersubscription.FieldCustomLimitUsdSnapshot)
+	}
 	return fields
 }
 
@@ -54298,6 +55088,30 @@ func (m *UserSubscriptionMutation) Field(name string) (ent.Value, bool) {
 		return m.AssignedAt()
 	case usersubscription.FieldNotes:
 		return m.Notes()
+	case usersubscription.FieldSourceType:
+		return m.SourceType()
+	case usersubscription.FieldSourceRefID:
+		return m.SourceRefID()
+	case usersubscription.FieldSourceRedeemCodeID:
+		return m.SourceRedeemCodeID()
+	case usersubscription.FieldRedeemCodeSnapshot:
+		return m.RedeemCodeSnapshot()
+	case usersubscription.FieldGroupNameSnapshot:
+		return m.GroupNameSnapshot()
+	case usersubscription.FieldGroupPlatformSnapshot:
+		return m.GroupPlatformSnapshot()
+	case usersubscription.FieldGroupRateMultiplierSnapshot:
+		return m.GroupRateMultiplierSnapshot()
+	case usersubscription.FieldDailyLimitUsdSnapshot:
+		return m.DailyLimitUsdSnapshot()
+	case usersubscription.FieldWeeklyLimitUsdSnapshot:
+		return m.WeeklyLimitUsdSnapshot()
+	case usersubscription.FieldMonthlyLimitUsdSnapshot:
+		return m.MonthlyLimitUsdSnapshot()
+	case usersubscription.FieldCustomLimitHoursSnapshot:
+		return m.CustomLimitHoursSnapshot()
+	case usersubscription.FieldCustomLimitUsdSnapshot:
+		return m.CustomLimitUsdSnapshot()
 	}
 	return nil, false
 }
@@ -54345,6 +55159,30 @@ func (m *UserSubscriptionMutation) OldField(ctx context.Context, name string) (e
 		return m.OldAssignedAt(ctx)
 	case usersubscription.FieldNotes:
 		return m.OldNotes(ctx)
+	case usersubscription.FieldSourceType:
+		return m.OldSourceType(ctx)
+	case usersubscription.FieldSourceRefID:
+		return m.OldSourceRefID(ctx)
+	case usersubscription.FieldSourceRedeemCodeID:
+		return m.OldSourceRedeemCodeID(ctx)
+	case usersubscription.FieldRedeemCodeSnapshot:
+		return m.OldRedeemCodeSnapshot(ctx)
+	case usersubscription.FieldGroupNameSnapshot:
+		return m.OldGroupNameSnapshot(ctx)
+	case usersubscription.FieldGroupPlatformSnapshot:
+		return m.OldGroupPlatformSnapshot(ctx)
+	case usersubscription.FieldGroupRateMultiplierSnapshot:
+		return m.OldGroupRateMultiplierSnapshot(ctx)
+	case usersubscription.FieldDailyLimitUsdSnapshot:
+		return m.OldDailyLimitUsdSnapshot(ctx)
+	case usersubscription.FieldWeeklyLimitUsdSnapshot:
+		return m.OldWeeklyLimitUsdSnapshot(ctx)
+	case usersubscription.FieldMonthlyLimitUsdSnapshot:
+		return m.OldMonthlyLimitUsdSnapshot(ctx)
+	case usersubscription.FieldCustomLimitHoursSnapshot:
+		return m.OldCustomLimitHoursSnapshot(ctx)
+	case usersubscription.FieldCustomLimitUsdSnapshot:
+		return m.OldCustomLimitUsdSnapshot(ctx)
 	}
 	return nil, fmt.Errorf("unknown UserSubscription field %s", name)
 }
@@ -54487,6 +55325,90 @@ func (m *UserSubscriptionMutation) SetField(name string, value ent.Value) error 
 		}
 		m.SetNotes(v)
 		return nil
+	case usersubscription.FieldSourceType:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSourceType(v)
+		return nil
+	case usersubscription.FieldSourceRefID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSourceRefID(v)
+		return nil
+	case usersubscription.FieldSourceRedeemCodeID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSourceRedeemCodeID(v)
+		return nil
+	case usersubscription.FieldRedeemCodeSnapshot:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRedeemCodeSnapshot(v)
+		return nil
+	case usersubscription.FieldGroupNameSnapshot:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetGroupNameSnapshot(v)
+		return nil
+	case usersubscription.FieldGroupPlatformSnapshot:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetGroupPlatformSnapshot(v)
+		return nil
+	case usersubscription.FieldGroupRateMultiplierSnapshot:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetGroupRateMultiplierSnapshot(v)
+		return nil
+	case usersubscription.FieldDailyLimitUsdSnapshot:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetDailyLimitUsdSnapshot(v)
+		return nil
+	case usersubscription.FieldWeeklyLimitUsdSnapshot:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetWeeklyLimitUsdSnapshot(v)
+		return nil
+	case usersubscription.FieldMonthlyLimitUsdSnapshot:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetMonthlyLimitUsdSnapshot(v)
+		return nil
+	case usersubscription.FieldCustomLimitHoursSnapshot:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCustomLimitHoursSnapshot(v)
+		return nil
+	case usersubscription.FieldCustomLimitUsdSnapshot:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCustomLimitUsdSnapshot(v)
+		return nil
 	}
 	return fmt.Errorf("unknown UserSubscription field %s", name)
 }
@@ -54507,6 +55429,27 @@ func (m *UserSubscriptionMutation) AddedFields() []string {
 	if m.addcustom_usage_usd != nil {
 		fields = append(fields, usersubscription.FieldCustomUsageUsd)
 	}
+	if m.addsource_redeem_code_id != nil {
+		fields = append(fields, usersubscription.FieldSourceRedeemCodeID)
+	}
+	if m.addgroup_rate_multiplier_snapshot != nil {
+		fields = append(fields, usersubscription.FieldGroupRateMultiplierSnapshot)
+	}
+	if m.adddaily_limit_usd_snapshot != nil {
+		fields = append(fields, usersubscription.FieldDailyLimitUsdSnapshot)
+	}
+	if m.addweekly_limit_usd_snapshot != nil {
+		fields = append(fields, usersubscription.FieldWeeklyLimitUsdSnapshot)
+	}
+	if m.addmonthly_limit_usd_snapshot != nil {
+		fields = append(fields, usersubscription.FieldMonthlyLimitUsdSnapshot)
+	}
+	if m.addcustom_limit_hours_snapshot != nil {
+		fields = append(fields, usersubscription.FieldCustomLimitHoursSnapshot)
+	}
+	if m.addcustom_limit_usd_snapshot != nil {
+		fields = append(fields, usersubscription.FieldCustomLimitUsdSnapshot)
+	}
 	return fields
 }
 
@@ -54523,6 +55466,20 @@ func (m *UserSubscriptionMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedMonthlyUsageUsd()
 	case usersubscription.FieldCustomUsageUsd:
 		return m.AddedCustomUsageUsd()
+	case usersubscription.FieldSourceRedeemCodeID:
+		return m.AddedSourceRedeemCodeID()
+	case usersubscription.FieldGroupRateMultiplierSnapshot:
+		return m.AddedGroupRateMultiplierSnapshot()
+	case usersubscription.FieldDailyLimitUsdSnapshot:
+		return m.AddedDailyLimitUsdSnapshot()
+	case usersubscription.FieldWeeklyLimitUsdSnapshot:
+		return m.AddedWeeklyLimitUsdSnapshot()
+	case usersubscription.FieldMonthlyLimitUsdSnapshot:
+		return m.AddedMonthlyLimitUsdSnapshot()
+	case usersubscription.FieldCustomLimitHoursSnapshot:
+		return m.AddedCustomLimitHoursSnapshot()
+	case usersubscription.FieldCustomLimitUsdSnapshot:
+		return m.AddedCustomLimitUsdSnapshot()
 	}
 	return nil, false
 }
@@ -54560,6 +55517,55 @@ func (m *UserSubscriptionMutation) AddField(name string, value ent.Value) error 
 		}
 		m.AddCustomUsageUsd(v)
 		return nil
+	case usersubscription.FieldSourceRedeemCodeID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddSourceRedeemCodeID(v)
+		return nil
+	case usersubscription.FieldGroupRateMultiplierSnapshot:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddGroupRateMultiplierSnapshot(v)
+		return nil
+	case usersubscription.FieldDailyLimitUsdSnapshot:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddDailyLimitUsdSnapshot(v)
+		return nil
+	case usersubscription.FieldWeeklyLimitUsdSnapshot:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddWeeklyLimitUsdSnapshot(v)
+		return nil
+	case usersubscription.FieldMonthlyLimitUsdSnapshot:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddMonthlyLimitUsdSnapshot(v)
+		return nil
+	case usersubscription.FieldCustomLimitHoursSnapshot:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddCustomLimitHoursSnapshot(v)
+		return nil
+	case usersubscription.FieldCustomLimitUsdSnapshot:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddCustomLimitUsdSnapshot(v)
+		return nil
 	}
 	return fmt.Errorf("unknown UserSubscription numeric field %s", name)
 }
@@ -54588,6 +55594,42 @@ func (m *UserSubscriptionMutation) ClearedFields() []string {
 	}
 	if m.FieldCleared(usersubscription.FieldNotes) {
 		fields = append(fields, usersubscription.FieldNotes)
+	}
+	if m.FieldCleared(usersubscription.FieldSourceType) {
+		fields = append(fields, usersubscription.FieldSourceType)
+	}
+	if m.FieldCleared(usersubscription.FieldSourceRefID) {
+		fields = append(fields, usersubscription.FieldSourceRefID)
+	}
+	if m.FieldCleared(usersubscription.FieldSourceRedeemCodeID) {
+		fields = append(fields, usersubscription.FieldSourceRedeemCodeID)
+	}
+	if m.FieldCleared(usersubscription.FieldRedeemCodeSnapshot) {
+		fields = append(fields, usersubscription.FieldRedeemCodeSnapshot)
+	}
+	if m.FieldCleared(usersubscription.FieldGroupNameSnapshot) {
+		fields = append(fields, usersubscription.FieldGroupNameSnapshot)
+	}
+	if m.FieldCleared(usersubscription.FieldGroupPlatformSnapshot) {
+		fields = append(fields, usersubscription.FieldGroupPlatformSnapshot)
+	}
+	if m.FieldCleared(usersubscription.FieldGroupRateMultiplierSnapshot) {
+		fields = append(fields, usersubscription.FieldGroupRateMultiplierSnapshot)
+	}
+	if m.FieldCleared(usersubscription.FieldDailyLimitUsdSnapshot) {
+		fields = append(fields, usersubscription.FieldDailyLimitUsdSnapshot)
+	}
+	if m.FieldCleared(usersubscription.FieldWeeklyLimitUsdSnapshot) {
+		fields = append(fields, usersubscription.FieldWeeklyLimitUsdSnapshot)
+	}
+	if m.FieldCleared(usersubscription.FieldMonthlyLimitUsdSnapshot) {
+		fields = append(fields, usersubscription.FieldMonthlyLimitUsdSnapshot)
+	}
+	if m.FieldCleared(usersubscription.FieldCustomLimitHoursSnapshot) {
+		fields = append(fields, usersubscription.FieldCustomLimitHoursSnapshot)
+	}
+	if m.FieldCleared(usersubscription.FieldCustomLimitUsdSnapshot) {
+		fields = append(fields, usersubscription.FieldCustomLimitUsdSnapshot)
 	}
 	return fields
 }
@@ -54623,6 +55665,42 @@ func (m *UserSubscriptionMutation) ClearField(name string) error {
 		return nil
 	case usersubscription.FieldNotes:
 		m.ClearNotes()
+		return nil
+	case usersubscription.FieldSourceType:
+		m.ClearSourceType()
+		return nil
+	case usersubscription.FieldSourceRefID:
+		m.ClearSourceRefID()
+		return nil
+	case usersubscription.FieldSourceRedeemCodeID:
+		m.ClearSourceRedeemCodeID()
+		return nil
+	case usersubscription.FieldRedeemCodeSnapshot:
+		m.ClearRedeemCodeSnapshot()
+		return nil
+	case usersubscription.FieldGroupNameSnapshot:
+		m.ClearGroupNameSnapshot()
+		return nil
+	case usersubscription.FieldGroupPlatformSnapshot:
+		m.ClearGroupPlatformSnapshot()
+		return nil
+	case usersubscription.FieldGroupRateMultiplierSnapshot:
+		m.ClearGroupRateMultiplierSnapshot()
+		return nil
+	case usersubscription.FieldDailyLimitUsdSnapshot:
+		m.ClearDailyLimitUsdSnapshot()
+		return nil
+	case usersubscription.FieldWeeklyLimitUsdSnapshot:
+		m.ClearWeeklyLimitUsdSnapshot()
+		return nil
+	case usersubscription.FieldMonthlyLimitUsdSnapshot:
+		m.ClearMonthlyLimitUsdSnapshot()
+		return nil
+	case usersubscription.FieldCustomLimitHoursSnapshot:
+		m.ClearCustomLimitHoursSnapshot()
+		return nil
+	case usersubscription.FieldCustomLimitUsdSnapshot:
+		m.ClearCustomLimitUsdSnapshot()
 		return nil
 	}
 	return fmt.Errorf("unknown UserSubscription nullable field %s", name)
@@ -54688,6 +55766,42 @@ func (m *UserSubscriptionMutation) ResetField(name string) error {
 		return nil
 	case usersubscription.FieldNotes:
 		m.ResetNotes()
+		return nil
+	case usersubscription.FieldSourceType:
+		m.ResetSourceType()
+		return nil
+	case usersubscription.FieldSourceRefID:
+		m.ResetSourceRefID()
+		return nil
+	case usersubscription.FieldSourceRedeemCodeID:
+		m.ResetSourceRedeemCodeID()
+		return nil
+	case usersubscription.FieldRedeemCodeSnapshot:
+		m.ResetRedeemCodeSnapshot()
+		return nil
+	case usersubscription.FieldGroupNameSnapshot:
+		m.ResetGroupNameSnapshot()
+		return nil
+	case usersubscription.FieldGroupPlatformSnapshot:
+		m.ResetGroupPlatformSnapshot()
+		return nil
+	case usersubscription.FieldGroupRateMultiplierSnapshot:
+		m.ResetGroupRateMultiplierSnapshot()
+		return nil
+	case usersubscription.FieldDailyLimitUsdSnapshot:
+		m.ResetDailyLimitUsdSnapshot()
+		return nil
+	case usersubscription.FieldWeeklyLimitUsdSnapshot:
+		m.ResetWeeklyLimitUsdSnapshot()
+		return nil
+	case usersubscription.FieldMonthlyLimitUsdSnapshot:
+		m.ResetMonthlyLimitUsdSnapshot()
+		return nil
+	case usersubscription.FieldCustomLimitHoursSnapshot:
+		m.ResetCustomLimitHoursSnapshot()
+		return nil
+	case usersubscription.FieldCustomLimitUsdSnapshot:
+		m.ResetCustomLimitUsdSnapshot()
 		return nil
 	}
 	return fmt.Errorf("unknown UserSubscription field %s", name)

@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"math"
 	"strings"
+	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -106,9 +108,22 @@ func (r *usageBillingRepository) claimUsageBillingKey(ctx context.Context, tx *s
 }
 
 func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, tx *sql.Tx, cmd *service.UsageBillingCommand, result *service.UsageBillingApplyResult) error {
-	if cmd.SubscriptionCost > 0 && cmd.SubscriptionID != nil {
-		if err := incrementUsageBillingSubscription(ctx, tx, *cmd.SubscriptionID, cmd.SubscriptionCost); err != nil {
+	if cmd.SubscriptionCost > 0 {
+		var (
+			subID int64
+			err   error
+		)
+		if cmd.SubscriptionID != nil && *cmd.SubscriptionID > 0 {
+			subID = *cmd.SubscriptionID
+			err = incrementUsageBillingSubscription(ctx, tx, subID, cmd.SubscriptionCost)
+		} else if cmd.SubscriptionUserID > 0 && cmd.SubscriptionGroupID > 0 {
+			subID, err = incrementUsageBillingSubscriptionStacked(ctx, tx, cmd.SubscriptionUserID, cmd.SubscriptionGroupID, cmd.SubscriptionCost)
+		}
+		if err != nil {
 			return err
+		}
+		if subID > 0 {
+			result.SubscriptionID = &subID
 		}
 	}
 
@@ -172,6 +187,241 @@ func incrementUsageBillingSubscription(ctx context.Context, tx *sql.Tx, subscrip
 		return nil
 	}
 	return service.ErrSubscriptionNotFound
+}
+
+type billingSubscriptionCandidate struct {
+	id                 int64
+	startsAt           time.Time
+	expiresAt          time.Time
+	dailyUsage         float64
+	weeklyUsage        float64
+	monthlyUsage       float64
+	customUsage        float64
+	dailyWindowStart   sql.NullTime
+	weeklyWindowStart  sql.NullTime
+	monthlyWindowStart sql.NullTime
+	customWindowStart  sql.NullTime
+	dailyLimit         sql.NullFloat64
+	weeklyLimit        sql.NullFloat64
+	monthlyLimit       sql.NullFloat64
+	customLimitHours   sql.NullInt64
+	customLimit        sql.NullFloat64
+}
+
+const billingMaxCustomLimitHours = 24 * 365 * 10
+
+func incrementUsageBillingSubscriptionStacked(ctx context.Context, tx *sql.Tx, userID, groupID int64, costUSD float64) (int64, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT
+			us.id,
+			us.starts_at,
+			us.expires_at,
+			us.daily_usage_usd,
+			us.weekly_usage_usd,
+			us.monthly_usage_usd,
+			us.custom_usage_usd,
+			us.daily_window_start,
+			us.weekly_window_start,
+			us.monthly_window_start,
+			us.custom_window_start,
+			COALESCE(us.daily_limit_usd_snapshot, g.daily_limit_usd),
+			COALESCE(us.weekly_limit_usd_snapshot, g.weekly_limit_usd),
+			COALESCE(us.monthly_limit_usd_snapshot, g.monthly_limit_usd),
+			COALESCE(us.custom_limit_hours_snapshot, g.custom_limit_hours),
+			COALESCE(us.custom_limit_usd_snapshot, g.custom_limit_usd)
+		FROM user_subscriptions us
+		LEFT JOIN groups g ON us.group_id = g.id AND g.deleted_at IS NULL
+		WHERE us.user_id = $1
+			AND us.group_id = $2
+			AND us.status = $3
+			AND us.expires_at > NOW()
+			AND us.deleted_at IS NULL
+		ORDER BY us.starts_at ASC, us.id ASC
+		FOR UPDATE OF us
+	`, userID, groupID, service.SubscriptionStatusActive)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	now := time.Now()
+	candidates := make([]billingSubscriptionCandidate, 0)
+	for rows.Next() {
+		var c billingSubscriptionCandidate
+		if err := rows.Scan(
+			&c.id,
+			&c.startsAt,
+			&c.expiresAt,
+			&c.dailyUsage,
+			&c.weeklyUsage,
+			&c.monthlyUsage,
+			&c.customUsage,
+			&c.dailyWindowStart,
+			&c.weeklyWindowStart,
+			&c.monthlyWindowStart,
+			&c.customWindowStart,
+			&c.dailyLimit,
+			&c.weeklyLimit,
+			&c.monthlyLimit,
+			&c.customLimitHours,
+			&c.customLimit,
+		); err != nil {
+			return 0, err
+		}
+		normalizeBillingSubscriptionCandidate(&c, now)
+		candidates = append(candidates, c)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	if len(candidates) == 0 {
+		return 0, service.ErrSubscriptionNotFound
+	}
+
+	remaining := costUSD
+	var firstChargedID int64
+	charged := make([]*billingSubscriptionCandidate, 0, len(candidates))
+	for i := range candidates {
+		available := billingSubscriptionAvailable(&candidates[i])
+		if available <= 0 {
+			continue
+		}
+		charge := remaining
+		if !math.IsInf(available, 1) && charge > available {
+			charge = available
+		}
+		if charge <= 0 {
+			continue
+		}
+		candidates[i].dailyUsage += charge
+		candidates[i].weeklyUsage += charge
+		candidates[i].monthlyUsage += charge
+		candidates[i].customUsage += charge
+		if firstChargedID == 0 {
+			firstChargedID = candidates[i].id
+		}
+		charged = append(charged, &candidates[i])
+		remaining -= charge
+		if remaining <= 1e-9 {
+			break
+		}
+	}
+	if len(charged) == 0 {
+		chosen := &candidates[0]
+		chosen.dailyUsage += remaining
+		chosen.weeklyUsage += remaining
+		chosen.monthlyUsage += remaining
+		chosen.customUsage += remaining
+		firstChargedID = chosen.id
+		charged = append(charged, chosen)
+		remaining = 0
+	}
+	if remaining > 1e-9 {
+		chosen := charged[len(charged)-1]
+		chosen.dailyUsage += remaining
+		chosen.weeklyUsage += remaining
+		chosen.monthlyUsage += remaining
+		chosen.customUsage += remaining
+		remaining = 0
+	}
+
+	for _, chosen := range charged {
+		res, err := tx.ExecContext(ctx, `
+			UPDATE user_subscriptions
+			SET daily_usage_usd = $1,
+				weekly_usage_usd = $2,
+				monthly_usage_usd = $3,
+				custom_usage_usd = $4,
+				daily_window_start = $5,
+				weekly_window_start = $6,
+				monthly_window_start = $7,
+				custom_window_start = $8,
+				updated_at = NOW()
+			WHERE id = $9 AND deleted_at IS NULL
+		`, chosen.dailyUsage, chosen.weeklyUsage, chosen.monthlyUsage, chosen.customUsage,
+			nullTimeValue(chosen.dailyWindowStart), nullTimeValue(chosen.weeklyWindowStart), nullTimeValue(chosen.monthlyWindowStart), nullTimeValue(chosen.customWindowStart), chosen.id)
+		if err != nil {
+			return 0, err
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return 0, err
+		}
+		if affected == 0 {
+			return 0, service.ErrSubscriptionNotFound
+		}
+	}
+	return firstChargedID, nil
+}
+
+func normalizeBillingSubscriptionCandidate(c *billingSubscriptionCandidate, now time.Time) {
+	if c == nil {
+		return
+	}
+	c.dailyWindowStart = normalizeBillingWindow(c.dailyWindowStart, c.startsAt, 24*time.Hour, now, !c.expiresAt.After(c.startsAt.AddDate(0, 0, 1)), &c.dailyUsage)
+	c.weeklyWindowStart = normalizeBillingWindow(c.weeklyWindowStart, c.startsAt, 7*24*time.Hour, now, false, &c.weeklyUsage)
+	c.monthlyWindowStart = normalizeBillingWindow(c.monthlyWindowStart, c.startsAt, 30*24*time.Hour, now, false, &c.monthlyUsage)
+	customPeriod := time.Duration(0)
+	if c.customLimitHours.Valid && c.customLimitHours.Int64 > 0 && c.customLimit.Valid && c.customLimit.Float64 > 0 {
+		hours := c.customLimitHours.Int64
+		if hours > billingMaxCustomLimitHours {
+			hours = billingMaxCustomLimitHours
+		}
+		customPeriod = time.Duration(hours) * time.Hour
+	}
+	c.customWindowStart = normalizeBillingWindow(c.customWindowStart, c.startsAt, customPeriod, now, false, &c.customUsage)
+}
+
+func normalizeBillingWindow(start sql.NullTime, fallback time.Time, period time.Duration, now time.Time, oneTime bool, usage *float64) sql.NullTime {
+	if !start.Valid {
+		start = sql.NullTime{Time: fallback, Valid: true}
+	}
+	if oneTime || period <= 0 || now.Before(start.Time.Add(period)) {
+		return start
+	}
+	elapsed := now.Sub(start.Time)
+	periods := int64(elapsed / period)
+	if periods < 1 {
+		return start
+	}
+	start.Time = start.Time.Add(time.Duration(periods) * period)
+	if usage != nil {
+		*usage = 0
+	}
+	return start
+}
+
+func billingSubscriptionAvailable(c *billingSubscriptionCandidate) float64 {
+	if c == nil {
+		return 0
+	}
+	available := math.Inf(1)
+	applyLimit := func(limit sql.NullFloat64, usage float64) {
+		if !limit.Valid || limit.Float64 <= 0 {
+			return
+		}
+		remaining := limit.Float64 - usage
+		if remaining < available {
+			available = remaining
+		}
+	}
+	applyLimit(c.dailyLimit, c.dailyUsage)
+	applyLimit(c.weeklyLimit, c.weeklyUsage)
+	applyLimit(c.monthlyLimit, c.monthlyUsage)
+	if c.customLimitHours.Valid && c.customLimitHours.Int64 > 0 {
+		applyLimit(c.customLimit, c.customUsage)
+	}
+	if available < 0 {
+		return 0
+	}
+	return available
+}
+
+func nullTimeValue(v sql.NullTime) any {
+	if !v.Valid {
+		return nil
+	}
+	return v.Time
 }
 
 func deductUsageBillingBalance(ctx context.Context, tx *sql.Tx, userID int64, amount float64) (float64, error) {

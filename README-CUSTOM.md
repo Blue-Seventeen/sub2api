@@ -46,7 +46,7 @@
 | 推广中心 | 自研 Promotion / 推广中心 / 推广后台 / 返佣统计 | 替代 upstream Affiliate，不可被覆盖 | `backend/internal/service/*promotion*`, `frontend/src/views/**/Promotion*.vue` |
 | 自动运维 | 账号自动刷新、测试、恢复、删除、规则筛选 | 维护账号池稳定性 | `account_auto_ops*`, `proxy_auto_probe*` |
 | 代理池 | 代理检测、成功队列、账号选择最优代理 | 提升上游请求成功率 | `proxy_*`, `account_proxy*`, `frontend` 代理管理页 |
-| 订阅管理 | 兑换时刻滚动窗口、自定义小时限额、开始时间列、秒级时间展示、`starts_at` 排序与列设置持久化 | 订阅额度语义必须跟随兑换/续费生效时刻，且不能因长时间字段影响表格布局或中转链路 | `backend/internal/service/subscription_service.go`, `backend/internal/service/user_subscription.go`, `backend/internal/repository/user_subscription_repo.go`, `backend/migrations/145_subscription_windows_anchor_to_starts_at.sql`, `backend/migrations/146_subscription_custom_hour_limit.sql`, `frontend/src/views/admin/SubscriptionsView.vue`, `frontend/src/views/admin/GroupsView.vue`, `frontend/src/views/user/SubscriptionsView.vue`, `frontend/src/views/user/PaymentView.vue` |
+| 订阅管理 | 兑换时刻滚动窗口、自定义小时限额、订阅卡堆叠、精细配额调整、选择性配额重置、撤销历史展示、来源/兑换码/分组限额快照、开始时间列、秒级时间展示、`starts_at` 排序与列设置持久化 | 订阅额度语义必须跟随兑换/购买生效时刻；用户侧可理解为同分组聚合权益，管理侧必须保留逐张卡证据；不能因订阅查询或扣费改变中转热路径与 mandatory usage/billing 语义 | `backend/internal/service/subscription_service.go`, `backend/internal/service/user_subscription.go`, `backend/internal/repository/user_subscription_repo.go`, `backend/internal/repository/usage_billing_repo.go`, `backend/migrations/145_subscription_windows_anchor_to_starts_at.sql`, `backend/migrations/146_subscription_custom_hour_limit.sql`, `backend/migrations/149_subscription_stacking_snapshots.sql`, `backend/migrations/150_subscription_billing_stack_index.sql`, `frontend/src/views/admin/SubscriptionsView.vue`, `frontend/src/views/admin/GroupsView.vue`, `frontend/src/views/user/SubscriptionsView.vue`, `frontend/src/views/user/PaymentView.vue` |
 | 设置增强 | 站点 Logo、自定义菜单、外链新页面打开、邀请码注册 HTML 提示 | 属于运营配置能力 | `setting_service.go`, `SettingsView.vue`, `AppSidebar.vue` |
 | 分组平台搜索 | `/admin/groups` 创建分组平台选择增加与账号表单一致的模糊搜索 | 纯前端交互增强，不改变分组保存、调度、计费或平台语义 | `frontend/src/views/admin/GroupsView.vue` |
 | 多机部署 | 定时备份本机开关 | 多机共库时由每台服务器本地文件决定是否执行定时备份，默认关闭 | `backup_service.go`, `backup_service_schedule_local_test.go` |
@@ -294,6 +294,21 @@ upstream 的 Affiliate / 邀请返利模块属于冗余功能，后续同步 ups
 - `frontend/src/views/admin/ChannelMonitorView.vue`
 - `frontend/src/views/user/AvailableChannelsView.vue`
 - `frontend/src/views/user/ChannelStatusView.vue`
+
+### 6.4 订阅堆叠与精细配额管理
+
+- 兑换码兑换和支付购买订阅必须创建新的订阅卡，不再复用同用户同分组已有活跃订阅；管理员手动分配、批量分配、注册赠送和默认赠送继续保持幂等/复用语义，避免误发重复权益。
+- 用户侧 `/subscriptions` 继续按分组聚合展示：同一分组多张活跃卡的每日、每周、每月、自定义窗口限额相加，已用额度相加，重置时间取相关窗口最早需要关注的重置点；不得暴露管理侧内部多条订阅卡细节、来源 ID 或兑换码快照。
+- 管理侧 `/admin/subscriptions` 必须逐张订阅卡管理；撤销订阅应设置 `status=revoked` 并软删除，管理员切换到“已撤销”分类时必须能看到这些软删除历史记录。
+- 管理侧“调整”既支持原有 `days` 到期天数，也支持设置 `daily_usage_usd`、`weekly_usage_usd`、`monthly_usage_usd`、`custom_usage_usd` 已用额度；额度允许非负且可超过限额，用于人工封顶或阻断该窗口继续使用。
+- 管理侧“重置配额”必须从单一确认框改为选择弹窗，支持单独重置 daily / weekly / monthly / custom 窗口，默认四项全选以兼容旧版全量重置行为。
+- 管理侧订阅表保留可选“兑换码”列，显示 `redeem_code_snapshot`；旧数据缺失时显示空值或 `-`，不能导致表格整页崩溃。
+- 订阅创建时应保存来源和历史证据快照：`source_type`、`source_ref_id`、`redeem_code_snapshot`、分组名称快照、平台快照、倍率快照、每日/每周/每月/自定义限额快照。旧数据字段为空时必须回退当前分组信息读取。
+- 过期或撤销订阅必须保留当时的分组名称、限额、窗口用量、开始时间和结束时间；后续管理员删除分组或调整分组限额，不得改写这些历史证据。
+- 计费链路必须多卡感知：请求前按聚合额度判断可用性；实际扣费在数据库事务内锁定该用户该分组活跃订阅卡，优先扣最早可用卡，已耗尽的旧卡跳过直到其窗口重置。
+- 负向订阅扣减/退款默认按最新活跃订阅卡优先撤销或扣减，用于抵消最近一次授予，避免破坏更早历史证据。
+- 迁移 `backend/migrations/149_subscription_stacking_snapshots.sql` 必须保持向后兼容：允许同用户同分组存在多张活跃订阅卡，新增字段全部可空，升级旧数据库时缺字段不能导致查询失败。
+- 本能力不得绕开 mandatory usage/billing、分组模型白名单、账号调度、并发控制、active usage、失败请求追踪或兼容网关链路；扣费优化只能发生在已有订阅计费路径内，不得引入成功热路径的额外同步 DB 回源。
 
 ## 7. 备份与双机部署保护
 
