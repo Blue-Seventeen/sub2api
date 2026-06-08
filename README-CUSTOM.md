@@ -724,6 +724,11 @@ pnpm run build
 - `/admin/settings` 邀请码注册提示、站点 Logo、自定义菜单
 - `/admin/usage` 与用户侧 `/usage`
 - 定时备份配置与本机启用开关行为
+- `/admin/subscriptions` 订阅专项：同用户同分组多张兑换/支付订阅卡在管理侧逐条展示，用户侧 `/subscriptions` 按分组聚合展示，不暴露兑换码或内部卡片明细。
+- `/admin/subscriptions` 选择性重置：仅勾选 daily 或 custom 等单一窗口时只重置对应窗口，成功后弹窗关闭、列表刷新，默认四项全选仍等价旧版全量重置。
+- `/admin/subscriptions` 调整订阅：可单独修改到期天数与 daily / weekly / monthly / custom 已用额度，允许设置超过限额的已用值。
+- `/admin/subscriptions` 撤销历史：管理员撤销后订阅进入“已撤销”分类，软删除历史仍可查，兑换码快照、分组快照、开始/结束时间和窗口用量保留。
+- 订阅扣费专项：多卡堆叠时优先扣最早可用卡，已耗尽旧卡跳过直到窗口重置；窗口重置后 cache miss 与 cache hit 路径都不得因旧用量误拒。
 
 ## 11. 后续新增定制功能时的记录要求
 

@@ -31,6 +31,19 @@ func (b *billingSubscriptionCacheStub) GetSubscriptionCache(ctx context.Context,
 	return b.data, nil
 }
 
+type billingCacheSubRepoStub struct {
+	UserSubscriptionRepository
+	calls int
+	subs  []UserSubscription
+}
+
+func (r *billingCacheSubRepoStub) ListActiveByUserIDAndGroupID(context.Context, int64, int64) ([]UserSubscription, error) {
+	r.calls++
+	out := make([]UserSubscription, len(r.subs))
+	copy(out, r.subs)
+	return out, nil
+}
+
 type billingRateLimitResetRepoStub struct {
 	APIKeyRepository
 	calls   atomic.Int64
@@ -365,6 +378,94 @@ func TestBillingCacheServiceFreshSubscriptionCheckAllowsCurrentCacheWhenSnapshot
 	)
 
 	require.NoError(t, err)
+}
+
+func TestBillingCacheServiceFreshSubscriptionCheckNormalizesStackedDBWindows(t *testing.T) {
+	now := time.Now()
+	limit := 100.0
+	windowStart := now.Add(-25 * time.Hour)
+	group := &Group{
+		ID:               2,
+		SubscriptionType: SubscriptionTypeSubscription,
+		DailyLimitUSD:    &limit,
+	}
+	repo := &billingCacheSubRepoStub{
+		subs: []UserSubscription{
+			{
+				ID:               10,
+				UserID:           1,
+				GroupID:          group.ID,
+				Group:            group,
+				Status:           SubscriptionStatusActive,
+				StartsAt:         now.Add(-48 * time.Hour),
+				ExpiresAt:        now.Add(48 * time.Hour),
+				DailyWindowStart: &windowStart,
+				DailyUsageUSD:    limit,
+			},
+		},
+	}
+	svc := NewBillingCacheService(nil, nil, repo, nil, nil, nil, &config.Config{}, nil)
+	t.Cleanup(svc.Stop)
+
+	err := svc.CheckBillingEligibilityFreshSubscription(
+		context.Background(),
+		&User{ID: 1},
+		&APIKey{},
+		group,
+		"",
+	)
+
+	require.NoError(t, err)
+}
+
+func TestBillingCacheServiceFreshSubscriptionCheckRefreshesExpiredStackedCacheWindow(t *testing.T) {
+	now := time.Now()
+	limit := 100.0
+	windowStart := now.Add(-25 * time.Hour)
+	stackedAvailable := 0.0
+	group := &Group{
+		ID:               2,
+		SubscriptionType: SubscriptionTypeSubscription,
+		DailyLimitUSD:    &limit,
+	}
+	cache := &billingSubscriptionCacheStub{
+		data: &SubscriptionCacheData{
+			Status:              SubscriptionStatusActive,
+			ExpiresAt:           now.Add(48 * time.Hour),
+			DailyUsage:          limit,
+			DailyLimitUSD:       &limit,
+			StackedAvailableUSD: &stackedAvailable,
+			DailyWindowStart:    &windowStart,
+		},
+	}
+	repo := &billingCacheSubRepoStub{
+		subs: []UserSubscription{
+			{
+				ID:               10,
+				UserID:           1,
+				GroupID:          group.ID,
+				Group:            group,
+				Status:           SubscriptionStatusActive,
+				StartsAt:         now.Add(-48 * time.Hour),
+				ExpiresAt:        now.Add(48 * time.Hour),
+				DailyWindowStart: &windowStart,
+				DailyUsageUSD:    limit,
+			},
+		},
+	}
+	svc := NewBillingCacheService(cache, nil, repo, nil, nil, nil, &config.Config{}, nil)
+	t.Cleanup(svc.Stop)
+
+	err := svc.CheckBillingEligibilityFreshSubscription(
+		context.Background(),
+		&User{ID: 1},
+		&APIKey{},
+		group,
+		"",
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, repo.calls)
 }
 
 func TestBillingCacheServiceQueueSubscriptionUsageDropsWhenWorkerUnavailable(t *testing.T) {

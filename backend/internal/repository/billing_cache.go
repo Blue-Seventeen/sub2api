@@ -57,12 +57,16 @@ const (
 	subFieldCustomUsage  = "custom_usage"
 	subFieldVersion      = "version"
 
-	subFieldDailyLimit       = "daily_limit"
-	subFieldWeeklyLimit      = "weekly_limit"
-	subFieldMonthlyLimit     = "monthly_limit"
-	subFieldCustomLimit      = "custom_limit"
-	subFieldCustomLimitHours = "custom_limit_hours"
-	subFieldStackedAvailable = "stacked_available"
+	subFieldDailyLimit         = "daily_limit"
+	subFieldWeeklyLimit        = "weekly_limit"
+	subFieldMonthlyLimit       = "monthly_limit"
+	subFieldCustomLimit        = "custom_limit"
+	subFieldCustomLimitHours   = "custom_limit_hours"
+	subFieldStackedAvailable   = "stacked_available"
+	subFieldDailyWindowStart   = "daily_window_start"
+	subFieldWeeklyWindowStart  = "weekly_window_start"
+	subFieldMonthlyWindowStart = "monthly_window_start"
+	subFieldCustomWindowStart  = "custom_window_start"
 )
 
 // billingRateLimitKey generates the Redis key for API key rate limit cache.
@@ -243,6 +247,10 @@ func (c *billingCache) parseSubscriptionCache(data map[string]string) (*service.
 		result.CustomLimitHours, _ = strconv.Atoi(customHoursStr)
 	}
 	result.StackedAvailableUSD = parseBillingFloatPtr(data[subFieldStackedAvailable])
+	result.DailyWindowStart = parseBillingTimePtr(data[subFieldDailyWindowStart])
+	result.WeeklyWindowStart = parseBillingTimePtr(data[subFieldWeeklyWindowStart])
+	result.MonthlyWindowStart = parseBillingTimePtr(data[subFieldMonthlyWindowStart])
+	result.CustomWindowStart = parseBillingTimePtr(data[subFieldCustomWindowStart])
 
 	return result, nil
 }
@@ -263,12 +271,16 @@ func (c *billingCache) SetSubscriptionCache(ctx context.Context, userID, groupID
 		subFieldCustomUsage:  data.CustomUsage,
 		subFieldVersion:      data.Version,
 
-		subFieldDailyLimit:       fmtBillingFloatPtr(data.DailyLimitUSD),
-		subFieldWeeklyLimit:      fmtBillingFloatPtr(data.WeeklyLimitUSD),
-		subFieldMonthlyLimit:     fmtBillingFloatPtr(data.MonthlyLimitUSD),
-		subFieldCustomLimit:      fmtBillingFloatPtr(data.CustomLimitUSD),
-		subFieldCustomLimitHours: data.CustomLimitHours,
-		subFieldStackedAvailable: fmtBillingFloatPtr(data.StackedAvailableUSD),
+		subFieldDailyLimit:         fmtBillingFloatPtr(data.DailyLimitUSD),
+		subFieldWeeklyLimit:        fmtBillingFloatPtr(data.WeeklyLimitUSD),
+		subFieldMonthlyLimit:       fmtBillingFloatPtr(data.MonthlyLimitUSD),
+		subFieldCustomLimit:        fmtBillingFloatPtr(data.CustomLimitUSD),
+		subFieldCustomLimitHours:   data.CustomLimitHours,
+		subFieldStackedAvailable:   fmtBillingFloatPtr(data.StackedAvailableUSD),
+		subFieldDailyWindowStart:   fmtBillingTimePtr(data.DailyWindowStart),
+		subFieldWeeklyWindowStart:  fmtBillingTimePtr(data.WeeklyWindowStart),
+		subFieldMonthlyWindowStart: fmtBillingTimePtr(data.MonthlyWindowStart),
+		subFieldCustomWindowStart:  fmtBillingTimePtr(data.CustomWindowStart),
 	}
 
 	pipe := c.rdb.Pipeline()
@@ -294,6 +306,25 @@ func fmtBillingFloatPtr(p *float64) string {
 		return ""
 	}
 	return strconv.FormatFloat(*p, 'f', -1, 64)
+}
+
+func parseBillingTimePtr(s string) *time.Time {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	unix, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || unix <= 0 {
+		return nil
+	}
+	t := time.Unix(unix, 0)
+	return &t
+}
+
+func fmtBillingTimePtr(p *time.Time) string {
+	if p == nil || p.IsZero() {
+		return ""
+	}
+	return strconv.FormatInt(p.Unix(), 10)
 }
 
 func (c *billingCache) UpdateSubscriptionUsage(ctx context.Context, userID, groupID int64, cost float64) error {

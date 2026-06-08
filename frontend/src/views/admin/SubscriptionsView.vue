@@ -1523,7 +1523,8 @@ const confirmResetQuota = async () => {
       custom: resetQuotaForm.custom
     })
     appStore.showSuccess(t('admin.subscriptions.quotaResetSuccess'))
-    closeResetQuotaDialog()
+    showResetQuotaConfirm.value = false
+    resettingSubscription.value = null
     await loadSubscriptions()
   } catch (error: any) {
     appStore.showError(error.response?.data?.detail || t('admin.subscriptions.failedToResetQuota'))

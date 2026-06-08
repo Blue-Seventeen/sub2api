@@ -56,6 +56,10 @@ type subscriptionCacheData struct {
 	CustomLimitUSD      *float64
 	CustomLimitHours    int
 	StackedAvailableUSD *float64
+	DailyWindowStart    *time.Time
+	WeeklyWindowStart   *time.Time
+	MonthlyWindowStart  *time.Time
+	CustomWindowStart   *time.Time
 }
 
 // 缓存写入任务类型
@@ -490,7 +494,11 @@ func (s *BillingCacheService) GetSubscriptionStatus(ctx context.Context, userID,
 	// 尝试从缓存读取
 	cacheData, err := s.cache.GetSubscriptionCache(ctx, userID, groupID)
 	if err == nil && cacheData != nil {
-		return s.convertFromPortsData(cacheData), nil
+		data := s.convertFromPortsData(cacheData)
+		if !subscriptionCacheNeedsWindowRefresh(data, time.Now()) {
+			return data, nil
+		}
+		_ = s.cache.InvalidateSubscriptionCache(ctx, userID, groupID)
 	}
 
 	// 缓存未命中，从数据库读取
@@ -525,6 +533,10 @@ func (s *BillingCacheService) convertFromPortsData(data *SubscriptionCacheData) 
 		CustomLimitUSD:      data.CustomLimitUSD,
 		CustomLimitHours:    data.CustomLimitHours,
 		StackedAvailableUSD: data.StackedAvailableUSD,
+		DailyWindowStart:    cloneTimePtr(data.DailyWindowStart),
+		WeeklyWindowStart:   cloneTimePtr(data.WeeklyWindowStart),
+		MonthlyWindowStart:  cloneTimePtr(data.MonthlyWindowStart),
+		CustomWindowStart:   cloneTimePtr(data.CustomWindowStart),
 	}
 }
 
@@ -543,6 +555,10 @@ func (s *BillingCacheService) convertToPortsData(data *subscriptionCacheData) *S
 		CustomLimitUSD:      data.CustomLimitUSD,
 		CustomLimitHours:    data.CustomLimitHours,
 		StackedAvailableUSD: data.StackedAvailableUSD,
+		DailyWindowStart:    cloneTimePtr(data.DailyWindowStart),
+		WeeklyWindowStart:   cloneTimePtr(data.WeeklyWindowStart),
+		MonthlyWindowStart:  cloneTimePtr(data.MonthlyWindowStart),
+		CustomWindowStart:   cloneTimePtr(data.CustomWindowStart),
 	}
 }
 
@@ -552,7 +568,8 @@ func (s *BillingCacheService) getSubscriptionFromDB(ctx context.Context, userID,
 	if err != nil {
 		return nil, fmt.Errorf("get subscription: %w", err)
 	}
-	sub := aggregateActiveSubscriptionsForDisplay(subs)
+	normalizedSubs := normalizeSubscriptionsForCache(subs)
+	sub := aggregateActiveSubscriptionsInternal(normalizedSubs, false)
 	if sub == nil {
 		return nil, fmt.Errorf("get subscription: %w", ErrSubscriptionNotFound)
 	}
@@ -570,8 +587,53 @@ func (s *BillingCacheService) getSubscriptionFromDB(ctx context.Context, userID,
 		MonthlyLimitUSD:     sub.EffectiveMonthlyLimitUSD(sub.Group),
 		CustomLimitUSD:      sub.EffectiveCustomLimitUSD(sub.Group),
 		CustomLimitHours:    sub.EffectiveCustomLimitHours(sub.Group),
-		StackedAvailableUSD: aggregateStackedAvailable(subs),
+		StackedAvailableUSD: aggregateStackedAvailable(normalizedSubs),
+		DailyWindowStart:    cloneTimePtr(sub.DailyWindowStart),
+		WeeklyWindowStart:   cloneTimePtr(sub.WeeklyWindowStart),
+		MonthlyWindowStart:  cloneTimePtr(sub.MonthlyWindowStart),
+		CustomWindowStart:   cloneTimePtr(sub.CustomWindowStart),
 	}, nil
+}
+
+func subscriptionCacheNeedsWindowRefresh(data *subscriptionCacheData, now time.Time) bool {
+	if data == nil {
+		return false
+	}
+	if data.DailyWindowStart != nil && data.ExpiresAt.After(data.DailyWindowStart.Add(subscriptionDailyWindow)) && subscriptionWindowExpired(data.DailyWindowStart, subscriptionDailyWindow, now) {
+		return true
+	}
+	if subscriptionWindowExpired(data.WeeklyWindowStart, subscriptionWeeklyWindow, now) {
+		return true
+	}
+	if subscriptionWindowExpired(data.MonthlyWindowStart, subscriptionMonthlyWindow, now) {
+		return true
+	}
+	if data.CustomLimitHours > 0 {
+		return subscriptionWindowExpired(data.CustomWindowStart, customSubscriptionWindowHours(data.CustomLimitHours), now)
+	}
+	return false
+}
+
+func cloneTimePtr(t *time.Time) *time.Time {
+	if t == nil {
+		return nil
+	}
+	v := *t
+	return &v
+}
+
+func normalizeSubscriptionsForCache(subs []UserSubscription) []UserSubscription {
+	if len(subs) == 0 {
+		return nil
+	}
+	now := time.Now()
+	normalized := make([]UserSubscription, 0, len(subs))
+	for i := range subs {
+		sub := subs[i]
+		normalizeSubscriptionWindowsAt(&sub, now)
+		normalized = append(normalized, sub)
+	}
+	return normalized
 }
 
 // setSubscriptionCache 设置订阅缓存

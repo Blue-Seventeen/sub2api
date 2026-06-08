@@ -20,4 +20,8 @@ type SubscriptionCacheData struct {
 	CustomLimitUSD      *float64
 	CustomLimitHours    int
 	StackedAvailableUSD *float64
+	DailyWindowStart    *time.Time
+	WeeklyWindowStart   *time.Time
+	MonthlyWindowStart  *time.Time
+	CustomWindowStart   *time.Time
 }
