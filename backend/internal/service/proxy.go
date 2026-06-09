@@ -11,6 +11,10 @@ import (
 const (
 	ProxySourceManual             = "manual"
 	ProxySourceMihomoSubscription = "mihomo_subscription"
+
+	FallbackModeNone   = "none"
+	FallbackModeProxy  = "proxy"
+	FallbackModeDirect = "direct"
 )
 
 type Proxy struct {
@@ -27,6 +31,10 @@ type Proxy struct {
 	RuntimeStatus  *ManagedProxyRuntimeStatus
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	ExpiresAt      *time.Time
+	FallbackMode   string
+	BackupProxyID  *int64
+	ExpiryWarnDays int
 }
 
 func (p *Proxy) IsActive() bool {
@@ -35,6 +43,11 @@ func (p *Proxy) IsActive() bool {
 
 func (p *Proxy) IsManagedMihomoSubscription() bool {
 	return p != nil && p.SourceType == ProxySourceMihomoSubscription && p.SubscriptionID != nil && *p.SubscriptionID > 0
+}
+
+// IsExpired reports whether the proxy is expired based on expires_at, independent of status.
+func (p *Proxy) IsExpired(now time.Time) bool {
+	return p.ExpiresAt != nil && !p.ExpiresAt.After(now)
 }
 
 func (p *Proxy) URL() string {

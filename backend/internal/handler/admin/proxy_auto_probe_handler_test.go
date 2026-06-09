@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -111,6 +112,18 @@ func (s *proxyAutoProbeHandlerProxyRepoStub) CountAccountsByProxyID(ctx context.
 }
 func (s *proxyAutoProbeHandlerProxyRepoStub) ListAccountSummariesByProxyID(ctx context.Context, proxyID int64) ([]service.ProxyAccountSummary, error) {
 	return []service.ProxyAccountSummary{}, nil
+}
+func (s *proxyAutoProbeHandlerProxyRepoStub) SweepExpiredProxies(ctx context.Context, now time.Time) (int64, error) {
+	return 0, nil
+}
+func (s *proxyAutoProbeHandlerProxyRepoStub) ListAllForFallback(ctx context.Context) ([]service.Proxy, error) {
+	return []service.Proxy{}, nil
+}
+func (s *proxyAutoProbeHandlerProxyRepoStub) CountExpired(ctx context.Context) (int64, error) {
+	return 0, nil
+}
+func (s *proxyAutoProbeHandlerProxyRepoStub) CountExpiringSoon(ctx context.Context, now time.Time) (int64, error) {
+	return 0, nil
 }
 
 func TestProxyHandlerAutoProbeConfigEndpoints(t *testing.T) {

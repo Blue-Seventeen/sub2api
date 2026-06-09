@@ -37,6 +37,7 @@ type APIKeyAuthUserSnapshot struct {
 	Concurrency           int     `json:"concurrency"`
 	UnifiedRateEnabled    bool    `json:"unified_rate_enabled"`
 	UnifiedRateMultiplier float64 `json:"unified_rate_multiplier"`
+	AllowedGroups         []int64 `json:"allowed_groups,omitempty"`
 
 	// Balance notification fields (required for CheckBalanceAfterDeduction)
 	Email                      string             `json:"email"`
@@ -60,6 +61,7 @@ type APIKeyAuthGroupSnapshot struct {
 	ID                              int64    `json:"id"`
 	Name                            string   `json:"name"`
 	Platform                        string   `json:"platform"`
+	IsExclusive                     bool     `json:"is_exclusive"`
 	Status                          string   `json:"status"`
 	SubscriptionType                string   `json:"subscription_type"`
 	RateMultiplier                  float64  `json:"rate_multiplier"`

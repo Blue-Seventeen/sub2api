@@ -665,6 +665,16 @@ export interface BatchOperationResult {
 }
 
 /**
+ * Revert account proxy to original before fallback
+ * @param id - Account ID
+ * @returns Success confirmation
+ */
+export async function revertProxyFallback(id: number): Promise<{ message: string }> {
+  const { data } = await apiClient.post<{ message: string }>(`/admin/accounts/${id}/revert-proxy-fallback`)
+  return data
+}
+
+/**
  * Batch clear account errors
  * @param accountIds - Array of account IDs
  * @returns Batch operation result
@@ -796,7 +806,8 @@ export const accountsAPI = {
   manualRunAutoOps,
   getAutoOpsLogs,
   getAutoOpsSamples,
-  getAutoOpsModelOptions
+  getAutoOpsModelOptions,
+  revertProxyFallback
 }
 
 export default accountsAPI

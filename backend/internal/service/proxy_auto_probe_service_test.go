@@ -126,6 +126,18 @@ func (s *proxyAutoProbeRepoStub) CountAccountsByProxyID(ctx context.Context, pro
 func (s *proxyAutoProbeRepoStub) ListAccountSummariesByProxyID(ctx context.Context, proxyID int64) ([]ProxyAccountSummary, error) {
 	return nil, nil
 }
+func (s *proxyAutoProbeRepoStub) SweepExpiredProxies(ctx context.Context, now time.Time) (int64, error) {
+	return 0, nil
+}
+func (s *proxyAutoProbeRepoStub) ListAllForFallback(ctx context.Context) ([]Proxy, error) {
+	return s.proxies, nil
+}
+func (s *proxyAutoProbeRepoStub) CountExpired(ctx context.Context) (int64, error) {
+	return 0, nil
+}
+func (s *proxyAutoProbeRepoStub) CountExpiringSoon(ctx context.Context, now time.Time) (int64, error) {
+	return 0, nil
+}
 
 type proxyAutoProbeLatencyCacheStub struct {
 	items map[int64]*ProxyLatencyInfo
