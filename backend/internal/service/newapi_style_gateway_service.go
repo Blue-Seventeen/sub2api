@@ -65,6 +65,7 @@ type NewAPIStyleGatewayService struct {
 	httpUpstream        HTTPUpstream
 	cfg                 *config.Config
 	tlsFPProfileService *TLSFingerprintProfileService
+	runtimeBlocker      AccountRuntimeBlocker
 }
 
 func NewNewAPIStyleGatewayService(
@@ -72,12 +73,14 @@ func NewNewAPIStyleGatewayService(
 	httpUpstream HTTPUpstream,
 	cfg *config.Config,
 	tlsFingerprintProfileService *TLSFingerprintProfileService,
+	runtimeBlocker AccountRuntimeBlocker,
 ) *NewAPIStyleGatewayService {
 	return &NewAPIStyleGatewayService{
 		gatewayService:      gatewayService,
 		httpUpstream:        httpUpstream,
 		cfg:                 cfg,
 		tlsFPProfileService: tlsFingerprintProfileService,
+		runtimeBlocker:      runtimeBlocker,
 	}
 }
 
@@ -218,6 +221,9 @@ func (s *NewAPIStyleGatewayService) Forward(
 	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsProfile(account))
 	if err != nil {
 		ClearAutoSelectedProxyStickyOnTransportError(ctx, account, err)
+		if account.Platform == PlatformOpenAI && s.gatewayService != nil {
+			return nil, upstreamEndpoint, s.gatewayService.handleOpenAIUpstreamTransportError(ctx, c, account, err, false, safeUpstreamURL(upstreamReq.URL.String()), s.runtimeBlocker)
+		}
 		safeErr := sanitizeUpstreamErrorMessage(err.Error())
 		setOpsUpstreamError(c, 0, safeErr, "")
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{

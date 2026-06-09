@@ -106,13 +106,45 @@ func classifyOpenAITransportError(err error) openAITransportErrorClass {
 //
 // passthrough tags the Ops error event for the OpenAI passthrough forward path.
 func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Context, c *gin.Context, account *Account, err error, passthrough bool) error {
+	var accountRepo AccountRepository
+	var runtimeBlocker AccountRuntimeBlocker
+	if s != nil {
+		accountRepo = s.accountRepo
+		runtimeBlocker = s
+	}
+	return handleOpenAITransportError(ctx, c, account, err, passthrough, "", accountRepo, runtimeBlocker)
+}
+
+// handleOpenAIUpstreamTransportError mirrors OpenAIGatewayService's transport
+// failover handling for gateway-adjacent services that share the same account
+// repository and scheduler runtime state.
+func (s *GatewayService) handleOpenAIUpstreamTransportError(ctx context.Context, c *gin.Context, account *Account, err error, passthrough bool, upstreamURL string, runtimeBlocker AccountRuntimeBlocker) error {
+	var accountRepo AccountRepository
+	if s != nil {
+		accountRepo = s.accountRepo
+	}
+	return handleOpenAITransportError(ctx, c, account, err, passthrough, upstreamURL, accountRepo, runtimeBlocker)
+}
+
+func handleOpenAITransportError(ctx context.Context, c *gin.Context, account *Account, err error, passthrough bool, upstreamURL string, accountRepo AccountRepository, runtimeBlocker AccountRuntimeBlocker) error {
+	if err == nil {
+		err = errors.New("upstream transport error")
+	}
 	safeErr := sanitizeUpstreamErrorMessage(err.Error())
+	var accountID int64
+	var platform, accountName string
+	if account != nil {
+		accountID = account.ID
+		platform = account.Platform
+		accountName = account.Name
+	}
 	setOpsUpstreamError(c, 0, safeErr, "")
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-		Platform:           account.Platform,
-		AccountID:          account.ID,
-		AccountName:        account.Name,
+		Platform:           platform,
+		AccountID:          accountID,
+		AccountName:        accountName,
 		UpstreamStatusCode: 0,
+		UpstreamURL:        upstreamURL,
 		Passthrough:        passthrough,
 		Kind:               "request_error",
 		Message:            safeErr,
@@ -125,7 +157,7 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 	}
 
 	if classifyOpenAITransportError(err).Persistent {
-		s.tempUnscheduleOpenAITransportError(ctx, account, safeErr)
+		tempUnscheduleOpenAITransportError(ctx, account, safeErr, accountRepo, runtimeBlocker)
 	}
 
 	return &UpstreamFailoverError{
@@ -146,7 +178,14 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 //   - "openai.account_temp_unscheduled_transport_failed" — DB write attempted
 //     but returned an error.
 func (s *OpenAIGatewayService) tempUnscheduleOpenAITransportError(ctx context.Context, account *Account, safeErr string) {
-	if s == nil || account == nil {
+	if s == nil {
+		return
+	}
+	tempUnscheduleOpenAITransportError(ctx, account, safeErr, s.accountRepo, s)
+}
+
+func tempUnscheduleOpenAITransportError(ctx context.Context, account *Account, safeErr string, accountRepo AccountRepository, runtimeBlocker AccountRuntimeBlocker) {
+	if account == nil {
 		return
 	}
 	until := time.Now().Add(openAITransportErrorTempUnschedDuration)
@@ -154,9 +193,11 @@ func (s *OpenAIGatewayService) tempUnscheduleOpenAITransportError(ctx context.Co
 
 	// Immediate in-memory block (honoured by the scheduler at selection time),
 	// effective even if the DB write below fails or the account cache lags.
-	s.BlockAccountScheduling(account, until, "transport_error")
+	if runtimeBlocker != nil {
+		runtimeBlocker.BlockAccountScheduling(account, until, "transport_error")
+	}
 
-	if s.accountRepo == nil {
+	if accountRepo == nil {
 		// No DB configured — block is in-memory only; emit a distinct event so
 		// operators are not misled into thinking the block survived a restart.
 		logger.L().With(zap.String("component", "service.openai_gateway")).Warn(
@@ -172,7 +213,7 @@ func (s *OpenAIGatewayService) tempUnscheduleOpenAITransportError(ctx context.Co
 
 	bgCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), openAIAccountStateUpdateTimeout)
 	defer cancel()
-	if err := s.accountRepo.SetTempUnschedulable(bgCtx, account.ID, until, reason); err != nil {
+	if err := accountRepo.SetTempUnschedulable(bgCtx, account.ID, until, reason); err != nil {
 		logger.L().With(zap.String("component", "service.openai_gateway")).Warn(
 			"openai.account_temp_unscheduled_transport_failed",
 			zap.Int64("account_id", account.ID),

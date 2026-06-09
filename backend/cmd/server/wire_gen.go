@@ -251,7 +251,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	promotionService := service.NewPromotionService(promotionRepository, userRepository, configConfig, settingService, billingCacheService)
 	promotionHandler := admin.NewPromotionHandler(promotionService)
 	adminHandlers := handler.ProvideAdminHandlers(dashboardHandler, adminUserHandler, groupHandler, accountHandler, adminAnnouncementHandler, dataManagementHandler, backupHandler, oAuthHandler, openAIOAuthHandler, geminiOAuthHandler, antigravityOAuthHandler, proxyHandler, adminRedeemHandler, promoHandler, settingHandler, opsHandler, systemHandler, adminSubscriptionHandler, adminUsageHandler, userAttributeHandler, errorPassthroughHandler, tlsFingerprintProfileHandler, adminAPIKeyHandler, scheduledTestHandler, channelHandler, channelMonitorHandler, channelMonitorRequestTemplateHandler, contentModerationHandler, paymentHandler, promotionHandler)
-	newAPIStyleGatewayService := service.NewNewAPIStyleGatewayService(gatewayService, httpUpstream, configConfig, tlsFingerprintProfileService)
+	newAPIStyleGatewayService := service.NewNewAPIStyleGatewayService(gatewayService, httpUpstream, configConfig, tlsFingerprintProfileService, openAIGatewayService)
 	usageRecordWorkerPool := service.NewUsageRecordWorkerPool(configConfig)
 	proxyStatsWorkerPool := service.NewProxyStatsWorkerPool()
 	userMsgQueueCache := repository.NewUserMsgQueueCache(redisClient)
