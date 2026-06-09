@@ -107,6 +107,100 @@ func TestPaymentSubscriptionFulfillmentStacksOrdersAndKeepsOrderIdempotency(t *t
 	require.True(t, sourceRefs[strconv.FormatInt(order2.ID, 10)])
 }
 
+func TestPaymentSubscriptionFulfillmentRetriesExistingSubscriptionBeforeGroupValidation(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+	user, err := client.User.Create().
+		SetEmail("subscription-payment-retry@example.com").
+		SetPasswordHash("hash").
+		SetUsername("subscription-payment-retry").
+		Save(ctx)
+	require.NoError(t, err)
+	groupID := int64(30)
+	groupRepo := &subscriptionGroupRepoStub{
+		group: &Group{
+			ID:               groupID,
+			Name:             "inactive-after-assignment",
+			Status:           "disabled",
+			SubscriptionType: SubscriptionTypeSubscription,
+			Platform:         PlatformAnthropic,
+			RateMultiplier:   1,
+		},
+	}
+	subRepo := newSubscriptionUserSubRepoStub()
+	subSvc := NewSubscriptionService(groupRepo, subRepo, nil, nil, nil)
+	svc := &PaymentService{
+		entClient:       client,
+		groupRepo:       groupRepo,
+		subscriptionSvc: subSvc,
+	}
+
+	order := createPaidSubscriptionOrderForTest(t, ctx, client, user.ID, user.Email, user.Username, groupID, "SUB-PAY-RETRY-EXISTING")
+	sourceType := "payment_order"
+	sourceRef := strconv.FormatInt(order.ID, 10)
+	subRepo.seed(&UserSubscription{
+		UserID:      user.ID,
+		GroupID:     groupID,
+		StartsAt:    time.Now().Add(-time.Minute),
+		ExpiresAt:   time.Now().Add(24 * time.Hour),
+		Status:      SubscriptionStatusActive,
+		Notes:       paymentSubscriptionOrderNote(order.ID),
+		SourceType:  &sourceType,
+		SourceRefID: &sourceRef,
+	})
+
+	require.NoError(t, svc.ExecuteSubscriptionFulfillment(ctx, order.ID))
+	require.Equal(t, 0, subRepo.createCalls, "retry must not create a duplicate subscription when source already exists")
+	refreshed, err := client.PaymentOrder.Get(ctx, order.ID)
+	require.NoError(t, err)
+	require.Equal(t, OrderStatusCompleted, refreshed.Status)
+}
+
+func TestPaymentSubscriptionFulfillmentRetriesExistingNoteBeforeGroupValidation(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+	user, err := client.User.Create().
+		SetEmail("subscription-payment-retry-note@example.com").
+		SetPasswordHash("hash").
+		SetUsername("subscription-payment-retry-note").
+		Save(ctx)
+	require.NoError(t, err)
+	groupID := int64(31)
+	groupRepo := &subscriptionGroupRepoStub{
+		group: &Group{
+			ID:               groupID,
+			Name:             "inactive-after-legacy-note",
+			Status:           "disabled",
+			SubscriptionType: SubscriptionTypeSubscription,
+			Platform:         PlatformAnthropic,
+			RateMultiplier:   1,
+		},
+	}
+	subRepo := newSubscriptionUserSubRepoStub()
+	subSvc := NewSubscriptionService(groupRepo, subRepo, nil, nil, nil)
+	svc := &PaymentService{
+		entClient:       client,
+		groupRepo:       groupRepo,
+		subscriptionSvc: subSvc,
+	}
+
+	order := createPaidSubscriptionOrderForTest(t, ctx, client, user.ID, user.Email, user.Username, groupID, "SUB-PAY-RETRY-NOTE")
+	subRepo.seed(&UserSubscription{
+		UserID:    user.ID,
+		GroupID:   groupID,
+		StartsAt:  time.Now().Add(-time.Minute),
+		ExpiresAt: time.Now().Add(24 * time.Hour),
+		Status:    SubscriptionStatusActive,
+		Notes:     paymentSubscriptionOrderNote(order.ID),
+	})
+
+	require.NoError(t, svc.ExecuteSubscriptionFulfillment(ctx, order.ID))
+	require.Equal(t, 0, subRepo.createCalls, "legacy notes-only retry must not create a duplicate subscription")
+	refreshed, err := client.PaymentOrder.Get(ctx, order.ID)
+	require.NoError(t, err)
+	require.Equal(t, OrderStatusCompleted, refreshed.Status)
+}
+
 func createPaidSubscriptionOrderForTest(t *testing.T, ctx context.Context, client *dbent.Client, userID int64, email, username string, groupID int64, code string) *dbent.PaymentOrder {
 	t.Helper()
 	order, err := client.PaymentOrder.Create().

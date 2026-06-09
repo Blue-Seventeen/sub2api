@@ -418,10 +418,6 @@ func (s *PaymentService) ExecuteSubscriptionFulfillment(ctx context.Context, oid
 func (s *PaymentService) doSub(ctx context.Context, o *dbent.PaymentOrder) error {
 	gid := *o.SubscriptionGroupID
 	days := *o.SubscriptionDays
-	g, err := s.groupRepo.GetByID(ctx, gid)
-	if err != nil || g.Status != payment.EntityStatusActive {
-		return fmt.Errorf("group %d no longer exists or inactive", gid)
-	}
 	// Idempotency: check audit log to see if subscription was already assigned.
 	// Prevents double-extension on retry after markCompleted fails.
 	if s.hasAuditLog(ctx, o.ID, "SUBSCRIPTION_SUCCESS") {
@@ -432,6 +428,10 @@ func (s *PaymentService) doSub(ctx context.Context, o *dbent.PaymentOrder) error
 	if s.subscriptionOrderAlreadyApplied(ctx, o.UserID, gid, orderNote) {
 		slog.Info("subscription order note already applied, skipping duplicate extension", "orderID", o.ID, "groupID", gid)
 		return s.markCompleted(ctx, o, "SUBSCRIPTION_SUCCESS")
+	}
+	g, err := s.groupRepo.GetByID(ctx, gid)
+	if err != nil || g.Status != payment.EntityStatusActive {
+		return fmt.Errorf("group %d no longer exists or inactive", gid)
 	}
 	_, _, err = s.subscriptionSvc.AssignStackedSubscription(ctx, &AssignSubscriptionInput{
 		UserID:       o.UserID,
