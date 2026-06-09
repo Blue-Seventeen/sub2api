@@ -79,6 +79,10 @@ type userSubscriptionAdminMutationRepository interface {
 	HardDelete(ctx context.Context, id int64) error
 }
 
+type userSubscriptionGroupSnapshotRepository interface {
+	UpdateGroupSnapshot(ctx context.Context, sub *UserSubscription) error
+}
+
 // NewSubscriptionService 创建订阅服务
 func NewSubscriptionService(groupRepo GroupRepository, userSubRepo UserSubscriptionRepository, billingCacheService *BillingCacheService, entClient *dbent.Client, cfg *config.Config) *SubscriptionService {
 	svc := &SubscriptionService{
@@ -294,7 +298,7 @@ func (s *SubscriptionService) assignOrExtendSubscriptionLocked(ctx context.Conte
 	if err != nil {
 		return nil, false, fmt.Errorf("group not found: %w", err)
 	}
-	if !group.IsSubscriptionType() {
+	if !group.IsActive() || !group.IsSubscriptionType() {
 		return nil, false, ErrGroupNotSubscriptionType
 	}
 
@@ -448,7 +452,7 @@ func (s *SubscriptionService) AssignStackedSubscription(ctx context.Context, inp
 	if err != nil {
 		return nil, false, fmt.Errorf("group not found: %w", err)
 	}
-	if !group.IsSubscriptionType() {
+	if !group.IsActive() || !group.IsSubscriptionType() {
 		return nil, false, ErrGroupNotSubscriptionType
 	}
 	if strings.TrimSpace(input.SourceType) != "" && strings.TrimSpace(input.SourceRefID) != "" {
@@ -648,24 +652,42 @@ func snapshotSubscriptionGroup(sub *UserSubscription, group *Group) {
 	sub.GroupPlatformSnapshot = &platform
 	rate := group.RateMultiplier
 	sub.GroupRateMultiplierSnapshot = &rate
-	if group.DailyLimitUSD != nil {
-		v := *group.DailyLimitUSD
-		sub.DailyLimitUSDSnapshot = &v
-	}
-	if group.WeeklyLimitUSD != nil {
-		v := *group.WeeklyLimitUSD
-		sub.WeeklyLimitUSDSnapshot = &v
-	}
-	if group.MonthlyLimitUSD != nil {
-		v := *group.MonthlyLimitUSD
-		sub.MonthlyLimitUSDSnapshot = &v
-	}
+	sub.DailyLimitUSDSnapshot = snapshotSubscriptionLimit(group.DailyLimitUSD)
+	sub.WeeklyLimitUSDSnapshot = snapshotSubscriptionLimit(group.WeeklyLimitUSD)
+	sub.MonthlyLimitUSDSnapshot = snapshotSubscriptionLimit(group.MonthlyLimitUSD)
 	hours := group.CustomLimitHours
 	sub.CustomLimitHoursSnapshot = &hours
-	if group.CustomLimitUSD != nil {
-		v := *group.CustomLimitUSD
-		sub.CustomLimitUSDSnapshot = &v
+	sub.CustomLimitUSDSnapshot = snapshotSubscriptionLimit(group.CustomLimitUSD)
+}
+
+func snapshotSubscriptionLimit(limit *float64) *float64 {
+	if limit == nil {
+		v := 0.0
+		return &v
 	}
+	v := *limit
+	return &v
+}
+
+func (s *SubscriptionService) refreshSubscriptionGroupSnapshot(ctx context.Context, sub *UserSubscription) error {
+	if sub == nil {
+		return nil
+	}
+	group := sub.Group
+	if group == nil && s.groupRepo != nil {
+		loaded, err := s.groupRepo.GetByID(ctx, sub.GroupID)
+		if err == nil {
+			group = loaded
+		}
+	}
+	if group == nil {
+		return nil
+	}
+	snapshotSubscriptionGroup(sub, group)
+	if repo, ok := s.userSubRepo.(userSubscriptionGroupSnapshotRepository); ok {
+		return repo.UpdateGroupSnapshot(ctx, sub)
+	}
+	return s.userSubRepo.Update(ctx, sub)
 }
 
 type BulkAssignSubscriptionInput struct {
@@ -738,7 +760,7 @@ func (s *SubscriptionService) assignSubscriptionWithReuseLocked(ctx context.Cont
 	if err != nil {
 		return nil, false, fmt.Errorf("group not found: %w", err)
 	}
-	if !group.IsSubscriptionType() {
+	if !group.IsActive() || !group.IsSubscriptionType() {
 		return nil, false, ErrGroupNotSubscriptionType
 	}
 
@@ -823,6 +845,9 @@ func (s *SubscriptionService) RevokeSubscription(ctx context.Context, subscripti
 		if err != nil {
 			return err
 		}
+		if err := s.refreshSubscriptionGroupSnapshot(txCtx, sub); err != nil {
+			return err
+		}
 		if err := s.userSubRepo.UpdateStatus(txCtx, subscriptionID, SubscriptionStatusRevoked); err != nil {
 			return err
 		}
@@ -862,6 +887,7 @@ func (s *SubscriptionService) ExtendSubscription(ctx context.Context, subscripti
 
 	now := time.Now()
 	isExpired := !sub.ExpiresAt.After(now)
+	wasHistorical := sub.UsesHistoricalGroupSnapshotAt(now)
 
 	// 如果订阅已过期，不允许负向调整
 	if isExpired && days < 0 {
@@ -885,6 +911,11 @@ func (s *SubscriptionService) ExtendSubscription(ctx context.Context, subscripti
 	// 检查新的过期时间必须大于当前时间
 	if !newExpiresAt.After(now) {
 		return nil, ErrAdjustWouldExpire
+	}
+	if wasHistorical {
+		if err := s.ensureSubscriptionCanReactivate(ctx, sub); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := s.userSubRepo.ExtendExpiry(ctx, subscriptionID, newExpiresAt); err != nil {
@@ -929,14 +960,8 @@ func (s *SubscriptionService) RestoreSubscription(ctx context.Context, subscript
 		if sub.DeletedAt == nil && sub.Status != SubscriptionStatusRevoked {
 			return ErrSubscriptionRestoreInvalid
 		}
-		if sub.ExpiresAt.After(time.Now()) {
-			if s.groupRepo == nil {
-				return ErrSubscriptionRestoreGroupInvalid
-			}
-			group, groupErr := s.groupRepo.GetByID(txCtx, sub.GroupID)
-			if groupErr != nil || group == nil || group.Status != StatusActive || !group.IsSubscriptionType() {
-				return ErrSubscriptionRestoreGroupInvalid
-			}
+		if err := s.ensureSubscriptionCanReactivate(txCtx, sub); err != nil {
+			return err
 		}
 		if err := repo.Restore(txCtx, subscriptionID); err != nil {
 			return err
@@ -1004,10 +1029,17 @@ func (s *SubscriptionService) AdjustSubscription(ctx context.Context, subscripti
 	if err != nil {
 		return nil, ErrSubscriptionNotFound
 	}
+	adjustNow := time.Now()
+	wasHistorical := sub.UsesHistoricalGroupSnapshotAt(adjustNow)
+	if wasHistorical {
+		if err := s.ensureSubscriptionCanReactivate(ctx, sub); err != nil {
+			return nil, err
+		}
+	}
 	fields := UserSubscriptionMutableFields{}
 	if input.Days != nil {
 		days := *input.Days
-		now := time.Now()
+		now := adjustNow
 		isExpired := !sub.ExpiresAt.After(now)
 		if isExpired && days < 0 {
 			return nil, infraerrors.BadRequest("CANNOT_SHORTEN_EXPIRED", "cannot shorten an expired subscription")
@@ -1055,6 +1087,20 @@ func (s *SubscriptionService) AdjustSubscription(ctx context.Context, subscripti
 	return s.userSubRepo.GetByID(ctx, subscriptionID)
 }
 
+func (s *SubscriptionService) ensureSubscriptionCanReactivate(ctx context.Context, sub *UserSubscription) error {
+	if sub == nil {
+		return ErrSubscriptionNotFound
+	}
+	if s.groupRepo == nil {
+		return ErrSubscriptionRestoreGroupInvalid
+	}
+	group, err := s.groupRepo.GetByID(ctx, sub.GroupID)
+	if err != nil || group == nil || group.Status != StatusActive || !group.IsSubscriptionType() {
+		return ErrSubscriptionRestoreGroupInvalid
+	}
+	return nil
+}
+
 func (s *SubscriptionService) DeductSubscriptionDaysNewest(ctx context.Context, userID, groupID int64, days int, note string) error {
 	_, err := s.DeductSubscriptionDaysNewestWithSnapshots(ctx, userID, groupID, days, note)
 	return err
@@ -1079,6 +1125,7 @@ func (s *SubscriptionService) DeductSubscriptionDaysNewestWithSnapshots(ctx cont
 		for i := len(subs) - 1; i >= 0 && remainingToDeduct > 0; i-- {
 			sub := subs[i]
 			updated := sub
+			snapshot := cloneUserSubscription(sub)
 			remainingDays := int(sub.ExpiresAt.Sub(now).Hours()/24) + 1
 			if remainingDays < 1 {
 				remainingDays = 1
@@ -1089,7 +1136,12 @@ func (s *SubscriptionService) DeductSubscriptionDaysNewestWithSnapshots(ctx cont
 				if trimmedNote != "" {
 					updated.Notes = appendSubscriptionNotes(sub.Notes, trimmedNote)
 				}
-				snapshots = append(snapshots, cloneUserSubscription(sub))
+				if updated.UsesHistoricalGroupSnapshotAt(now) {
+					if err := s.applyCurrentGroupSnapshot(txCtx, &updated); err != nil {
+						return err
+					}
+				}
+				snapshots = append(snapshots, snapshot)
 				if err := s.userSubRepo.Update(txCtx, &updated); err != nil {
 					return err
 				}
@@ -1104,7 +1156,12 @@ func (s *SubscriptionService) DeductSubscriptionDaysNewestWithSnapshots(ctx cont
 			if trimmedNote != "" {
 				updated.Notes = appendSubscriptionNotes(sub.Notes, trimmedNote)
 			}
-			snapshots = append(snapshots, cloneUserSubscription(sub))
+			if updated.UsesHistoricalGroupSnapshotAt(now) {
+				if err := s.applyCurrentGroupSnapshot(txCtx, &updated); err != nil {
+					return err
+				}
+			}
+			snapshots = append(snapshots, snapshot)
 			if err := s.userSubRepo.Update(txCtx, &updated); err != nil {
 				return err
 			}
@@ -1141,12 +1198,7 @@ func (s *SubscriptionService) RestoreSubscriptionSnapshots(ctx context.Context, 
 			if err != nil {
 				return err
 			}
-			fields := UserSubscriptionMutableFields{
-				Status:    &snapshot.Status,
-				ExpiresAt: &snapshot.ExpiresAt,
-				Notes:     &snapshot.Notes,
-			}
-			if err := s.userSubRepo.UpdateMutableFields(txCtx, snapshot.ID, fields); err != nil {
+			if err := s.userSubRepo.Update(txCtx, &snapshot); err != nil {
 				return err
 			}
 			seen[pair{userID: current.UserID, groupID: current.GroupID}] = struct{}{}
@@ -1166,6 +1218,25 @@ func (s *SubscriptionService) RestoreSubscriptionSnapshots(ctx context.Context, 
 }
 
 // GetByID 根据ID获取订阅
+func (s *SubscriptionService) applyCurrentGroupSnapshot(ctx context.Context, sub *UserSubscription) error {
+	if sub == nil {
+		return nil
+	}
+	group := sub.Group
+	if group == nil && s.groupRepo != nil {
+		loaded, err := s.groupRepo.GetByID(ctx, sub.GroupID)
+		if err != nil {
+			return err
+		}
+		group = loaded
+	}
+	if group == nil {
+		return nil
+	}
+	snapshotSubscriptionGroup(sub, group)
+	return nil
+}
+
 func cloneUserSubscription(sub UserSubscription) UserSubscription {
 	cp := sub
 	cp.StackedAvailableUSD = cloneSubscriptionFloat64Ptr(sub.StackedAvailableUSD)

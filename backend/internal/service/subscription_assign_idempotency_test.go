@@ -326,11 +326,14 @@ func (s *subscriptionUserSubRepoStub) Update(_ context.Context, sub *UserSubscri
 }
 
 func (s *subscriptionUserSubRepoStub) UpdateMutableFields(_ context.Context, id int64, fields UserSubscriptionMutableFields) error {
+	s.mu.Lock()
 	existing := s.byID[id]
 	if existing == nil {
+		s.mu.Unlock()
 		return ErrSubscriptionNotFound
 	}
 	cp := *existing
+	s.mu.Unlock()
 	if fields.ExpiresAt != nil {
 		cp.ExpiresAt = *fields.ExpiresAt
 	}
@@ -355,10 +358,55 @@ func (s *subscriptionUserSubRepoStub) UpdateMutableFields(_ context.Context, id 
 	return s.Update(context.Background(), &cp)
 }
 
+func (s *subscriptionUserSubRepoStub) UpdateStatus(_ context.Context, id int64, status string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	existing := s.byID[id]
+	if existing == nil {
+		return ErrSubscriptionNotFound
+	}
+	existing.Status = status
+	return nil
+}
+
+func (s *subscriptionUserSubRepoStub) Delete(_ context.Context, id int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	existing := s.byID[id]
+	if existing == nil {
+		return nil
+	}
+	now := time.Now()
+	existing.DeletedAt = &now
+	return nil
+}
+
+func (s *subscriptionUserSubRepoStub) UpdateGroupSnapshot(_ context.Context, sub *UserSubscription) error {
+	s.mu.Lock()
+	existing := s.byID[sub.ID]
+	if existing == nil {
+		s.mu.Unlock()
+		return ErrSubscriptionNotFound
+	}
+	cp := *existing
+	cp.GroupNameSnapshot = cloneSubscriptionStringPtr(sub.GroupNameSnapshot)
+	cp.GroupPlatformSnapshot = cloneSubscriptionStringPtr(sub.GroupPlatformSnapshot)
+	cp.GroupRateMultiplierSnapshot = cloneSubscriptionFloat64Ptr(sub.GroupRateMultiplierSnapshot)
+	cp.DailyLimitUSDSnapshot = cloneSubscriptionFloat64Ptr(sub.DailyLimitUSDSnapshot)
+	cp.WeeklyLimitUSDSnapshot = cloneSubscriptionFloat64Ptr(sub.WeeklyLimitUSDSnapshot)
+	cp.MonthlyLimitUSDSnapshot = cloneSubscriptionFloat64Ptr(sub.MonthlyLimitUSDSnapshot)
+	cp.CustomLimitHoursSnapshot = cloneSubscriptionIntPtr(sub.CustomLimitHoursSnapshot)
+	cp.CustomLimitUSDSnapshot = cloneSubscriptionFloat64Ptr(sub.CustomLimitUSDSnapshot)
+	s.mu.Unlock()
+	return s.Update(context.Background(), &cp)
+}
+
 func TestAssignSubscriptionReuseWhenSemanticsMatch(t *testing.T) {
 	start := time.Date(2026, 2, 20, 10, 0, 0, 0, time.UTC)
 	groupRepo := &subscriptionGroupRepoStub{
-		group: &Group{ID: 1, SubscriptionType: SubscriptionTypeSubscription},
+		group: &Group{ID: 1, Status: StatusActive, SubscriptionType: SubscriptionTypeSubscription},
 	}
 	subRepo := newSubscriptionUserSubRepoStub()
 	subRepo.seed(&UserSubscription{
@@ -385,7 +433,7 @@ func TestAssignSubscriptionReuseWhenSemanticsMatch(t *testing.T) {
 func TestAssignSubscriptionConflictWhenSemanticsMismatch(t *testing.T) {
 	start := time.Date(2026, 2, 20, 10, 0, 0, 0, time.UTC)
 	groupRepo := &subscriptionGroupRepoStub{
-		group: &Group{ID: 1, SubscriptionType: SubscriptionTypeSubscription},
+		group: &Group{ID: 1, Status: StatusActive, SubscriptionType: SubscriptionTypeSubscription},
 	}
 	subRepo := newSubscriptionUserSubRepoStub()
 	subRepo.seed(&UserSubscription{
@@ -412,7 +460,7 @@ func TestAssignSubscriptionConflictWhenSemanticsMismatch(t *testing.T) {
 func TestBulkAssignSubscriptionCreatedReusedAndConflict(t *testing.T) {
 	start := time.Date(2026, 2, 20, 10, 0, 0, 0, time.UTC)
 	groupRepo := &subscriptionGroupRepoStub{
-		group: &Group{ID: 1, SubscriptionType: SubscriptionTypeSubscription},
+		group: &Group{ID: 1, Status: StatusActive, SubscriptionType: SubscriptionTypeSubscription},
 	}
 	subRepo := newSubscriptionUserSubRepoStub()
 	// user 1: 语义一致，可 reused
@@ -455,7 +503,7 @@ func TestBulkAssignSubscriptionCreatedReusedAndConflict(t *testing.T) {
 
 func TestAssignSubscriptionKeepsWorkingWhenIdempotencyStoreUnavailable(t *testing.T) {
 	groupRepo := &subscriptionGroupRepoStub{
-		group: &Group{ID: 1, SubscriptionType: SubscriptionTypeSubscription},
+		group: &Group{ID: 1, Status: StatusActive, SubscriptionType: SubscriptionTypeSubscription},
 	}
 	subRepo := newSubscriptionUserSubRepoStub()
 	SetDefaultIdempotencyCoordinator(NewIdempotencyCoordinator(failingIdempotencyRepo{}, DefaultIdempotencyConfig()))
@@ -477,7 +525,7 @@ func TestAssignSubscriptionKeepsWorkingWhenIdempotencyStoreUnavailable(t *testin
 
 func TestAssignSubscriptionConcurrentKeepsNonStackedIdempotent(t *testing.T) {
 	groupRepo := &subscriptionGroupRepoStub{
-		group: &Group{ID: 1, SubscriptionType: SubscriptionTypeSubscription},
+		group: &Group{ID: 1, Status: StatusActive, SubscriptionType: SubscriptionTypeSubscription},
 	}
 	subRepo := newSubscriptionUserSubRepoStub()
 	svc := NewSubscriptionService(groupRepo, subRepo, nil, nil, nil)
@@ -527,7 +575,7 @@ func TestAssignSubscriptionConcurrentKeepsNonStackedIdempotent(t *testing.T) {
 
 func TestAssignSubscription_NewSubscriptionWindowsStartAtRedeemTime(t *testing.T) {
 	groupRepo := &subscriptionGroupRepoStub{
-		group: &Group{ID: 1, SubscriptionType: SubscriptionTypeSubscription},
+		group: &Group{ID: 1, Status: StatusActive, SubscriptionType: SubscriptionTypeSubscription},
 	}
 	subRepo := newSubscriptionUserSubRepoStub()
 	svc := NewSubscriptionService(groupRepo, subRepo, nil, nil, nil)
@@ -608,6 +656,97 @@ func TestAssignSubscriptionGroupTypeValidation(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.Equal(t, infraerrors.Code(ErrGroupNotSubscriptionType), infraerrors.Code(err))
+}
+
+func TestAssignSubscriptionRejectsDisabledSubscriptionGroup(t *testing.T) {
+	groupRepo := &subscriptionGroupRepoStub{
+		group: &Group{ID: 1, Status: StatusDisabled, SubscriptionType: SubscriptionTypeSubscription},
+	}
+	subRepo := newSubscriptionUserSubRepoStub()
+	svc := NewSubscriptionService(groupRepo, subRepo, nil, nil, nil)
+
+	_, err := svc.AssignSubscription(context.Background(), &AssignSubscriptionInput{
+		UserID:       1001,
+		GroupID:      1,
+		ValidityDays: 30,
+	})
+
+	require.Error(t, err)
+	require.Equal(t, infraerrors.Code(ErrGroupNotSubscriptionType), infraerrors.Code(err))
+	require.Equal(t, 0, subRepo.createCalls)
+}
+
+func TestBulkAssignSubscriptionRejectsDisabledSubscriptionGroup(t *testing.T) {
+	groupRepo := &subscriptionGroupRepoStub{
+		group: &Group{ID: 1, Status: StatusDisabled, SubscriptionType: SubscriptionTypeSubscription},
+	}
+	subRepo := newSubscriptionUserSubRepoStub()
+	svc := NewSubscriptionService(groupRepo, subRepo, nil, nil, nil)
+
+	result, err := svc.BulkAssignSubscription(context.Background(), &BulkAssignSubscriptionInput{
+		UserIDs:      []int64{1001, 1002},
+		GroupID:      1,
+		ValidityDays: 30,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 0, result.SuccessCount)
+	require.Equal(t, 0, result.CreatedCount)
+	require.Equal(t, 2, result.FailedCount)
+	require.Equal(t, "failed", result.Statuses[1001])
+	require.Equal(t, "failed", result.Statuses[1002])
+	require.Len(t, result.Errors, 2)
+	require.Equal(t, 0, subRepo.createCalls)
+}
+
+func TestAssignOrExtendSubscriptionRejectsDisabledSubscriptionGroup(t *testing.T) {
+	start := time.Now().UTC().Add(-48 * time.Hour)
+	groupRepo := &subscriptionGroupRepoStub{
+		group: &Group{ID: 1, Status: StatusDisabled, SubscriptionType: SubscriptionTypeSubscription},
+	}
+	subRepo := newSubscriptionUserSubRepoStub()
+	subRepo.seed(&UserSubscription{
+		ID:        30,
+		UserID:    1001,
+		GroupID:   1,
+		StartsAt:  start,
+		ExpiresAt: start.Add(24 * time.Hour),
+		Status:    SubscriptionStatusExpired,
+	})
+	svc := NewSubscriptionService(groupRepo, subRepo, nil, nil, nil)
+
+	_, _, err := svc.AssignOrExtendSubscription(context.Background(), &AssignSubscriptionInput{
+		UserID:       1001,
+		GroupID:      1,
+		ValidityDays: 30,
+	})
+
+	require.Error(t, err)
+	require.Equal(t, infraerrors.Code(ErrGroupNotSubscriptionType), infraerrors.Code(err))
+	stored, getErr := subRepo.GetByID(context.Background(), 30)
+	require.NoError(t, getErr)
+	require.Equal(t, SubscriptionStatusExpired, stored.Status)
+	require.True(t, stored.ExpiresAt.Before(time.Now()))
+}
+
+func TestAssignStackedSubscriptionRejectsDisabledSubscriptionGroup(t *testing.T) {
+	groupRepo := &subscriptionGroupRepoStub{
+		group: &Group{ID: 1, Status: StatusDisabled, SubscriptionType: SubscriptionTypeSubscription},
+	}
+	subRepo := newSubscriptionUserSubRepoStub()
+	svc := NewSubscriptionService(groupRepo, subRepo, nil, nil, nil)
+
+	_, _, err := svc.AssignStackedSubscription(context.Background(), &AssignSubscriptionInput{
+		UserID:       1001,
+		GroupID:      1,
+		ValidityDays: 30,
+		SourceType:   "redeem_code",
+		SourceRefID:  "disabled-group-code",
+	})
+
+	require.Error(t, err)
+	require.Equal(t, infraerrors.Code(ErrGroupNotSubscriptionType), infraerrors.Code(err))
+	require.Equal(t, 0, subRepo.createCalls)
 }
 
 func strconvFormatInt(v int64) string {

@@ -770,6 +770,7 @@ func UserSubscriptionFromServiceAdmin(sub *service.UserSubscription) *AdminUserS
 		AssignedAt:       sub.AssignedAt,
 		Notes:            sub.Notes,
 		AssignedByUser:   UserFromServiceShallow(sub.AssignedByUser),
+		CanReactivate:    subscriptionCanReactivate(sub),
 	}
 }
 
@@ -814,6 +815,16 @@ func subscriptionGroupFromService(sub *service.UserSubscription) *Group {
 		return nil
 	}
 	return GroupFromServiceShallow(sub.EffectiveGroup(sub.Group))
+}
+
+func subscriptionCanReactivate(sub *service.UserSubscription) bool {
+	if sub == nil {
+		return false
+	}
+	if !sub.UsesHistoricalGroupSnapshotAt(time.Now()) {
+		return true
+	}
+	return sub.Group != nil && sub.Group.Status == service.StatusActive && sub.Group.IsSubscriptionType()
 }
 
 func BulkAssignResultFromService(r *service.BulkAssignResult) *BulkAssignResult {

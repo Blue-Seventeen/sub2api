@@ -73,7 +73,7 @@ Bug 修复：
 | 推广中心 | 自研 Promotion / 推广中心 / 推广后台 / 返佣统计 | 替代 upstream Affiliate，不可被覆盖 | `backend/internal/service/*promotion*`, `frontend/src/views/**/Promotion*.vue` |
 | 自动运维 | 账号自动刷新、测试、恢复、删除、规则筛选 | 维护账号池稳定性 | `account_auto_ops*`, `proxy_auto_probe*` |
 | 代理池 | 代理检测、成功队列、账号选择最优代理 | 提升上游请求成功率 | `proxy_*`, `account_proxy*`, `frontend` 代理管理页 |
-| 订阅管理 | 兑换时刻滚动窗口、自定义小时限额、订阅卡堆叠、精细配额调整、选择性配额重置、撤销历史展示、来源/兑换码/分组限额快照、开始时间列、秒级时间展示、`starts_at` 排序与列设置持久化 | 订阅额度语义必须跟随兑换/购买生效时刻；用户侧可理解为同分组聚合权益，管理侧必须保留逐张卡证据；不能因订阅查询或扣费改变中转热路径与 mandatory usage/billing 语义 | `backend/internal/service/subscription_service.go`, `backend/internal/service/user_subscription.go`, `backend/internal/repository/user_subscription_repo.go`, `backend/internal/repository/usage_billing_repo.go`, `backend/migrations/145_subscription_windows_anchor_to_starts_at.sql`, `backend/migrations/146_subscription_custom_hour_limit.sql`, `backend/migrations/149_subscription_stacking_snapshots.sql`, `backend/migrations/150_subscription_billing_stack_index.sql`, `frontend/src/views/admin/SubscriptionsView.vue`, `frontend/src/views/admin/GroupsView.vue`, `frontend/src/views/user/SubscriptionsView.vue`, `frontend/src/views/user/PaymentView.vue` |
+| 订阅管理 | 兑换时刻滚动窗口、自定义小时限额、订阅卡堆叠、精细配额调整、选择性配额重置、撤销历史展示、来源/兑换码/分组限额快照、开始时间列、秒级时间展示、`starts_at` 排序与列设置持久化、孤儿历史订阅禁止重新激活 | 订阅额度语义必须跟随兑换/购买生效时刻；用户侧可理解为同分组聚合权益，管理侧必须保留逐张卡证据；已过期/已撤销订阅若真实分组已删除、禁用或不再是订阅类型，只允许硬删除，不能通过恢复或调整时间重新变成生效中；不能因订阅查询或扣费改变中转热路径与 mandatory usage/billing 语义 | `backend/internal/service/subscription_service.go`, `backend/internal/service/user_subscription.go`, `backend/internal/repository/user_subscription_repo.go`, `backend/internal/repository/usage_billing_repo.go`, `backend/migrations/145_subscription_windows_anchor_to_starts_at.sql`, `backend/migrations/146_subscription_custom_hour_limit.sql`, `backend/migrations/149_subscription_stacking_snapshots.sql`, `backend/migrations/150_subscription_billing_stack_index.sql`, `frontend/src/views/admin/SubscriptionsView.vue`, `frontend/src/views/admin/GroupsView.vue`, `frontend/src/views/user/SubscriptionsView.vue`, `frontend/src/views/user/PaymentView.vue` |
 | 设置增强 | 站点 Logo、自定义菜单、外链新页面打开、邀请码注册 HTML 提示 | 属于运营配置能力 | `setting_service.go`, `SettingsView.vue`, `AppSidebar.vue` |
 | 分组平台搜索 | `/admin/groups` 创建分组平台选择增加与账号表单一致的模糊搜索 | 纯前端交互增强，不改变分组保存、调度、计费或平台语义 | `frontend/src/views/admin/GroupsView.vue` |
 | 多机部署 | 定时备份本机开关 | 多机共库时由每台服务器本地文件决定是否执行定时备份，默认关闭 | `backup_service.go`, `backup_service_schedule_local_test.go` |
@@ -335,6 +335,7 @@ upstream 的 Affiliate / 邀请返利模块属于冗余功能，后续同步 ups
 - 订阅创建时应保存来源和历史证据快照：`source_type`、`source_ref_id`、`redeem_code_snapshot`、分组名称快照、平台快照、倍率快照、每日/每周/每月/自定义限额快照。旧数据字段为空时必须回退当前分组信息读取。
 - 生效中订阅必须继续跟随当前分组配置：管理员在 `/admin/groups` 调整或移除每日、每周、每月、自定义窗口限额后，用户侧聚合展示、管理侧生效中订阅、preflight 限额检查和实际扣费都必须读取实时分组限额；分组保存后必须失效该分组活跃订阅的 L1/Redis billing cache，避免旧额度短暂继续生效。
 - 过期或撤销订阅必须保留当时的分组名称、限额、窗口用量、开始时间和结束时间；后续管理员删除分组或调整分组限额，不得改写这些历史证据。
+- 撤销订阅和后台自然过期状态更新必须在历史化前重新固化当前分组完整限额快照（daily / weekly / monthly / custom），不能只依赖订阅创建时的旧快照；旧版本遗留的部分快照数据仍允许回退当前分组展示，避免升级后历史记录查询崩溃或限额列丢失。
 - 计费链路必须多卡感知：请求前按聚合额度判断可用性；实际扣费在数据库事务内锁定该用户该分组活跃订阅卡，优先扣最早可用卡，已耗尽的旧卡跳过直到其窗口重置。
 - 负向订阅扣减/退款默认按最新活跃订阅卡优先撤销或扣减，用于抵消最近一次授予，避免破坏更早历史证据。
 - 迁移 `backend/migrations/149_subscription_stacking_snapshots.sql` 必须保持向后兼容：允许同用户同分组存在多张活跃订阅卡，新增字段全部可空，升级旧数据库时缺字段不能导致查询失败。

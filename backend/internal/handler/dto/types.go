@@ -637,6 +637,7 @@ type AdminUserSubscription struct {
 	Notes      string    `json:"notes"`
 
 	AssignedByUser *User `json:"assigned_by_user,omitempty"`
+	CanReactivate  bool  `json:"can_reactivate"`
 }
 
 type BulkAssignResult struct {

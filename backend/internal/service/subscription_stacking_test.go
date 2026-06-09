@@ -384,6 +384,82 @@ func TestDeductSubscriptionDaysNewestReturnsSnapshotsAndRestoreExactCards(t *tes
 	require.InDelta(t, newCard.CustomUsageUSD, restoredNew.CustomUsageUSD, 0.000001)
 }
 
+func TestDeductSubscriptionDaysNewestSnapshotsCurrentGroupWhenCardExpires(t *testing.T) {
+	now := time.Now().UTC()
+	repo := newSubscriptionUserSubRepoStub()
+	oldGroupName := "old snapshot"
+	oldDaily := 10.0
+	oldWeekly := 20.0
+	currentDaily := 100.0
+	currentWeekly := 500.0
+	currentMonthly := 1000.0
+	currentCustom := 50.0
+	card := UserSubscription{
+		ID:                     3,
+		UserID:                 10,
+		GroupID:                20,
+		StartsAt:               now.Add(-24 * time.Hour),
+		ExpiresAt:              now.Add(12 * time.Hour),
+		Status:                 SubscriptionStatusActive,
+		Notes:                  "before",
+		GroupNameSnapshot:      &oldGroupName,
+		DailyLimitUSDSnapshot:  &oldDaily,
+		WeeklyLimitUSDSnapshot: &oldWeekly,
+	}
+	repo.seed(&card)
+	groupRepo := &subscriptionGroupRepoStub{group: &Group{
+		ID:               20,
+		Name:             "current snapshot",
+		Platform:         PlatformAnthropic,
+		Status:           StatusActive,
+		SubscriptionType: SubscriptionTypeSubscription,
+		RateMultiplier:   2,
+		DailyLimitUSD:    &currentDaily,
+		WeeklyLimitUSD:   &currentWeekly,
+		MonthlyLimitUSD:  &currentMonthly,
+		CustomLimitHours: 6,
+		CustomLimitUSD:   &currentCustom,
+	}}
+	svc := NewSubscriptionService(groupRepo, repo, nil, nil, nil)
+
+	snapshots, err := svc.DeductSubscriptionDaysNewestWithSnapshots(context.Background(), 10, 20, 1, "refund expire")
+	require.NoError(t, err)
+	require.Len(t, snapshots, 1)
+	require.Equal(t, oldGroupName, *snapshots[0].GroupNameSnapshot)
+
+	expired, err := repo.GetByID(context.Background(), 3)
+	require.NoError(t, err)
+	require.Equal(t, SubscriptionStatusExpired, expired.Status)
+	require.NotNil(t, expired.GroupNameSnapshot)
+	require.Equal(t, "current snapshot", *expired.GroupNameSnapshot)
+	require.NotNil(t, expired.DailyLimitUSDSnapshot)
+	require.InDelta(t, currentDaily, *expired.DailyLimitUSDSnapshot, 0.000001)
+	require.NotNil(t, expired.WeeklyLimitUSDSnapshot)
+	require.InDelta(t, currentWeekly, *expired.WeeklyLimitUSDSnapshot, 0.000001)
+	require.NotNil(t, expired.MonthlyLimitUSDSnapshot)
+	require.InDelta(t, currentMonthly, *expired.MonthlyLimitUSDSnapshot, 0.000001)
+	require.NotNil(t, expired.CustomLimitHoursSnapshot)
+	require.Equal(t, 6, *expired.CustomLimitHoursSnapshot)
+	require.NotNil(t, expired.CustomLimitUSDSnapshot)
+	require.InDelta(t, currentCustom, *expired.CustomLimitUSDSnapshot, 0.000001)
+
+	require.NoError(t, svc.RestoreSubscriptionSnapshots(context.Background(), snapshots))
+	restored, err := repo.GetByID(context.Background(), 3)
+	require.NoError(t, err)
+	require.Equal(t, card.Status, restored.Status)
+	require.Equal(t, card.ExpiresAt, restored.ExpiresAt)
+	require.Equal(t, card.Notes, restored.Notes)
+	require.NotNil(t, restored.GroupNameSnapshot)
+	require.Equal(t, oldGroupName, *restored.GroupNameSnapshot)
+	require.NotNil(t, restored.DailyLimitUSDSnapshot)
+	require.InDelta(t, oldDaily, *restored.DailyLimitUSDSnapshot, 0.000001)
+	require.NotNil(t, restored.WeeklyLimitUSDSnapshot)
+	require.InDelta(t, oldWeekly, *restored.WeeklyLimitUSDSnapshot, 0.000001)
+	require.Nil(t, restored.MonthlyLimitUSDSnapshot)
+	require.Nil(t, restored.CustomLimitHoursSnapshot)
+	require.Nil(t, restored.CustomLimitUSDSnapshot)
+}
+
 func TestGetActiveSubscriptionNormalizesStackedWindowsBeforePreflight(t *testing.T) {
 	now := time.Now().UTC()
 	dailyLimit := 100.0
@@ -681,6 +757,162 @@ func TestAdjustSubscriptionRejectsInvalidDays(t *testing.T) {
 	tooSmall := -MaxValidityDays - 1
 	_, err = svc.AdjustSubscription(context.Background(), 10, AdjustSubscriptionInput{Days: &tooSmall})
 	require.Error(t, err)
+}
+
+func TestAdjustSubscriptionRejectsExpiredReactivationWhenGroupMissing(t *testing.T) {
+	now := time.Now().UTC()
+	repo := newSubscriptionUserSubRepoStub()
+	repo.seed(&UserSubscription{
+		ID:        10,
+		UserID:    100,
+		GroupID:   200,
+		StartsAt:  now.Add(-48 * time.Hour),
+		ExpiresAt: now.Add(-24 * time.Hour),
+		Status:    SubscriptionStatusExpired,
+	})
+	svc := NewSubscriptionService(&subscriptionGroupRepoStub{}, repo, nil, nil, nil)
+
+	days := 1
+	_, err := svc.AdjustSubscription(context.Background(), 10, AdjustSubscriptionInput{Days: &days})
+
+	require.ErrorIs(t, err, ErrSubscriptionRestoreGroupInvalid)
+	stored, getErr := repo.GetByID(context.Background(), 10)
+	require.NoError(t, getErr)
+	require.Equal(t, SubscriptionStatusExpired, stored.Status)
+	require.True(t, stored.ExpiresAt.Before(now))
+}
+
+func TestAdjustSubscriptionRejectsExpiredReactivationWhenGroupInactive(t *testing.T) {
+	now := time.Now().UTC()
+	repo := newSubscriptionUserSubRepoStub()
+	repo.seed(&UserSubscription{
+		ID:        10,
+		UserID:    100,
+		GroupID:   200,
+		StartsAt:  now.Add(-48 * time.Hour),
+		ExpiresAt: now.Add(-24 * time.Hour),
+		Status:    SubscriptionStatusExpired,
+	})
+	svc := NewSubscriptionService(&subscriptionGroupRepoStub{group: &Group{
+		ID:               200,
+		Status:           StatusDisabled,
+		SubscriptionType: SubscriptionTypeSubscription,
+	}}, repo, nil, nil, nil)
+
+	days := 1
+	_, err := svc.AdjustSubscription(context.Background(), 10, AdjustSubscriptionInput{Days: &days})
+
+	require.ErrorIs(t, err, ErrSubscriptionRestoreGroupInvalid)
+}
+
+func TestAdjustSubscriptionRejectsExpiredReactivationWhenGroupNotSubscriptionType(t *testing.T) {
+	now := time.Now().UTC()
+	repo := newSubscriptionUserSubRepoStub()
+	repo.seed(&UserSubscription{
+		ID:        10,
+		UserID:    100,
+		GroupID:   200,
+		StartsAt:  now.Add(-48 * time.Hour),
+		ExpiresAt: now.Add(-24 * time.Hour),
+		Status:    SubscriptionStatusExpired,
+	})
+	svc := NewSubscriptionService(&subscriptionGroupRepoStub{group: &Group{
+		ID:               200,
+		Status:           StatusActive,
+		SubscriptionType: SubscriptionTypeStandard,
+	}}, repo, nil, nil, nil)
+
+	days := 1
+	_, err := svc.AdjustSubscription(context.Background(), 10, AdjustSubscriptionInput{Days: &days})
+
+	require.ErrorIs(t, err, ErrSubscriptionRestoreGroupInvalid)
+}
+
+func TestAdjustSubscriptionRejectsOrphanHistoricalRecordUsageAdjustment(t *testing.T) {
+	now := time.Now().UTC()
+	repo := newSubscriptionUserSubRepoStub()
+	repo.seed(&UserSubscription{
+		ID:              10,
+		UserID:          100,
+		GroupID:         200,
+		StartsAt:        now.Add(-48 * time.Hour),
+		ExpiresAt:       now.Add(-24 * time.Hour),
+		Status:          SubscriptionStatusExpired,
+		DailyUsageUSD:   1,
+		WeeklyUsageUSD:  2,
+		MonthlyUsageUSD: 3,
+		CustomUsageUSD:  4,
+	})
+	svc := NewSubscriptionService(&subscriptionGroupRepoStub{}, repo, nil, nil, nil)
+
+	daily := 9.5
+	_, err := svc.AdjustSubscription(context.Background(), 10, AdjustSubscriptionInput{DailyUsageUSD: &daily})
+
+	require.ErrorIs(t, err, ErrSubscriptionRestoreGroupInvalid)
+	stored, getErr := repo.GetByID(context.Background(), 10)
+	require.NoError(t, getErr)
+	require.InDelta(t, 1, stored.DailyUsageUSD, 0.000001)
+	require.Equal(t, SubscriptionStatusExpired, stored.Status)
+	require.True(t, stored.ExpiresAt.Before(now))
+}
+
+func TestExtendSubscriptionRejectsHistoricalWhenGroupInvalid(t *testing.T) {
+	cases := []struct {
+		name  string
+		group *Group
+	}{
+		{name: "missing", group: nil},
+		{name: "disabled", group: &Group{ID: 200, Status: StatusDisabled, SubscriptionType: SubscriptionTypeSubscription}},
+		{name: "not subscription", group: &Group{ID: 200, Status: StatusActive, SubscriptionType: SubscriptionTypeStandard}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Now().UTC()
+			repo := newSubscriptionUserSubRepoStub()
+			repo.seed(&UserSubscription{
+				ID:        10,
+				UserID:    100,
+				GroupID:   200,
+				StartsAt:  now.Add(-48 * time.Hour),
+				ExpiresAt: now.Add(-24 * time.Hour),
+				Status:    SubscriptionStatusExpired,
+			})
+			svc := NewSubscriptionService(&subscriptionGroupRepoStub{group: tc.group}, repo, nil, nil, nil)
+
+			_, err := svc.ExtendSubscription(context.Background(), 10, 1)
+
+			require.ErrorIs(t, err, ErrSubscriptionRestoreGroupInvalid)
+			stored, getErr := repo.GetByID(context.Background(), 10)
+			require.NoError(t, getErr)
+			require.Equal(t, SubscriptionStatusExpired, stored.Status)
+			require.True(t, stored.ExpiresAt.Before(now))
+		})
+	}
+}
+
+func TestAdjustSubscriptionAllowsActiveFutureWithoutGroupLookup(t *testing.T) {
+	now := time.Now().UTC()
+	repo := newSubscriptionUserSubRepoStub()
+	repo.seed(&UserSubscription{
+		ID:        10,
+		UserID:    100,
+		GroupID:   200,
+		StartsAt:  now.Add(-time.Hour),
+		ExpiresAt: now.Add(24 * time.Hour),
+		Status:    SubscriptionStatusActive,
+	})
+	svc := NewSubscriptionService(groupRepoNoop{}, repo, nil, nil, nil)
+
+	days := 1
+	usage := 12.5
+	sub, err := svc.AdjustSubscription(context.Background(), 10, AdjustSubscriptionInput{
+		Days:          &days,
+		DailyUsageUSD: &usage,
+	})
+
+	require.NoError(t, err)
+	require.True(t, sub.ExpiresAt.After(now.Add(24*time.Hour)))
+	require.InDelta(t, 12.5, sub.DailyUsageUSD, 0.000001)
 }
 
 func TestDoWindowMaintenanceSkipsAggregateVirtualSubscription(t *testing.T) {

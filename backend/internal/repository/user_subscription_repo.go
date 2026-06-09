@@ -296,6 +296,24 @@ func (r *userSubscriptionRepository) UpdateMutableFields(ctx context.Context, su
 	return translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
 }
 
+func (r *userSubscriptionRepository) UpdateGroupSnapshot(ctx context.Context, sub *service.UserSubscription) error {
+	if sub == nil || sub.ID <= 0 {
+		return service.ErrSubscriptionNotFound
+	}
+	client := clientFromContext(ctx, r.client)
+	builder := client.UserSubscription.UpdateOneID(sub.ID).
+		SetNillableGroupNameSnapshot(sub.GroupNameSnapshot).
+		SetNillableGroupPlatformSnapshot(sub.GroupPlatformSnapshot).
+		SetNillableGroupRateMultiplierSnapshot(sub.GroupRateMultiplierSnapshot).
+		SetNillableDailyLimitUsdSnapshot(sub.DailyLimitUSDSnapshot).
+		SetNillableWeeklyLimitUsdSnapshot(sub.WeeklyLimitUSDSnapshot).
+		SetNillableMonthlyLimitUsdSnapshot(sub.MonthlyLimitUSDSnapshot).
+		SetNillableCustomLimitHoursSnapshot(sub.CustomLimitHoursSnapshot).
+		SetNillableCustomLimitUsdSnapshot(sub.CustomLimitUSDSnapshot)
+	_, err := builder.Save(ctx)
+	return translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
+}
+
 func (r *userSubscriptionRepository) Delete(ctx context.Context, id int64) error {
 	// Match GORM semantics: deleting a missing row is not an error.
 	client := clientFromContext(ctx, r.client)
@@ -645,14 +663,49 @@ func (r *userSubscriptionRepository) IncrementUsage(ctx context.Context, id int6
 
 func (r *userSubscriptionRepository) BatchUpdateExpiredStatus(ctx context.Context) (int64, error) {
 	client := clientFromContext(ctx, r.client)
-	n, err := client.UserSubscription.Update().
-		Where(
-			usersubscription.StatusEQ(service.SubscriptionStatusActive),
-			usersubscription.ExpiresAtLTE(time.Now()),
-		).
-		SetStatus(service.SubscriptionStatusExpired).
-		Save(ctx)
-	return int64(n), err
+	const updateSQL = `
+		WITH expired AS (
+			SELECT
+				us.id,
+				g.id AS group_snapshot_id,
+				g.name AS group_name,
+				g.platform AS group_platform,
+				g.rate_multiplier AS group_rate_multiplier,
+				g.daily_limit_usd,
+				g.weekly_limit_usd,
+				g.monthly_limit_usd,
+				g.custom_limit_hours,
+				g.custom_limit_usd
+			FROM user_subscriptions us
+			LEFT JOIN groups g ON g.id = us.group_id
+			WHERE us.deleted_at IS NULL
+				AND us.status = $2
+				AND us.expires_at <= $3
+		)
+		UPDATE user_subscriptions us
+		SET
+			status = $1,
+			group_name_snapshot = CASE WHEN expired.group_snapshot_id IS NULL THEN us.group_name_snapshot ELSE expired.group_name END,
+			group_platform_snapshot = CASE WHEN expired.group_snapshot_id IS NULL THEN us.group_platform_snapshot ELSE expired.group_platform END,
+			group_rate_multiplier_snapshot = CASE WHEN expired.group_snapshot_id IS NULL THEN us.group_rate_multiplier_snapshot ELSE expired.group_rate_multiplier END,
+			daily_limit_usd_snapshot = CASE WHEN expired.group_snapshot_id IS NULL THEN us.daily_limit_usd_snapshot ELSE COALESCE(expired.daily_limit_usd, 0) END,
+			weekly_limit_usd_snapshot = CASE WHEN expired.group_snapshot_id IS NULL THEN us.weekly_limit_usd_snapshot ELSE COALESCE(expired.weekly_limit_usd, 0) END,
+			monthly_limit_usd_snapshot = CASE WHEN expired.group_snapshot_id IS NULL THEN us.monthly_limit_usd_snapshot ELSE COALESCE(expired.monthly_limit_usd, 0) END,
+			custom_limit_hours_snapshot = CASE WHEN expired.group_snapshot_id IS NULL THEN us.custom_limit_hours_snapshot ELSE COALESCE(expired.custom_limit_hours, 0) END,
+			custom_limit_usd_snapshot = CASE WHEN expired.group_snapshot_id IS NULL THEN us.custom_limit_usd_snapshot ELSE COALESCE(expired.custom_limit_usd, 0) END,
+			updated_at = NOW()
+		FROM expired
+		WHERE us.id = expired.id
+	`
+	result, err := client.ExecContext(ctx, updateSQL, service.SubscriptionStatusExpired, service.SubscriptionStatusActive, time.Now())
+	if err != nil {
+		return 0, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return affected, nil
 }
 
 // Extra repository helpers (currently used only by integration tests).

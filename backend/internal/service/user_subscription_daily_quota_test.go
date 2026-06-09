@@ -98,7 +98,7 @@ func (r *activateWindowUserSubRepo) ActivateWindows(_ context.Context, _ int64, 
 
 func TestAssignOrExtendSubscription_ExpiredDailyCardStartsNewOneTimeQuota(t *testing.T) {
 	groupRepo := &subscriptionGroupRepoStub{
-		group: &Group{ID: 1, SubscriptionType: SubscriptionTypeSubscription},
+		group: &Group{ID: 1, Status: StatusActive, SubscriptionType: SubscriptionTypeSubscription},
 	}
 	subRepo := newSubscriptionUserSubRepoStub()
 	oldStart := time.Now().AddDate(0, 0, -3)

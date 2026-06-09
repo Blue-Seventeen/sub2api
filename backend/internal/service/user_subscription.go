@@ -237,7 +237,7 @@ func (s *UserSubscription) CheckAllLimits(group *Group, additionalCost float64) 
 
 func (s *UserSubscription) EffectiveDailyLimitUSD(group *Group) *float64 {
 	group = s.resolveEffectiveGroupInput(group)
-	if s != nil && s.shouldUseGroupSnapshot(group) && s.DailyLimitUSDSnapshot != nil {
+	if s != nil && s.shouldUseGroupSnapshot(group) && (s.DailyLimitUSDSnapshot != nil || s.hasCompleteLimitSnapshot()) {
 		return s.DailyLimitUSDSnapshot
 	}
 	if group != nil {
@@ -251,7 +251,7 @@ func (s *UserSubscription) EffectiveDailyLimitUSD(group *Group) *float64 {
 
 func (s *UserSubscription) EffectiveWeeklyLimitUSD(group *Group) *float64 {
 	group = s.resolveEffectiveGroupInput(group)
-	if s != nil && s.shouldUseGroupSnapshot(group) && s.WeeklyLimitUSDSnapshot != nil {
+	if s != nil && s.shouldUseGroupSnapshot(group) && (s.WeeklyLimitUSDSnapshot != nil || s.hasCompleteLimitSnapshot()) {
 		return s.WeeklyLimitUSDSnapshot
 	}
 	if group != nil {
@@ -265,7 +265,7 @@ func (s *UserSubscription) EffectiveWeeklyLimitUSD(group *Group) *float64 {
 
 func (s *UserSubscription) EffectiveMonthlyLimitUSD(group *Group) *float64 {
 	group = s.resolveEffectiveGroupInput(group)
-	if s != nil && s.shouldUseGroupSnapshot(group) && s.MonthlyLimitUSDSnapshot != nil {
+	if s != nil && s.shouldUseGroupSnapshot(group) && (s.MonthlyLimitUSDSnapshot != nil || s.hasCompleteLimitSnapshot()) {
 		return s.MonthlyLimitUSDSnapshot
 	}
 	if group != nil {
@@ -293,7 +293,7 @@ func (s *UserSubscription) EffectiveCustomLimitHours(group *Group) int {
 
 func (s *UserSubscription) EffectiveCustomLimitUSD(group *Group) *float64 {
 	group = s.resolveEffectiveGroupInput(group)
-	if s != nil && s.shouldUseGroupSnapshot(group) && s.CustomLimitUSDSnapshot != nil {
+	if s != nil && s.shouldUseGroupSnapshot(group) && (s.CustomLimitUSDSnapshot != nil || s.hasCompleteLimitSnapshot()) {
 		return s.CustomLimitUSDSnapshot
 	}
 	if group != nil {
@@ -317,6 +317,15 @@ func (s *UserSubscription) HasGroupSnapshot() bool {
 			s.CustomLimitUSDSnapshot != nil)
 }
 
+func (s *UserSubscription) hasCompleteLimitSnapshot() bool {
+	return s != nil &&
+		s.DailyLimitUSDSnapshot != nil &&
+		s.WeeklyLimitUSDSnapshot != nil &&
+		s.MonthlyLimitUSDSnapshot != nil &&
+		s.CustomLimitHoursSnapshot != nil &&
+		s.CustomLimitUSDSnapshot != nil
+}
+
 func (s *UserSubscription) EffectiveGroup(group *Group) *Group {
 	if s == nil {
 		return nil
@@ -338,18 +347,25 @@ func (s *UserSubscription) EffectiveGroup(group *Group) *Group {
 	if useSnapshot && s.GroupRateMultiplierSnapshot != nil {
 		out.RateMultiplier = *s.GroupRateMultiplierSnapshot
 	}
+	completeLimitSnapshot := s.hasCompleteLimitSnapshot()
 	if useSnapshot && s.DailyLimitUSDSnapshot != nil {
 		out.DailyLimitUSD = s.DailyLimitUSDSnapshot
+	} else if useSnapshot && completeLimitSnapshot {
+		out.DailyLimitUSD = nil
 	} else {
 		out.DailyLimitUSD = group.DailyLimitUSD
 	}
 	if useSnapshot && s.WeeklyLimitUSDSnapshot != nil {
 		out.WeeklyLimitUSD = s.WeeklyLimitUSDSnapshot
+	} else if useSnapshot && completeLimitSnapshot {
+		out.WeeklyLimitUSD = nil
 	} else {
 		out.WeeklyLimitUSD = group.WeeklyLimitUSD
 	}
 	if useSnapshot && s.MonthlyLimitUSDSnapshot != nil {
 		out.MonthlyLimitUSD = s.MonthlyLimitUSDSnapshot
+	} else if useSnapshot && completeLimitSnapshot {
+		out.MonthlyLimitUSD = nil
 	} else {
 		out.MonthlyLimitUSD = group.MonthlyLimitUSD
 	}
@@ -360,6 +376,8 @@ func (s *UserSubscription) EffectiveGroup(group *Group) *Group {
 	}
 	if useSnapshot && s.CustomLimitUSDSnapshot != nil {
 		out.CustomLimitUSD = s.CustomLimitUSDSnapshot
+	} else if useSnapshot && completeLimitSnapshot {
+		out.CustomLimitUSD = nil
 	} else {
 		out.CustomLimitUSD = group.CustomLimitUSD
 	}

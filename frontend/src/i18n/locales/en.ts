@@ -3155,6 +3155,23 @@ export default {
       adjusting: 'Adjusting...',
       revoke: 'Revoke',
       restore: 'Restore',
+      copyRecord: 'Copy',
+      copySuccess: 'Subscription copied',
+      copyFields: {
+        email: 'Email',
+        group: 'Group',
+        redeemCode: 'Redeem Code',
+        usage: 'Usage',
+        startsAt: 'Start Time',
+        expiresAt: 'Expiration Time',
+        status: 'Status'
+      },
+      reactivateBlockedTitle: 'Cannot Reactivate Subscription',
+      reactivateBlockedMessage:
+        "The real group linked to this subscription, '{group}', no longer exists, is disabled, or is no longer a subscription group. It cannot be restored to Active or reactivated by adjusting expiration.",
+      reactivateBlockedHint:
+        'This historical record is kept only as evidence and may only be permanently deleted. Assign a valid subscription group if the user needs new access.',
+      reactivateBlockedToast: 'The linked group is no longer valid, so this subscription cannot be restored or reactivated',
       resetQuota: 'Reset Quota',
       resetQuotaTitle: 'Reset Usage Quota',
       resetQuotaConfirm: "Select quota windows to reset for '{user}'. Selected windows will be zeroed and restarted from now.",

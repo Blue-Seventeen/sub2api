@@ -1681,6 +1681,7 @@ export interface UserSubscription {
   expires_at: string | null
   user?: User
   group?: Group
+  can_reactivate?: boolean
 }
 
 export interface SubscriptionProgress {

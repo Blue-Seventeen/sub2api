@@ -150,13 +150,37 @@ func TestRestoreSubscription_RestoresExpiredSubscriptionButDisplaysExpired(t *te
 			DeletedAt: &deletedAt,
 		},
 	}
-	svc := NewSubscriptionService(groupRepoNoop{}, repo, nil, nil, nil)
+	svc := NewSubscriptionService(&subscriptionGroupRepoStub{group: &Group{
+		ID:               200,
+		Status:           StatusActive,
+		SubscriptionType: SubscriptionTypeSubscription,
+	}}, repo, nil, nil, nil)
 
 	sub, err := svc.RestoreSubscription(context.Background(), 11)
 
 	require.NoError(t, err)
 	require.Equal(t, SubscriptionStatusActive, repo.sub.Status)
 	require.Equal(t, SubscriptionStatusExpired, sub.Status)
+}
+
+func TestRestoreSubscription_RejectsExpiredSubscriptionWhenGroupMissing(t *testing.T) {
+	deletedAt := time.Now().Add(-time.Hour)
+	repo := &adminMutationSubRepoStub{
+		sub: &UserSubscription{
+			ID:        19,
+			UserID:    100,
+			GroupID:   200,
+			Status:    SubscriptionStatusRevoked,
+			ExpiresAt: time.Now().Add(-time.Hour),
+			DeletedAt: &deletedAt,
+		},
+	}
+	svc := NewSubscriptionService(&subscriptionGroupRepoStub{}, repo, nil, nil, nil)
+
+	_, err := svc.RestoreSubscription(context.Background(), 19)
+
+	require.ErrorIs(t, err, ErrSubscriptionRestoreGroupInvalid)
+	require.Zero(t, repo.restoreCalls)
 }
 
 func TestRestoreSubscription_RejectsNonRevokedNonDeletedSubscription(t *testing.T) {
@@ -233,4 +257,44 @@ func TestHardDeleteSubscription_RejectsActiveFutureSubscription(t *testing.T) {
 
 	require.ErrorIs(t, err, ErrSubscriptionHardDeleteInvalid)
 	require.Zero(t, repo.hardDeleteCalls)
+}
+
+func TestRevokeSubscriptionRefreshesCurrentGroupSnapshots(t *testing.T) {
+	now := time.Now().UTC()
+	oldDaily := 10.0
+	currentDaily := 100.0
+	currentWeekly := 500.0
+	repo := newSubscriptionUserSubRepoStub()
+	repo.seed(&UserSubscription{
+		ID:                    30,
+		UserID:                100,
+		GroupID:               200,
+		Status:                SubscriptionStatusActive,
+		StartsAt:              now.Add(-time.Hour),
+		ExpiresAt:             now.Add(time.Hour),
+		DailyLimitUSDSnapshot: &oldDaily,
+	})
+	svc := NewSubscriptionService(&subscriptionGroupRepoStub{group: &Group{
+		ID:               200,
+		Name:             "revoked group",
+		Platform:         PlatformAnthropic,
+		Status:           StatusActive,
+		SubscriptionType: SubscriptionTypeSubscription,
+		DailyLimitUSD:    &currentDaily,
+		WeeklyLimitUSD:   &currentWeekly,
+	}}, repo, nil, nil, nil)
+
+	err := svc.RevokeSubscription(context.Background(), 30)
+
+	require.NoError(t, err)
+	stored, err := repo.GetByID(context.Background(), 30)
+	require.NoError(t, err)
+	require.Equal(t, SubscriptionStatusRevoked, stored.Status)
+	require.NotNil(t, stored.DeletedAt)
+	require.NotNil(t, stored.DailyLimitUSDSnapshot)
+	require.InDelta(t, currentDaily, *stored.DailyLimitUSDSnapshot, 0.000001)
+	require.NotNil(t, stored.WeeklyLimitUSDSnapshot)
+	require.InDelta(t, currentWeekly, *stored.WeeklyLimitUSDSnapshot, 0.000001)
+	require.NotNil(t, stored.GroupNameSnapshot)
+	require.Equal(t, "revoked group", *stored.GroupNameSnapshot)
 }

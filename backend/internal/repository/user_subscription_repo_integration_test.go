@@ -625,6 +625,59 @@ func (s *UserSubscriptionRepoSuite) TestBatchUpdateExpiredStatus() {
 	s.Require().Equal(service.SubscriptionStatusExpired, gotExpired.Status)
 }
 
+func (s *UserSubscriptionRepoSuite) TestBatchUpdateExpiredStatusSnapshotsCurrentGroupLimits() {
+	user := s.mustCreateUser("batch-snapshot@test.com", service.RoleUser)
+	group := s.mustCreateGroup("g-batch-snapshot")
+	groupName := "g-batch-snapshot-current"
+	dailyLimit := 100.0
+	weeklyLimit := 500.0
+	monthlyLimit := 1000.0
+	customLimit := 20.0
+	oldGroupName := "g-batch-snapshot-old"
+	oldPlatform := service.PlatformOpenAI
+	oldRate := 1.2
+	s.Require().NoError(s.client.Group.UpdateOneID(group.ID).
+		SetName(groupName).
+		SetPlatform(service.PlatformAnthropic).
+		SetRateMultiplier(2.5).
+		SetDailyLimitUsd(dailyLimit).
+		SetWeeklyLimitUsd(weeklyLimit).
+		SetMonthlyLimitUsd(monthlyLimit).
+		SetCustomLimitHours(1).
+		SetCustomLimitUsd(customLimit).
+		Exec(s.ctx))
+	sub := s.mustCreateSubscription(user.ID, group.ID, func(c *dbent.UserSubscriptionCreate) {
+		c.SetExpiresAt(time.Now().Add(-24 * time.Hour))
+		c.SetGroupNameSnapshot(oldGroupName)
+		c.SetGroupPlatformSnapshot(oldPlatform)
+		c.SetGroupRateMultiplierSnapshot(oldRate)
+	})
+
+	affected, err := s.repo.BatchUpdateExpiredStatus(s.ctx)
+
+	s.Require().NoError(err, "BatchUpdateExpiredStatus")
+	s.Require().Equal(int64(1), affected)
+	got, err := s.repo.GetByID(s.ctx, sub.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(service.SubscriptionStatusExpired, got.Status)
+	s.Require().NotNil(got.GroupNameSnapshot)
+	s.Require().Equal(groupName, *got.GroupNameSnapshot)
+	s.Require().NotNil(got.GroupPlatformSnapshot)
+	s.Require().Equal(service.PlatformAnthropic, *got.GroupPlatformSnapshot)
+	s.Require().NotNil(got.GroupRateMultiplierSnapshot)
+	s.Require().InDelta(2.5, *got.GroupRateMultiplierSnapshot, 1e-6)
+	s.Require().NotNil(got.DailyLimitUSDSnapshot)
+	s.Require().InDelta(dailyLimit, *got.DailyLimitUSDSnapshot, 1e-6)
+	s.Require().NotNil(got.WeeklyLimitUSDSnapshot)
+	s.Require().InDelta(weeklyLimit, *got.WeeklyLimitUSDSnapshot, 1e-6)
+	s.Require().NotNil(got.MonthlyLimitUSDSnapshot)
+	s.Require().InDelta(monthlyLimit, *got.MonthlyLimitUSDSnapshot, 1e-6)
+	s.Require().NotNil(got.CustomLimitHoursSnapshot)
+	s.Require().Equal(1, *got.CustomLimitHoursSnapshot)
+	s.Require().NotNil(got.CustomLimitUSDSnapshot)
+	s.Require().InDelta(customLimit, *got.CustomLimitUSDSnapshot, 1e-6)
+}
+
 // --- ExistsByUserIDAndGroupID ---
 
 func (s *UserSubscriptionRepoSuite) TestExistsByUserIDAndGroupID() {

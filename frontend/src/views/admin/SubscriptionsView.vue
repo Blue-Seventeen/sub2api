@@ -432,7 +432,7 @@
           <template #cell-actions="{ row }">
             <div class="flex items-center gap-1">
               <button
-                v-if="row.status === 'active' || row.status === 'expired'"
+                v-if="canAdjustSubscription(row)"
                 @click="handleExtend(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
               >
@@ -449,6 +449,13 @@
                 <span class="text-xs">{{ t('admin.subscriptions.resetQuota') }}</span>
               </button>
               <button
+                @click="handleCopySubscription(row)"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-sky-50 hover:text-sky-600 dark:hover:bg-sky-900/20 dark:hover:text-sky-400"
+              >
+                <Icon name="copy" size="sm" />
+                <span class="text-xs">{{ t('admin.subscriptions.copyRecord') }}</span>
+              </button>
+              <button
                 v-if="row.status === 'active'"
                 @click="handleRevoke(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
@@ -457,7 +464,7 @@
                 <span class="text-xs">{{ t('admin.subscriptions.revoke') }}</span>
               </button>
               <button
-                v-if="row.status === 'revoked'"
+                v-if="canRestoreSubscription(row)"
                 @click="handleRestore(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-900/20 dark:hover:text-green-400"
               >
@@ -780,6 +787,27 @@
       @cancel="closeRestoreDialog"
     />
 
+    <BaseDialog
+      :show="showReactivateBlockedDialog"
+      :title="t('admin.subscriptions.reactivateBlockedTitle')"
+      width="narrow"
+      @close="closeReactivateBlockedDialog"
+    >
+      <div class="space-y-4">
+        <div class="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-800/60 dark:bg-amber-900/20 dark:text-amber-100">
+          {{ t('admin.subscriptions.reactivateBlockedMessage', { group: blockedSubscriptionGroupName }) }}
+        </div>
+        <p class="text-sm text-gray-600 dark:text-gray-400">
+          {{ t('admin.subscriptions.reactivateBlockedHint') }}
+        </p>
+      </div>
+      <template #footer>
+        <button type="button" class="btn btn-primary w-full justify-center" @click="closeReactivateBlockedDialog">
+          {{ t('common.close') }}
+        </button>
+      </template>
+    </BaseDialog>
+
     <!-- Hard Delete Confirmation Dialog -->
     <ConfirmDialog
       :show="showHardDeleteDialog"
@@ -943,6 +971,7 @@ import type { UserSubscription, Group, GroupPlatform, SubscriptionType, ExtendSu
 import type { SimpleUser } from '@/api/admin/usage'
 import type { Column } from '@/components/common/types'
 import { formatCurrencyAmount, formatDateOnly } from '@/utils/format'
+import { useClipboard } from '@/composables/useClipboard'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
@@ -959,6 +988,7 @@ import { getRemainingDurationParts, isOneTimeDailyQuota, type RemainingDurationP
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const { copyToClipboard } = useClipboard()
 
 interface GroupOption {
   value: number
@@ -1024,7 +1054,7 @@ const allColumns = computed<Column[]>(() => [
   { key: 'starts_at', label: t('admin.subscriptions.columns.starts'), sortable: true, class: 'min-w-[180px]' },
   { key: 'expires_at', label: t('admin.subscriptions.columns.expires'), sortable: true, class: 'min-w-[180px]' },
   { key: 'status', label: t('admin.subscriptions.columns.status'), sortable: true, class: 'min-w-[110px]' },
-  { key: 'actions', label: t('admin.subscriptions.columns.actions'), sortable: false, class: 'min-w-[170px]' }
+  { key: 'actions', label: t('admin.subscriptions.columns.actions'), sortable: false, class: 'min-w-[220px]' }
 ])
 
 // Columns that can be toggled (exclude user and actions which are always visible)
@@ -1159,6 +1189,7 @@ const showRevokeDialog = ref(false)
 const showRestoreDialog = ref(false)
 const showHardDeleteDialog = ref(false)
 const showResetQuotaConfirm = ref(false)
+const showReactivateBlockedDialog = ref(false)
 const submitting = ref(false)
 const resettingSubscription = ref<UserSubscription | null>(null)
 const resettingQuota = ref(false)
@@ -1166,6 +1197,7 @@ const extendingSubscription = ref<UserSubscription | null>(null)
 const revokingSubscription = ref<UserSubscription | null>(null)
 const restoringSubscription = ref<UserSubscription | null>(null)
 const hardDeletingSubscription = ref<UserSubscription | null>(null)
+const reactivateBlockedSubscription = ref<UserSubscription | null>(null)
 
 const assignForm = reactive({
   user_id: null as number | null,
@@ -1206,6 +1238,39 @@ const resetQuotaCheckboxClass = (selected: boolean): string[] => [
     ? 'border-primary-500 bg-primary-600 text-white shadow-sm shadow-primary-500/25'
     : 'border-gray-300 bg-white text-transparent dark:border-gray-600 dark:bg-dark-700'
 ]
+
+const canReactivateSubscription = (subscription: UserSubscription): boolean =>
+  subscription.status === 'active' || subscription.can_reactivate === true
+
+const canAdjustSubscription = (subscription: UserSubscription): boolean =>
+  (subscription.status === 'active' || subscription.status === 'expired') && canReactivateSubscription(subscription)
+
+const canRestoreSubscription = (subscription: UserSubscription): boolean =>
+  subscription.status === 'revoked' && canReactivateSubscription(subscription)
+
+const blockedSubscriptionGroupName = computed(() =>
+  reactivateBlockedSubscription.value?.group?.name ||
+  reactivateBlockedSubscription.value?.group_name_snapshot ||
+  `#${reactivateBlockedSubscription.value?.group_id ?? '-'}`
+)
+
+const showReactivateBlocked = (subscription: UserSubscription) => {
+  reactivateBlockedSubscription.value = subscription
+  showReactivateBlockedDialog.value = true
+}
+
+const handleReactivateBlockedResponse = (subscription: UserSubscription | null) => {
+  if (subscription) {
+    showReactivateBlocked(subscription)
+  } else {
+    appStore.showError(t('admin.subscriptions.reactivateBlockedToast'))
+  }
+}
+
+const closeReactivateBlockedDialog = () => {
+  showReactivateBlockedDialog.value = false
+  reactivateBlockedSubscription.value = null
+}
 
 // Group options for filter (all groups)
 const groupOptions = computed(() => [
@@ -1457,6 +1522,10 @@ const handleAssignSubscription = async () => {
 }
 
 const handleExtend = (subscription: UserSubscription) => {
+  if (!canAdjustSubscription(subscription)) {
+    showReactivateBlocked(subscription)
+    return
+  }
   extendingSubscription.value = subscription
   resetExtendForm()
   showExtendModal.value = true
@@ -1536,7 +1605,14 @@ const handleExtendSubscription = async () => {
     closeExtendModal()
     loadSubscriptions()
   } catch (error: any) {
-    appStore.showError(error.response?.data?.detail || t('admin.subscriptions.failedToAdjust'))
+    const reason = error.response?.data?.reason
+    if (reason === 'SUBSCRIPTION_RESTORE_GROUP_INVALID') {
+      const blocked = extendingSubscription.value
+      closeExtendModal()
+      handleReactivateBlockedResponse(blocked)
+    } else {
+      appStore.showError(error.response?.data?.detail || t('admin.subscriptions.failedToAdjust'))
+    }
     console.error('Error adjusting subscription:', error)
   } finally {
     submitting.value = false
@@ -1564,6 +1640,10 @@ const confirmRevoke = async () => {
 }
 
 const handleRestore = (subscription: UserSubscription) => {
+  if (!canRestoreSubscription(subscription)) {
+    showReactivateBlocked(subscription)
+    return
+  }
   restoringSubscription.value = subscription
   showRestoreDialog.value = true
 }
@@ -1583,7 +1663,14 @@ const confirmRestore = async () => {
     restoringSubscription.value = null
     loadSubscriptions()
   } catch (error: any) {
-    appStore.showError(error.response?.data?.detail || t('admin.subscriptions.failedToRestore'))
+    const reason = error.response?.data?.reason
+    if (reason === 'SUBSCRIPTION_RESTORE_GROUP_INVALID') {
+      const blocked = restoringSubscription.value
+      closeRestoreDialog()
+      handleReactivateBlockedResponse(blocked)
+    } else {
+      appStore.showError(error.response?.data?.detail || t('admin.subscriptions.failedToRestore'))
+    }
     console.error('Error restoring subscription:', error)
   }
 }
@@ -1654,6 +1741,80 @@ const confirmResetQuota = async () => {
   } finally {
     resettingQuota.value = false
   }
+}
+
+const formatSubscriptionUsageLine = (
+  label: string,
+  used: number | null | undefined,
+  limit: number | null | undefined
+): string | null => {
+  if (!limit || limit <= 0) return null
+  return `${label}: ${formatCurrencyAmount(used ?? 0)} / ${formatCurrencyAmount(limit)}`
+}
+
+const formatSubscriptionUsageForCopy = (subscription: UserSubscription): string => {
+  const group = subscription.group
+  const lines = [
+    formatSubscriptionUsageLine(
+      t('admin.subscriptions.daily'),
+      subscription.daily_usage_usd,
+      group?.daily_limit_usd
+    ),
+    formatSubscriptionUsageLine(
+      t('admin.subscriptions.weekly'),
+      subscription.weekly_usage_usd,
+      group?.weekly_limit_usd
+    ),
+    formatSubscriptionUsageLine(
+      t('admin.subscriptions.monthly'),
+      subscription.monthly_usage_usd,
+      group?.monthly_limit_usd
+    ),
+    group?.custom_limit_hours && group?.custom_limit_usd
+      ? formatSubscriptionUsageLine(
+          t('admin.subscriptions.custom', { hours: group.custom_limit_hours }),
+          subscription.custom_usage_usd,
+          group.custom_limit_usd
+        )
+      : null
+  ].filter((line): line is string => Boolean(line))
+
+  return lines.length > 0 ? lines.join('; ') : t('admin.subscriptions.unlimited')
+}
+
+const buildSubscriptionCopyText = (subscription: UserSubscription): string => {
+  const labels = {
+    email: t('admin.subscriptions.copyFields.email'),
+    group: t('admin.subscriptions.copyFields.group'),
+    redeemCode: t('admin.subscriptions.copyFields.redeemCode'),
+    usage: t('admin.subscriptions.copyFields.usage'),
+    startsAt: t('admin.subscriptions.copyFields.startsAt'),
+    expiresAt: t('admin.subscriptions.copyFields.expiresAt'),
+    status: t('admin.subscriptions.copyFields.status')
+  }
+  const values = {
+    email: subscription.user?.email || t('admin.redeem.userPrefix', { id: subscription.user_id }),
+    group: subscription.group?.name || subscription.group_name_snapshot || `#${subscription.group_id}`,
+    redeemCode: subscription.redeem_code_snapshot || '-',
+    usage: formatSubscriptionUsageForCopy(subscription),
+    startsAt: formatSubscriptionDateTime(subscription.starts_at) || '-',
+    expiresAt: formatSubscriptionDateTime(subscription.expires_at) || '-',
+    status: t(`admin.subscriptions.status.${subscription.status}`)
+  }
+
+  return [
+    `${labels.email}: ${values.email}`,
+    `${labels.group}: ${values.group}`,
+    `${labels.redeemCode}: ${values.redeemCode}`,
+    `${labels.usage}: ${values.usage}`,
+    `${labels.startsAt}: ${values.startsAt}`,
+    `${labels.expiresAt}: ${values.expiresAt}`,
+    `${labels.status}: ${values.status}`
+  ].join('\n')
+}
+
+const handleCopySubscription = async (subscription: UserSubscription) => {
+  await copyToClipboard(buildSubscriptionCopyText(subscription), t('admin.subscriptions.copySuccess'))
 }
 
 // Helper functions
