@@ -1656,6 +1656,16 @@ export interface UserSubscription {
   starts_at: string
   is_aggregate?: boolean
   subscription_count?: number
+  effective_available_usd?: number | null
+  effective_resets_at?: string | null
+  effective_daily_resets_at?: string | null
+  effective_weekly_resets_at?: string | null
+  effective_monthly_resets_at?: string | null
+  effective_custom_resets_at?: string | null
+  effective_daily_usage_usd?: number | null
+  effective_weekly_usage_usd?: number | null
+  effective_monthly_usage_usd?: number | null
+  effective_custom_usage_usd?: number | null
   daily_usage_usd: number
   weekly_usage_usd: number
   monthly_usage_usd: number

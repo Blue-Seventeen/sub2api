@@ -153,6 +153,18 @@ func (h *SubscriptionHandler) GetSummary(c *gin.Context) {
 			MonthlyUsedUSD: sub.MonthlyUsageUSD,
 			CustomUsedUSD:  sub.CustomUsageUSD,
 		}
+		if sub.EffectiveDailyUsageUSD != nil {
+			item.DailyUsedUSD = *sub.EffectiveDailyUsageUSD
+		}
+		if sub.EffectiveWeeklyUsageUSD != nil {
+			item.WeeklyUsedUSD = *sub.EffectiveWeeklyUsageUSD
+		}
+		if sub.EffectiveMonthlyUsageUSD != nil {
+			item.MonthlyUsedUSD = *sub.EffectiveMonthlyUsageUSD
+		}
+		if sub.EffectiveCustomUsageUSD != nil {
+			item.CustomUsedUSD = *sub.EffectiveCustomUsageUSD
+		}
 		if item.ID == 0 {
 			item.ID = sub.GroupID
 		}
@@ -181,8 +193,8 @@ func (h *SubscriptionHandler) GetSummary(c *gin.Context) {
 			item.ExpiresAt = &formatted
 		}
 
-		// Track total usage (use monthly as the most comprehensive)
-		totalUsed += sub.MonthlyUsageUSD
+		// Track total usage with the same effective display semantics as item rows.
+		totalUsed += item.MonthlyUsedUSD
 
 		items = append(items, item)
 	}

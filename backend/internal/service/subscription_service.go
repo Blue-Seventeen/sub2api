@@ -1401,6 +1401,15 @@ func aggregateActiveSubscriptionsForDisplay(subs []UserSubscription) *UserSubscr
 	return aggregateActiveSubscriptionsInternal(subs, true)
 }
 
+func aggregateActiveSubscriptionsForUserDisplay(subs []UserSubscription) *UserSubscription {
+	agg := aggregateActiveSubscriptionsForDisplay(subs)
+	if agg == nil {
+		return agg
+	}
+	applyUserEffectiveDisplay(agg, subs)
+	return agg
+}
+
 func aggregateActiveSubscriptionsInternal(subs []UserSubscription, normalizeWindows bool) *UserSubscription {
 	if len(subs) == 0 {
 		return nil
@@ -1486,6 +1495,360 @@ func aggregateActiveSubscriptionsInternal(subs []UserSubscription, normalizeWind
 	agg.CustomWindowStart = aggregateWindowStart(normalized, "custom")
 	agg.Group = agg.EffectiveGroup(agg.Group)
 	return &agg
+}
+
+type subscriptionWindowDisplayInfo struct {
+	limit   *float64
+	usage   float64
+	resetAt *time.Time
+	enabled bool
+}
+
+type subscriptionCardDisplayAvailability struct {
+	available float64
+	unlimited bool
+	resetsAt  *time.Time
+	windows   map[string]subscriptionWindowDisplayInfo
+}
+
+func applyUserEffectiveDisplay(agg *UserSubscription, subs []UserSubscription) {
+	if agg == nil || len(subs) == 0 {
+		return
+	}
+	now := time.Now()
+	normalized := make([]UserSubscription, 0, len(subs))
+	for i := range subs {
+		sub := subs[i]
+		normalizeSubscriptionWindowsAt(&sub, now)
+		normalized = append(normalized, sub)
+	}
+
+	cards := make([]subscriptionCardDisplayAvailability, 0, len(normalized))
+	totalAvailable := 0.0
+	hasUnlimited := false
+	var effectiveResetsAt *time.Time
+	for i := range normalized {
+		card := subscriptionDisplayAvailability(&normalized[i])
+		cards = append(cards, card)
+		if card.unlimited {
+			hasUnlimited = true
+		} else {
+			totalAvailable += card.available
+		}
+		if card.resetsAt != nil && (effectiveResetsAt == nil || card.resetsAt.Before(*effectiveResetsAt)) {
+			v := *card.resetsAt
+			effectiveResetsAt = &v
+		}
+	}
+	if hasUnlimited {
+		agg.EffectiveAvailableUSD = nil
+		effectiveResetsAt = nil
+	} else {
+		agg.EffectiveAvailableUSD = subscriptionFloatPtr(totalAvailable)
+	}
+	applyUserDisplayAggregateLimits(agg, cards, hasUnlimited)
+	agg.EffectiveResetsAt = effectiveResetsAt
+	agg.EffectiveDailyUsageUSD = aggregateEffectiveWindowUsage(cards, "daily", agg.EffectiveDailyLimitUSD(agg.Group))
+	agg.EffectiveWeeklyUsageUSD = aggregateEffectiveWindowUsage(cards, "weekly", agg.EffectiveWeeklyLimitUSD(agg.Group))
+	agg.EffectiveMonthlyUsageUSD = aggregateEffectiveWindowUsage(cards, "monthly", agg.EffectiveMonthlyLimitUSD(agg.Group))
+	agg.EffectiveDailyResetsAt = aggregateEffectiveWindowResetTime(cards, "daily")
+	agg.EffectiveWeeklyResetsAt = aggregateEffectiveWindowResetTime(cards, "weekly")
+	agg.EffectiveMonthlyResetsAt = aggregateEffectiveWindowResetTime(cards, "monthly")
+	if agg.EffectiveCustomLimitHours(agg.Group) > 0 {
+		agg.EffectiveCustomUsageUSD = aggregateEffectiveWindowUsage(cards, "custom", agg.EffectiveCustomLimitUSD(agg.Group))
+		agg.EffectiveCustomResetsAt = aggregateEffectiveWindowResetTime(cards, "custom")
+	}
+}
+
+func applyUserDisplayAggregateLimits(agg *UserSubscription, cards []subscriptionCardDisplayAvailability, hasUnlimited bool) {
+	if agg == nil {
+		return
+	}
+	group := agg.EffectiveGroup(agg.Group)
+	if group == nil {
+		group = &Group{ID: agg.GroupID, SubscriptionType: SubscriptionTypeSubscription}
+	}
+	groupCopy := *group
+	if hasUnlimited {
+		agg.DailyLimitUSDSnapshot = nil
+		agg.WeeklyLimitUSDSnapshot = nil
+		agg.MonthlyLimitUSDSnapshot = nil
+		agg.CustomLimitHoursSnapshot = nil
+		agg.CustomLimitUSDSnapshot = nil
+		groupCopy.DailyLimitUSD = nil
+		groupCopy.WeeklyLimitUSD = nil
+		groupCopy.MonthlyLimitUSD = nil
+		groupCopy.CustomLimitHours = 0
+		groupCopy.CustomLimitUSD = nil
+		agg.Group = &groupCopy
+		return
+	}
+
+	agg.DailyLimitUSDSnapshot = aggregateEnabledWindowLimit(cards, "daily")
+	agg.WeeklyLimitUSDSnapshot = aggregateEnabledWindowLimit(cards, "weekly")
+	agg.MonthlyLimitUSDSnapshot = aggregateEnabledWindowLimit(cards, "monthly")
+	agg.CustomLimitUSDSnapshot = aggregateEnabledWindowLimit(cards, "custom")
+	if agg.CustomLimitUSDSnapshot == nil {
+		agg.CustomLimitHoursSnapshot = nil
+	}
+
+	groupCopy.DailyLimitUSD = agg.DailyLimitUSDSnapshot
+	groupCopy.WeeklyLimitUSD = agg.WeeklyLimitUSDSnapshot
+	groupCopy.MonthlyLimitUSD = agg.MonthlyLimitUSDSnapshot
+	if agg.CustomLimitUSDSnapshot == nil {
+		groupCopy.CustomLimitHours = 0
+		groupCopy.CustomLimitUSD = nil
+	} else {
+		groupCopy.CustomLimitUSD = agg.CustomLimitUSDSnapshot
+		if agg.CustomLimitHoursSnapshot != nil {
+			groupCopy.CustomLimitHours = *agg.CustomLimitHoursSnapshot
+		}
+	}
+	agg.Group = &groupCopy
+}
+
+func aggregateEnabledWindowLimit(cards []subscriptionCardDisplayAvailability, window string) *float64 {
+	var sum float64
+	found := false
+	for _, card := range cards {
+		info, ok := card.windows[window]
+		if !ok || !info.enabled || !hasPositiveLimit(info.limit) {
+			continue
+		}
+		found = true
+		sum += *info.limit
+	}
+	if !found {
+		return nil
+	}
+	return subscriptionFloatPtr(sum)
+}
+
+func subscriptionDisplayAvailability(sub *UserSubscription) subscriptionCardDisplayAvailability {
+	out := subscriptionCardDisplayAvailability{
+		available: math.Inf(1),
+		unlimited: true,
+		windows:   make(map[string]subscriptionWindowDisplayInfo, 4),
+	}
+	if sub == nil {
+		out.available = 0
+		out.unlimited = false
+		return out
+	}
+	group := sub.EffectiveGroup(sub.Group)
+	addWindow := func(name string, limit *float64, usage float64, resetAt *time.Time, enabled bool) {
+		if !enabled || !hasPositiveLimit(limit) {
+			out.windows[name] = subscriptionWindowDisplayInfo{limit: limit, usage: usage, resetAt: resetAt, enabled: false}
+			return
+		}
+		out.unlimited = false
+		remaining := *limit - usage
+		if remaining < out.available {
+			out.available = remaining
+		}
+		out.windows[name] = subscriptionWindowDisplayInfo{
+			limit:   limit,
+			usage:   usage,
+			resetAt: resetAt,
+			enabled: true,
+		}
+	}
+	addWindow("daily", sub.EffectiveDailyLimitUSD(group), sub.DailyUsageUSD, sub.EffectiveDisplayDailyResetTime(), true)
+	addWindow("weekly", sub.EffectiveWeeklyLimitUSD(group), sub.WeeklyUsageUSD, sub.WeeklyResetTime(), true)
+	addWindow("monthly", sub.EffectiveMonthlyLimitUSD(group), sub.MonthlyUsageUSD, sub.MonthlyResetTime(), true)
+	addWindow("custom", sub.EffectiveCustomLimitUSD(group), sub.CustomUsageUSD, sub.CustomResetTime(group), sub.EffectiveCustomLimitHours(group) > 0)
+	if out.unlimited {
+		out.available = math.Inf(1)
+		return out
+	}
+	if out.available < 0 {
+		out.available = 0
+	}
+	out.resetsAt = cardEffectiveResetTime(out.windows, out.available)
+	return out
+}
+
+func cardEffectiveResetTime(windows map[string]subscriptionWindowDisplayInfo, available float64) *time.Time {
+	var latest *time.Time
+	for _, window := range windows {
+		if !window.enabled {
+			continue
+		}
+		remaining := 0.0
+		if hasPositiveLimit(window.limit) {
+			remaining = *window.limit - window.usage
+		}
+		if remaining > available+1e-9 {
+			continue
+		}
+		if window.resetAt == nil {
+			return nil
+		}
+		if latest == nil || window.resetAt.After(*latest) {
+			v := *window.resetAt
+			latest = &v
+		}
+	}
+	return latest
+}
+
+func aggregateEffectiveWindowResetTime(cards []subscriptionCardDisplayAvailability, window string) *time.Time {
+	var earliest *time.Time
+	for _, card := range cards {
+		resetAt := cardEffectiveWindowResetTime(card, window)
+		if resetAt == nil {
+			continue
+		}
+		if earliest == nil || resetAt.Before(*earliest) {
+			v := *resetAt
+			earliest = &v
+		}
+	}
+	return earliest
+}
+
+func cardEffectiveWindowResetTime(card subscriptionCardDisplayAvailability, target string) *time.Time {
+	targetInfo, ok := card.windows[target]
+	if !ok || !targetInfo.enabled || math.IsInf(card.available, 1) {
+		return nil
+	}
+
+	targetRemaining := windowRemaining(targetInfo)
+	currentAvailable := card.available
+	if currentAvailable < 0 {
+		currentAvailable = 0
+	}
+
+	if targetRemaining > currentAvailable+1e-9 {
+		// The target window itself is not part of the current bottleneck.
+		// Its displayed recovery waits for the windows that currently make this card unusable.
+		return cardEffectiveResetTime(card.windows, currentAvailable)
+	}
+
+	return cardRecoveryAfterWindowReset(card.windows, target)
+}
+
+func cardRecoveryAfterWindowReset(windows map[string]subscriptionWindowDisplayInfo, target string) *time.Time {
+	targetInfo := windows[target]
+	if targetInfo.resetAt == nil {
+		return nil
+	}
+	recoveryAt := *targetInfo.resetAt
+	var latest *time.Time
+	setLatest := func(resetAt *time.Time) bool {
+		if resetAt == nil {
+			return false
+		}
+		if latest == nil || resetAt.After(*latest) {
+			v := *resetAt
+			latest = &v
+		}
+		return true
+	}
+	if !setLatest(targetInfo.resetAt) {
+		return nil
+	}
+
+	for name, info := range windows {
+		if name == target || !info.enabled {
+			continue
+		}
+		remaining := windowRemaining(info)
+		if info.resetAt == nil {
+			if remaining <= 1e-9 {
+				return nil
+			}
+			continue
+		}
+		if !recoveryAt.Before(*info.resetAt) {
+			remaining = *info.limit
+		}
+		if remaining > 1e-9 {
+			continue
+		}
+		if !setLatest(info.resetAt) {
+			return nil
+		}
+	}
+	return latest
+}
+
+func windowRemaining(info subscriptionWindowDisplayInfo) float64 {
+	if !info.enabled || !hasPositiveLimit(info.limit) {
+		return math.Inf(1)
+	}
+	remaining := *info.limit - info.usage
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
+}
+
+func aggregateEffectiveWindowUsage(cards []subscriptionCardDisplayAvailability, window string, limit *float64) *float64 {
+	if !hasPositiveLimit(limit) {
+		return nil
+	}
+	var available float64
+	found := false
+	for _, card := range cards {
+		info, ok := card.windows[window]
+		if !ok || !info.enabled {
+			continue
+		}
+		if math.IsInf(card.available, 1) {
+			return subscriptionFloatPtr(0)
+		}
+		found = true
+		available += card.available
+	}
+	if !found {
+		return nil
+	}
+	if available < 0 {
+		available = 0
+	}
+	if available > *limit {
+		available = *limit
+	}
+	usage := *limit - available
+	if usage < 0 {
+		usage = 0
+	}
+	return subscriptionFloatPtr(usage)
+}
+
+func subscriptionDisplayUsageForWindow(sub *UserSubscription, window string) float64 {
+	if sub == nil {
+		return 0
+	}
+	switch window {
+	case "daily":
+		if sub.EffectiveDailyUsageUSD != nil {
+			return *sub.EffectiveDailyUsageUSD
+		}
+		return sub.DailyUsageUSD
+	case "weekly":
+		if sub.EffectiveWeeklyUsageUSD != nil {
+			return *sub.EffectiveWeeklyUsageUSD
+		}
+		return sub.WeeklyUsageUSD
+	case "monthly":
+		if sub.EffectiveMonthlyUsageUSD != nil {
+			return *sub.EffectiveMonthlyUsageUSD
+		}
+		return sub.MonthlyUsageUSD
+	case "custom":
+		if sub.EffectiveCustomUsageUSD != nil {
+			return *sub.EffectiveCustomUsageUSD
+		}
+		return sub.CustomUsageUSD
+	default:
+		return 0
+	}
+}
+
+func subscriptionFloatPtr(v float64) *float64 {
+	return &v
 }
 
 func aggregateStackedAvailable(subs []UserSubscription) *float64 {
@@ -1598,18 +1961,26 @@ func subscriptionWindowInfo(sub *UserSubscription, window string) (*time.Time, f
 }
 
 func aggregateActiveByGroup(subs []UserSubscription) []UserSubscription {
-	return aggregateActiveByGroupInternal(subs, false)
+	return aggregateActiveByGroupInternal(subs, false, false)
 }
 
 func aggregateActiveByGroupForDisplay(subs []UserSubscription) []UserSubscription {
-	return aggregateActiveByGroupInternal(subs, true)
+	return aggregateActiveByGroupInternal(subs, true, false)
+}
+
+func aggregateActiveByGroupForUserDisplay(subs []UserSubscription) []UserSubscription {
+	return aggregateActiveByGroupInternal(subs, true, true)
 }
 
 func aggregateUserVisibleByGroupForDisplay(subs []UserSubscription) []UserSubscription {
-	return aggregateByGroupAndStatusForDisplay(subs, true)
+	return aggregateByGroupAndStatusForDisplay(subs, true, false)
 }
 
-func aggregateActiveByGroupInternal(subs []UserSubscription, normalizeWindows bool) []UserSubscription {
+func aggregateUserVisibleByGroupForUserDisplay(subs []UserSubscription) []UserSubscription {
+	return aggregateByGroupAndStatusForDisplay(subs, true, true)
+}
+
+func aggregateActiveByGroupInternal(subs []UserSubscription, normalizeWindows bool, userDisplay bool) []UserSubscription {
 	if len(subs) == 0 {
 		return subs
 	}
@@ -1634,7 +2005,9 @@ func aggregateActiveByGroupInternal(subs []UserSubscription, normalizeWindows bo
 		items := grouped[key]
 		if key > 0 {
 			var agg *UserSubscription
-			if normalizeWindows {
+			if userDisplay {
+				agg = aggregateActiveSubscriptionsForUserDisplay(items)
+			} else if normalizeWindows {
 				agg = aggregateActiveSubscriptionsForDisplay(items)
 			} else {
 				agg = aggregateActiveSubscriptions(items)
@@ -1649,7 +2022,7 @@ func aggregateActiveByGroupInternal(subs []UserSubscription, normalizeWindows bo
 	return out
 }
 
-func aggregateByGroupAndStatusForDisplay(subs []UserSubscription, normalizeWindows bool) []UserSubscription {
+func aggregateByGroupAndStatusForDisplay(subs []UserSubscription, normalizeWindows bool, userDisplay bool) []UserSubscription {
 	if len(subs) == 0 {
 		return subs
 	}
@@ -1674,7 +2047,9 @@ func aggregateByGroupAndStatusForDisplay(subs []UserSubscription, normalizeWindo
 		items := grouped[key]
 		var agg *UserSubscription
 		isActiveBucket := len(items) > 0 && items[0].Status == SubscriptionStatusActive && items[0].ExpiresAt.After(now)
-		if normalizeWindows && isActiveBucket {
+		if userDisplay && isActiveBucket {
+			agg = aggregateActiveSubscriptionsForUserDisplay(items)
+		} else if normalizeWindows && isActiveBucket {
 			agg = aggregateActiveSubscriptionsForDisplay(items)
 		} else {
 			agg = aggregateActiveSubscriptions(items)
@@ -1712,7 +2087,7 @@ func (s *SubscriptionService) ListUserSubscriptions(ctx context.Context, userID 
 		return nil, err
 	}
 	normalizeSubscriptionStatus(subs)
-	return aggregateUserVisibleByGroupForDisplay(subs), nil
+	return aggregateUserVisibleByGroupForUserDisplay(subs), nil
 }
 
 // ListActiveUserSubscriptions 获取用户的所有有效订阅
@@ -1721,7 +2096,7 @@ func (s *SubscriptionService) ListActiveUserSubscriptions(ctx context.Context, u
 	if err != nil {
 		return nil, err
 	}
-	return aggregateActiveByGroupForDisplay(subs), nil
+	return aggregateActiveByGroupForUserDisplay(subs), nil
 }
 
 // ListGroupSubscriptions 获取分组的所有订阅
@@ -2234,15 +2609,19 @@ func (s *SubscriptionService) calculateProgress(sub *UserSubscription, group *Gr
 	// 日进度
 	if group.HasDailyLimit() && sub.DailyWindowStart != nil {
 		limit := *group.DailyLimitUSD
+		used := subscriptionDisplayUsageForWindow(sub, "daily")
 		resetsAt := sub.DailyWindowStart.Add(subscriptionDailyWindow)
 		if dailyResetTime := sub.DailyResetTime(); dailyResetTime != nil {
 			resetsAt = *dailyResetTime
 		}
+		if sub.EffectiveDailyResetsAt != nil {
+			resetsAt = *sub.EffectiveDailyResetsAt
+		}
 		progress.Daily = &UsageWindowProgress{
 			LimitUSD:        limit,
-			UsedUSD:         sub.DailyUsageUSD,
-			RemainingUSD:    limit - sub.DailyUsageUSD,
-			Percentage:      (sub.DailyUsageUSD / limit) * 100,
+			UsedUSD:         used,
+			RemainingUSD:    limit - used,
+			Percentage:      (used / limit) * 100,
 			WindowStart:     *sub.DailyWindowStart,
 			ResetsAt:        resetsAt,
 			ResetsInSeconds: int64(time.Until(resetsAt).Seconds()),
@@ -2261,12 +2640,16 @@ func (s *SubscriptionService) calculateProgress(sub *UserSubscription, group *Gr
 	// 周进度
 	if group.HasWeeklyLimit() && sub.WeeklyWindowStart != nil {
 		limit := *group.WeeklyLimitUSD
+		used := subscriptionDisplayUsageForWindow(sub, "weekly")
 		resetsAt := sub.WeeklyWindowStart.Add(subscriptionWeeklyWindow)
+		if sub.EffectiveWeeklyResetsAt != nil {
+			resetsAt = *sub.EffectiveWeeklyResetsAt
+		}
 		progress.Weekly = &UsageWindowProgress{
 			LimitUSD:        limit,
-			UsedUSD:         sub.WeeklyUsageUSD,
-			RemainingUSD:    limit - sub.WeeklyUsageUSD,
-			Percentage:      (sub.WeeklyUsageUSD / limit) * 100,
+			UsedUSD:         used,
+			RemainingUSD:    limit - used,
+			Percentage:      (used / limit) * 100,
 			WindowStart:     *sub.WeeklyWindowStart,
 			ResetsAt:        resetsAt,
 			ResetsInSeconds: int64(time.Until(resetsAt).Seconds()),
@@ -2285,12 +2668,16 @@ func (s *SubscriptionService) calculateProgress(sub *UserSubscription, group *Gr
 	// 月进度
 	if group.HasMonthlyLimit() && sub.MonthlyWindowStart != nil {
 		limit := *group.MonthlyLimitUSD
+		used := subscriptionDisplayUsageForWindow(sub, "monthly")
 		resetsAt := sub.MonthlyWindowStart.Add(subscriptionMonthlyWindow)
+		if sub.EffectiveMonthlyResetsAt != nil {
+			resetsAt = *sub.EffectiveMonthlyResetsAt
+		}
 		progress.Monthly = &UsageWindowProgress{
 			LimitUSD:        limit,
-			UsedUSD:         sub.MonthlyUsageUSD,
-			RemainingUSD:    limit - sub.MonthlyUsageUSD,
-			Percentage:      (sub.MonthlyUsageUSD / limit) * 100,
+			UsedUSD:         used,
+			RemainingUSD:    limit - used,
+			Percentage:      (used / limit) * 100,
 			WindowStart:     *sub.MonthlyWindowStart,
 			ResetsAt:        resetsAt,
 			ResetsInSeconds: int64(time.Until(resetsAt).Seconds()),
@@ -2308,15 +2695,19 @@ func (s *SubscriptionService) calculateProgress(sub *UserSubscription, group *Gr
 
 	if group.HasCustomLimit() && sub.CustomWindowStart != nil {
 		limit := *group.CustomLimitUSD
+		used := subscriptionDisplayUsageForWindow(sub, "custom")
 		resetsAt := sub.CustomWindowStart.Add(customSubscriptionWindow(group))
 		if customResetTime := sub.CustomResetTime(group); customResetTime != nil {
 			resetsAt = *customResetTime
 		}
+		if sub.EffectiveCustomResetsAt != nil {
+			resetsAt = *sub.EffectiveCustomResetsAt
+		}
 		progress.Custom = &UsageWindowProgress{
 			LimitUSD:        limit,
-			UsedUSD:         sub.CustomUsageUSD,
-			RemainingUSD:    limit - sub.CustomUsageUSD,
-			Percentage:      (sub.CustomUsageUSD / limit) * 100,
+			UsedUSD:         used,
+			RemainingUSD:    limit - used,
+			Percentage:      (used / limit) * 100,
 			WindowStart:     *sub.CustomWindowStart,
 			ResetsAt:        resetsAt,
 			ResetsInSeconds: int64(time.Until(resetsAt).Seconds()),

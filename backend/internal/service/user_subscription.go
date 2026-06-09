@@ -21,6 +21,17 @@ type UserSubscription struct {
 	SubscriptionCount   int
 	StackedAvailableUSD *float64
 
+	EffectiveAvailableUSD    *float64
+	EffectiveResetsAt        *time.Time
+	EffectiveDailyResetsAt   *time.Time
+	EffectiveWeeklyResetsAt  *time.Time
+	EffectiveMonthlyResetsAt *time.Time
+	EffectiveCustomResetsAt  *time.Time
+	EffectiveDailyUsageUSD   *float64
+	EffectiveWeeklyUsageUSD  *float64
+	EffectiveMonthlyUsageUSD *float64
+	EffectiveCustomUsageUSD  *float64
+
 	DailyWindowStart   *time.Time
 	WeeklyWindowStart  *time.Time
 	MonthlyWindowStart *time.Time
@@ -138,6 +149,14 @@ func (s *UserSubscription) DailyResetTime() *time.Time {
 	if s.HasOneTimeDailyQuota() {
 		t := s.ExpiresAt
 		return &t
+	}
+	t := s.DailyWindowStart.Add(subscriptionDailyWindow)
+	return &t
+}
+
+func (s *UserSubscription) EffectiveDisplayDailyResetTime() *time.Time {
+	if s.DailyWindowStart == nil || s.HasOneTimeDailyQuota() {
+		return nil
 	}
 	t := s.DailyWindowStart.Add(subscriptionDailyWindow)
 	return &t

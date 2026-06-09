@@ -596,6 +596,17 @@ type UserSubscription struct {
 	IsAggregate       bool `json:"is_aggregate,omitempty"`
 	SubscriptionCount int  `json:"subscription_count,omitempty"`
 
+	EffectiveAvailableUSD    *float64   `json:"effective_available_usd,omitempty"`
+	EffectiveResetsAt        *time.Time `json:"effective_resets_at,omitempty"`
+	EffectiveDailyResetsAt   *time.Time `json:"effective_daily_resets_at,omitempty"`
+	EffectiveWeeklyResetsAt  *time.Time `json:"effective_weekly_resets_at,omitempty"`
+	EffectiveMonthlyResetsAt *time.Time `json:"effective_monthly_resets_at,omitempty"`
+	EffectiveCustomResetsAt  *time.Time `json:"effective_custom_resets_at,omitempty"`
+	EffectiveDailyUsageUSD   *float64   `json:"effective_daily_usage_usd,omitempty"`
+	EffectiveWeeklyUsageUSD  *float64   `json:"effective_weekly_usage_usd,omitempty"`
+	EffectiveMonthlyUsageUSD *float64   `json:"effective_monthly_usage_usd,omitempty"`
+	EffectiveCustomUsageUSD  *float64   `json:"effective_custom_usage_usd,omitempty"`
+
 	DailyWindowStart   *time.Time `json:"daily_window_start"`
 	WeeklyWindowStart  *time.Time `json:"weekly_window_start"`
 	MonthlyWindowStart *time.Time `json:"monthly_window_start"`

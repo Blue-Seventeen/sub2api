@@ -101,7 +101,7 @@
                   {{ t('userSubscriptions.daily') }}
                 </span>
                 <span class="text-sm text-gray-500 dark:text-dark-400">
-                  {{ formatCurrencyAmount(subscription.daily_usage_usd || 0) }} / {{
+                  {{ formatCurrencyAmount(displayUsage(subscription, 'daily')) }} / {{
                     formatCurrencyAmount(subscription.group.daily_limit_usd)
                   }}
                 </span>
@@ -111,13 +111,13 @@
                   class="absolute inset-y-0 left-0 rounded-full transition-all duration-300"
                   :class="
                     getProgressBarClass(
-                      subscription.daily_usage_usd,
+                      displayUsage(subscription, 'daily'),
                       subscription.group.daily_limit_usd
                     )
                   "
                   :style="{
                     width: getProgressWidth(
-                      subscription.daily_usage_usd,
+                      displayUsage(subscription, 'daily'),
                       subscription.group.daily_limit_usd
                     )
                   }"
@@ -138,7 +138,7 @@
                   {{ t('userSubscriptions.weekly') }}
                 </span>
                 <span class="text-sm text-gray-500 dark:text-dark-400">
-                  {{ formatCurrencyAmount(subscription.weekly_usage_usd || 0) }} / {{
+                  {{ formatCurrencyAmount(displayUsage(subscription, 'weekly')) }} / {{
                     formatCurrencyAmount(subscription.group.weekly_limit_usd)
                   }}
                 </span>
@@ -148,13 +148,13 @@
                   class="absolute inset-y-0 left-0 rounded-full transition-all duration-300"
                   :class="
                     getProgressBarClass(
-                      subscription.weekly_usage_usd,
+                      displayUsage(subscription, 'weekly'),
                       subscription.group.weekly_limit_usd
                     )
                   "
                   :style="{
                     width: getProgressWidth(
-                      subscription.weekly_usage_usd,
+                      displayUsage(subscription, 'weekly'),
                       subscription.group.weekly_limit_usd
                     )
                   }"
@@ -166,7 +166,7 @@
               >
                 {{
                   t('userSubscriptions.resetIn', {
-                    time: formatResetTime(subscription.weekly_window_start, 168)
+                    time: formatSubscriptionResetTime(subscription, 'weekly', 168)
                   })
                 }}
               </p>
@@ -179,7 +179,7 @@
                   {{ t('userSubscriptions.monthly') }}
                 </span>
                 <span class="text-sm text-gray-500 dark:text-dark-400">
-                  {{ formatCurrencyAmount(subscription.monthly_usage_usd || 0) }} / {{
+                  {{ formatCurrencyAmount(displayUsage(subscription, 'monthly')) }} / {{
                     formatCurrencyAmount(subscription.group.monthly_limit_usd)
                   }}
                 </span>
@@ -189,13 +189,13 @@
                   class="absolute inset-y-0 left-0 rounded-full transition-all duration-300"
                   :class="
                     getProgressBarClass(
-                      subscription.monthly_usage_usd,
+                      displayUsage(subscription, 'monthly'),
                       subscription.group.monthly_limit_usd
                     )
                   "
                   :style="{
                     width: getProgressWidth(
-                      subscription.monthly_usage_usd,
+                      displayUsage(subscription, 'monthly'),
                       subscription.group.monthly_limit_usd
                     )
                   }"
@@ -207,7 +207,7 @@
               >
                 {{
                   t('userSubscriptions.resetIn', {
-                    time: formatResetTime(subscription.monthly_window_start, 720)
+                    time: formatSubscriptionResetTime(subscription, 'monthly', 720)
                   })
                 }}
               </p>
@@ -223,7 +223,7 @@
                   {{ t('userSubscriptions.custom', { hours: subscription.group.custom_limit_hours }) }}
                 </span>
                 <span class="text-sm text-gray-500 dark:text-dark-400">
-                  {{ formatCurrencyAmount(subscription.custom_usage_usd || 0) }} / {{
+                  {{ formatCurrencyAmount(displayUsage(subscription, 'custom')) }} / {{
                     formatCurrencyAmount(subscription.group.custom_limit_usd)
                   }}
                 </span>
@@ -233,13 +233,13 @@
                   class="absolute inset-y-0 left-0 rounded-full transition-all duration-300"
                   :class="
                     getProgressBarClass(
-                      subscription.custom_usage_usd,
+                      displayUsage(subscription, 'custom'),
                       subscription.group.custom_limit_usd
                     )
                   "
                   :style="{
                     width: getProgressWidth(
-                      subscription.custom_usage_usd,
+                      displayUsage(subscription, 'custom'),
                       subscription.group.custom_limit_usd
                     )
                   }"
@@ -251,10 +251,7 @@
               >
                 {{
                   t('userSubscriptions.resetIn', {
-                    time: formatResetTime(
-                      subscription.custom_window_start,
-                      subscription.group.custom_limit_hours
-                    )
+                    time: formatSubscriptionResetTime(subscription, 'custom', subscription.group.custom_limit_hours)
                   })
                 }}
               </p>
@@ -352,6 +349,19 @@ function getProgressBarClass(used: number | undefined, limit: number | null | un
   return 'bg-green-500'
 }
 
+type SubscriptionWindow = 'daily' | 'weekly' | 'monthly' | 'custom'
+
+function displayUsage(subscription: UserSubscription, window: SubscriptionWindow): number {
+  const key = `effective_${window}_usage_usd` as const
+  const effective = subscription[key]
+  if (typeof effective === 'number' && Number.isFinite(effective)) {
+    return effective
+  }
+  const fallbackKey = `${window}_usage_usd` as const
+  const fallback = subscription[fallbackKey]
+  return typeof fallback === 'number' && Number.isFinite(fallback) ? fallback : 0
+}
+
 function padDatePart(value: number): string {
   return String(value).padStart(2, '0')
 }
@@ -405,6 +415,11 @@ function formatDurationParts(parts: RemainingDurationParts): string {
 }
 
 function formatDailyUsageWindow(subscription: UserSubscription): string {
+  if (subscription.effective_daily_resets_at) {
+    return t('userSubscriptions.resetIn', {
+      time: formatAbsoluteResetTime(subscription.effective_daily_resets_at)
+    })
+  }
   if (isOneTimeDailyQuota(subscription) && subscription.expires_at) {
     const parts = getRemainingDurationParts(subscription.expires_at)
     if (!parts) return t('userSubscriptions.windowNotActive')
@@ -424,6 +439,26 @@ function formatResetTime(windowStart: string | null, windowHours: number): strin
   const parts = getRemainingDurationParts(end)
 
   return parts ? formatDurationParts(parts) : t('userSubscriptions.windowNotActive')
+}
+
+function formatAbsoluteResetTime(resetAt: string | null): string {
+  if (!resetAt) return t('userSubscriptions.windowNotActive')
+  const parts = getRemainingDurationParts(resetAt)
+  return parts ? formatDurationParts(parts) : t('userSubscriptions.windowNotActive')
+}
+
+function formatSubscriptionResetTime(
+  subscription: UserSubscription,
+  window: SubscriptionWindow,
+  windowHours: number
+): string {
+  const resetKey = `effective_${window}_resets_at` as const
+  const effectiveResetAt = subscription[resetKey]
+  if (effectiveResetAt) {
+    return formatAbsoluteResetTime(effectiveResetAt)
+  }
+  const startKey = `${window}_window_start` as const
+  return formatResetTime(subscription[startKey], windowHours)
 }
 
 onMounted(() => {
