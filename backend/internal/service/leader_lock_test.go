@@ -33,6 +33,22 @@ func (f *fakeLeaderLockCache) TryAcquireLeaderLock(_ context.Context, key, owner
 	return true, nil
 }
 
+func (f *fakeLeaderLockCache) TryAcquireOrRenewLeaderLock(_ context.Context, key, owner string, _ time.Duration) (bool, error) {
+	if f.acquireErr != nil {
+		return false, f.acquireErr
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.owners == nil {
+		f.owners = map[string]string{}
+	}
+	if current, held := f.owners[key]; held && current != owner {
+		return false, nil
+	}
+	f.owners[key] = owner
+	return true, nil
+}
+
 func (f *fakeLeaderLockCache) ReleaseLeaderLock(_ context.Context, key, owner string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -85,10 +101,32 @@ func TestTryAcquireSingletonLeaderLock_CacheErrorSkipsCycle(t *testing.T) {
 	require.Nil(t, release)
 }
 
+func TestTryAcquirePeriodicLeaderLease_RenewsSameOwnerWithoutRelease(t *testing.T) {
+	cache := &fakeLeaderLockCache{}
+	ctx := context.Background()
+	const key = "leader:test:periodic"
+
+	releaseA, ok := tryAcquirePeriodicLeaderLease(ctx, cache, nil, key, "A", time.Minute)
+	require.True(t, ok, "first instance should acquire")
+	require.NotNil(t, releaseA)
+	require.Equal(t, "A", cache.heldBy(key))
+
+	releaseA()
+	require.Equal(t, "A", cache.heldBy(key), "periodic Redis lease must remain held until TTL instead of releasing immediately")
+
+	releaseA2, ok := tryAcquirePeriodicLeaderLease(ctx, cache, nil, key, "A", time.Minute)
+	require.True(t, ok, "same owner should renew")
+	require.NotNil(t, releaseA2)
+
+	releaseB, ok := tryAcquirePeriodicLeaderLease(ctx, cache, nil, key, "B", time.Minute)
+	require.False(t, ok, "peer must be locked out while owner renews")
+	require.Nil(t, releaseB)
+}
+
 func TestSubscriptionExpiryService_ReminderSkipsScanWhenNotLeader(t *testing.T) {
 	cache := &fakeLeaderLockCache{}
 	// A peer already holds the reminder leader lock.
-	_, _ = cache.TryAcquireLeaderLock(context.Background(), subscriptionExpiryReminderLeaderLockKey, "peer", time.Minute)
+	_, _ = cache.TryAcquireOrRenewLeaderLock(context.Background(), subscriptionExpiryReminderLeaderLockKey, "peer", time.Minute)
 
 	repo := &subscriptionExpiryRepoStub{}
 	settingRepo := &subscriptionExpirySettingRepoStub{values: map[string]string{}}
@@ -115,9 +153,9 @@ func TestSubscriptionExpiryService_ReminderScansWhenLeader(t *testing.T) {
 	require.Equal(t, 1, repo.listCalls, "leader should scan active subscriptions once")
 }
 
-// Single-instance correctness: the lock is released at the end of each cycle, so
-// the same instance must re-acquire it and run on every subsequent cycle (no
-// self-lockout). Covers both the cache-backed path and the no-backend path.
+// Single-instance correctness: the same owner renews the periodic lease and runs
+// every subsequent cycle (no self-lockout). Covers both the cache-backed path
+// and the no-backend path.
 func TestSubscriptionExpiryService_ReminderRunsEveryCycleSingleInstance(t *testing.T) {
 	cases := map[string]LeaderLockCache{
 		"with_cache": &fakeLeaderLockCache{},

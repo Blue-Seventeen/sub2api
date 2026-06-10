@@ -85,7 +85,7 @@ func (s *PromotionSettlementRunnerService) loop() {
 func (s *PromotionSettlementRunnerService) tick() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	release, ok := tryAcquireSingletonLeaderLock(ctx, s.lockCache, s.lockDB, promotionSettlementRunnerLeaderLockKey, s.instanceID, promotionSettlementRunnerLeaderLockTTL)
+	release, ok := tryAcquirePeriodicLeaderLease(ctx, s.lockCache, s.lockDB, promotionSettlementRunnerLeaderLockKey, s.instanceID, promotionSettlementRunnerLeaderLockTTL)
 	if !ok {
 		return
 	}

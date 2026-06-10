@@ -77,3 +77,25 @@ func TestLeaderLockCache_TTLExpires(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok, "lock should be re-acquirable after the TTL expires")
 }
+
+func TestLeaderLockCache_AcquireOrRenew(t *testing.T) {
+	cache, _ := newLeaderLockTestCache(t)
+	ctx := context.Background()
+	const key = "user-platform-quota:flusher:leader"
+
+	ok, err := cache.TryAcquireOrRenewLeaderLock(ctx, key, "A", time.Minute)
+	require.NoError(t, err)
+	require.True(t, ok, "first owner should acquire")
+
+	ok, err = cache.TryAcquireOrRenewLeaderLock(ctx, key, "B", time.Minute)
+	require.NoError(t, err)
+	require.False(t, ok, "peer must not acquire while A owns the lease")
+
+	ok, err = cache.TryAcquireOrRenewLeaderLock(ctx, key, "A", 2*time.Minute)
+	require.NoError(t, err)
+	require.True(t, ok, "same owner should renew the lease")
+
+	val, err := cache.rdb.Get(ctx, leaderLockKeyPrefix+key).Result()
+	require.NoError(t, err)
+	require.Equal(t, "A", val)
+}

@@ -286,7 +286,7 @@ func (s *UserPlatformQuotaUsageFlusher) flushWithLeaderLock() {
 	ctx, cancel := context.WithTimeout(context.Background(), s.flushTimeout)
 	defer cancel()
 
-	release, ok := tryAcquireSingletonLeaderLock(ctx, s.lockCache, s.lockDB, userPlatformQuotaFlusherLeaderLockKey, s.instanceID, userPlatformQuotaFlusherLeaderLockTTL)
+	release, ok := tryAcquirePeriodicLeaderLease(ctx, s.lockCache, s.lockDB, userPlatformQuotaFlusherLeaderLockKey, s.instanceID, userPlatformQuotaFlusherLeaderLockTTL)
 	if !ok {
 		return
 	}

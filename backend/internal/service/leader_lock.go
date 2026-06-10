@@ -14,6 +14,9 @@ type LeaderLockCache interface {
 	// TryAcquireLeaderLock sets key=owner with the given TTL iff key is absent.
 	// It returns true when the caller becomes the owner.
 	TryAcquireLeaderLock(ctx context.Context, key, owner string, ttl time.Duration) (bool, error)
+	// TryAcquireOrRenewLeaderLock sets key=owner when absent, or extends the TTL
+	// when the same owner already holds it. It returns false when a peer owns it.
+	TryAcquireOrRenewLeaderLock(ctx context.Context, key, owner string, ttl time.Duration) (bool, error)
 	// ReleaseLeaderLock deletes key iff it is still owned by owner.
 	ReleaseLeaderLock(ctx context.Context, key, owner string) error
 }
@@ -67,4 +70,28 @@ func tryAcquireSingletonLeaderLock(ctx context.Context, cache LeaderLockCache, d
 
 	// No coordination backend available: run without gating.
 	return func() {}, true
+}
+
+// tryAcquirePeriodicLeaderLease elects a stable leader for recurring jobs.
+//
+// Unlike tryAcquireSingletonLeaderLock, Redis-backed leases are not released at
+// the end of a successful run. The current owner renews the TTL on each tick and
+// peers keep skipping until the owner stops renewing. This prevents multi-node
+// deployments with skewed tick times from running the same periodic job once per
+// node in the same cadence window. DB fallback keeps the old single-flight
+// behavior because PostgreSQL advisory locks do not have TTL-based leases.
+func tryAcquirePeriodicLeaderLease(ctx context.Context, cache LeaderLockCache, db *sql.DB, key, owner string, ttl time.Duration) (func(), bool) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	if cache != nil {
+		ok, err := cache.TryAcquireOrRenewLeaderLock(ctx, key, owner, ttl)
+		if err != nil || !ok {
+			return nil, false
+		}
+		return func() {}, true
+	}
+
+	return tryAcquireSingletonLeaderLock(ctx, nil, db, key, owner, ttl)
 }

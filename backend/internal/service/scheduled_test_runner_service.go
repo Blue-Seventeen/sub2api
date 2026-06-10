@@ -111,7 +111,7 @@ func (s *ScheduledTestRunnerService) runScheduled() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	release, ok := tryAcquireSingletonLeaderLock(ctx, s.lockCache, s.lockDB, scheduledTestRunnerLeaderLockKey, s.instanceID, scheduledTestRunnerLeaderLockTTL)
+	release, ok := tryAcquirePeriodicLeaderLease(ctx, s.lockCache, s.lockDB, scheduledTestRunnerLeaderLockKey, s.instanceID, scheduledTestRunnerLeaderLockTTL)
 	if !ok {
 		return
 	}

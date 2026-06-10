@@ -224,7 +224,7 @@ func (s *DashboardAggregationService) runScheduledAggregation() {
 
 	// Multi-instance guard: only the leader runs the periodic aggregation; peers
 	// skip this cycle to avoid N× redundant GROUP BY queries and watermark races.
-	release, ok := tryAcquireSingletonLeaderLock(ctx, s.lockCache, s.db, dashboardAggregationLeaderLockKey, s.instanceID, dashboardAggregationLeaderLockTTL)
+	release, ok := tryAcquirePeriodicLeaderLease(ctx, s.lockCache, s.db, dashboardAggregationLeaderLockKey, s.instanceID, dashboardAggregationLeaderLockTTL)
 	if !ok {
 		return
 	}

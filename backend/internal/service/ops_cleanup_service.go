@@ -32,9 +32,15 @@ const (
 
 var opsCleanupCronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 
-var opsCleanupReleaseScript = redis.NewScript(`
-if redis.call("GET", KEYS[1]) == ARGV[1] then
-  return redis.call("DEL", KEYS[1])
+var opsCleanupAcquireOrRenewScript = redis.NewScript(`
+local current = redis.call("GET", KEYS[1])
+if not current then
+  redis.call("SET", KEYS[1], ARGV[1], "PX", ARGV[2])
+  return 1
+end
+if current == ARGV[1] then
+  redis.call("PEXPIRE", KEYS[1], ARGV[2])
+  return 1
 end
 return 0
 `)
@@ -511,14 +517,17 @@ func (s *OpsCleanupService) tryAcquireLeaderLock(ctx context.Context) (func(), b
 	// unavailable, skip this cycle instead of falling back to DB and risking
 	// split leadership with peers that still use Redis.
 	if s.redisClient != nil {
-		ok, err := s.redisClient.SetNX(ctx, key, s.instanceID, ttl).Result()
+		ttlMillis := ttl.Milliseconds()
+		if ttlMillis <= 0 {
+			ttlMillis = 1
+		}
+		n, err := opsCleanupAcquireOrRenewScript.Run(ctx, s.redisClient, []string{key}, s.instanceID, ttlMillis).Int()
 		if err == nil {
+			ok := n == 1
 			if !ok {
 				return nil, false
 			}
-			return func() {
-				_, _ = opsCleanupReleaseScript.Run(ctx, s.redisClient, []string{key}, s.instanceID).Result()
-			}, true
+			return func() {}, true
 		}
 		s.warnNoRedisOnce.Do(func() {
 			logger.LegacyPrintf("service.ops_cleanup", "[OpsCleanup] leader lock SetNX failed; skipping this cycle to avoid split leadership: %v", err)

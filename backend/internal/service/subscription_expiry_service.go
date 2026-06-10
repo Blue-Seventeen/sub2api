@@ -124,7 +124,7 @@ func (s *SubscriptionExpiryService) sendExpiryReminders(ctx context.Context) {
 
 	// Multi-instance guard: only the leader walks every active subscription and
 	// sends reminders, avoiding N× full scans and duplicate reminder emails.
-	release, ok := tryAcquireSingletonLeaderLock(ctx, s.lockCache, s.db, subscriptionExpiryReminderLeaderLockKey, s.instanceID, subscriptionExpiryReminderLeaderLockTTL)
+	release, ok := tryAcquirePeriodicLeaderLease(ctx, s.lockCache, s.db, subscriptionExpiryReminderLeaderLockKey, s.instanceID, subscriptionExpiryReminderLeaderLockTTL)
 	if !ok {
 		return
 	}

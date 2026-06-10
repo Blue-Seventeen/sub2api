@@ -373,9 +373,15 @@ func (s *OpsAggregationService) isMonitoringEnabled(ctx context.Context) bool {
 	}
 }
 
-var opsAggReleaseScript = redis.NewScript(`
-if redis.call("GET", KEYS[1]) == ARGV[1] then
-  return redis.call("DEL", KEYS[1])
+var opsAggAcquireOrRenewScript = redis.NewScript(`
+local current = redis.call("GET", KEYS[1])
+if not current then
+  redis.call("SET", KEYS[1], ARGV[1], "PX", ARGV[2])
+  return 1
+end
+if current == ARGV[1] then
+  redis.call("PEXPIRE", KEYS[1], ARGV[2])
+  return 1
 end
 return 0
 `)
@@ -392,18 +398,18 @@ func (s *OpsAggregationService) tryAcquireLeaderLock(ctx context.Context, key st
 	// unavailable, skip this cycle instead of falling back to DB and risking
 	// split leadership with peers that still use Redis.
 	if s.redisClient != nil {
-		ok, err := s.redisClient.SetNX(ctx, key, s.instanceID, ttl).Result()
+		ttlMillis := ttl.Milliseconds()
+		if ttlMillis <= 0 {
+			ttlMillis = 1
+		}
+		n, err := opsAggAcquireOrRenewScript.Run(ctx, s.redisClient, []string{key}, s.instanceID, ttlMillis).Int()
 		if err == nil {
+			ok := n == 1
 			if !ok {
 				s.maybeLogSkip(logPrefix)
 				return nil, false
 			}
-			release := func() {
-				ctx2, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-				defer cancel()
-				_, _ = opsAggReleaseScript.Run(ctx2, s.redisClient, []string{key}, s.instanceID).Result()
-			}
-			return release, true
+			return func() {}, true
 		}
 		s.maybeLogLockError(logPrefix, err)
 		return nil, false

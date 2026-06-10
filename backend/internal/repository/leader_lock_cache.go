@@ -22,6 +22,19 @@ end
 return 0
 `)
 
+var leaderLockAcquireOrRenewScript = redis.NewScript(`
+local current = redis.call("GET", KEYS[1])
+if not current then
+  redis.call("SET", KEYS[1], ARGV[1], "PX", ARGV[2])
+  return 1
+end
+if current == ARGV[1] then
+  redis.call("PEXPIRE", KEYS[1], ARGV[2])
+  return 1
+end
+return 0
+`)
+
 type leaderLockCache struct {
 	rdb *redis.Client
 }
@@ -35,6 +48,15 @@ func NewLeaderLockCache(rdb *redis.Client) service.LeaderLockCache {
 
 func (c *leaderLockCache) TryAcquireLeaderLock(ctx context.Context, key, owner string, ttl time.Duration) (bool, error) {
 	return c.rdb.SetNX(ctx, leaderLockKeyPrefix+key, owner, ttl).Result()
+}
+
+func (c *leaderLockCache) TryAcquireOrRenewLeaderLock(ctx context.Context, key, owner string, ttl time.Duration) (bool, error) {
+	ttlMillis := ttl.Milliseconds()
+	if ttlMillis <= 0 {
+		ttlMillis = 1
+	}
+	n, err := leaderLockAcquireOrRenewScript.Run(ctx, c.rdb, []string{leaderLockKeyPrefix + key}, owner, ttlMillis).Int()
+	return n == 1, err
 }
 
 func (c *leaderLockCache) ReleaseLeaderLock(ctx context.Context, key, owner string) error {

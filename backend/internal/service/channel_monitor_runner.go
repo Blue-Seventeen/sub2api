@@ -256,13 +256,14 @@ func (r *ChannelMonitorRunner) fire(ctx context.Context, task *scheduledMonitor)
 		return
 	}
 	lockCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	releaseLeader, ok := tryAcquireSingletonLeaderLock(
+	leaseTTL := task.interval + monitorRequestTimeout + monitorPingTimeout + monitorRunOneBuffer + 30*time.Second
+	releaseLeader, ok := tryAcquirePeriodicLeaderLease(
 		lockCtx,
 		r.lockCache,
 		r.lockDB,
 		"channel:monitor:runner:"+strconv.FormatInt(task.id, 10),
 		r.instanceID,
-		monitorRequestTimeout+monitorPingTimeout+monitorRunOneBuffer+30*time.Second,
+		leaseTTL,
 	)
 	cancel()
 	if !ok {
