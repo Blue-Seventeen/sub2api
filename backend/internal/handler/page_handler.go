@@ -256,6 +256,7 @@ func RegisterPageRoutes(v1 *gin.RouterGroup, dataDir string, jwtAuth gin.Handler
 
 	adminPages := v1.Group("/pages")
 	adminPages.Use(adminAuth)
+	adminPages.Use(middleware2.AdminComplianceGuard(settingService))
 	{
 		adminPages.GET("", h.ListPages)
 	}

@@ -52,7 +52,7 @@ Bug 修复：
 | 项目 | 当前约定 |
 |---|---|
 | 当前主线 | `dev` |
-| 当前 upstream 基线 | 已同步到 `v0.1.134`，`backend/cmd/server/VERSION` 已对齐 `0.1.134` |
+| 当前 upstream 基线 | 已同步到 `v0.1.136`，`backend/cmd/server/VERSION` 跟随官方 tag 当前值 `0.1.135` |
 | 早期 fork 保护基线 | `2b72deb8fd45dc3a526bda2299b16df8d471107c` |
 | 部署策略 | `dev` 是真实可部署主线；`sub2api-custom-localtest` 仅用于本地测试 |
 | 架构原则 | 保留 Sub2API 的 Account / Group / Channel / 调度 / sticky / failover / billing，渐进吸收协议优先兼容内核 |
@@ -870,6 +870,8 @@ Protect files:
 - 当前 `codex/sync-v0.1.134` 已合入 upstream `v0.1.134`，`backend/cmd/server/VERSION` 对齐为 `0.1.134`；后续不得回退 v0.1.134 已吸收的失败请求追踪、图像 token 计费、用户平台配额 flusher、Responses/Chat bridge、OpenAI/Codex 兼容增强、leader lock 与请求体性能优化，同时必须保留本 fork 的 CompatibleGateway、NewAPI-style、mandatory usage/billing、Promotion、Kimi/Qwen/GLM/DeepSeek 自定义链路。
 - 当前 `codex/sync-v0.1.135` 已合入 upstream `v0.1.135`，且 `codex/sync-v0.1.134`、upstream `v0.1.134` 和 upstream `v0.1.135` 都必须保持为当前同步分支祖先。官方 `v0.1.135` 的代理有效期与失败回退、OpenAI `/responses` 传输层 failover、临时不可调度告警、API Key 专属分组鉴权、usage cache creation/read token 拆分、非流式 JSON Content-Type、Select 下拉高度和 `sub2api-admin` skill 均已吸收；不得在后续同步中回退这些优化。
 - `backend/cmd/server/VERSION` 在官方 `v0.1.135` tag 中仍为 `0.1.134`，本 fork 默认跟随该官方状态，不将其视为遗漏；若后续要改显示版本号，必须作为独立发布策略处理。
+- 当前 `codex/sync-v0.1.136` 已合入 upstream `v0.1.136`。已吸收官方管理员合规确认门禁、`claude-fable-5` 模型、管理端用户列表按 API Key 分组筛选、账号分组调度索引、调度 debug 日志循环降噪、Bedrock CC 兼容清理、网关错误透传 double-write 修复、OpenAI failover 模型请求体替换修复、idempotency 响应 UTF-8 安全截断和 OpenAI Chat Completions `prompt_cache_key` 透传修复。官方 `v0.1.136` tag 内 `backend/cmd/server/VERSION` 为 `0.1.135`，本 fork 继续跟随官方 tag 文件值，不单独伪造版本号。
+- v0.1.136 同步必须继续排除 upstream Affiliate 主链路；本 fork 只允许保留 inert 兼容 shim，实际推广返佣仍由自研 Promotion 负责。合规确认门禁、用户筛选和调度索引属于增量能力，不得覆盖 Promotion、NewAPI-style、CompatibleGateway、订阅堆叠、mandatory usage/billing、失败请求记录和分布式 leader lock 自定义链路。
 - NewAPI-style OpenAI 传输层错误必须复用 OpenAI gateway 的 failover/temp-unschedule 语义：`DoWithTLS` 返回 DNS/TCP/TLS/proxy 等非 HTTP 错误时，先保留自定义 proxy sticky cleanup 和 ops request_error 归因，再返回 `UpstreamFailoverError` 让 handler 切账号；持久性代理/网络错误还要通过注入的 `AccountRuntimeBlocker` 和 `AccountRepository.SetTempUnschedulable` 临时摘除账号。非 OpenAI NewAPI-style 平台不因此继承 OpenAI 专用摘除策略，避免跨平台误封。
 - 多实例周期任务 leader lock 必须使用 Redis 续租型 lease：同一节点获得 `leader:*` 锁后在后续 tick 续租，任务结束不主动释放，避免多个容器 tick 错峰时同一周期任务被每个节点各跑一次；节点退出或崩溃后由 TTL 到期自动切换。适用范围包括 dashboard aggregation、subscription expiry reminder、payment order expiry、promotion settlement runner、scheduled test runner、user platform quota flusher、channel monitor runner 以及 ops aggregation/cleanup。一次性备份/恢复操作仍使用原来的立即释放互斥锁，避免长时间阻塞人工操作。
 - 当前存在 `149_proxy_expiry_fallback.sql` 与 `149_subscription_stacking_snapshots.sql` 两个同编号迁移文件；runner 按完整文件名记录可兼容运行。本轮不重排历史 migration，后续新增 migration 必须避免继续复用已有编号，优先使用新的连续编号并在 upstream sync 时检查排序影响。
