@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -69,6 +70,7 @@ type UserPlatformQuotaUsageFlusher struct {
 	flushTimeout time.Duration
 	metrics      *FlusherMetrics
 	stopped      atomic.Bool
+	flushMu      sync.Mutex
 }
 
 // NewUserPlatformQuotaUsageFlusher 创建 UserPlatformQuotaUsageFlusher。
@@ -283,16 +285,58 @@ func (s *UserPlatformQuotaUsageFlusher) flushWithLeaderLock() {
 	if s == nil {
 		return
 	}
+	s.flushMu.Lock()
+	defer s.flushMu.Unlock()
+
 	ctx, cancel := context.WithTimeout(context.Background(), s.flushTimeout)
 	defer cancel()
 
-	release, ok := tryAcquirePeriodicLeaderLease(ctx, s.lockCache, s.lockDB, userPlatformQuotaFlusherLeaderLockKey, s.instanceID, userPlatformQuotaFlusherLeaderLockTTL)
+	release, ok := tryAcquirePeriodicLeaderLease(ctx, s.lockCache, s.lockDB, userPlatformQuotaFlusherLeaderLockKey, s.instanceID, s.periodicLeaderLeaseTTL())
 	if !ok {
 		return
 	}
 	defer release()
 
 	s.flush()
+}
+
+func (s *UserPlatformQuotaUsageFlusher) flushWithReleasableLeaderLock() {
+	if s == nil {
+		return
+	}
+	s.flushMu.Lock()
+	defer s.flushMu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), s.flushTimeout)
+	defer cancel()
+
+	if s.lockCache != nil {
+		ok, err := s.lockCache.TryAcquireOrRenewLeaderLock(ctx, userPlatformQuotaFlusherLeaderLockKey, s.instanceID, s.periodicLeaderLeaseTTL())
+		if err != nil || !ok {
+			return
+		}
+		defer func() {
+			releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer releaseCancel()
+			_ = s.lockCache.ReleaseLeaderLock(releaseCtx, userPlatformQuotaFlusherLeaderLockKey, s.instanceID)
+		}()
+	} else {
+		release, ok := tryAcquireSingletonLeaderLock(ctx, nil, s.lockDB, userPlatformQuotaFlusherLeaderLockKey, s.instanceID, userPlatformQuotaFlusherLeaderLockTTL)
+		if !ok {
+			return
+		}
+		defer release()
+	}
+
+	s.flush()
+}
+
+func (s *UserPlatformQuotaUsageFlusher) periodicLeaderLeaseTTL() time.Duration {
+	ttl := s.interval + s.flushTimeout + 30*time.Second
+	if ttl < userPlatformQuotaFlusherLeaderLockTTL {
+		return userPlatformQuotaFlusherLeaderLockTTL
+	}
+	return ttl
 }
 
 // tick 是 TimingWheel 回调。若 flusher 已停止则直接返回。
@@ -318,5 +362,5 @@ func (s *UserPlatformQuotaUsageFlusher) Stop() {
 	}
 	s.stopped.Store(true)
 	s.timingWheel.Cancel("deferred:platform_quota")
-	s.flushWithLeaderLock()
+	s.flushWithReleasableLeaderLock()
 }

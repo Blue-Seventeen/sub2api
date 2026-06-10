@@ -224,7 +224,7 @@ func (s *DashboardAggregationService) runScheduledAggregation() {
 
 	// Multi-instance guard: only the leader runs the periodic aggregation; peers
 	// skip this cycle to avoid N× redundant GROUP BY queries and watermark races.
-	release, ok := tryAcquirePeriodicLeaderLease(ctx, s.lockCache, s.db, dashboardAggregationLeaderLockKey, s.instanceID, dashboardAggregationLeaderLockTTL)
+	release, ok := tryAcquirePeriodicLeaderLease(ctx, s.lockCache, s.db, dashboardAggregationLeaderLockKey, s.instanceID, s.periodicLeaderLeaseTTL())
 	if !ok {
 		return
 	}
@@ -267,6 +267,18 @@ func (s *DashboardAggregationService) runScheduledAggregation() {
 	)
 
 	s.maybeCleanupRetention(ctx, now)
+}
+
+func (s *DashboardAggregationService) periodicLeaderLeaseTTL() time.Duration {
+	interval := time.Duration(s.cfg.IntervalSeconds) * time.Second
+	if interval <= 0 {
+		interval = time.Minute
+	}
+	ttl := interval + defaultDashboardAggregationTimeout + time.Minute
+	if ttl < dashboardAggregationLeaderLockTTL {
+		return dashboardAggregationLeaderLockTTL
+	}
+	return ttl
 }
 
 func (s *DashboardAggregationService) backfillRange(ctx context.Context, start, end time.Time) error {

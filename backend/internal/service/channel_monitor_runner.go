@@ -255,29 +255,27 @@ func (r *ChannelMonitorRunner) fire(ctx context.Context, task *scheduledMonitor)
 			"monitor_id", task.id, "name", task.name)
 		return
 	}
-	lockCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	leaseTTL := task.interval + monitorRequestTimeout + monitorPingTimeout + monitorRunOneBuffer + 30*time.Second
-	releaseLeader, ok := tryAcquirePeriodicLeaderLease(
-		lockCtx,
-		r.lockCache,
-		r.lockDB,
-		"channel:monitor:runner:"+strconv.FormatInt(task.id, 10),
-		r.instanceID,
-		leaseTTL,
-	)
-	cancel()
-	if !ok {
-		r.releaseInFlight(task.id)
-		slog.Debug("channel_monitor: skip lock held by peer",
-			"monitor_id", task.id, "name", task.name)
-		return
-	}
 	if _, ok := r.pool.TrySubmit(func() {
+		lockCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		leaseTTL := task.interval + monitorRequestTimeout + monitorPingTimeout + monitorRunOneBuffer + 30*time.Second
+		releaseLeader, ok := tryAcquirePeriodicLeaderLease(
+			lockCtx,
+			r.lockCache,
+			r.lockDB,
+			"channel:monitor:runner:"+strconv.FormatInt(task.id, 10),
+			r.instanceID,
+			leaseTTL,
+		)
+		cancel()
+		if !ok {
+			r.releaseInFlight(task.id)
+			slog.Debug("channel_monitor: skip lock held by peer",
+				"monitor_id", task.id, "name", task.name)
+			return
+		}
 		defer releaseLeader()
 		r.runOne(task.id, task.name)
 	}); !ok {
-		// 池满：丢弃本次检测，但必须释放已占用的 inFlight 槽，否则该 monitor 会被永久卡住。
-		releaseLeader()
 		r.releaseInFlight(task.id)
 		slog.Warn("channel_monitor: worker pool full, skip submission",
 			"monitor_id", task.id, "name", task.name)

@@ -44,7 +44,7 @@ const (
 	opsAggDailyLeaderLockKey  = "ops:aggregation:daily:leader"
 
 	opsAggHourlyLeaderLockTTL = 15 * time.Minute
-	opsAggDailyLeaderLockTTL  = 10 * time.Minute
+	opsAggDailyLeaderLockTTL  = opsAggDailyInterval + 10*time.Minute
 )
 
 // OpsAggregationService periodically backfills ops_metrics_hourly / ops_metrics_daily
