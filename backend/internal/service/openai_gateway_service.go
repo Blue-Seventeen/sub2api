@@ -246,6 +246,7 @@ type OpenAIForwardResult struct {
 	Duration                time.Duration
 	FirstTokenMs            *int
 	ClientDisconnect        bool
+	SkipUsageBilling        bool // Internal guard: stream ended abnormally after headers were sent.
 	ImageCount              int
 	ImageSize               string
 	ImageInputSize          string
@@ -5844,6 +5845,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	result := input.Result
 	if result == nil {
 		return errors.New("openai usage result is nil")
+	}
+	if result.SkipUsageBilling {
+		return nil
 	}
 	ApplyOpenAIImageBillingResolution(result)
 

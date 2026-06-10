@@ -256,9 +256,32 @@ func (c *Channel) IsBedrockCCCompatEnabled(platform string) bool {
 	if c == nil || c.FeaturesConfig == nil {
 		return false
 	}
-	// 直接检查 bedrock_cc_compat 开关，不再检查 platform 子字段
-	enabled, ok := c.FeaturesConfig[featureKeyBedrockCCCompat].(bool)
-	return ok && enabled
+	switch value := c.FeaturesConfig[featureKeyBedrockCCCompat].(type) {
+	case bool:
+		return value
+	case map[string]any:
+		if enabled, ok := value[platform].(bool); ok && enabled {
+			return true
+		}
+		for _, enabled := range value {
+			if enabledBool, ok := enabled.(bool); ok && enabledBool {
+				return true
+			}
+		}
+		return false
+	case map[string]bool:
+		if value[platform] {
+			return true
+		}
+		for _, enabled := range value {
+			if enabled {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
 }
 
 // deepCopyFeaturesConfig creates a deep copy of FeaturesConfig to prevent cache pollution.

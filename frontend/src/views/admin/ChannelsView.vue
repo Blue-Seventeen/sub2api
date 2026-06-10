@@ -1144,14 +1144,14 @@ function formToAPI(): { group_ids: number[], model_pricing: ChannelModelPricing[
     delete featuresConfig.codex_image_generation_bridge
   }
 
-  const bedrockCCCompat: Record<string, boolean> = {}
+  let bedrockCCCompat = false
   for (const section of form.platforms) {
     if (!section.enabled) continue
     if (section.platform === 'anthropic') {
-      bedrockCCCompat[section.platform] = !!section.bedrock_cc_compat
+      bedrockCCCompat = !!section.bedrock_cc_compat
     }
   }
-  if (Object.keys(bedrockCCCompat).length > 0) {
+  if (bedrockCCCompat) {
     featuresConfig.bedrock_cc_compat = bedrockCCCompat
   } else {
     delete featuresConfig.bedrock_cc_compat
@@ -1207,7 +1207,12 @@ function apiToForm(channel: Channel): PlatformSection[] {
     const webSearchEnabled = wsEmulation?.[platform] === true
     const codexImageGenerationBridge = fc?.codex_image_generation_bridge as Record<string, boolean> | undefined
     const codexImageGenerationBridgeEnabled = codexImageGenerationBridge?.[platform] === true
-    const bedrockCCCompatEnabled = fc?.bedrock_cc_compat === true
+    const bedrockCCCompatRaw = fc?.bedrock_cc_compat
+    const bedrockCCCompatEnabled =
+      bedrockCCCompatRaw === true ||
+      (typeof bedrockCCCompatRaw === 'object' &&
+        bedrockCCCompatRaw !== null &&
+        (bedrockCCCompatRaw as Record<string, boolean>)[platform] === true)
 
     sections.push({
       platform,

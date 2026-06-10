@@ -57,10 +57,10 @@ func TestChannel_IsBedrockCCCompatEnabled_WrongType(t *testing.T) {
 func TestChannel_IsBedrockCCCompatEnabled_OldMapFormat(t *testing.T) {
 	c := &Channel{
 		FeaturesConfig: map[string]any{
-			featureKeyBedrockCCCompat: map[string]any{"bedrock": true},
+			featureKeyBedrockCCCompat: map[string]any{"anthropic": true},
 		},
 	}
-	require.False(t, c.IsBedrockCCCompatEnabled("bedrock"))
+	require.True(t, c.IsBedrockCCCompatEnabled("bedrock"))
 }
 
 func TestChannel_IsBedrockCCCompatEnabled_MissingKey(t *testing.T) {

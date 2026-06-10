@@ -9090,6 +9090,9 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 	if input.Result == nil {
 		return errors.New("usage result is nil")
 	}
+	if input.Result.SkipUsageBilling {
+		return nil
+	}
 	return s.recordUsageCore(ctx, &recordUsageCoreInput{
 		Result:                input.Result,
 		APIKey:                input.APIKey,
@@ -9145,6 +9148,9 @@ func (s *GatewayService) RecordUsageWithLongContext(ctx context.Context, input *
 	}
 	if input.Result == nil {
 		return errors.New("usage result is nil")
+	}
+	if input.Result.SkipUsageBilling {
+		return nil
 	}
 	return s.recordUsageCore(ctx, &recordUsageCoreInput{
 		Result:             input.Result,

@@ -36,6 +36,27 @@ func TestGatewayRecordUsageRejectsNilInputOrResult(t *testing.T) {
 	}
 }
 
+func TestRecordUsageSkipsAbnormalStreamBilling(t *testing.T) {
+	gatewaySvc := &GatewayService{}
+	if err := gatewaySvc.RecordUsage(context.Background(), &RecordUsageInput{
+		Result: &ForwardResult{SkipUsageBilling: true},
+	}); err != nil {
+		t.Fatalf("Gateway RecordUsage skip error = %v", err)
+	}
+	if err := gatewaySvc.RecordUsageWithLongContext(context.Background(), &RecordUsageLongContextInput{
+		Result: &ForwardResult{SkipUsageBilling: true},
+	}); err != nil {
+		t.Fatalf("Gateway RecordUsageWithLongContext skip error = %v", err)
+	}
+
+	openAISvc := &OpenAIGatewayService{}
+	if err := openAISvc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{SkipUsageBilling: true},
+	}); err != nil {
+		t.Fatalf("OpenAI RecordUsage skip error = %v", err)
+	}
+}
+
 func TestCalculateCostUnifiedDurationAndCharacterModes(t *testing.T) {
 	svc := &BillingService{}
 	resolver := &ModelPricingResolver{}

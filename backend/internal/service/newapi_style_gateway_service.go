@@ -406,6 +406,7 @@ func OpenAIForwardResultFromForwardResult(result *ForwardResult) *OpenAIForwardR
 		Duration:                result.Duration,
 		FirstTokenMs:            result.FirstTokenMs,
 		ImageCount:              result.ImageCount,
+		SkipUsageBilling:        result.SkipUsageBilling,
 		ImageSize:               result.ImageSize,
 		ImageInputSize:          result.ImageInputSize,
 		ImageOutputSize:         result.ImageOutputSize,
