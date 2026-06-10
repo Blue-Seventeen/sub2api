@@ -741,9 +741,69 @@ func TestUserDisplayAggregateShowsEffectiveCapacityWhenWindowsBlockEachOther(t *
 	require.NotNil(t, agg.EffectiveDailyUsageUSD)
 	require.NotNil(t, agg.EffectiveWeeklyUsageUSD)
 	require.InDelta(t, 20, *agg.EffectiveDailyUsageUSD, 0.000001)
-	require.InDelta(t, 20, *agg.EffectiveWeeklyUsageUSD, 0.000001)
+	require.InDelta(t, 10, *agg.EffectiveWeeklyUsageUSD, 0.000001)
 	require.InDelta(t, 10, agg.DailyUsageUSD, 0.000001)
 	require.InDelta(t, 10, agg.WeeklyUsageUSD, 0.000001)
+}
+
+func TestUserDisplayAggregateTreatsDailyAsBlockedWhenOlderCardWeeklyAndMonthlyAreFull(t *testing.T) {
+	now := time.Now().UTC()
+	limit := 100.0
+	group := &Group{
+		ID:               20,
+		SubscriptionType: SubscriptionTypeSubscription,
+		DailyLimitUSD:    &limit,
+		WeeklyLimitUSD:   &limit,
+		MonthlyLimitUSD:  &limit,
+	}
+	subs := []UserSubscription{
+		{
+			ID:                 1,
+			UserID:             10,
+			GroupID:            20,
+			StartsAt:           now.Add(-8 * 24 * time.Hour),
+			ExpiresAt:          now.Add(24 * time.Hour),
+			Status:             SubscriptionStatusActive,
+			DailyUsageUSD:      0,
+			WeeklyUsageUSD:     100,
+			MonthlyUsageUSD:    100,
+			DailyWindowStart:   subscriptionTimePtr(now.Add(-time.Hour)),
+			WeeklyWindowStart:  subscriptionTimePtr(now.Add(-6 * 24 * time.Hour)),
+			MonthlyWindowStart: subscriptionTimePtr(now.Add(-8 * 24 * time.Hour)),
+			Group:              group,
+		},
+		{
+			ID:                 2,
+			UserID:             10,
+			GroupID:            20,
+			StartsAt:           now.Add(-time.Hour),
+			ExpiresAt:          now.Add(24 * time.Hour),
+			Status:             SubscriptionStatusActive,
+			DailyUsageUSD:      0,
+			WeeklyUsageUSD:     0,
+			MonthlyUsageUSD:    0,
+			DailyWindowStart:   subscriptionTimePtr(now.Add(-time.Hour)),
+			WeeklyWindowStart:  subscriptionTimePtr(now.Add(-time.Hour)),
+			MonthlyWindowStart: subscriptionTimePtr(now.Add(-time.Hour)),
+			Group:              group,
+		},
+	}
+
+	agg := aggregateActiveSubscriptionsForUserDisplay(subs)
+
+	require.NotNil(t, agg)
+	require.True(t, agg.IsAggregate)
+	require.NotNil(t, agg.EffectiveAvailableUSD)
+	require.InDelta(t, 100, *agg.EffectiveAvailableUSD, 0.000001)
+	require.NotNil(t, agg.EffectiveDailyUsageUSD)
+	require.NotNil(t, agg.EffectiveWeeklyUsageUSD)
+	require.NotNil(t, agg.EffectiveMonthlyUsageUSD)
+	require.InDelta(t, 100, *agg.EffectiveDailyUsageUSD, 0.000001)
+	require.InDelta(t, 100, *agg.EffectiveWeeklyUsageUSD, 0.000001)
+	require.InDelta(t, 100, *agg.EffectiveMonthlyUsageUSD, 0.000001)
+	require.InDelta(t, 0, agg.DailyUsageUSD, 0.000001)
+	require.InDelta(t, 100, agg.WeeklyUsageUSD, 0.000001)
+	require.InDelta(t, 100, agg.MonthlyUsageUSD, 0.000001)
 }
 
 func TestUserDisplayAggregateResetTimeWaitsUntilCardCanActuallyRecover(t *testing.T) {
@@ -841,7 +901,7 @@ func TestUserDisplayAggregateWindowResetTimeUsesDailyCardInsteadOfWeeklyBlockedC
 	require.NotNil(t, agg.EffectiveDailyResetsAt)
 	require.WithinDuration(t, dailyFullStart.Add(subscriptionDailyWindow), *agg.EffectiveDailyResetsAt, time.Second)
 	require.NotNil(t, agg.EffectiveWeeklyResetsAt)
-	require.WithinDuration(t, dailyFullStart.Add(subscriptionDailyWindow), *agg.EffectiveWeeklyResetsAt, time.Second)
+	require.WithinDuration(t, weeklyBlockedStart.Add(subscriptionWeeklyWindow), *agg.EffectiveWeeklyResetsAt, time.Second)
 }
 
 func TestUserDisplaySingleCardUsesEffectiveBottleneck(t *testing.T) {
@@ -887,12 +947,15 @@ func TestUserDisplaySingleCardMonthlyBottleneckFillsShorterWindows(t *testing.T)
 	dailyLimit := 100.0
 	weeklyLimit := 100.0
 	monthlyLimit := 10.0
+	customLimit := 100.0
 	group := &Group{
 		ID:               20,
 		SubscriptionType: SubscriptionTypeSubscription,
 		DailyLimitUSD:    &dailyLimit,
 		WeeklyLimitUSD:   &weeklyLimit,
 		MonthlyLimitUSD:  &monthlyLimit,
+		CustomLimitHours: 1,
+		CustomLimitUSD:   &customLimit,
 	}
 	monthlyStart := now.Add(-3 * 24 * time.Hour)
 	sub := UserSubscription{
@@ -905,9 +968,11 @@ func TestUserDisplaySingleCardMonthlyBottleneckFillsShorterWindows(t *testing.T)
 		DailyUsageUSD:      0,
 		WeeklyUsageUSD:     0,
 		MonthlyUsageUSD:    10,
+		CustomUsageUSD:     0,
 		DailyWindowStart:   subscriptionTimePtr(now.Add(-time.Hour)),
 		WeeklyWindowStart:  subscriptionTimePtr(now.Add(-time.Hour)),
 		MonthlyWindowStart: &monthlyStart,
+		CustomWindowStart:  subscriptionTimePtr(now.Add(-30 * time.Minute)),
 		Group:              group,
 	}
 
@@ -919,9 +984,14 @@ func TestUserDisplaySingleCardMonthlyBottleneckFillsShorterWindows(t *testing.T)
 	require.NotNil(t, agg.EffectiveDailyUsageUSD)
 	require.NotNil(t, agg.EffectiveWeeklyUsageUSD)
 	require.NotNil(t, agg.EffectiveMonthlyUsageUSD)
+	require.NotNil(t, agg.EffectiveCustomUsageUSD)
 	require.InDelta(t, 100, *agg.EffectiveDailyUsageUSD, 0.000001)
 	require.InDelta(t, 100, *agg.EffectiveWeeklyUsageUSD, 0.000001)
 	require.InDelta(t, 10, *agg.EffectiveMonthlyUsageUSD, 0.000001)
+	require.InDelta(t, 100, *agg.EffectiveCustomUsageUSD, 0.000001)
+	require.InDelta(t, 0, agg.DailyUsageUSD, 0.000001)
+	require.InDelta(t, 0, agg.WeeklyUsageUSD, 0.000001)
+	require.InDelta(t, 10, agg.MonthlyUsageUSD, 0.000001)
 	require.NotNil(t, agg.EffectiveResetsAt)
 	require.WithinDuration(t, monthlyStart.Add(subscriptionMonthlyWindow), *agg.EffectiveResetsAt, time.Second)
 	require.NotNil(t, agg.EffectiveDailyResetsAt)
@@ -967,6 +1037,8 @@ func TestUserDisplayEffectiveResetTimeUsesLaterBlockingCustomResetThanDaily(t *t
 	require.NotNil(t, agg.EffectiveCustomUsageUSD)
 	require.InDelta(t, 10, *agg.EffectiveDailyUsageUSD, 0.000001)
 	require.InDelta(t, 10, *agg.EffectiveCustomUsageUSD, 0.000001)
+	require.InDelta(t, 10, agg.DailyUsageUSD, 0.000001)
+	require.InDelta(t, 10, agg.CustomUsageUSD, 0.000001)
 	require.NotNil(t, agg.EffectiveResetsAt)
 	require.WithinDuration(t, customStart.Add(48*time.Hour), *agg.EffectiveResetsAt, time.Second)
 	require.NotNil(t, agg.EffectiveDailyResetsAt)
@@ -1012,6 +1084,104 @@ func TestUserDisplayEffectiveResetTimeUsesLaterBlockingDailyResetThanCustom(t *t
 	require.WithinDuration(t, dailyStart.Add(subscriptionDailyWindow), *agg.EffectiveDailyResetsAt, time.Second)
 	require.NotNil(t, agg.EffectiveCustomResetsAt)
 	require.WithinDuration(t, dailyStart.Add(subscriptionDailyWindow), *agg.EffectiveCustomResetsAt, time.Second)
+}
+
+func TestUserDisplayShortCustomWindowDoesNotFillLongerWindows(t *testing.T) {
+	now := time.Now().UTC()
+	limit := 100.0
+	customLimit := 10.0
+	group := &Group{
+		ID:               20,
+		SubscriptionType: SubscriptionTypeSubscription,
+		DailyLimitUSD:    &limit,
+		WeeklyLimitUSD:   &limit,
+		MonthlyLimitUSD:  &limit,
+		CustomLimitHours: 2,
+		CustomLimitUSD:   &customLimit,
+	}
+	customStart := now.Add(-90 * time.Minute)
+	sub := UserSubscription{
+		ID:                 1,
+		UserID:             10,
+		GroupID:            20,
+		StartsAt:           now.Add(-time.Hour),
+		ExpiresAt:          now.Add(48 * time.Hour),
+		Status:             SubscriptionStatusActive,
+		DailyUsageUSD:      0,
+		WeeklyUsageUSD:     0,
+		MonthlyUsageUSD:    0,
+		CustomUsageUSD:     10,
+		DailyWindowStart:   subscriptionTimePtr(now.Add(-time.Hour)),
+		WeeklyWindowStart:  subscriptionTimePtr(now.Add(-time.Hour)),
+		MonthlyWindowStart: subscriptionTimePtr(now.Add(-time.Hour)),
+		CustomWindowStart:  &customStart,
+		Group:              group,
+	}
+
+	agg := aggregateActiveSubscriptionsForUserDisplay([]UserSubscription{sub})
+
+	require.NotNil(t, agg)
+	require.NotNil(t, agg.EffectiveAvailableUSD)
+	require.InDelta(t, 0, *agg.EffectiveAvailableUSD, 0.000001)
+	require.NotNil(t, agg.EffectiveDailyUsageUSD)
+	require.NotNil(t, agg.EffectiveWeeklyUsageUSD)
+	require.NotNil(t, agg.EffectiveMonthlyUsageUSD)
+	require.NotNil(t, agg.EffectiveCustomUsageUSD)
+	require.InDelta(t, 0, *agg.EffectiveDailyUsageUSD, 0.000001)
+	require.InDelta(t, 0, *agg.EffectiveWeeklyUsageUSD, 0.000001)
+	require.InDelta(t, 0, *agg.EffectiveMonthlyUsageUSD, 0.000001)
+	require.InDelta(t, 10, *agg.EffectiveCustomUsageUSD, 0.000001)
+	require.NotNil(t, agg.EffectiveResetsAt)
+	require.WithinDuration(t, customStart.Add(2*time.Hour), *agg.EffectiveResetsAt, time.Second)
+}
+
+func TestUserDisplayLongCustomWindowBlocksMonthlyAndShorterWindows(t *testing.T) {
+	now := time.Now().UTC()
+	limit := 100.0
+	customLimit := 10.0
+	group := &Group{
+		ID:               20,
+		SubscriptionType: SubscriptionTypeSubscription,
+		DailyLimitUSD:    &limit,
+		WeeklyLimitUSD:   &limit,
+		MonthlyLimitUSD:  &limit,
+		CustomLimitHours: 1000,
+		CustomLimitUSD:   &customLimit,
+	}
+	customStart := now.Add(-10 * 24 * time.Hour)
+	sub := UserSubscription{
+		ID:                 1,
+		UserID:             10,
+		GroupID:            20,
+		StartsAt:           now.Add(-10 * 24 * time.Hour),
+		ExpiresAt:          now.Add(60 * 24 * time.Hour),
+		Status:             SubscriptionStatusActive,
+		DailyUsageUSD:      0,
+		WeeklyUsageUSD:     0,
+		MonthlyUsageUSD:    0,
+		CustomUsageUSD:     10,
+		DailyWindowStart:   subscriptionTimePtr(now.Add(-time.Hour)),
+		WeeklyWindowStart:  subscriptionTimePtr(now.Add(-time.Hour)),
+		MonthlyWindowStart: subscriptionTimePtr(now.Add(-time.Hour)),
+		CustomWindowStart:  &customStart,
+		Group:              group,
+	}
+
+	agg := aggregateActiveSubscriptionsForUserDisplay([]UserSubscription{sub})
+
+	require.NotNil(t, agg)
+	require.NotNil(t, agg.EffectiveAvailableUSD)
+	require.InDelta(t, 0, *agg.EffectiveAvailableUSD, 0.000001)
+	require.NotNil(t, agg.EffectiveDailyUsageUSD)
+	require.NotNil(t, agg.EffectiveWeeklyUsageUSD)
+	require.NotNil(t, agg.EffectiveMonthlyUsageUSD)
+	require.NotNil(t, agg.EffectiveCustomUsageUSD)
+	require.InDelta(t, 100, *agg.EffectiveDailyUsageUSD, 0.000001)
+	require.InDelta(t, 100, *agg.EffectiveWeeklyUsageUSD, 0.000001)
+	require.InDelta(t, 100, *agg.EffectiveMonthlyUsageUSD, 0.000001)
+	require.InDelta(t, 10, *agg.EffectiveCustomUsageUSD, 0.000001)
+	require.NotNil(t, agg.EffectiveMonthlyResetsAt)
+	require.WithinDuration(t, customStart.Add(1000*time.Hour), *agg.EffectiveMonthlyResetsAt, time.Second)
 }
 
 func TestUserDisplayEffectiveResetTimeDoesNotTreatOneTimeDailyQuotaAsRecoverable(t *testing.T) {
@@ -1135,6 +1305,8 @@ func TestUserDisplayAggregateDoesNotBorrowCapacityFromCardsWithoutWindow(t *test
 	require.NotNil(t, agg.EffectiveWeeklyUsageUSD)
 	require.InDelta(t, 5, *agg.EffectiveDailyUsageUSD, 0.000001)
 	require.InDelta(t, 7, *agg.EffectiveWeeklyUsageUSD, 0.000001)
+	require.InDelta(t, 5, agg.DailyUsageUSD, 0.000001)
+	require.InDelta(t, 7, agg.WeeklyUsageUSD, 0.000001)
 	require.NotNil(t, agg.EffectiveDailyLimitUSD(agg.Group))
 	require.NotNil(t, agg.EffectiveWeeklyLimitUSD(agg.Group))
 	require.InDelta(t, 10, *agg.EffectiveDailyLimitUSD(agg.Group), 0.000001)

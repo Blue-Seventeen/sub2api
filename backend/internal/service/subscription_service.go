@@ -1498,10 +1498,11 @@ func aggregateActiveSubscriptionsInternal(subs []UserSubscription, normalizeWind
 }
 
 type subscriptionWindowDisplayInfo struct {
-	limit   *float64
-	usage   float64
-	resetAt *time.Time
-	enabled bool
+	limit    *float64
+	usage    float64
+	resetAt  *time.Time
+	duration time.Duration
+	enabled  bool
 }
 
 type subscriptionCardDisplayAvailability struct {
@@ -1636,9 +1637,9 @@ func subscriptionDisplayAvailability(sub *UserSubscription) subscriptionCardDisp
 		return out
 	}
 	group := sub.EffectiveGroup(sub.Group)
-	addWindow := func(name string, limit *float64, usage float64, resetAt *time.Time, enabled bool) {
+	addWindow := func(name string, limit *float64, usage float64, resetAt *time.Time, duration time.Duration, enabled bool) {
 		if !enabled || !hasPositiveLimit(limit) {
-			out.windows[name] = subscriptionWindowDisplayInfo{limit: limit, usage: usage, resetAt: resetAt, enabled: false}
+			out.windows[name] = subscriptionWindowDisplayInfo{limit: limit, usage: usage, resetAt: resetAt, duration: duration, enabled: false}
 			return
 		}
 		out.unlimited = false
@@ -1647,16 +1648,17 @@ func subscriptionDisplayAvailability(sub *UserSubscription) subscriptionCardDisp
 			out.available = remaining
 		}
 		out.windows[name] = subscriptionWindowDisplayInfo{
-			limit:   limit,
-			usage:   usage,
-			resetAt: resetAt,
-			enabled: true,
+			limit:    limit,
+			usage:    usage,
+			resetAt:  resetAt,
+			duration: duration,
+			enabled:  true,
 		}
 	}
-	addWindow("daily", sub.EffectiveDailyLimitUSD(group), sub.DailyUsageUSD, sub.EffectiveDisplayDailyResetTime(), true)
-	addWindow("weekly", sub.EffectiveWeeklyLimitUSD(group), sub.WeeklyUsageUSD, sub.WeeklyResetTime(), true)
-	addWindow("monthly", sub.EffectiveMonthlyLimitUSD(group), sub.MonthlyUsageUSD, sub.MonthlyResetTime(), true)
-	addWindow("custom", sub.EffectiveCustomLimitUSD(group), sub.CustomUsageUSD, sub.CustomResetTime(group), sub.EffectiveCustomLimitHours(group) > 0)
+	addWindow("daily", sub.EffectiveDailyLimitUSD(group), sub.DailyUsageUSD, sub.EffectiveDisplayDailyResetTime(), subscriptionDailyWindow, true)
+	addWindow("weekly", sub.EffectiveWeeklyLimitUSD(group), sub.WeeklyUsageUSD, sub.WeeklyResetTime(), subscriptionWeeklyWindow, true)
+	addWindow("monthly", sub.EffectiveMonthlyLimitUSD(group), sub.MonthlyUsageUSD, sub.MonthlyResetTime(), subscriptionMonthlyWindow, true)
+	addWindow("custom", sub.EffectiveCustomLimitUSD(group), sub.CustomUsageUSD, sub.CustomResetTime(group), customSubscriptionWindow(group), sub.EffectiveCustomLimitHours(group) > 0)
 	if out.unlimited {
 		out.available = math.Inf(1)
 		return out
@@ -1713,19 +1715,20 @@ func cardEffectiveWindowResetTime(card subscriptionCardDisplayAvailability, targ
 		return nil
 	}
 
+	eligible := displayBlockingWindowsForTarget(card.windows, target)
 	targetRemaining := windowRemaining(targetInfo)
-	currentAvailable := card.available
+	currentAvailable := effectiveDisplayAvailableForWindow(card, target)
 	if currentAvailable < 0 {
 		currentAvailable = 0
 	}
 
 	if targetRemaining > currentAvailable+1e-9 {
 		// The target window itself is not part of the current bottleneck.
-		// Its displayed recovery waits for the windows that currently make this card unusable.
-		return cardEffectiveResetTime(card.windows, currentAvailable)
+		// Its displayed recovery waits for same-or-longer windows that currently block it.
+		return cardEffectiveResetTime(eligible, currentAvailable)
 	}
 
-	return cardRecoveryAfterWindowReset(card.windows, target)
+	return cardRecoveryAfterWindowReset(eligible, target)
 }
 
 func cardRecoveryAfterWindowReset(windows map[string]subscriptionWindowDisplayInfo, target string) *time.Time {
@@ -1799,7 +1802,7 @@ func aggregateEffectiveWindowUsage(cards []subscriptionCardDisplayAvailability, 
 			return subscriptionFloatPtr(0)
 		}
 		found = true
-		available += card.available
+		available += effectiveDisplayAvailableForWindow(card, window)
 	}
 	if !found {
 		return nil
@@ -1815,6 +1818,48 @@ func aggregateEffectiveWindowUsage(cards []subscriptionCardDisplayAvailability, 
 		usage = 0
 	}
 	return subscriptionFloatPtr(usage)
+}
+
+func effectiveDisplayAvailableForWindow(card subscriptionCardDisplayAvailability, target string) float64 {
+	targetInfo, ok := card.windows[target]
+	if !ok || !targetInfo.enabled || !hasPositiveLimit(targetInfo.limit) {
+		return math.Inf(1)
+	}
+	available := windowRemaining(targetInfo)
+	for _, info := range displayBlockingWindowsForTarget(card.windows, target) {
+		if !info.enabled {
+			continue
+		}
+		remaining := windowRemaining(info)
+		if remaining < available {
+			available = remaining
+		}
+	}
+	if available < 0 {
+		return 0
+	}
+	if available > *targetInfo.limit {
+		return *targetInfo.limit
+	}
+	return available
+}
+
+func displayBlockingWindowsForTarget(windows map[string]subscriptionWindowDisplayInfo, target string) map[string]subscriptionWindowDisplayInfo {
+	targetInfo, ok := windows[target]
+	if !ok || !targetInfo.enabled {
+		return nil
+	}
+	eligible := make(map[string]subscriptionWindowDisplayInfo, len(windows))
+	for name, info := range windows {
+		if !info.enabled {
+			continue
+		}
+		if info.duration+time.Nanosecond < targetInfo.duration {
+			continue
+		}
+		eligible[name] = info
+	}
+	return eligible
 }
 
 func subscriptionDisplayUsageForWindow(sub *UserSubscription, window string) float64 {
