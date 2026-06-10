@@ -9,7 +9,10 @@
 -- 该列现已废弃，所有读写操作均使用 user_allowed_groups 联接表。
 
 -- 删除 allowed_groups 列
-ALTER TABLE users DROP COLUMN IF EXISTS allowed_groups;
+-- Compatibility note:
+-- Keep the legacy users.allowed_groups column when it exists. Current code reads
+-- from user_allowed_groups, but preserving the old column avoids destroying
+-- original upgrade evidence on very old databases.
 
 -- 添加注释记录删除原因
 COMMENT ON TABLE users IS '用户表。注：原 allowed_groups BIGINT[] 列已迁移至 user_allowed_groups 联接表';

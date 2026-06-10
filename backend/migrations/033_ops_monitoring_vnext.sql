@@ -13,8 +13,11 @@
 -- into a single 030 migration for easier review and a cleaner migration history.
 --
 -- Notes:
--- - This is intentionally destructive for ops_* data (error logs / metrics / alerts).
--- - It is idempotent (DROP/CREATE/ALTER IF EXISTS/IF NOT EXISTS), but will wipe ops_* data if re-run.
+-- - Older fork deployments may already contain legacy ops_* data. Preserve that
+--   data by moving legacy tables into a dedicated archive schema before
+--   creating the vNext schema.
+-- - The archived legacy tables are not read by current code, but remain in the
+--   database for audit/recovery during low-version upgrades.
 
 -- =====================================================================
 -- 030_ops_drop_legacy_ops_tables.sql
@@ -23,25 +26,35 @@
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '10min';
 
--- Legacy pre-aggregation tables (from 026 and/or previous branches)
-DROP TABLE IF EXISTS ops_metrics_daily CASCADE;
-DROP TABLE IF EXISTS ops_metrics_hourly CASCADE;
+-- Legacy ops tables are archived instead of dropped. This keeps low-version
+-- upgrade evidence intact while allowing the new schema below to be created.
+DO $$
+DECLARE
+    tbl TEXT;
+BEGIN
+    EXECUTE 'CREATE SCHEMA IF NOT EXISTS ops_legacy_033';
+    FOREACH tbl IN ARRAY ARRAY[
+        'ops_metrics_daily',
+        'ops_metrics_hourly',
+        'ops_system_metrics',
+        'ops_error_logs',
+        'ops_alert_events',
+        'ops_alert_rules',
+        'ops_job_heartbeats',
+        'ops_retry_attempts',
+        'ops_scheduled_reports',
+        'ops_group_availability_configs',
+        'ops_group_availability_events'
+    ]
+    LOOP
+        IF to_regclass('public.' || tbl) IS NOT NULL THEN
+            EXECUTE format('ALTER TABLE public.%I SET SCHEMA ops_legacy_033', tbl);
+        END IF;
+    END LOOP;
+END $$;
 
--- Core ops tables that may exist in some deployments / branches
-DROP TABLE IF EXISTS ops_system_metrics CASCADE;
-DROP TABLE IF EXISTS ops_error_logs CASCADE;
-DROP TABLE IF EXISTS ops_alert_events CASCADE;
-DROP TABLE IF EXISTS ops_alert_rules CASCADE;
-DROP TABLE IF EXISTS ops_job_heartbeats CASCADE;
-DROP TABLE IF EXISTS ops_retry_attempts CASCADE;
-
--- Optional legacy tables (best-effort cleanup)
-DROP TABLE IF EXISTS ops_scheduled_reports CASCADE;
-DROP TABLE IF EXISTS ops_group_availability_configs CASCADE;
-DROP TABLE IF EXISTS ops_group_availability_events CASCADE;
-
--- Optional legacy views/indexes
-DROP VIEW IF EXISTS ops_latest_metrics CASCADE;
+-- Keep optional legacy views as-is. They do not affect the vNext tables below
+-- and preserving them avoids any DROP on the upgrade path.
 
 -- =====================================================================
 -- 031_ops_core_schema.sql
@@ -134,6 +147,143 @@ CREATE TABLE IF NOT EXISTS ops_error_logs (
 );
 
 COMMENT ON TABLE ops_error_logs IS 'Ops error logs (vNext). Stores sanitized error details and request_body for retries (errors only).';
+
+-- Preserve user/admin-visible historical failure logs from legacy branches.
+-- The full original table remains in ops_legacy_033; this copies compatible
+-- base fields into the new public table so /usage/errors and /admin/usage keep
+-- showing historical failures after upgrade.
+DO $$
+DECLARE
+    insert_cols TEXT[] := ARRAY[]::TEXT[];
+    select_exprs TEXT[] := ARRAY[]::TEXT[];
+    col TEXT;
+    expr TEXT;
+    has_source_col BOOLEAN;
+    has_target_col BOOLEAN;
+    insert_sql TEXT;
+    copied_id BOOLEAN := false;
+    max_id BIGINT;
+BEGIN
+    IF to_regclass('ops_legacy_033.ops_error_logs') IS NOT NULL THEN
+        FOREACH col IN ARRAY ARRAY[
+            'id',
+            'request_id',
+            'client_request_id',
+            'user_id',
+            'api_key_id',
+            'account_id',
+            'group_id',
+            'client_ip',
+            'platform',
+            'model',
+            'request_path',
+            'stream',
+            'user_agent',
+            'error_phase',
+            'error_type',
+            'severity',
+            'status_code',
+            'is_business_limited',
+            'error_message',
+            'error_body',
+            'error_source',
+            'error_owner',
+            'account_status',
+            'upstream_status_code',
+            'upstream_error_message',
+            'upstream_error_detail',
+            'provider_error_code',
+            'provider_error_type',
+            'network_error_type',
+            'retry_after_seconds',
+            'duration_ms',
+            'time_to_first_token_ms',
+            'auth_latency_ms',
+            'routing_latency_ms',
+            'upstream_latency_ms',
+            'response_latency_ms',
+            'request_body',
+            'request_headers',
+            'request_body_truncated',
+            'request_body_bytes',
+            'is_retryable',
+            'retry_count',
+            'created_at'
+        ]
+        LOOP
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'ops_error_logs' AND column_name = col
+            ) INTO has_target_col;
+            IF NOT has_target_col THEN
+                CONTINUE;
+            END IF;
+
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'ops_legacy_033' AND table_name = 'ops_error_logs' AND column_name = col
+            ) INTO has_source_col;
+
+            IF has_source_col THEN
+                expr := format('%I', col);
+                IF col = 'stream' THEN
+                    expr := format('COALESCE(%I, false)', col);
+                ELSIF col = 'error_phase' THEN
+                    expr := format('COALESCE(NULLIF(%I, ''''), ''upstream'')', col);
+                ELSIF col = 'error_type' THEN
+                    expr := format('COALESCE(NULLIF(%I, ''''), ''unknown'')', col);
+                ELSIF col = 'severity' THEN
+                    expr := format('COALESCE(NULLIF(%I, ''''), ''P2'')', col);
+                ELSIF col IN ('is_business_limited', 'request_body_truncated', 'is_retryable') THEN
+                    expr := format('COALESCE(%I, false)', col);
+                ELSIF col = 'retry_count' THEN
+                    expr := format('COALESCE(%I, 0)', col);
+                ELSIF col = 'created_at' THEN
+                    expr := format('COALESCE(%I, NOW())', col);
+                END IF;
+            ELSIF col = 'stream' THEN
+                expr := 'false';
+            ELSIF col = 'error_phase' THEN
+                expr := '''upstream''';
+            ELSIF col = 'error_type' THEN
+                expr := '''unknown''';
+            ELSIF col = 'severity' THEN
+                expr := '''P2''';
+            ELSIF col IN ('is_business_limited', 'request_body_truncated', 'is_retryable') THEN
+                expr := 'false';
+            ELSIF col = 'retry_count' THEN
+                expr := '0';
+            ELSIF col = 'created_at' THEN
+                expr := 'NOW()';
+            ELSE
+                CONTINUE;
+            END IF;
+
+            insert_cols := array_append(insert_cols, format('%I', col));
+            select_exprs := array_append(select_exprs, expr);
+            IF col = 'id' THEN
+                copied_id := true;
+            END IF;
+        END LOOP;
+
+        IF array_length(insert_cols, 1) IS NOT NULL THEN
+            insert_sql := format(
+                'INSERT INTO public.ops_error_logs (%s) SELECT %s FROM ops_legacy_033.ops_error_logs ON CONFLICT DO NOTHING',
+                array_to_string(insert_cols, ', '),
+                array_to_string(select_exprs, ', ')
+            );
+            EXECUTE insert_sql;
+            IF copied_id THEN
+                SELECT MAX(id) INTO max_id FROM public.ops_error_logs;
+                PERFORM setval(
+                    pg_get_serial_sequence('public.ops_error_logs', 'id'),
+                    COALESCE(max_id, 1),
+                    max_id IS NOT NULL
+                );
+            END IF;
+        END IF;
+    END IF;
+END $$;
 
 -- ============================================
 -- 2) ops_retry_attempts: audit log for retries

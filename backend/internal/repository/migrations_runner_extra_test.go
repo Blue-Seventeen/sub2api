@@ -96,6 +96,11 @@ func TestIsMigrationChecksumCompatible_AdditionalCases(t *testing.T) {
 
 func TestMigrationChecksumCompatibilityRules_CoverEditedUpgradeCompatibilityMigrations(t *testing.T) {
 	for _, name := range []string{
+		"014_drop_legacy_allowed_groups.sql",
+		"019_migrate_wechat_to_attributes.sql",
+		"033_ops_monitoring_vnext.sql",
+		"054_drop_legacy_cache_columns.sql",
+		"090_drop_sora.sql",
 		"109_auth_identity_compat_backfill.sql",
 		"110_pending_auth_and_provider_default_grants.sql",
 		"112_add_payment_order_provider_key_snapshot.sql",
@@ -104,6 +109,8 @@ func TestMigrationChecksumCompatibilityRules_CoverEditedUpgradeCompatibilityMigr
 		"118_wechat_dual_mode_and_auth_source_defaults.sql",
 		"120_enforce_payment_orders_out_trade_no_unique_notx.sql",
 		"123_fix_legacy_auth_source_grant_on_signup_defaults.sql",
+		"127_drop_channel_monitor_deleted_at.sql",
+		"142_remove_ops_retry_replay_compat.sql",
 		"145_subscription_windows_anchor_to_starts_at.sql",
 		"146_subscription_custom_hour_limit.sql",
 	} {

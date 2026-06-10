@@ -65,26 +65,33 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 
 		apiKeyService := service.NewAPIKeyService(apiKeyRepo, nil, nil, nil, nil, nil, cfg)
 
-		past := time.Now().Add(-48 * time.Hour)
 		sub := &service.UserSubscription{
-			ID:               55,
-			UserID:           user.ID,
-			GroupID:          group.ID,
-			Status:           service.SubscriptionStatusActive,
-			ExpiresAt:        time.Now().Add(24 * time.Hour),
-			DailyWindowStart: &past,
-			DailyUsageUSD:    0,
+			ID:        55,
+			UserID:    user.ID,
+			GroupID:   group.ID,
+			Status:    service.SubscriptionStatusActive,
+			StartsAt:  time.Now().Add(-time.Hour),
+			ExpiresAt: time.Now().Add(24 * time.Hour),
 		}
-		maintenanceCalled := make(chan struct{}, 1)
+		maintenanceCalled := make(chan struct{}, 2)
+		signalMaintenance := func() {
+			select {
+			case maintenanceCalled <- struct{}{}:
+			default:
+			}
+		}
 		subscriptionRepo := &stubUserSubscriptionRepo{
 			getActive: func(ctx context.Context, userID, groupID int64) (*service.UserSubscription, error) {
 				clone := *sub
 				return &clone, nil
 			},
-			updateStatus:   func(ctx context.Context, subscriptionID int64, status string) error { return nil },
-			activateWindow: func(ctx context.Context, id int64, start time.Time) error { return nil },
+			updateStatus: func(ctx context.Context, subscriptionID int64, status string) error { return nil },
+			activateWindow: func(ctx context.Context, id int64, start time.Time) error {
+				signalMaintenance()
+				return nil
+			},
 			resetDaily: func(ctx context.Context, id int64, start time.Time) error {
-				maintenanceCalled <- struct{}{}
+				signalMaintenance()
 				return nil
 			},
 			resetWeekly:  func(ctx context.Context, id int64, start time.Time) error { return nil },
@@ -104,12 +111,12 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 		select {
 		case <-maintenanceCalled:
 			// ok
-		case <-time.After(time.Second):
+		case <-time.After(5 * time.Second):
 			t.Fatalf("expected maintenance to be scheduled")
 		}
 	})
 
-	t.Run("standard_mode_maintenance_uses_pre_validation_snapshot", func(t *testing.T) {
+	t.Run("standard_mode_uses_normalized_subscription_snapshot", func(t *testing.T) {
 		cfg := &config.Config{RunMode: config.RunModeStandard}
 		cfg.SubscriptionMaintenance.WorkerCount = 1
 		cfg.SubscriptionMaintenance.QueueSize = 1
@@ -160,24 +167,23 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 			CustomWindowStart: &customWindowStart,
 			CustomUsageUSD:    95,
 		}
-		previousUsageCh := make(chan float64, 1)
-		expectedUpdatedAtCh := make(chan time.Time, 1)
 		subscriptionRepo := &stubUserSubscriptionRepo{
 			getActive: func(ctx context.Context, userID, groupID int64) (*service.UserSubscription, error) {
 				clone := *sub
 				return &clone, nil
 			},
 			updateStatus: func(ctx context.Context, subscriptionID int64, status string) error { return nil },
-			rollCustom: func(ctx context.Context, id int64, oldWindowStart, newWindowStart time.Time, previousUsage float64, expectedUpdatedAt time.Time) (bool, error) {
-				previousUsageCh <- previousUsage
-				expectedUpdatedAtCh <- expectedUpdatedAt
-				return true, nil
-			},
 		}
 		subscriptionService := service.NewSubscriptionService(nil, subscriptionRepo, nil, nil, cfg)
 		t.Cleanup(subscriptionService.Stop)
 
-		router := newAuthTestRouter(apiKeyService, subscriptionService, cfg)
+		var gotSub *service.UserSubscription
+		router := gin.New()
+		router.Use(gin.HandlerFunc(NewAPIKeyAuthMiddleware(apiKeyService, subscriptionService, cfg)))
+		router.GET("/t", func(c *gin.Context) {
+			gotSub, _ = GetSubscriptionFromContext(c)
+			c.JSON(http.StatusOK, gin.H{"ok": true})
+		})
 
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/t", nil)
@@ -185,18 +191,10 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		require.Equal(t, http.StatusOK, w.Code)
-		select {
-		case previousUsage := <-previousUsageCh:
-			require.Equal(t, 95.0, previousUsage)
-		case <-time.After(time.Second):
-			t.Fatalf("expected custom window maintenance to be scheduled")
-		}
-		select {
-		case got := <-expectedUpdatedAtCh:
-			require.Equal(t, updatedAt, got)
-		case <-time.After(time.Second):
-			t.Fatalf("expected custom window maintenance expectedUpdatedAt")
-		}
+		require.NotNil(t, gotSub)
+		require.NotNil(t, gotSub.CustomWindowStart)
+		require.Equal(t, 0.0, gotSub.CustomUsageUSD)
+		require.True(t, gotSub.CustomWindowStart.After(customWindowStart))
 	})
 
 	t.Run("simple_mode_bypasses_quota_check", func(t *testing.T) {

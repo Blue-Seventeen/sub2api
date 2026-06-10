@@ -567,6 +567,7 @@ type ForwardResult struct {
 	Duration         time.Duration
 	FirstTokenMs     *int // 首字时间（流式请求）
 	ClientDisconnect bool // 客户端是否在流式传输过程中断开
+	SkipUsageBilling bool // Internal guard: stream ended abnormally after headers were sent.
 	ReasoningEffort  *string
 
 	// Image generation billing metadata.

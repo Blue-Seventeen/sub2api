@@ -200,15 +200,6 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 	}
 
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
-	if err := h.base.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
-		status, code, message, retryAfter := billingErrorDetails(err)
-		if retryAfter > 0 {
-			c.Header("Retry-After", strconv.Itoa(retryAfter))
-		}
-		h.writeRouteError(c, route, status, code, message, false)
-		return
-	}
-
 	parsed.SessionContext = &service.SessionContext{
 		ClientIP:  ip.GetClientIP(c),
 		UserAgent: c.GetHeader("User-Agent"),
@@ -437,6 +428,11 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 			}
 
 			h.writeRouteError(c, route, http.StatusBadGateway, "upstream_error", err.Error(), streamStarted)
+			return
+		}
+
+		if result != nil && result.SkipUsageBilling {
+			reqLog.Warn("compatible.skip_usage_billing_after_abnormal_stream", zap.Int64("account_id", account.ID))
 			return
 		}
 

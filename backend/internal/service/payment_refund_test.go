@@ -256,6 +256,6 @@ func TestRollbackRefundRestoresSubscriptionSnapshotsWithoutCreatingCard(t *testi
 	require.Equal(t, original.ExpiresAt, restored.ExpiresAt)
 	require.Equal(t, original.Status, restored.Status)
 	require.Equal(t, original.Notes, restored.Notes)
-	require.InDelta(t, 99, restored.DailyUsageUSD, 0.000001)
-	require.InDelta(t, 88, restored.CustomUsageUSD, 0.000001)
+	require.InDelta(t, original.DailyUsageUSD, restored.DailyUsageUSD, 0.000001)
+	require.InDelta(t, original.CustomUsageUSD, restored.CustomUsageUSD, 0.000001)
 }

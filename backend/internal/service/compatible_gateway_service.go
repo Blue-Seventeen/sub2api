@@ -1144,9 +1144,10 @@ func (s *CompatibleGatewayService) handleMessagesResponse(resp *http.Response, c
 				flushCompatibleSSEBuffer(c, &eventBuf)
 			}
 		}
-		logCompatibleStreamScannerError(prepared, scanner.Err())
+		scanErr := scanner.Err()
+		logCompatibleStreamScannerError(prepared, scanErr)
 		flushCompatibleSSEBuffer(c, &eventBuf)
-		return buildCompatibleForwardResult(resp, prepared, usage, true, startTime, firstTokenMs)
+		return buildCompatibleStreamForwardResult(resp, prepared, usage, startTime, firstTokenMs, scanErr)
 	}
 
 	body, ok := compatibleReadUpstreamResponseBody(resp, s.cfg, c, anthropicTooLargeError, []byte(`{"type":"error","error":{"type":"api_error","message":"invalid upstream response"}}`))
@@ -1196,9 +1197,10 @@ func (s *CompatibleGatewayService) handleResponsesResponse(resp *http.Response, 
 				flushCompatibleSSEBuffer(c, &eventBuf)
 			}
 		}
-		logCompatibleStreamScannerError(prepared, scanner.Err())
+		scanErr := scanner.Err()
+		logCompatibleStreamScannerError(prepared, scanErr)
 		flushCompatibleSSEBuffer(c, &eventBuf)
-		return buildCompatibleForwardResult(resp, prepared, usage, true, startTime, firstTokenMs)
+		return buildCompatibleStreamForwardResult(resp, prepared, usage, startTime, firstTokenMs, scanErr)
 	}
 
 	body, ok := compatibleReadUpstreamResponseBody(resp, s.cfg, c, openAITooLargeError, []byte(`{"error":{"message":"invalid upstream response"}}`))
@@ -1241,9 +1243,10 @@ func (s *CompatibleGatewayService) handleChatPassthrough(resp *http.Response, c 
 				flushCompatibleSSEBuffer(c, &eventBuf)
 			}
 		}
-		logCompatibleStreamScannerError(prepared, scanner.Err())
+		scanErr := scanner.Err()
+		logCompatibleStreamScannerError(prepared, scanErr)
 		flushCompatibleSSEBuffer(c, &eventBuf)
-		return buildCompatibleForwardResult(resp, prepared, usage, true, startTime, firstTokenMs)
+		return buildCompatibleStreamForwardResult(resp, prepared, usage, startTime, firstTokenMs, scanErr)
 	}
 
 	body, ok := compatibleReadUpstreamResponseBody(resp, s.cfg, c, openAITooLargeError, []byte(`{"error":{"message":"invalid upstream response"}}`))
@@ -1389,7 +1392,7 @@ func (s *CompatibleGatewayService) handleChatAsResponses(resp *http.Response, c 
 	}
 	if err := scanner.Err(); err != nil {
 		logCompatibleStreamScannerError(prepared, err)
-		return buildCompatibleForwardResult(resp, prepared, usage, true, startTime, firstTokenMs)
+		return buildCompatibleStreamForwardResult(resp, prepared, usage, startTime, firstTokenMs, err)
 	}
 	if !seenFinishReason {
 		finalFinishReason = "stop"
@@ -1597,7 +1600,7 @@ func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *
 	}
 	if err := scanner.Err(); err != nil {
 		logCompatibleStreamScannerError(prepared, err)
-		return buildCompatibleForwardResult(resp, prepared, usage, true, startTime, firstTokenMs)
+		return buildCompatibleStreamForwardResult(resp, prepared, usage, startTime, firstTokenMs, err)
 	}
 	if !seenFinishReason {
 		finalFinishReason = "stop"
@@ -1667,6 +1670,21 @@ func buildCompatibleForwardResult(
 		body = responseBody[0]
 	}
 	applyCompatibleBillableQuantities(result, prepared, body)
+	return result
+}
+
+func buildCompatibleStreamForwardResult(
+	resp *http.Response,
+	prepared *compatiblePreparedRequest,
+	usage ClaudeUsage,
+	startTime time.Time,
+	firstTokenMs *int,
+	streamErr error,
+) *ForwardResult {
+	result := buildCompatibleForwardResult(resp, prepared, usage, true, startTime, firstTokenMs)
+	if streamErr != nil {
+		result.SkipUsageBilling = true
+	}
 	return result
 }
 

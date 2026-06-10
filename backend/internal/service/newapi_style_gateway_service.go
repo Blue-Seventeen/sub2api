@@ -312,12 +312,18 @@ func (s *NewAPIStyleGatewayService) Forward(
 		}
 		if c != nil {
 			c.Status(resp.StatusCode)
-			_, _ = io.Copy(c.Writer, streamReader)
+			_, copyErr := io.Copy(c.Writer, streamReader)
+			if copyErr != nil {
+				result.SkipUsageBilling = true
+			}
 			if f, ok := c.Writer.(http.Flusher); ok {
 				f.Flush()
 			}
 		} else {
-			_, _ = io.Copy(io.Discard, streamReader)
+			_, copyErr := io.Copy(io.Discard, streamReader)
+			if copyErr != nil {
+				result.SkipUsageBilling = true
+			}
 		}
 		if captureAudioStream {
 			if upstreamMsg, ok := newAPIStyleAudioUpstreamErrorPayload(opts, audioStreamCapture.Bytes()); ok {

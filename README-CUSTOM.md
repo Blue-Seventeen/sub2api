@@ -855,6 +855,17 @@ Protect files:
 
 ## 17. v0.1.133 升级兼容说明
 
+## 17.1 v0.1.135 审计补丁
+
+- 内置 migration runner 只允许执行 `-- +goose Up` 到 `-- +goose Down` 之前的内容；历史文件若保留 Down 段，只能作为人工回滚参考，不能在启动迁移时被执行。新增或修改带 goose 标记的 migration 时必须补 runner 测试，防止低版本升级误执行 Down 段造成数据删除。
+- 本轮对 `014/019/033/054/090/127/142` 的历史 migration 做了数据保全修正；这些文件已进入 checksum 兼容白名单，允许已执行旧 destructive 版本的数据库继续启动，但不得把这种白名单扩大成通用跳过校验。后续若继续修改已发布 migration，必须同时说明旧 checksum、当前 checksum 和数据保全原因。
+- `backend/migrations/033_ops_monitoring_vnext.sql` 归档旧 `ops_*` 表时必须移动到 `ops_legacy_033` schema，而不是在 `public` 下简单 rename。这样才能保留旧 ops 数据，同时避免旧表索引名、唯一约束名、serial 序列名占用 `public` 命名空间，导致 vNext 新表缺索引或建表失败。归档后必须把旧 `ops_error_logs` 中与新 schema 兼容的基础字段回填到 `public.ops_error_logs`，确保用户侧和管理侧失败请求历史在升级后仍可见。
+- `backend/migrations/142_remove_ops_retry_replay_compat.sql` 是数据保全兼容迁移：旧版本可能已经写入 `ops_retry_attempts` 或 `ops_error_logs` 的 request/retry 相关列；当前代码不再使用这些 replay 字段，但升级迁移不得 DROP 表或 DROP 列，避免低版本升级破坏历史运维证据。
+- Compatible / NewAPI-style 网关入口只能执行一次计费资格与 RPM 检查；不得在并发等待前后重复调用 `CheckBillingEligibility` 与 `CheckBillingEligibilityFreshSubscription`，否则会导致同一请求双倍消耗 RPM，并增加 Redis/DB 热路径开销。标准做法是保留并发槽获取后的 fresh check。
+- ops upstream request body 上下文只能保存已重写请求体的引用，不能为了错误日志预先 `append([]byte(nil), body...)` 做全量拷贝；只有真正写入错误事件时才允许做必要的字符串化/脱敏处理，避免大请求热路径额外内存放大。
+- Compatible / NewAPI-style 的流式转发如果在响应头已写出后发生上游读错误、`io.Copy` 失败或 `scanner.Err()`，必须跳过成功计费写入；这类异常只能保留已透传给客户端的流式结果，不能当作完整成功请求计费。
+- OpenAI 原生 `/v1/chat/completions` 的 Responses 转换路径遇到代理 / 网络 transport error 时，必须和 `/v1/responses` 一样返回 `UpstreamFailoverError`，由 handler 执行账号 failover / temp-unschedule；不得在 service 层提前写普通 502。
+
 - 当前 `codex/sync-v0.1.133` 以 `codex/sync-v0.1.132` 为基线合入 upstream `v0.1.133`，`backend/cmd/server/VERSION` 对齐为 `0.1.133`；后续不得回退 v0.1.132 已保留的 Promotion、CompatibleGateway、usage fallback、统一倍率、AccountAutoOps、订阅管理和 `/admin/proxies` 自定义体系。
 - 当前 `codex/sync-v0.1.134` 已合入 upstream `v0.1.134`，`backend/cmd/server/VERSION` 对齐为 `0.1.134`；后续不得回退 v0.1.134 已吸收的失败请求追踪、图像 token 计费、用户平台配额 flusher、Responses/Chat bridge、OpenAI/Codex 兼容增强、leader lock 与请求体性能优化，同时必须保留本 fork 的 CompatibleGateway、NewAPI-style、mandatory usage/billing、Promotion、Kimi/Qwen/GLM/DeepSeek 自定义链路。
 - 当前 `codex/sync-v0.1.135` 已合入 upstream `v0.1.135`，且 `codex/sync-v0.1.134`、upstream `v0.1.134` 和 upstream `v0.1.135` 都必须保持为当前同步分支祖先。官方 `v0.1.135` 的代理有效期与失败回退、OpenAI `/responses` 传输层 failover、临时不可调度告警、API Key 专属分组鉴权、usage cache creation/read token 拆分、非流式 JSON Content-Type、Select 下拉高度和 `sub2api-admin` skill 均已吸收；不得在后续同步中回退这些优化。

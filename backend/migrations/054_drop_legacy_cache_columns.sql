@@ -8,7 +8,6 @@
 --   cache_creation_1h_tokens  (defined in 001_init.sql)
 --
 -- Migration 009 already copied data from legacy → canonical columns.
--- This migration drops the legacy columns to avoid confusion.
-
-ALTER TABLE usage_logs DROP COLUMN IF EXISTS cache_creation5m_tokens;
-ALTER TABLE usage_logs DROP COLUMN IF EXISTS cache_creation1h_tokens;
+-- Keep the legacy columns when they exist. Current code uses the canonical
+-- columns, but preserving the old values avoids destroying historical usage
+-- evidence during low-version upgrades.

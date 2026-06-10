@@ -99,7 +99,9 @@ func setOpsUpstreamRequestBody(c *gin.Context, body []byte) {
 	if c == nil || len(body) == 0 {
 		return
 	}
-	c.Set(OpsUpstreamRequestBodyKey, append([]byte(nil), body...))
+	// Body is already immutable after the request rewrite phase; keep a direct
+	// reference so ops logging can reuse it without another full copy.
+	c.Set(OpsUpstreamRequestBodyKey, body)
 }
 
 // OpsUpstreamErrorEvent describes one upstream error attempt during a single gateway request.

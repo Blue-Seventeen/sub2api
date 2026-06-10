@@ -49,8 +49,9 @@ SET display_order = ordered.new_order
 FROM ordered
 WHERE user_attribute_definitions.id = ordered.id;
 
--- Step 4: Drop the redundant wechat column from users table
-ALTER TABLE users DROP COLUMN IF EXISTS wechat;
+-- Step 4: Keep the redundant wechat column for rollback/audit safety.
+-- Current code reads from user_attribute_values; preserving users.wechat avoids
+-- destroying the original value during low-version upgrades.
 
 -- +goose StatementEnd
 

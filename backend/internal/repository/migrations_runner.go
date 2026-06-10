@@ -64,8 +64,12 @@ type migrationChecksumCompatibilityRule struct {
 // 规则必须同时匹配「迁移名 + 数据库 checksum + 当前文件 checksum」且两者都落在该迁移的已知版本集合内才会放行，
 // 避免放宽全局校验，也允许将误改的历史 migration 回滚为已发布版本而不要求人工修 checksum。
 var migrationChecksumCompatibilityRules = map[string]migrationChecksumCompatibilityRule{
-	"054_drop_legacy_cache_columns.sql":                       newMigrationChecksumCompatibilityRule("82de761156e03876653e7a6a4eee883cd927847036f779b0b9f34c42a8af7a7d", "182c193f3359946cf094090cd9e57d5c3fd9abaffbc1e8fc378646b8a6fa12b4"),
+	"014_drop_legacy_allowed_groups.sql":                      newMigrationChecksumCompatibilityRule("f939e24bde1904b3253acd743f75618845892e039dcc78b72916fded8fb81263", "b63fc37ba6a6ffdcb50e082250be5f34f40632597d568bb97247c607198befcc", "9b6920999b47c7fad128daff60d2e4d460221f9db48d8a0e8d0605857f8158fd"),
+	"019_migrate_wechat_to_attributes.sql":                    newMigrationChecksumCompatibilityRule("f0798a7c381f85eccbd437a2f661f9d8b25ca91de332885ea4760fd299417914", "d45e05b4bb722b287377790583c2677b8666dbf7e02b626c93468491d4ce8cf8", "ea91c9b9626fd72e88f7ab48ef730d5feb2dbaab8d979c770fbc839de6b911dd"),
+	"033_ops_monitoring_vnext.sql":                            newMigrationChecksumCompatibilityRule("727d91efba866d26cd7e34fe84ca72434bd82dfd65d7548ceaf03fd58be757e2", "accf363544d187aecad4f1c68fe34118f86d1a931465e66490c530d3f3f1106d", "d87b55e2c10fdfe7148b0f428724bc3776f8c223b15e478b6f5c3b7b1b206a04", "17ff58770c3c0e3777d2404e01c564cde52a99e5e64584a2317b6219111683a0", "2552aa89d5e5c4ba083286dcd48c37dfdbcaec25d03f3b2dc8e19d48e103e6f0", "b7a2ebf6a74ce1d1cf8bef9e70ce84bdc1d678a8f9a3c44c9c4e4c3ea2e7a9ba"),
+	"054_drop_legacy_cache_columns.sql":                       newMigrationChecksumCompatibilityRule("8061ef96e52b5e8d65c18a05c10899f649cd636d78cb576c6fed6330c31f607e", "82de761156e03876653e7a6a4eee883cd927847036f779b0b9f34c42a8af7a7d", "182c193f3359946cf094090cd9e57d5c3fd9abaffbc1e8fc378646b8a6fa12b4", "94df976cd242197554f583dac2998142d07e75358a4674d6b94b8af7a0e81323"),
 	"061_add_usage_log_request_type.sql":                      newMigrationChecksumCompatibilityRule("66207e7aa5dd0429c2e2c0fabdaf79783ff157fa0af2e81adff2ee03790ec65c", "08a248652cbab7cfde147fc6ef8cda464f2477674e20b718312faa252e0481c0", "222b4a09c797c22e5922b6b172327c824f5463aaa8760e4f621bc5c22e2be0f3"),
+	"090_drop_sora.sql":                                       newMigrationChecksumCompatibilityRule("9dc538a1ee4981bf733e62e147c6837a2f0497ef1e73646dea60f827017b7522", "5326d418f2ccc10ce8f4c8766ae490eccbc96c29ba76ea5807635985bbfb877c", "e444ff160e0d596b2bd702ea8962869cec2d3c299cbee562ec316651fc4ea9c6"),
 	"109_auth_identity_compat_backfill.sql":                   newMigrationChecksumCompatibilityRule("0580b4602d85435edf9aca1633db580bb3932f26517f75134106f80275ec2ace", "551e498aa5616d2d91096e9d72cf9fb36e418ee22eacc557f8811cadbc9e20ee"),
 	"110_pending_auth_and_provider_default_grants.sql":        newMigrationChecksumCompatibilityRule("32cf87ee787b1bb36b5c691367c96eee37518fa3eed6f3322cf68795e3745279", "e3d1f433be2b564cfbdc549adf98fce13c5c7b363ebc20fd05b765d0563b0925"),
 	"112_add_payment_order_provider_key_snapshot.sql":         newMigrationChecksumCompatibilityRule("b75f8f56d39455682787696a3d92ad25b055444ca328fb7fca9a460a15d68d99", "ffd3e8a2c9295fa9cbefefd629a78268877e5b51bc970a82d9b3f46ec4ebd15e"),
@@ -75,7 +79,9 @@ var migrationChecksumCompatibilityRules = map[string]migrationChecksumCompatibil
 	"119_enforce_payment_orders_out_trade_no_unique.sql":      newMigrationChecksumCompatibilityRule("0bbe809ae48a9d811dabda1ba1c74955bd71c4a9cc610f9128816818dfa6c11e", "ebd2c67cce0116393fb4f1b5d5116a67c6aceb73820dfb5133d1ff6f36d72d34"),
 	"120_enforce_payment_orders_out_trade_no_unique_notx.sql": newMigrationChecksumCompatibilityRule("34aadc0db59a4e390f92a12b73bd74642d9724f33124f73638ae00089ea5e074", "e77921f79d539bc24575cb9c16cbe566d2b23ce816190343d0a7568f6a3fcf61", "707431450603e70a43ce9fbd61e0c12fa67da4875158ccefabacea069587ab22", "04b082b5a239c525154fe9185d324ee2b05ff90da9297e10dba19f9be79aa59a"),
 	"123_fix_legacy_auth_source_grant_on_signup_defaults.sql": newMigrationChecksumCompatibilityRule("2ce43c2cd89e9f9e1febd34a407ed9e84d177386c5544b6f02c1f58a21129f57", "6cd33422f215dcd1f486ab6f35c0ea5805d9ca69bb25906d94bc649156657145"),
+	"127_drop_channel_monitor_deleted_at.sql":                 newMigrationChecksumCompatibilityRule("0d7336a4e12ee8b01b93d2ceb3c9f44a5523f01dbcd215efe47f897448472e4d", "ac7decb355555a711a372e1ed0d7f1559af41cd796e4be1736f4f978f5f88735", "fd82989ad15a3b450ebb6a0aac3b501a2c211240ff7f5dc5423dad554d46ad0d"),
 	"145_subscription_windows_anchor_to_starts_at.sql":        newMigrationChecksumCompatibilityRule("24f0754ad2355d839ddd2d3f01d15bde97f1b89d28ba60f520cd4855041b2f78", "bd2e1d7cf7dea901bba96b030fb41168db129abc84f705d081afec937d52bfd6"),
+	"142_remove_ops_retry_replay_compat.sql":                  newMigrationChecksumCompatibilityRule("e8f288ca3a703457c47cce4d697f36a35da230914efc3d57ecb25d4b4842e643", "88d139daf730c511ffcd9e8ce99769a6dbc781d63a8b1b954f272254c9468c6f", "2683a204e8aed45c0cae0747d38c9db0dfcba4243d944fcfbc18432c2c3bcd70"),
 	"146_subscription_custom_hour_limit.sql":                  newMigrationChecksumCompatibilityRule("2da1855df7d0295b69219d8fe4da55bac18c6dc1998a1ff1963932fa2f722b0f", "e37b17f291d50b1ac96404f3dd56e23e2e8a6e7dba0fd9c4d148b943709c806c"),
 }
 
@@ -163,6 +169,10 @@ func applyMigrationsFS(ctx context.Context, db *sql.DB, fsys fs.FS) error {
 		if content == "" {
 			continue // 跳过空文件
 		}
+		executionContent := extractGooseUpSection(content)
+		if executionContent == "" {
+			continue
+		}
 
 		// 计算文件内容的 SHA256 校验和，用于检测文件是否被修改。
 		// 这是一种防篡改机制：如果有人修改了已应用的迁移文件，系统会拒绝启动。
@@ -197,7 +207,7 @@ func applyMigrationsFS(ctx context.Context, db *sql.DB, fsys fs.FS) error {
 			return fmt.Errorf("check migration %s: %w", name, rowErr)
 		}
 
-		nonTx, err := validateMigrationExecutionMode(name, content)
+		nonTx, err := validateMigrationExecutionMode(name, executionContent)
 		if err != nil {
 			return fmt.Errorf("validate migration %s: %w", name, err)
 		}
@@ -209,7 +219,7 @@ func applyMigrationsFS(ctx context.Context, db *sql.DB, fsys fs.FS) error {
 
 			// *_notx.sql：用于 CREATE/DROP INDEX CONCURRENTLY 场景，必须非事务执行。
 			// 逐条语句执行，避免将多条 CONCURRENTLY 语句放入同一个隐式事务块。
-			statements := splitSQLStatements(content)
+			statements := splitSQLStatements(executionContent)
 			for i, stmt := range statements {
 				trimmed := strings.TrimSpace(stmt)
 				if trimmed == "" {
@@ -235,7 +245,7 @@ func applyMigrationsFS(ctx context.Context, db *sql.DB, fsys fs.FS) error {
 		}
 
 		// 执行迁移 SQL
-		if _, err := tx.ExecContext(ctx, content); err != nil {
+		if _, err := tx.ExecContext(ctx, executionContent); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("apply migration %s: %w", name, err)
 		}
@@ -485,6 +495,18 @@ func validateMigrationExecutionMode(name, content string) (bool, error) {
 	}
 
 	return true, nil
+}
+
+func extractGooseUpSection(content string) string {
+	lines := strings.Split(content, "\n")
+	cutoff := len(lines)
+	for i, line := range lines {
+		if strings.EqualFold(strings.TrimSpace(line), "-- +goose down") {
+			cutoff = i
+			break
+		}
+	}
+	return strings.TrimSpace(strings.Join(lines[:cutoff], "\n"))
 }
 
 func splitSQLStatements(content string) []string {

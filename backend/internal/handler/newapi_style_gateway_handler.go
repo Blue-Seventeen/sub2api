@@ -141,15 +141,6 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 	channelMapping, _ := h.base.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, model)
 
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
-	if err := h.base.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
-		status, code, message, retryAfter := billingErrorDetails(err)
-		if retryAfter > 0 {
-			c.Header("Retry-After", fmt.Sprintf("%d", retryAfter))
-		}
-		h.writeError(c, status, code, message)
-		return
-	}
-
 	parsedReq, err := service.ParseGatewayRequest(service.NewRequestBodyRef(body), "")
 	if err != nil {
 		parsedReq = &service.ParsedRequest{
@@ -368,6 +359,17 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 				return
 			}
 			h.writeRouteError(c, route, http.StatusBadGateway, "upstream_error", err.Error(), streamStarted)
+			return
+		}
+
+		if result != nil && result.SkipUsageBilling {
+			logger.L().With(
+				zap.String("component", "handler.newapi_style"),
+				zap.Int64("user_id", subject.UserID),
+				zap.Int64("api_key_id", apiKey.ID),
+				zap.Any("group_id", apiKey.GroupID),
+				zap.Int64("account_id", account.ID),
+			).Warn("newapi.skip_usage_billing_after_abnormal_stream")
 			return
 		}
 
