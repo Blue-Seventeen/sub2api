@@ -138,10 +138,14 @@ func TestTempUnscheduleOpenAITransportError_NilAccountRepo_InMemoryBlockOnly(t *
 	// nil accountRepo → no DB write.
 	svc := &OpenAIGatewayService{accountRepo: nil}
 	account := &Account{ID: 55, Name: "no-db", Platform: PlatformOpenAI}
+	c, _ := newOpenAITransportErrTestContext()
 
-	svc.tempUnscheduleOpenAITransportError(context.Background(), account, "proxy refused")
+	err := svc.handleOpenAIUpstreamTransportError(context.Background(), c, account,
+		errors.New("proxyconnect tcp: dial tcp 1.2.3.4:1080: connect: connection refused"), false)
 
 	// In-memory block must still happen.
+	var fo *UpstreamFailoverError
+	require.True(t, errors.As(err, &fo))
 	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account),
 		"in-memory block must apply even when accountRepo is nil")
 }

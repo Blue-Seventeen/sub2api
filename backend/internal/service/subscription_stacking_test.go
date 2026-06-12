@@ -268,7 +268,7 @@ func TestAggregateActiveByGroupKeepsExpiredRecordsSeparate(t *testing.T) {
 	active2 := UserSubscription{ID: 2, UserID: 10, GroupID: 20, StartsAt: now.Add(-time.Hour), ExpiresAt: now.Add(2 * time.Hour), Status: SubscriptionStatusActive}
 	expired := UserSubscription{ID: 3, UserID: 10, GroupID: 20, StartsAt: now.Add(-48 * time.Hour), ExpiresAt: now.Add(-24 * time.Hour), Status: SubscriptionStatusExpired}
 
-	out := aggregateActiveByGroup([]UserSubscription{active1, expired, active2})
+	out := aggregateActiveByGroupInternal([]UserSubscription{active1, expired, active2}, false, false)
 
 	require.Len(t, out, 2)
 	require.True(t, out[0].IsAggregate)
@@ -285,7 +285,7 @@ func TestUserVisibleSubscriptionsAggregateExpiredCardsByGroup(t *testing.T) {
 	expired2 := UserSubscription{ID: 4, UserID: 10, GroupID: 20, StartsAt: now.Add(-48 * time.Hour), ExpiresAt: now.Add(-24 * time.Hour), Status: SubscriptionStatusExpired, DailyUsageUSD: 40}
 	otherGroup := UserSubscription{ID: 5, UserID: 10, GroupID: 21, StartsAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour), Status: SubscriptionStatusActive, DailyUsageUSD: 50}
 
-	out := aggregateUserVisibleByGroupForDisplay([]UserSubscription{active1, expired1, active2, expired2, otherGroup})
+	out := aggregateByGroupAndStatusForDisplay([]UserSubscription{active1, expired1, active2, expired2, otherGroup}, true, false)
 
 	require.Len(t, out, 3)
 	require.True(t, out[0].IsAggregate)
@@ -323,7 +323,7 @@ func TestUserVisibleExpiredAggregationPreservesHistoricalWindowUsage(t *testing.
 		DailyWindowStart: subscriptionTimePtr(now.Add(-7 * 24 * time.Hour)),
 	}
 
-	out := aggregateUserVisibleByGroupForDisplay([]UserSubscription{expired1, expired2})
+	out := aggregateByGroupAndStatusForDisplay([]UserSubscription{expired1, expired2}, true, false)
 
 	require.Len(t, out, 1)
 	require.True(t, out[0].IsAggregate)

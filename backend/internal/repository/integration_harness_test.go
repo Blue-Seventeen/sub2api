@@ -18,8 +18,11 @@ import (
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	_ "github.com/Wei-Shaw/sub2api/ent/runtime"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
+	"github.com/docker/go-connections/nat"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/wait"
 
 	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"
@@ -30,8 +33,8 @@ import (
 )
 
 const (
-	redisImageTag    = "redis:8.4-alpine"
-	postgresImageTag = "postgres:18.1-alpine3.23"
+	redisImageTag    = "redis:7-alpine"
+	postgresImageTag = "postgres:16-alpine"
 )
 
 var (
@@ -44,10 +47,21 @@ var (
 
 func TestMain(m *testing.M) {
 	ctx := context.Background()
+	_ = os.Setenv("TESTCONTAINERS_RYUK_DISABLED", "true")
 
 	if err := timezone.Init("UTC"); err != nil {
 		log.Printf("failed to init timezone: %v", err)
 		os.Exit(1)
+	}
+
+	if dsn := strings.TrimSpace(os.Getenv("SUB2API_TEST_POSTGRES_DSN")); dsn != "" {
+		redisAddr := strings.TrimSpace(os.Getenv("SUB2API_TEST_REDIS_ADDR"))
+		if redisAddr == "" {
+			log.Printf("SUB2API_TEST_REDIS_ADDR is required when SUB2API_TEST_POSTGRES_DSN is set")
+			os.Exit(1)
+		}
+		code := runIntegrationTestsWithExternalServices(ctx, m, dsn, redisAddr)
+		os.Exit(code)
 	}
 
 	if !dockerIsAvailable(ctx) {
@@ -67,7 +81,10 @@ func TestMain(m *testing.M) {
 		tcpostgres.WithDatabase("sub2api_test"),
 		tcpostgres.WithUsername("postgres"),
 		tcpostgres.WithPassword("postgres"),
-		tcpostgres.BasicWaitStrategies(),
+		testcontainers.WithWaitStrategy(
+			wait.ForListeningPort(nat.Port("5432/tcp")).WithStartupTimeout(2*time.Minute),
+			wait.ForLog("database system is ready to accept connections").WithOccurrence(2).WithStartupTimeout(2*time.Minute),
+		),
 	)
 	if err != nil {
 		log.Printf("failed to start postgres container: %v", err)
@@ -78,6 +95,10 @@ func TestMain(m *testing.M) {
 	redisContainer, err := tcredis.Run(
 		ctx,
 		redisImageTag,
+		testcontainers.WithWaitStrategy(
+			wait.ForListeningPort(nat.Port("6379/tcp")).WithStartupTimeout(time.Minute),
+			wait.ForLog("Ready to accept connections").WithStartupTimeout(time.Minute),
+		),
 	)
 	if err != nil {
 		log.Printf("failed to start redis container: %v", err)
@@ -132,6 +153,80 @@ func TestMain(m *testing.M) {
 	_ = integrationDB.Close()
 
 	os.Exit(code)
+}
+
+func runIntegrationTestsWithExternalServices(ctx context.Context, m *testing.M, dsn string, redisAddr string) int {
+	var err error
+	integrationDB, err = openSQLWithRetry(ctx, dsn, 30*time.Second)
+	if err != nil {
+		log.Printf("failed to open external sql db: %v", err)
+		return 1
+	}
+	if err := resetIntegrationDatabase(ctx, integrationDB); err != nil {
+		log.Printf("failed to reset external sql db: %v", err)
+		_ = integrationDB.Close()
+		return 1
+	}
+	if err := ApplyMigrations(ctx, integrationDB); err != nil {
+		log.Printf("failed to apply db migrations: %v", err)
+		_ = integrationDB.Close()
+		return 1
+	}
+
+	drv := entsql.OpenDB(dialect.Postgres, integrationDB)
+	integrationEntClient = dbent.NewClient(dbent.Driver(drv))
+
+	integrationRedis = redisclient.NewClient(&redisclient.Options{
+		Addr: redisAddr,
+		DB:   0,
+	})
+	if err := integrationRedis.Ping(ctx).Err(); err != nil {
+		log.Printf("failed to ping external redis: %v", err)
+		_ = integrationEntClient.Close()
+		_ = integrationDB.Close()
+		return 1
+	}
+	if err := integrationRedis.FlushDB(ctx).Err(); err != nil {
+		log.Printf("failed to flush external redis: %v", err)
+		_ = integrationEntClient.Close()
+		_ = integrationRedis.Close()
+		_ = integrationDB.Close()
+		return 1
+	}
+
+	code := m.Run()
+
+	_ = integrationEntClient.Close()
+	if integrationRedis != nil {
+		_ = integrationRedis.Close()
+	}
+	_ = integrationDB.Close()
+	return code
+}
+
+func resetIntegrationDatabase(ctx context.Context, db *sql.DB) error {
+	if _, err := db.ExecContext(ctx, `
+		DO $$
+		DECLARE
+			schema_name text;
+		BEGIN
+			FOR schema_name IN
+				SELECT nspname
+				FROM pg_namespace
+				WHERE nspname NOT LIKE 'pg_%'
+				  AND nspname <> 'information_schema'
+			LOOP
+				EXECUTE format('DROP SCHEMA IF EXISTS %I CASCADE', schema_name);
+			END LOOP;
+		END $$;
+	`); err != nil {
+		return err
+	}
+	if _, err := db.ExecContext(ctx, `CREATE SCHEMA public`); err != nil {
+		return err
+	}
+	_, err := db.ExecContext(ctx, `GRANT ALL ON SCHEMA public TO public`)
+	return err
 }
 
 func dockerIsAvailable(ctx context.Context) bool {

@@ -37,8 +37,6 @@ const (
 	bytesPerMB = 1024 * 1024
 )
 
-var opsMetricsCollectorAdvisoryLockID = hashAdvisoryLockID(opsMetricsCollectorLeaderLockKey)
-
 type OpsMetricsCollector struct {
 	opsRepo     OpsRepository
 	settingRepo SettingRepository

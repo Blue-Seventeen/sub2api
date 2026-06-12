@@ -224,6 +224,7 @@ func (r *userPlatformQuotaRepository) IncrementUsageWithReset(ctx context.Contex
 			SetDailyWindowStart(timezone.StartOfDay(now)).
 			SetWeeklyWindowStart(timezone.StartOfWeek(now)).
 			SetMonthlyWindowStart(newMonthlyStart). // 30 天滚动：仅过期时更新起始
+			SetUpdatedAt(now).
 			Save(txCtx)
 		return e
 	})

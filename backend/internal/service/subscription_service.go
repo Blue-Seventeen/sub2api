@@ -2005,20 +2005,8 @@ func subscriptionWindowInfo(sub *UserSubscription, window string) (*time.Time, f
 	}
 }
 
-func aggregateActiveByGroup(subs []UserSubscription) []UserSubscription {
-	return aggregateActiveByGroupInternal(subs, false, false)
-}
-
-func aggregateActiveByGroupForDisplay(subs []UserSubscription) []UserSubscription {
-	return aggregateActiveByGroupInternal(subs, true, false)
-}
-
 func aggregateActiveByGroupForUserDisplay(subs []UserSubscription) []UserSubscription {
 	return aggregateActiveByGroupInternal(subs, true, true)
-}
-
-func aggregateUserVisibleByGroupForDisplay(subs []UserSubscription) []UserSubscription {
-	return aggregateByGroupAndStatusForDisplay(subs, true, false)
 }
 
 func aggregateUserVisibleByGroupForUserDisplay(subs []UserSubscription) []UserSubscription {
@@ -2168,13 +2156,6 @@ func (s *SubscriptionService) List(ctx context.Context, page, pageSize int, user
 
 // normalizeExpiredWindows 将已过期窗口的数据清零（仅影响返回数据，不影响数据库）
 // 这确保前端显示正确的当前窗口状态，而不是过期窗口的历史数据
-func normalizeExpiredWindows(subs []UserSubscription) {
-	now := time.Now()
-	for i := range subs {
-		normalizeSubscriptionWindowsAt(&subs[i], now)
-	}
-}
-
 func normalizeSubscriptionSnapshot(sub *UserSubscription) {
 	if sub == nil {
 		return

@@ -1056,24 +1056,6 @@ func newAPIStyleAudioErrorPayloadResult(
 	}
 }
 
-type limitedBufferWriter struct {
-	buffer *bytes.Buffer
-	limit  int
-}
-
-func (w *limitedBufferWriter) Write(p []byte) (int, error) {
-	n := len(p)
-	if w == nil || w.buffer == nil || w.limit <= 0 || w.buffer.Len() >= w.limit {
-		return n, nil
-	}
-	remaining := w.limit - w.buffer.Len()
-	if remaining > len(p) {
-		remaining = len(p)
-	}
-	_, _ = w.buffer.Write(p[:remaining])
-	return n, nil
-}
-
 type tailBufferWriter struct {
 	buffer *bytes.Buffer
 	limit  int

@@ -16,10 +16,12 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go"
 	tcredis "github.com/testcontainers/testcontainers-go/modules/redis"
+	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-const redisImageTag = "redis:8.4-alpine"
+const redisImageTag = "redis:7-alpine"
 
 func TestRateLimiterSetsTTLAndDoesNotRefresh(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -91,9 +93,15 @@ func performRequest(router *gin.Engine) *httptest.ResponseRecorder {
 
 func startRedis(t *testing.T, ctx context.Context) *redis.Client {
 	t.Helper()
+	_ = os.Setenv("TESTCONTAINERS_RYUK_DISABLED", "true")
 	ensureDockerAvailable(t)
 
-	redisContainer, err := tcredis.Run(ctx, redisImageTag)
+	redisContainer, err := tcredis.Run(ctx, redisImageTag,
+		testcontainers.WithWaitStrategy(
+			wait.ForListeningPort("6379/tcp").WithStartupTimeout(time.Minute),
+			wait.ForLog("Ready to accept connections").WithStartupTimeout(time.Minute),
+		),
+	)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_ = redisContainer.Terminate(ctx)

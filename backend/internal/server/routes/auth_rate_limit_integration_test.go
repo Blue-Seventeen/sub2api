@@ -12,13 +12,16 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go"
 	tcredis "github.com/testcontainers/testcontainers-go/modules/redis"
+	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-const authRouteRedisImageTag = "redis:8.4-alpine"
+const authRouteRedisImageTag = "redis:7-alpine"
 
 func TestAuthRegisterRateLimitThresholdHitReturns429(t *testing.T) {
 	ctx := context.Background()
@@ -46,9 +49,15 @@ func TestAuthRegisterRateLimitThresholdHitReturns429(t *testing.T) {
 
 func startAuthRouteRedis(t *testing.T, ctx context.Context) *redis.Client {
 	t.Helper()
+	_ = os.Setenv("TESTCONTAINERS_RYUK_DISABLED", "true")
 	ensureAuthRouteDockerAvailable(t)
 
-	redisContainer, err := tcredis.Run(ctx, authRouteRedisImageTag)
+	redisContainer, err := tcredis.Run(ctx, authRouteRedisImageTag,
+		testcontainers.WithWaitStrategy(
+			wait.ForListeningPort("6379/tcp").WithStartupTimeout(time.Minute),
+			wait.ForLog("Ready to accept connections").WithStartupTimeout(time.Minute),
+		),
+	)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_ = redisContainer.Terminate(ctx)

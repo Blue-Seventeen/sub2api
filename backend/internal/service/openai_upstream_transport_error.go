@@ -177,13 +177,6 @@ func handleOpenAITransportError(ctx context.Context, c *gin.Context, account *Ac
 //     accountRepo is nil (in-memory only; no persistence).
 //   - "openai.account_temp_unscheduled_transport_failed" — DB write attempted
 //     but returned an error.
-func (s *OpenAIGatewayService) tempUnscheduleOpenAITransportError(ctx context.Context, account *Account, safeErr string) {
-	if s == nil {
-		return
-	}
-	tempUnscheduleOpenAITransportError(ctx, account, safeErr, s.accountRepo, s)
-}
-
 func tempUnscheduleOpenAITransportError(ctx context.Context, account *Account, safeErr string, accountRepo AccountRepository, runtimeBlocker AccountRuntimeBlocker) {
 	if account == nil {
 		return

@@ -242,7 +242,7 @@ func incrementUsageBillingSubscriptionStacked(ctx context.Context, tx *sql.Tx, u
 	if err != nil {
 		return 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	now := time.Now()
 	candidates := make([]billingSubscriptionCandidate, 0)
@@ -322,7 +322,6 @@ func incrementUsageBillingSubscriptionStacked(ctx context.Context, tx *sql.Tx, u
 		chosen.weeklyUsage += remaining
 		chosen.monthlyUsage += remaining
 		chosen.customUsage += remaining
-		remaining = 0
 	}
 
 	for _, chosen := range charged {
