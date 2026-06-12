@@ -1,12 +1,23 @@
 package service
 
-import "time"
+import (
+	"net"
+	"regexp"
+	"strings"
+	"time"
+)
 
-// UserErrorRequest 是面向终端用户的"错误请求"精简脱敏视图（白名单）。
-// 严禁包含 client_ip / user_agent / account / api_key_prefix / upstream_endpoint /
-// user_email 等敏感或内部字段。注：message（网关标准化错误描述）与 key_name
-// （用户自有 API Key 名称，KeysView 中本就可见）经产品决策对该用户开放；
-// error_body 仅在详情接口（GetUserErrorRequestDetail）按归属校验后返回。
+const userVisibleNetworkRedaction = "*.*.*.*"
+
+var (
+	userVisibleURLHostRegex     = regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.-]*://)(?:[^@\s/"']+@)?(\[[0-9a-f:.%]+\]|[a-z0-9.-]+)(:\d{1,5})?`)
+	userVisibleDomainRegex      = regexp.MustCompile(`\b(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}\b`)
+	userVisibleIPv4Regex        = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
+	userVisibleBracketIPv6Regex = regexp.MustCompile(`\[[0-9A-Fa-f:.%]+\]`)
+	userVisibleBareIPv6Regex    = regexp.MustCompile(`[0-9A-Fa-f]{0,4}:[0-9A-Fa-f:.%]{2,}`)
+)
+
+// UserErrorRequest is the redacted failed-request view returned to end users.
 type UserErrorRequest struct {
 	ID              int64     `json:"id"`
 	CreatedAt       time.Time `json:"created_at"`
@@ -20,7 +31,7 @@ type UserErrorRequest struct {
 	KeyDeleted      bool      `json:"key_deleted"`
 }
 
-// UserErrorRequestList 是用户错误请求分页结果。
+// UserErrorRequestList is the paginated failed-request result for users.
 type UserErrorRequestList struct {
 	Items    []*UserErrorRequest `json:"items"`
 	Total    int                 `json:"total"`
@@ -28,8 +39,7 @@ type UserErrorRequestList struct {
 	PageSize int                 `json:"page_size"`
 }
 
-// MapUserErrorCategory 把后端 error_phase + error_type 映射为用户侧粗分类码。
-// 返回的是稳定的分类 code（前端做 i18n），不是展示文案。
+// MapUserErrorCategory maps internal ops dimensions to stable user-facing codes.
 func MapUserErrorCategory(phase, errType string) string {
 	switch phase {
 	case "auth":
@@ -53,9 +63,7 @@ func MapUserErrorCategory(phase, errType string) string {
 	return "other"
 }
 
-// CategoryToFilter 把用户侧分类码反向映射为后端过滤条件（plain ANY）。
-// 未知分类返回两个空切片（即不施加分类过滤）。
-// 注意："other" 与未知分类都走 default 返回空切片——"other" 无对应的 phase/type 组合，无法精确反查，因此等价于不过滤。
+// CategoryToFilter maps user-facing category codes back to ops filter dimensions.
 func CategoryToFilter(category string) (phases []string, errorTypes []string) {
 	switch category {
 	case "auth":
@@ -77,7 +85,43 @@ func CategoryToFilter(category string) (phases []string, errorTypes []string) {
 	}
 }
 
-// ToUserErrorRequest 把内部 OpsErrorLog 裁剪为用户安全视图。
+func sanitizeUserVisibleErrorText(text string) string {
+	if text == "" {
+		return ""
+	}
+
+	out := userVisibleURLHostRegex.ReplaceAllString(text, `${1}`+userVisibleNetworkRedaction+`${3}`)
+	out = userVisibleDomainRegex.ReplaceAllString(out, userVisibleNetworkRedaction)
+	out = userVisibleIPv4Regex.ReplaceAllStringFunc(out, func(match string) string {
+		if ip := net.ParseIP(match); ip != nil && ip.To4() != nil {
+			return userVisibleNetworkRedaction
+		}
+		return match
+	})
+	out = userVisibleBracketIPv6Regex.ReplaceAllStringFunc(out, func(match string) string {
+		host := strings.Trim(match, "[]")
+		if idx := strings.LastIndex(host, "%"); idx >= 0 {
+			host = host[:idx]
+		}
+		if ip := net.ParseIP(host); ip != nil && ip.To4() == nil {
+			return "[" + userVisibleNetworkRedaction + "]"
+		}
+		return match
+	})
+	out = userVisibleBareIPv6Regex.ReplaceAllStringFunc(out, func(match string) string {
+		host := match
+		if idx := strings.LastIndex(host, "%"); idx >= 0 {
+			host = host[:idx]
+		}
+		if ip := net.ParseIP(host); ip != nil && ip.To4() == nil {
+			return userVisibleNetworkRedaction
+		}
+		return match
+	})
+	return out
+}
+
+// ToUserErrorRequest converts an internal ops error to the user-safe list view.
 func ToUserErrorRequest(e *OpsErrorLog) *UserErrorRequest {
 	if e == nil {
 		return nil
@@ -94,22 +138,20 @@ func ToUserErrorRequest(e *OpsErrorLog) *UserErrorRequest {
 		StatusCode:      e.StatusCode,
 		Category:        MapUserErrorCategory(e.Phase, e.Type),
 		Platform:        e.Platform,
-		Message:         e.Message,
+		Message:         sanitizeUserVisibleErrorText(e.Message),
 		KeyName:         e.APIKeyName,
 		KeyDeleted:      e.APIKeyDeleted,
 	}
 }
 
-// UserErrorRequestDetail 是错误请求详情的脱敏视图(点击单行查看)。
-// 在 UserErrorRequest 基础上额外暴露 error_body(上游错误响应正文)与 upstream_status_code;
-// 仍严禁任何内部/敏感字段。
+// UserErrorRequestDetail is the redacted detail view returned to end users.
 type UserErrorRequestDetail struct {
 	UserErrorRequest
 	ErrorBody          string `json:"error_body"`
 	UpstreamStatusCode *int   `json:"upstream_status_code,omitempty"`
 }
 
-// ToUserErrorRequestDetail 把内部 OpsErrorLogDetail 裁剪为用户安全详情视图。
+// ToUserErrorRequestDetail converts an internal ops detail to a user-safe detail view.
 func ToUserErrorRequestDetail(e *OpsErrorLogDetail) *UserErrorRequestDetail {
 	if e == nil {
 		return nil
@@ -117,7 +159,7 @@ func ToUserErrorRequestDetail(e *OpsErrorLogDetail) *UserErrorRequestDetail {
 	base := ToUserErrorRequest(&e.OpsErrorLog)
 	return &UserErrorRequestDetail{
 		UserErrorRequest:   *base,
-		ErrorBody:          e.ErrorBody,
+		ErrorBody:          sanitizeUserVisibleErrorText(e.ErrorBody),
 		UpstreamStatusCode: e.UpstreamStatusCode,
 	}
 }

@@ -103,6 +103,60 @@ func TestToUserErrorRequest_RedactsSensitiveFields(t *testing.T) {
 	}
 }
 
+func TestToUserErrorRequest_RedactsNetworkIdentifiersInUserVisibleMessage(t *testing.T) {
+	message := `Post "https://japan.zelly.cn/v1/responses": dial tcp 43.165.178.21:443: connect: connection timed out while model gpt-5.4`
+	src := &OpsErrorLog{
+		ID:              124,
+		CreatedAt:       time.Unix(0, 0).UTC(),
+		Model:           "gpt-5.4",
+		InboundEndpoint: "/v1/responses",
+		StatusCode:      502,
+		Platform:        "openai",
+		Phase:           "network",
+		Type:            "api_error",
+		Message:         message,
+	}
+
+	out := ToUserErrorRequest(src)
+	want := `Post "https://*.*.*.*/v1/responses": dial tcp *.*.*.*:443: connect: connection timed out while model gpt-5.4`
+	if out.Message != want {
+		t.Fatalf("message = %q, want %q", out.Message, want)
+	}
+	if src.Message != message {
+		t.Fatalf("source message mutated: %q", src.Message)
+	}
+	if strings.Contains(out.Message, "japan.zelly.cn") || strings.Contains(out.Message, "43.165.178.21") {
+		t.Fatalf("network identifier leaked in user message: %q", out.Message)
+	}
+	if !strings.Contains(out.Message, "gpt-5.4") {
+		t.Fatalf("non-host model version should not be redacted: %q", out.Message)
+	}
+}
+
+func TestToUserErrorRequest_LeavesSourceOpsLogUnchangedForAdminPath(t *testing.T) {
+	message := `Post "https://japan.zelly.cn/v1/responses": dial tcp 43.165.178.21:443`
+	src := &OpsErrorLog{
+		ID:         125,
+		Model:      "gpt-5.4",
+		StatusCode: 502,
+		Platform:   "openai",
+		Phase:      "network",
+		Type:       "api_error",
+		Message:    message,
+	}
+
+	out := ToUserErrorRequest(src)
+	if out == nil {
+		t.Fatal("expected non-nil user view")
+	}
+	if out.Message == src.Message {
+		t.Fatalf("user message should be redacted, got %q", out.Message)
+	}
+	if src.Message != message {
+		t.Fatalf("source ops message should remain unchanged for admin path, got %q", src.Message)
+	}
+}
+
 func TestToUserErrorRequestDetail_WhitelistAndRedacts(t *testing.T) {
 	uid := int64(42)
 	upstreamStatus := 503
@@ -157,6 +211,42 @@ func TestToUserErrorRequestDetail_WhitelistAndRedacts(t *testing.T) {
 		if strings.Contains(raw, forbidden) {
 			t.Errorf("sensitive field %q leaked in JSON output: %s", forbidden, raw)
 		}
+	}
+}
+
+func TestToUserErrorRequestDetail_RedactsNetworkIdentifiersInErrorBody(t *testing.T) {
+	body := `{"error":{"message":"proxy http://proxy.example.net:8080 failed via [2001:db8::1]:443 and 10.0.0.1"}}`
+	src := &OpsErrorLogDetail{
+		OpsErrorLog: OpsErrorLog{
+			ID:              1000,
+			CreatedAt:       time.Unix(1000, 0).UTC(),
+			Model:           "gpt-5.4",
+			InboundEndpoint: "/v1/responses",
+			StatusCode:      502,
+			Platform:        "openai",
+			Phase:           "network",
+			Type:            "api_error",
+			Message:         `retry https://upstream.example.com/v1 from 2606:4700:4700::1111`,
+		},
+		ErrorBody: body,
+	}
+
+	out := ToUserErrorRequestDetail(src)
+	if out == nil {
+		t.Fatal("expected non-nil detail")
+	}
+	for _, leaked := range []string{"proxy.example.net", "upstream.example.com", "10.0.0.1", "2001:db8::1", "2606:4700:4700::1111"} {
+		if strings.Contains(out.Message, leaked) || strings.Contains(out.ErrorBody, leaked) {
+			t.Fatalf("network identifier %q leaked: message=%q body=%q", leaked, out.Message, out.ErrorBody)
+		}
+	}
+	for _, want := range []string{"https://*.*.*.*/v1", "http://*.*.*.*:8080", "[*.*.*.*]:443"} {
+		if !strings.Contains(out.Message, want) && !strings.Contains(out.ErrorBody, want) {
+			t.Fatalf("expected redacted fragment %q in message/body, got message=%q body=%q", want, out.Message, out.ErrorBody)
+		}
+	}
+	if src.ErrorBody != body {
+		t.Fatalf("source error body mutated: %q", src.ErrorBody)
 	}
 }
 
