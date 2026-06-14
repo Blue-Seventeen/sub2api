@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -349,7 +350,7 @@ func (h *PaymentHandler) GetMyOrders(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Paginated(c, sanitizePaymentOrdersForResponse(orders), int64(total), page, pageSize)
+	response.Paginated(c, sanitizePaymentOrdersForUserResponse(c.Request.Context(), h.paymentService, orders), int64(total), page, pageSize)
 }
 
 // GetOrder returns a single order for the authenticated user.
@@ -371,7 +372,7 @@ func (h *PaymentHandler) GetOrder(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Success(c, sanitizePaymentOrderForResponse(order))
+	response.Success(c, sanitizePaymentOrderForUserResponse(c.Request.Context(), h.paymentService, order))
 }
 
 // CancelOrder cancels a pending order for the authenticated user.
@@ -428,14 +429,10 @@ func (h *PaymentHandler) RequestRefund(c *gin.Context) {
 	response.Success(c, gin.H{"message": "refund requested"})
 }
 
-// GetRefundEligibleProviders returns provider instance IDs that allow user refund.
+// GetRefundEligibleProviders is kept for backwards compatibility. New clients
+// should use order-level can_request_refund instead of internal provider IDs.
 func (h *PaymentHandler) GetRefundEligibleProviders(c *gin.Context) {
-	ids, err := h.configService.GetUserRefundEligibleInstanceIDs(c.Request.Context())
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	response.Success(c, gin.H{"provider_instance_ids": ids})
+	response.Success(c, gin.H{"provider_instance_ids": []string{}})
 }
 
 // VerifyOrderRequest is the request body for verifying a payment order.
@@ -467,7 +464,7 @@ func (h *PaymentHandler) VerifyOrder(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Success(c, sanitizePaymentOrderForResponse(order))
+	response.Success(c, sanitizePaymentOrderForUserResponse(c.Request.Context(), h.paymentService, order))
 }
 
 // PublicOrderResult is the limited order info returned by the public verify endpoint.
@@ -597,12 +594,23 @@ type PaymentOrderResult struct {
 	RefundRequestReason *string    `json:"refund_request_reason,omitempty"`
 	PlanID              *int64     `json:"plan_id,omitempty"`
 	ProviderInstanceID  *string    `json:"provider_instance_id,omitempty"`
+	CanRequestRefund    bool       `json:"can_request_refund"`
 }
 
 func sanitizePaymentOrdersForResponse(orders []*dbent.PaymentOrder) []PaymentOrderResult {
 	out := make([]PaymentOrderResult, 0, len(orders))
 	for _, order := range orders {
 		if item := sanitizePaymentOrderForResponse(order); item != nil {
+			out = append(out, *item)
+		}
+	}
+	return out
+}
+
+func sanitizePaymentOrdersForUserResponse(ctx context.Context, paymentService *service.PaymentService, orders []*dbent.PaymentOrder) []PaymentOrderResult {
+	out := make([]PaymentOrderResult, 0, len(orders))
+	for _, order := range orders {
+		if item := sanitizePaymentOrderForUserResponse(ctx, paymentService, order); item != nil {
 			out = append(out, *item)
 		}
 	}
@@ -634,8 +642,16 @@ func sanitizePaymentOrderForResponse(order *dbent.PaymentOrder) *PaymentOrderRes
 		RefundRequestedBy:   order.RefundRequestedBy,
 		RefundRequestReason: order.RefundRequestReason,
 		PlanID:              order.PlanID,
-		ProviderInstanceID:  order.ProviderInstanceID,
 	}
+}
+
+func sanitizePaymentOrderForUserResponse(ctx context.Context, paymentService *service.PaymentService, order *dbent.PaymentOrder) *PaymentOrderResult {
+	out := sanitizePaymentOrderForResponse(order)
+	if out == nil || paymentService == nil {
+		return out
+	}
+	out.CanRequestRefund = paymentService.CanUserRequestRefund(ctx, order)
+	return out
 }
 
 func isWeChatBrowser(c *gin.Context) bool {

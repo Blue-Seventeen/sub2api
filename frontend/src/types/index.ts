@@ -1290,13 +1290,11 @@ export interface UsageLog {
   id: number
   user_id: number
   api_key_id: number
-  account_id: number | null
   request_id: string
   model: string
   service_tier?: string | null
   reasoning_effort?: string | null
   inbound_endpoint?: string | null
-  upstream_endpoint?: string | null
 
   group_id: number | null
   subscription_id: number | null
@@ -1362,6 +1360,11 @@ export interface UsageLogAccountSummary {
 }
 
 export interface AdminUsageLog extends UsageLog {
+  account_id?: number | null
+  upstream_endpoint?: string | null
+  compatibility_route?: string | null
+  fallback_chain?: string | null
+  upstream_transport?: string | null
   upstream_model?: string | null
   model_mapping_chain?: string | null
 

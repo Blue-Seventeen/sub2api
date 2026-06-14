@@ -818,6 +818,36 @@ func TestNormalizeStringSlice(t *testing.T) {
 	}
 }
 
+func TestLoadTrustedProxiesAndAuthRateLimitEnv(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	t.Setenv("SERVER_TRUSTED_PROXIES", "127.0.0.1, 10.0.0.0/8")
+	t.Setenv("RATE_LIMIT_AUTH_REDIS_FAILURE_MODE", "fail-open")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if len(cfg.Server.TrustedProxies) != 2 || cfg.Server.TrustedProxies[0] != "127.0.0.1" || cfg.Server.TrustedProxies[1] != "10.0.0.0/8" {
+		t.Fatalf("TrustedProxies = %#v", cfg.Server.TrustedProxies)
+	}
+	if cfg.RateLimit.AuthRedisFailureMode != "fail-open" {
+		t.Fatalf("AuthRedisFailureMode = %q", cfg.RateLimit.AuthRedisFailureMode)
+	}
+}
+
+func TestLoadAuthRateLimitFailureModeDefaultsFailClose(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	t.Setenv("RATE_LIMIT_AUTH_REDIS_FAILURE_MODE", "bad-value")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if cfg.RateLimit.AuthRedisFailureMode != "fail-close" {
+		t.Fatalf("AuthRedisFailureMode = %q", cfg.RateLimit.AuthRedisFailureMode)
+	}
+}
+
 func TestGetServerAddressFromEnv(t *testing.T) {
 	t.Setenv("SERVER_HOST", "127.0.0.1")
 	t.Setenv("SERVER_PORT", "9090")

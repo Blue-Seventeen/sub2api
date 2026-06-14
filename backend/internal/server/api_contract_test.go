@@ -619,7 +619,6 @@ func TestAPIContracts(t *testing.T) {
 							"id": 1,
 							"user_id": 1,
 							"api_key_id": 100,
-							"account_id": 200,
 								"request_id": "req_123",
 								"model": "claude-3",
 								"request_type": "stream",

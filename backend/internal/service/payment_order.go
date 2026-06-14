@@ -774,7 +774,7 @@ func (s *PaymentService) GetOrder(ctx context.Context, orderID, userID int64) (*
 		return nil, infraerrors.NotFound("NOT_FOUND", "order not found")
 	}
 	if o.UserID != userID {
-		return nil, infraerrors.Forbidden("FORBIDDEN", "no permission for this order")
+		return nil, infraerrors.NotFound("NOT_FOUND", "order not found")
 	}
 	return o, nil
 }

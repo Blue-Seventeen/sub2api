@@ -66,6 +66,51 @@ func TestValidateRefundRequestRejectsLegacyGuessedProviderInstance(t *testing.T)
 	require.Equal(t, "USER_REFUND_DISABLED", infraerrors.Reason(err))
 }
 
+func TestValidateRefundRequestHidesForeignOrderExistence(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+
+	owner, err := client.User.Create().
+		SetEmail("refund-foreign-owner@example.com").
+		SetPasswordHash("hash").
+		SetUsername("refund-foreign-owner").
+		Save(ctx)
+	require.NoError(t, err)
+
+	other, err := client.User.Create().
+		SetEmail("refund-foreign-other@example.com").
+		SetPasswordHash("hash").
+		SetUsername("refund-foreign-other").
+		Save(ctx)
+	require.NoError(t, err)
+
+	order, err := client.PaymentOrder.Create().
+		SetUserID(owner.ID).
+		SetUserEmail(owner.Email).
+		SetUserName(owner.Username).
+		SetAmount(33).
+		SetPayAmount(33).
+		SetFeeRate(0).
+		SetRechargeCode("REFUND-FOREIGN-ORDER").
+		SetOutTradeNo("sub2_refund_foreign_order").
+		SetPaymentType(payment.TypeAlipay).
+		SetPaymentTradeNo("trade-refund-foreign").
+		SetOrderType(payment.OrderTypeBalance).
+		SetStatus(OrderStatusCompleted).
+		SetExpiresAt(time.Now().Add(time.Hour)).
+		SetPaidAt(time.Now()).
+		SetClientIP("127.0.0.1").
+		SetSrcHost("api.example.com").
+		Save(ctx)
+	require.NoError(t, err)
+
+	svc := &PaymentService{entClient: client}
+
+	_, err = svc.validateRefundRequest(ctx, order.ID, other.ID)
+	require.Error(t, err)
+	require.Equal(t, "NOT_FOUND", infraerrors.Reason(err))
+}
+
 func TestPrepareRefundRejectsLegacyGuessedProviderInstance(t *testing.T) {
 	ctx := context.Background()
 	client := newPaymentConfigServiceTestClient(t)

@@ -103,7 +103,6 @@ const appStore = useAppStore()
 const loading = ref(false)
 const actionLoading = ref(false)
 const orders = ref<PaymentOrder[]>([])
-const refundEligibleProviders = ref<Set<string>>(new Set())
 const currentFilter = ref('')
 const cancelTargetId = ref<number | null>(null)
 const refundTarget = ref<PaymentOrder | null>(null)
@@ -174,17 +173,8 @@ async function confirmRefund() {
 }
 
 function canRequestRefund(order: PaymentOrder): boolean {
-  if (order.status !== 'COMPLETED') return false
-  if (!order.provider_instance_id) return false
-  return refundEligibleProviders.value.has(order.provider_instance_id)
+  return order.status === 'COMPLETED' && order.can_request_refund === true
 }
 
-async function loadRefundEligibility() {
-  try {
-    const res = await paymentAPI.getRefundEligibleProviders()
-    refundEligibleProviders.value = new Set(res.data.provider_instance_ids || [])
-  } catch { /* ignore — default to hiding refund button */ }
-}
-
-onMounted(() => { fetchOrders(); loadRefundEligibility() })
+onMounted(() => { fetchOrders() })
 </script>

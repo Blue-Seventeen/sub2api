@@ -102,7 +102,7 @@ func (s *PaymentService) CancelOrder(ctx context.Context, orderID, userID int64)
 		return "", infraerrors.NotFound("NOT_FOUND", "order not found")
 	}
 	if o.UserID != userID {
-		return "", infraerrors.Forbidden("FORBIDDEN", "no permission for this order")
+		return "", infraerrors.NotFound("NOT_FOUND", "order not found")
 	}
 	if o.Status != OrderStatusPending {
 		return "", infraerrors.BadRequest("INVALID_STATUS", "order cannot be cancelled in current status")
@@ -281,7 +281,7 @@ func (s *PaymentService) VerifyOrderByOutTradeNo(ctx context.Context, outTradeNo
 		return nil, infraerrors.NotFound("NOT_FOUND", "order not found")
 	}
 	if o.UserID != userID {
-		return nil, infraerrors.Forbidden("FORBIDDEN", "no permission for this order")
+		return nil, infraerrors.NotFound("NOT_FOUND", "order not found")
 	}
 	// Only verify orders that are still pending or recently expired
 	if o.Status == OrderStatusPending || o.Status == OrderStatusExpired {

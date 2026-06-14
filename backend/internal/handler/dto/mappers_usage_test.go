@@ -73,18 +73,25 @@ func TestRequestTypeStringPtrNil(t *testing.T) {
 	require.Nil(t, requestTypeStringPtr(nil))
 }
 
-func TestUsageLogFromService_IncludesServiceTierForUserAndAdmin(t *testing.T) {
+func TestUsageLogFromService_ExposesOnlyUserSafeRoutingFields(t *testing.T) {
 	t.Parallel()
 
 	serviceTier := "priority"
 	inboundEndpoint := "/v1/chat/completions"
 	upstreamEndpoint := "/v1/responses"
+	fallbackChain := "responses -> chat_fallback"
+	compatibilityRoute := "openai_responses_bridge"
+	upstreamTransport := "sse"
 	log := &service.UsageLog{
 		RequestID:             "req_3",
+		AccountID:             200,
 		Model:                 "gpt-5.4",
 		ServiceTier:           &serviceTier,
 		InboundEndpoint:       &inboundEndpoint,
 		UpstreamEndpoint:      &upstreamEndpoint,
+		FallbackChain:         &fallbackChain,
+		CompatibilityRoute:    &compatibilityRoute,
+		UpstreamTransport:     &upstreamTransport,
 		AccountRateMultiplier: f64Ptr(1.5),
 	}
 
@@ -95,14 +102,37 @@ func TestUsageLogFromService_IncludesServiceTierForUserAndAdmin(t *testing.T) {
 	require.Equal(t, serviceTier, *userDTO.ServiceTier)
 	require.NotNil(t, userDTO.InboundEndpoint)
 	require.Equal(t, inboundEndpoint, *userDTO.InboundEndpoint)
-	require.NotNil(t, userDTO.UpstreamEndpoint)
-	require.Equal(t, upstreamEndpoint, *userDTO.UpstreamEndpoint)
+
+	userJSON, err := json.Marshal(userDTO)
+	require.NoError(t, err)
+	for _, forbidden := range []string{
+		"account_id",
+		"upstream_endpoint",
+		"fallback_chain",
+		"compatibility_route",
+		"upstream_transport",
+		upstreamEndpoint,
+		fallbackChain,
+		compatibilityRoute,
+		upstreamTransport,
+	} {
+		require.NotContains(t, string(userJSON), forbidden)
+	}
+
 	require.NotNil(t, adminDTO.ServiceTier)
 	require.Equal(t, serviceTier, *adminDTO.ServiceTier)
 	require.NotNil(t, adminDTO.InboundEndpoint)
 	require.Equal(t, inboundEndpoint, *adminDTO.InboundEndpoint)
+	require.NotNil(t, adminDTO.AccountID)
+	require.Equal(t, int64(200), *adminDTO.AccountID)
 	require.NotNil(t, adminDTO.UpstreamEndpoint)
 	require.Equal(t, upstreamEndpoint, *adminDTO.UpstreamEndpoint)
+	require.NotNil(t, adminDTO.FallbackChain)
+	require.Equal(t, fallbackChain, *adminDTO.FallbackChain)
+	require.NotNil(t, adminDTO.CompatibilityRoute)
+	require.Equal(t, compatibilityRoute, *adminDTO.CompatibilityRoute)
+	require.NotNil(t, adminDTO.UpstreamTransport)
+	require.Equal(t, upstreamTransport, *adminDTO.UpstreamTransport)
 	require.NotNil(t, adminDTO.AccountRateMultiplier)
 	require.InDelta(t, 1.5, *adminDTO.AccountRateMultiplier, 1e-12)
 }
@@ -146,6 +176,32 @@ func TestUsageLogFromService_FallsBackToLegacyModelWhenRequestedModelMissing(t *
 
 	require.Equal(t, "claude-3", userDTO.Model)
 	require.Equal(t, "claude-3", adminDTO.Model)
+}
+
+func TestUsageLogFromService_RedactsNestedAPIKeyForUser(t *testing.T) {
+	t.Parallel()
+
+	log := &service.UsageLog{
+		RequestID: "req_key_redact",
+		APIKey: &service.APIKey{
+			ID:     42,
+			UserID: 7,
+			Key:    "sk-sensitive-user-key",
+			Name:   "primary",
+			Status: "active",
+		},
+	}
+
+	userDTO := UsageLogFromService(log)
+	adminDTO := UsageLogFromServiceAdmin(log)
+
+	require.NotNil(t, userDTO.APIKey)
+	require.Equal(t, int64(42), userDTO.APIKey.ID)
+	require.Equal(t, "primary", userDTO.APIKey.Name)
+	require.Empty(t, userDTO.APIKey.Key)
+
+	require.NotNil(t, adminDTO.APIKey)
+	require.Equal(t, "sk-sensitive-user-key", adminDTO.APIKey.Key)
 }
 
 func TestUsageLogFromService_IncludesImageBillingMetadataForUserAndAdmin(t *testing.T) {

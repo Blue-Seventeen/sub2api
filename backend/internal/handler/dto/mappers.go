@@ -124,6 +124,14 @@ func APIKeyFromService(k *service.APIKey) *APIKey {
 	return out
 }
 
+func APIKeyFromServiceForUsageUser(k *service.APIKey) *APIKey {
+	out := APIKeyFromService(k)
+	if out != nil {
+		out.Key = ""
+	}
+	return out
+}
+
 func GroupFromServiceShallow(g *service.Group) *Group {
 	if g == nil {
 		return nil
@@ -596,17 +604,12 @@ func usageLogFromServiceUser(l *service.UsageLog) UsageLog {
 		ID:                      l.ID,
 		UserID:                  l.UserID,
 		APIKeyID:                l.APIKeyID,
-		AccountID:               l.AccountID,
 		RequestID:               l.RequestID,
 		Model:                   requestedModel,
 		ServiceTier:             l.ServiceTier,
 		ReasoningEffort:         l.ReasoningEffort,
 		InboundEndpoint:         l.InboundEndpoint,
-		UpstreamEndpoint:        l.UpstreamEndpoint,
 		ClientProfile:           l.ClientProfile,
-		CompatibilityRoute:      l.CompatibilityRoute,
-		FallbackChain:           l.FallbackChain,
-		UpstreamTransport:       l.UpstreamTransport,
 		GroupID:                 l.GroupID,
 		SubscriptionID:          l.SubscriptionID,
 		InputTokens:             l.InputTokens,
@@ -648,7 +651,7 @@ func usageLogFromServiceUser(l *service.UsageLog) UsageLog {
 		BillingMode:             l.BillingMode,
 		CreatedAt:               l.CreatedAt,
 		User:                    UserFromServiceShallow(l.User),
-		APIKey:                  APIKeyFromService(l.APIKey),
+		APIKey:                  APIKeyFromServiceForUsageUser(l.APIKey),
 		Group:                   GroupFromServiceShallow(l.Group),
 		Subscription:            UserSubscriptionFromService(l.Subscription),
 	}
@@ -670,7 +673,8 @@ func UsageLogFromServiceAdmin(l *service.UsageLog) *AdminUsageLog {
 	if l == nil {
 		return nil
 	}
-	return &AdminUsageLog{
+	accountID := l.AccountID
+	out := &AdminUsageLog{
 		UsageLog:              usageLogFromServiceUser(l),
 		UpstreamModel:         l.UpstreamModel,
 		ChannelID:             l.ChannelID,
@@ -683,6 +687,13 @@ func UsageLogFromServiceAdmin(l *service.UsageLog) *AdminUsageLog {
 		IPAddress:             l.IPAddress,
 		Account:               AccountSummaryFromService(l.Account),
 	}
+	out.AccountID = &accountID
+	out.UpstreamEndpoint = l.UpstreamEndpoint
+	out.CompatibilityRoute = l.CompatibilityRoute
+	out.FallbackChain = l.FallbackChain
+	out.UpstreamTransport = l.UpstreamTransport
+	out.APIKey = APIKeyFromService(l.APIKey)
+	return out
 }
 
 func UsageCleanupTaskFromService(task *service.UsageCleanupTask) *UsageCleanupTask {

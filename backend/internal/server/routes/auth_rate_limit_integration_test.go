@@ -27,7 +27,7 @@ func TestAuthRegisterRateLimitThresholdHitReturns429(t *testing.T) {
 	ctx := context.Background()
 	rdb := startAuthRouteRedis(t, ctx)
 
-	router := newAuthRoutesTestRouter(rdb)
+	router := newAuthRoutesTestRouter(rdb, nil)
 	const path = "/api/v1/auth/register"
 
 	for i := 1; i <= 6; i++ {

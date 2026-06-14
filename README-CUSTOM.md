@@ -1,5 +1,22 @@
 # README-CUSTOM
 
+## Auth Rate Limit And Redis Safety
+
+- Login rate limiting uses two Redis buckets: a broader per-IP bucket and a per-IP + email-hash bucket. This prevents reverse proxy/NAT traffic from sharing the old narrow `auth-login:<ip>` bucket while still limiting repeated attempts against the same email.
+- Multi-instance deployments must point every Sub2API node at the same Redis-compatible single endpoint for auth rate-limit keys, and must keep `SERVER_TRUSTED_PROXIES` / `RATE_LIMIT_AUTH_REDIS_FAILURE_MODE` consistent across nodes.
+- Deployments behind Nginx/CDN/LB must configure `SERVER_TRUSTED_PROXIES` or `server.trusted_proxies`; otherwise Gin sees the proxy IP as the client IP and all users share the same auth rate-limit buckets. This value is global to Gin client IP resolution, so only include trusted reverse proxy addresses or CIDRs; never use `0.0.0.0/0`.
+- Auth Redis failures are no longer reported as user-side `429 rate limit exceeded`; fail-close mode returns `503 rate limit unavailable` so operators can distinguish Redis outages from real user throttling.
+- `RATE_LIMIT_AUTH_REDIS_FAILURE_MODE=fail-close` remains the default. HA deployments that prefer login availability during Redis failover may set `fail-open`, but this should be a deliberate production decision.
+- Redis rate-limit keys with missing TTL or a TTL longer than the configured window are repaired on the next request, avoiding stale `rate_limit:*` keys that require a Redis restart to clear.
+
+## User Visible Usage And Error Privacy
+
+- User `/usage` and `/usage/:id` responses must not expose upstream account IDs, upstream endpoints, compatibility/fallback routing internals, admin-only account summaries, request IPs, or plaintext nested `api_key.key`. Admin `/admin/usage` keeps those troubleshooting fields.
+- User `/usage/errors` and `/usage/errors/:id` responses must mask upstream domains and IP addresses as `*.*.*.*`. URL path/query text is intentionally preserved for user-side debugging, but API keys and Bearer tokens inside the text must be partially masked.
+- User-visible secret masking keeps a small prefix/suffix for attribution only, for example `sk-proj-...7890` and `Bearer bare-t...7890`; full secrets must never be returned to users.
+- Admin ops error endpoints keep the stored troubleshooting view and must not reuse user-side redaction DTOs.
+- User-facing payment order responses must not expose internal `provider_instance_id`; refund eligibility is exposed only as the boolean `can_request_refund`. User attempts to access, cancel, verify, or request refund for another user's order must return `404` to avoid order ID or `out_trade_no` probing.
+
 ## 管理端在线更新源
 
 - 管理端在线更新检查必须继续跟踪官方 `Wei-Shaw/sub2api` 的 release。
@@ -17,6 +34,7 @@
 2. **先分析再合并**：必须先列出 upstream 改动点、本地定制点、冲突文件、行为风险，再决定吸收/裁剪/保留。
 3. **Affiliate 禁止并入**：upstream 的 Affiliate / 邀请返利模块对本 fork 属于冗余功能，默认禁止重新引入。保留本 fork 自研的 Promotion / 推广中心。
 4. **使用记录页属于核心资产**：`/admin/usage`、`/usage`、`/key-usage` 及其统计、筛选、成本、模型映射、首 token、耗时字段不得被 upstream 简化或覆盖。
+5. **用户侧敏感字段最小暴露**：普通用户 `/usage` 与 `/usage/:id` 可以展示自己的 API Key 名称、ID 与用量归因，但嵌套的 `api_key.key` 明文必须清空；管理端 `/admin/usage` 保持管理员审计所需字段，不使用用户侧脱敏 DTO。
 5. **兼容链路优先保真**：Claude Code / Codex / Cherry Studio 与 GPT / Claude / GLM / Kimi 的兼容改动，不得被单纯平台同步覆盖。
 6. **不可判定就停下询问**：若无法确定某个 upstream 改动是否会破坏本地能力，必须停止并向维护者确认。
 

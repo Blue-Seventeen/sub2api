@@ -178,7 +178,7 @@ func (s *PaymentService) validateRefundRequest(ctx context.Context, oid, uid int
 		return nil, infraerrors.NotFound("NOT_FOUND", "order not found")
 	}
 	if o.UserID != uid {
-		return nil, infraerrors.Forbidden("FORBIDDEN", "no permission")
+		return nil, infraerrors.NotFound("NOT_FOUND", "order not found")
 	}
 	if o.OrderType != payment.OrderTypeBalance {
 		return nil, infraerrors.BadRequest("INVALID_ORDER_TYPE", "only balance orders can request refund")
@@ -195,6 +195,19 @@ func (s *PaymentService) validateRefundRequest(ctx context.Context, oid, uid int
 		return nil, infraerrors.Forbidden("USER_REFUND_DISABLED", "user refund is not enabled for this provider")
 	}
 	return o, nil
+}
+
+// CanUserRequestRefund reports whether the user-facing order view should show
+// the refund action without exposing the internal provider instance identity.
+func (s *PaymentService) CanUserRequestRefund(ctx context.Context, o *dbent.PaymentOrder) bool {
+	if o == nil || o.OrderType != payment.OrderTypeBalance || o.Status != OrderStatusCompleted {
+		return false
+	}
+	inst, err := s.getRefundOrderProviderInstance(ctx, o)
+	if err != nil || inst == nil {
+		return false
+	}
+	return inst.RefundEnabled && inst.AllowUserRefund
 }
 
 func (s *PaymentService) PrepareRefund(ctx context.Context, oid int64, amt float64, reason string, force, deduct bool) (*RefundPlan, *RefundResult, error) {

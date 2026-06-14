@@ -24,6 +24,7 @@ services:
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8080
       - SERVER_MODE=debug
+      - SERVER_TRUSTED_PROXIES=${SERVER_TRUSTED_PROXIES:-}
       - RUN_MODE=${RUN_MODE:-standard}
       - DATABASE_HOST=postgres
       - DATABASE_PORT=5432
@@ -38,6 +39,7 @@ services:
       - REDIS_PORT=6379
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       - REDIS_DB=${REDIS_DB:-0}
+      - RATE_LIMIT_AUTH_REDIS_FAILURE_MODE=${RATE_LIMIT_AUTH_REDIS_FAILURE_MODE:-fail-close}
       - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@sub2api.local}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
       - JWT_SECRET=${JWT_SECRET:-}

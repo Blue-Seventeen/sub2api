@@ -293,7 +293,7 @@ func (h *UsageHandler) GetByID(c *gin.Context) {
 
 	// 验证所有权
 	if record.UserID != subject.UserID {
-		response.Forbidden(c, "Not authorized to access this record")
+		response.NotFound(c, "Usage record not found")
 		return
 	}
 

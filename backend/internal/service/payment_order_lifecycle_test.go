@@ -11,6 +11,7 @@ import (
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/enttest"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/stretchr/testify/require"
 
@@ -566,6 +567,58 @@ func TestCancelOrderStillClosesUnpaidUpstreamOrder(t *testing.T) {
 	reloaded, err := client.PaymentOrder.Get(ctx, order.ID)
 	require.NoError(t, err)
 	require.Equal(t, OrderStatusCancelled, reloaded.Status)
+}
+
+func TestUserOrderActionsHideForeignOrderExistence(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentOrderLifecycleTestClient(t)
+
+	owner, err := client.User.Create().
+		SetEmail("foreign-order-owner@example.com").
+		SetPasswordHash("hash").
+		SetUsername("foreign-order-owner").
+		Save(ctx)
+	require.NoError(t, err)
+
+	other, err := client.User.Create().
+		SetEmail("foreign-order-other@example.com").
+		SetPasswordHash("hash").
+		SetUsername("foreign-order-other").
+		Save(ctx)
+	require.NoError(t, err)
+
+	order, err := client.PaymentOrder.Create().
+		SetUserID(owner.ID).
+		SetUserEmail(owner.Email).
+		SetUserName(owner.Username).
+		SetAmount(20).
+		SetPayAmount(20).
+		SetFeeRate(0).
+		SetRechargeCode("FOREIGN-ORDER-HIDDEN").
+		SetOutTradeNo("sub2_foreign_order_hidden").
+		SetPaymentType(payment.TypeAlipay).
+		SetPaymentTradeNo("").
+		SetOrderType(payment.OrderTypeBalance).
+		SetStatus(OrderStatusPending).
+		SetExpiresAt(time.Now().Add(time.Hour)).
+		SetClientIP("127.0.0.1").
+		SetSrcHost("api.example.com").
+		Save(ctx)
+	require.NoError(t, err)
+
+	svc := &PaymentService{entClient: client}
+
+	_, err = svc.GetOrder(ctx, order.ID, other.ID)
+	require.Error(t, err)
+	require.Equal(t, "NOT_FOUND", infraerrors.Reason(err))
+
+	_, err = svc.CancelOrder(ctx, order.ID, other.ID)
+	require.Error(t, err)
+	require.Equal(t, "NOT_FOUND", infraerrors.Reason(err))
+
+	_, err = svc.VerifyOrderByOutTradeNo(ctx, order.OutTradeNo, other.ID)
+	require.Error(t, err)
+	require.Equal(t, "NOT_FOUND", infraerrors.Reason(err))
 }
 
 func TestReconcilePendingWxpayOrdersBackfillsPaidOrder(t *testing.T) {

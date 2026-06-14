@@ -83,6 +83,31 @@ func TestRateLimiterFixesMissingTTL(t *testing.T) {
 	require.Greater(t, ttlAfter, time.Duration(0))
 }
 
+func TestRateLimiterCapsExcessiveTTL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	ctx := context.Background()
+	rdb := startRedis(t, ctx)
+	limiter := NewRateLimiter(rdb)
+
+	router := gin.New()
+	router.Use(limiter.Limit("ttl-excessive", 10, 2*time.Second))
+	router.GET("/test", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	redisKey := limiter.prefix + "ttl-excessive:127.0.0.1"
+	require.NoError(t, rdb.Set(ctx, redisKey, 5, time.Hour).Err())
+
+	recorder := performRequest(router)
+	require.Equal(t, http.StatusOK, recorder.Code)
+
+	ttlAfter, err := rdb.PTTL(ctx, redisKey).Result()
+	require.NoError(t, err)
+	require.Greater(t, ttlAfter, time.Duration(0))
+	require.LessOrEqual(t, ttlAfter, 2*time.Second)
+}
+
 func performRequest(router *gin.Engine) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	req.RemoteAddr = "127.0.0.1:1234"

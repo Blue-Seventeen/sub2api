@@ -1313,8 +1313,9 @@ type DefaultConfig struct {
 }
 
 type RateLimitConfig struct {
-	OverloadCooldownMinutes int `mapstructure:"overload_cooldown_minutes"`  // 529过载冷却时间(分钟)
-	OAuth401CooldownMinutes int `mapstructure:"oauth_401_cooldown_minutes"` // OAuth 401临时不可调度冷却(分钟)
+	OverloadCooldownMinutes int    `mapstructure:"overload_cooldown_minutes"`  // 529过载冷却时间(分钟)
+	OAuth401CooldownMinutes int    `mapstructure:"oauth_401_cooldown_minutes"` // OAuth 401临时不可调度冷却(分钟)
+	AuthRedisFailureMode    string `mapstructure:"auth_redis_failure_mode"`    // fail-close / fail-open
 }
 
 // APIKeyAuthCacheConfig API Key 认证缓存配置
@@ -1474,6 +1475,10 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 		cfg.Server.Mode = "debug"
 	}
 	cfg.Server.FrontendURL = strings.TrimSpace(cfg.Server.FrontendURL)
+	if raw := strings.TrimSpace(os.Getenv("SERVER_TRUSTED_PROXIES")); raw != "" {
+		cfg.Server.TrustedProxies = splitEnvList(raw)
+	}
+	cfg.Server.TrustedProxies = normalizeStringSlice(cfg.Server.TrustedProxies)
 	cfg.JWT.Secret = strings.TrimSpace(cfg.JWT.Secret)
 	cfg.LinuxDo.ClientID = strings.TrimSpace(cfg.LinuxDo.ClientID)
 	cfg.LinuxDo.ClientSecret = strings.TrimSpace(cfg.LinuxDo.ClientSecret)
@@ -1522,6 +1527,10 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	cfg.Log.Environment = strings.TrimSpace(cfg.Log.Environment)
 	cfg.Log.StacktraceLevel = strings.ToLower(strings.TrimSpace(cfg.Log.StacktraceLevel))
 	cfg.Log.Output.FilePath = strings.TrimSpace(cfg.Log.Output.FilePath)
+	cfg.RateLimit.AuthRedisFailureMode = strings.ToLower(strings.TrimSpace(cfg.RateLimit.AuthRedisFailureMode))
+	if cfg.RateLimit.AuthRedisFailureMode != "fail-open" {
+		cfg.RateLimit.AuthRedisFailureMode = "fail-close"
+	}
 	cfg.Gateway.ForcedCodexInstructionsTemplateFile = strings.TrimSpace(cfg.Gateway.ForcedCodexInstructionsTemplateFile)
 	if cfg.Gateway.ForcedCodexInstructionsTemplateFile != "" {
 		content, err := os.ReadFile(cfg.Gateway.ForcedCodexInstructionsTemplateFile)
@@ -1833,6 +1842,7 @@ func setDefaults() {
 	// RateLimit
 	viper.SetDefault("rate_limit.overload_cooldown_minutes", 10)
 	viper.SetDefault("rate_limit.oauth_401_cooldown_minutes", 10)
+	viper.SetDefault("rate_limit.auth_redis_failure_mode", "fail-close")
 
 	// Pricing - 从 model-price-repo 同步模型定价和上下文窗口数据（固定到 commit，避免分支漂移）
 	viper.SetDefault("pricing.remote_url", "https://raw.githubusercontent.com/Wei-Shaw/model-price-repo/main/model_prices_and_context_window.json")
@@ -2922,6 +2932,12 @@ func normalizeStringSlice(values []string) []string {
 		normalized = append(normalized, trimmed)
 	}
 	return normalized
+}
+
+func splitEnvList(raw string) []string {
+	return strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ';' || r == ' ' || r == '\n' || r == '\t'
+	})
 }
 
 func isWeakJWTSecret(secret string) bool {

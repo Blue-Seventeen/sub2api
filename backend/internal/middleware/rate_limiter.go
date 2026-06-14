@@ -1,11 +1,17 @@
 package middleware
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -23,6 +29,7 @@ const (
 // RateLimitOptions 限流可选配置
 type RateLimitOptions struct {
 	FailureMode RateLimitFailureMode
+	KeySuffix   func(*gin.Context) string
 }
 
 var rateLimitScript = redis.NewScript(`
@@ -32,6 +39,9 @@ local repaired = 0
 if current == 1 then
   redis.call('PEXPIRE', KEYS[1], ARGV[1])
 elseif ttl == -1 then
+  redis.call('PEXPIRE', KEYS[1], ARGV[1])
+  repaired = 1
+elseif ttl > tonumber(ARGV[1]) then
   redis.call('PEXPIRE', KEYS[1], ARGV[1])
   repaired = 1
 end
@@ -88,8 +98,13 @@ func (r *RateLimiter) LimitWithOptions(key string, limit int, window time.Durati
 	}
 
 	return func(c *gin.Context) {
-		ip := c.ClientIP()
-		redisKey := r.prefix + key + ":" + ip
+		keyParts := []string{r.prefix + key, c.ClientIP()}
+		if opts.KeySuffix != nil {
+			if suffix := strings.TrimSpace(opts.KeySuffix(c)); suffix != "" {
+				keyParts = append(keyParts, suffix)
+			}
+		}
+		redisKey := strings.Join(keyParts, ":")
 
 		ctx := c.Request.Context()
 
@@ -100,7 +115,7 @@ func (r *RateLimiter) LimitWithOptions(key string, limit int, window time.Durati
 		if err != nil {
 			log.Printf("[RateLimit] redis error: key=%s mode=%s err=%v", redisKey, failureModeLabel(failureMode), err)
 			if failureMode == RateLimitFailClose {
-				abortRateLimit(c)
+				abortRateLimitUnavailable(c)
 				return
 			}
 			// Redis 错误时放行，避免影响正常服务
@@ -129,10 +144,59 @@ func windowTTLMillis(window time.Duration) int64 {
 	return ttl
 }
 
+// JSONFieldHashSuffix builds a non-reversible suffix from a JSON string field.
+// It restores the request body so downstream handlers can bind JSON normally.
+func JSONFieldHashSuffix(field string) func(*gin.Context) string {
+	return func(c *gin.Context) string {
+		value := readJSONFieldForRateLimit(c, field)
+		if value == "" {
+			return ""
+		}
+		sum := sha256.Sum256([]byte(strings.ToLower(value)))
+		return field + ":" + hex.EncodeToString(sum[:])[:24]
+	}
+}
+
+func readJSONFieldForRateLimit(c *gin.Context, field string) string {
+	if c == nil || c.Request == nil || c.Request.Body == nil || strings.TrimSpace(field) == "" {
+		return ""
+	}
+	limited := io.LimitReader(c.Request.Body, (64<<10)+1)
+	body, err := io.ReadAll(limited)
+	if err != nil {
+		c.Request.Body = io.NopCloser(strings.NewReader(""))
+		return ""
+	}
+	if len(body) > 64<<10 {
+		c.Request.Body = io.NopCloser(io.MultiReader(bytes.NewReader(body), c.Request.Body))
+		return ""
+	}
+	c.Request.Body = io.NopCloser(bytes.NewReader(body))
+	if len(body) == 0 {
+		return ""
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return ""
+	}
+	raw, ok := payload[field].(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(raw)
+}
+
 func abortRateLimit(c *gin.Context) {
 	c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
 		"error":   "rate limit exceeded",
 		"message": "Too many requests, please try again later",
+	})
+}
+
+func abortRateLimitUnavailable(c *gin.Context) {
+	c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+		"error":   "rate limit unavailable",
+		"message": "Login protection is temporarily unavailable, please try again later",
 	})
 }
 

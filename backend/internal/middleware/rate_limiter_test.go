@@ -2,8 +2,10 @@ package middleware
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,7 +59,7 @@ func TestRateLimiterFailureModes(t *testing.T) {
 	req.RemoteAddr = "127.0.0.1:1234"
 	recorder = httptest.NewRecorder()
 	failCloseRouter.ServeHTTP(recorder, req)
-	require.Equal(t, http.StatusTooManyRequests, recorder.Code)
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
 }
 
 func TestRateLimiterDifferentIPsIndependent(t *testing.T) {
@@ -140,4 +142,78 @@ func TestRateLimiterSuccessAndLimit(t *testing.T) {
 	recorder = httptest.NewRecorder()
 	router.ServeHTTP(recorder, req)
 	require.Equal(t, http.StatusTooManyRequests, recorder.Code)
+}
+
+func TestRateLimiterJSONFieldHashSuffixSeparatesSameIPLogins(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	callCounts := make(map[string]int64)
+	originalRun := rateLimitRun
+	rateLimitRun = func(ctx context.Context, client *redis.Client, key string, windowMillis int64) (int64, bool, error) {
+		callCounts[key]++
+		return callCounts[key], false, nil
+	}
+	t.Cleanup(func() {
+		rateLimitRun = originalRun
+	})
+
+	limiter := NewRateLimiter(redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"}))
+
+	router := gin.New()
+	router.Use(limiter.LimitWithOptions("login", 1, time.Second, RateLimitOptions{
+		KeySuffix: JSONFieldHashSuffix("email"),
+	}))
+	router.POST("/login", func(c *gin.Context) {
+		body, err := io.ReadAll(c.Request.Body)
+		require.NoError(t, err)
+		c.JSON(http.StatusOK, gin.H{"body": string(body)})
+	})
+
+	req1 := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"email":"a@example.com","password":"x"}`))
+	req1.Header.Set("Content-Type", "application/json")
+	req1.RemoteAddr = "10.0.0.1:1234"
+	rec1 := httptest.NewRecorder()
+	router.ServeHTTP(rec1, req1)
+	require.Equal(t, http.StatusOK, rec1.Code)
+	require.Contains(t, rec1.Body.String(), "a@example.com")
+
+	req2 := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"email":"b@example.com","password":"x"}`))
+	req2.Header.Set("Content-Type", "application/json")
+	req2.RemoteAddr = "10.0.0.1:1234"
+	rec2 := httptest.NewRecorder()
+	router.ServeHTTP(rec2, req2)
+	require.Equal(t, http.StatusOK, rec2.Code)
+
+	req3 := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"email":"a@example.com","password":"x"}`))
+	req3.Header.Set("Content-Type", "application/json")
+	req3.RemoteAddr = "10.0.0.1:1234"
+	rec3 := httptest.NewRecorder()
+	router.ServeHTTP(rec3, req3)
+	require.Equal(t, http.StatusTooManyRequests, rec3.Code)
+}
+
+func TestRateLimiterFailCloseRedisErrorReturnsUnavailable(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	limiter := NewRateLimiter(redis.NewClient(&redis.Options{
+		Addr:         "127.0.0.1:1",
+		DialTimeout:  50 * time.Millisecond,
+		ReadTimeout:  50 * time.Millisecond,
+		WriteTimeout: 50 * time.Millisecond,
+	}))
+
+	router := gin.New()
+	router.Use(limiter.LimitWithOptions("test", 1, time.Second, RateLimitOptions{
+		FailureMode: RateLimitFailClose,
+	}))
+	router.GET("/test", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req.RemoteAddr = "127.0.0.1:1234"
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	require.Contains(t, rec.Body.String(), "rate limit unavailable")
 }

@@ -47,6 +47,7 @@ services:
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8080
       - SERVER_MODE=${SERVER_MODE:-release}
+      - SERVER_TRUSTED_PROXIES=${SERVER_TRUSTED_PROXIES:-}
       - RUN_MODE=${RUN_MODE:-standard}
       - NODE_ID=${NODE_ID:-}
 
@@ -77,6 +78,7 @@ services:
       - REDIS_POOL_SIZE=${REDIS_POOL_SIZE:-1024}
       - REDIS_MIN_IDLE_CONNS=${REDIS_MIN_IDLE_CONNS:-10}
       - REDIS_ENABLE_TLS=${REDIS_ENABLE_TLS:-false}
+      - RATE_LIMIT_AUTH_REDIS_FAILURE_MODE=${RATE_LIMIT_AUTH_REDIS_FAILURE_MODE:-fail-close}
 
       # =======================================================================
       # Admin Account (auto-created on first run)
