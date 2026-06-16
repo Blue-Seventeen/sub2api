@@ -6,8 +6,6 @@ import (
 	"time"
 )
 
-const SettingKeyAffiliateEnabled = "affiliate_enabled"
-
 var ErrAffiliateProfileNotFound = errors.New("affiliate profile not found")
 
 // Affiliate compatibility is intentionally inert in this fork. The custom
