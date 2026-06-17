@@ -55,6 +55,18 @@ func TestIsMigrationChecksumCompatible_UpgradeCompatCases(t *testing.T) {
 			fileChecksum: "0d7336a4e12ee8b01b93d2ceb3c9f44a5523f01dbcd215efe47f897448472e4d",
 		},
 		{
+			name:         "133",
+			migration:    "133_allow_email_oauth_provider_types.sql",
+			dbChecksum:   "1d5948a0de5fae4fff368e4ae648edb794ce4e7b2704b6e7020c3b881c0f51f3",
+			fileChecksum: "21e0bfe39530adea594e7d161d202f2dd201cc8caffeeb8b563ada15ab7f8fc5",
+		},
+		{
+			name:         "135",
+			migration:    "135_allow_email_oauth_provider_types.sql",
+			dbChecksum:   "e5e3512fd7ff6e9225414bf79425fd8ddbf6d78a66998142bfb2441f8e7e4708",
+			fileChecksum: "72b6005ff64cddd845615e249d95858010dd6d3bd7a1d24b3e9a32eb03b76eb8",
+		},
+		{
 			name:         "142",
 			migration:    "142_remove_ops_retry_replay_compat.sql",
 			dbChecksum:   "88d139daf730c511ffcd9e8ce99769a6dbc781d63a8b1b954f272254c9468c6f",
@@ -80,6 +92,8 @@ func TestMigrationChecksumCompatibilityRules_MatchEmbeddedCurrentFiles(t *testin
 			migration != "054_drop_legacy_cache_columns.sql" &&
 			migration != "090_drop_sora.sql" &&
 			migration != "127_drop_channel_monitor_deleted_at.sql" &&
+			migration != "133_allow_email_oauth_provider_types.sql" &&
+			migration != "135_allow_email_oauth_provider_types.sql" &&
 			migration != "142_remove_ops_retry_replay_compat.sql" {
 			continue
 		}

@@ -70,7 +70,7 @@ Bug 修复：
 | 项目 | 当前约定 |
 |---|---|
 | 当前主线 | `dev` |
-| 当前 upstream 基线 | 已同步到 `v0.1.137`，`backend/cmd/server/VERSION` 跟随官方 tag 当前值 `0.1.136` |
+| 当前 upstream 基线 | 已同步到 `v0.1.137`，`backend/cmd/server/VERSION` 已按 release 号对齐为 `0.1.137` |
 | 早期 fork 保护基线 | `2b72deb8fd45dc3a526bda2299b16df8d471107c` |
 | 部署策略 | `dev` 是真实可部署主线；`sub2api-custom-localtest` 仅用于本地测试 |
 | 架构原则 | 保留 Sub2API 的 Account / Group / Channel / 调度 / sticky / failover / billing，渐进吸收协议优先兼容内核 |
@@ -902,9 +902,10 @@ Protect files:
 - 已吸收 upstream 账号 quota 自动暂停能力：支持按 5h/7d 用量阈值自动暂停账号调度，并在配置更新后刷新调度热路径缓存；该能力不得替代现有账号状态、AccountAutoOps、sticky proxy、auto-probe 或 proxy stats 语义。
 - 已吸收 upstream 内容审计运行态增强：blocked keywords、pre-block/runtime status、hash block 记录与队列观测需与本 fork 风控开关并存；默认关闭时不得读取/记录请求体或影响中转热路径。
 - 已吸收 upstream Antigravity/Anthropic/Gemini 兼容修复、Claude Opus 4.8 模型映射和模型价格元数据更新；这些仅用于协议适配、usage 准确性和价格表更新，不得覆盖本 fork 的统一倍率、GroupRates、channel pricing 优先级或图片按生成数计费语义。
-- 当前 `codex/sync-v0.1.137` 已合入 upstream `v0.1.137`。已吸收官方 OpenAI 重置次数/5h/7d quota 观测、cyber_policy 原样透传与 request_type 记录、Claude OAuth system prompt blocks、国产/Claude/Antigravity/Gemini 模型定价与 thinking/reasoning 兼容、OpenAI 图片/网关错误透传与 failover、scheduler outbox 去重、channel monitor jitter、Docker/docs/legal 与前端依赖安全更新。官方 `v0.1.137` tag 内 `backend/cmd/server/VERSION` 为 `0.1.136`，本 fork 继续跟随官方 tag 文件值，不单独伪造版本号。
+- 当前 `codex/sync-v0.1.137` 已合入 upstream `v0.1.137`。已吸收官方 OpenAI 重置次数/5h/7d quota 观测、cyber_policy 原样透传与 request_type 记录、Claude OAuth system prompt blocks、国产/Claude/Antigravity/Gemini 模型定价与 thinking/reasoning 兼容、OpenAI 图片/网关错误透传与 failover、scheduler outbox 去重、channel monitor jitter、Docker/docs/legal 与前端依赖安全更新。官方 `v0.1.137` tag 内 `backend/cmd/server/VERSION` 为 `0.1.136`，但本 fork 从本轮开始按 release tag 号主动对齐版本显示，`backend/cmd/server/VERSION` 固定为 `0.1.137`；后续同步若 upstream tag 内 VERSION 落后于 release tag，默认继续按 release tag 号对齐，除非维护者明确要求跟随官方文件值。
 - v0.1.137 同步必须继续排除 upstream Affiliate 主链路；本 fork 只允许保留 inert 兼容 shim，实际推广返佣仍由自研 Promotion 负责。Email OAuth 新用户待注册 pending session 不得写入 affiliate `aff_code`，但必须继续保留 Promotion `promo_code`，避免上游 Affiliate 参数污染当前推广体系。
 - v0.1.137 新增迁移必须保持增量兼容：`151_account_autopause_expiry_index_notx.sql` 只新增账号到期索引，`151_channel_monitor_jitter.sql` 只新增带默认值的 jitter 字段，`152_scheduler_outbox_dedup_key.sql` 只新增可空 dedup 字段，`153_scheduler_outbox_pending_dedup_key_index_notx.sql` 只为非空 pending dedup key 建唯一并发索引；不得清空余额、订阅用量、usage、API key、订单或历史错误记录。runner 按完整文件名记录迁移，允许本轮两个 `151_*.sql` 共存，但后续新增 migration 必须避免继续复用编号。
+- v0.1.137 低版本升级兼容补丁：`133_allow_email_oauth_provider_types.sql` 与 `135_allow_email_oauth_provider_types.sql` 必须把 `dingtalk` 一并保留在 OAuth provider check 约束中，避免从已支持 DingTalk 的 v0.1.134/v0.1.136 数据库升级时先执行低编号上游迁移并阻断启动；这两个迁移的旧 checksum 已纳入兼容白名单，只用于允许已执行旧文件的环境继续启动，不得扩大成通用跳过校验。
 - v0.1.137 的 scheduler outbox 能力只用于多实例周期任务去重与可靠调度，不得替代现有 Redis leader lease、usage billing dedup、订阅扣费事务锁或 proxy 节点本地化语义。多实例部署专项验收时必须覆盖 leader lock、outbox dedup、登录限流 Redis 容错、订阅 cache 失效和失败请求记录。
 - v0.1.137 的错误透传、cyber_policy 和图片 failover 属于上游错误可观测性与故障转移优化；用户侧 `/usage/errors` 仍必须执行域名/IP/API Key/Bearer Token 脱敏，管理侧 `/admin/ops/request-errors*` 保持原文用于运维归因。
 - `/admin/proxies` 仍以本 fork 为准；v0.1.133 合并不得改写 Clash/mihomo 托管订阅、订阅节点拆分、proxy stats、active usage、sticky、auto-probe、增量刷新或 gateway 代理解析链路。
