@@ -53,6 +53,7 @@ const providerGridClass = computed(() => [
 
 function providerLabel(provider: EmailOAuthProvider): string {
   const name = provider === 'github' ? 'GitHub' : 'Google'
+  if (visibleProviders.value.length > 1) return name
   return t('auth.emailOAuth.signIn', { providerName: name }, `Continue with ${name}`)
 }
 
@@ -62,6 +63,13 @@ function startLogin(provider: EmailOAuthProvider): void {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined) || '/api/v1'
   const normalized = apiBase.replace(/\/$/, '')
   const params = new URLSearchParams({ redirect: redirectTo })
+  const affiliateCode = [route.query.aff, route.query.aff_code]
+    .find((value): value is string => typeof value === 'string' && value.trim() !== '')
+    ?.trim()
+  if (affiliateCode) {
+    params.set('aff_code', affiliateCode)
+    window.sessionStorage.setItem('oauth_aff_code', affiliateCode)
+  }
   window.location.href = `${normalized}/auth/oauth/${provider}/start?${params.toString()}`
 }
 </script>

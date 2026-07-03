@@ -502,7 +502,8 @@ const platformOptions = [
   { value: 'openrouter', label: 'OpenRouter' },
   { value: 'suno', label: 'Suno' },
   { value: 'kling', label: 'Kling' },
-  { value: 'midjourney', label: 'Midjourney' }
+  { value: 'midjourney', label: 'Midjourney' },
+  { value: 'grok', label: 'Grok' }
 ]
 
 // Load rules when dialog opens

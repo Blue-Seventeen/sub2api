@@ -25,6 +25,9 @@
           <td class="py-1 text-right text-green-600 dark:text-green-400">
             {{ formatDisplayCost(user.real_actual_cost ?? user.actual_cost) }}
           </td>
+          <td v-if="showAccountCost" class="py-1 text-right text-orange-500 dark:text-orange-400">
+            {{ formatDisplayCost(user.account_cost) }}
+          </td>
           <td class="py-1 pr-1 text-right text-gray-400 dark:text-gray-500">
             {{ formatDisplayCost(user.cost) }}
           </td>
@@ -35,6 +38,7 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import type { UserBreakdownItem } from '@/types'
@@ -42,10 +46,16 @@ import { getDisplayCurrencySymbol } from '@/utils/format'
 
 const { t } = useI18n()
 
-defineProps<{
+const props = withDefaults(defineProps<{
   items: UserBreakdownItem[]
   loading?: boolean
-}>()
+  showAccountCost?: boolean
+}>(), {
+  loading: false,
+  showAccountCost: true,
+})
+
+const showAccountCost = computed(() => props.showAccountCost)
 
 const formatTokens = (value: number): string => {
   if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)}B`
@@ -54,12 +64,13 @@ const formatTokens = (value: number): string => {
   return value.toLocaleString()
 }
 
-const formatCost = (value: number): string => {
+const formatCost = (value: number | undefined | null): string => {
+  if (value == null) return '0.0000'
   if (value >= 1000) return (value / 1000).toFixed(2) + 'K'
   if (value >= 1) return value.toFixed(2)
   if (value >= 0.01) return value.toFixed(3)
   return value.toFixed(4)
 }
 
-const formatDisplayCost = (value: number): string => `${getDisplayCurrencySymbol()}${formatCost(value)}`
+const formatDisplayCost = (value: number | undefined | null): string => `${getDisplayCurrencySymbol()}${formatCost(value)}`
 </script>

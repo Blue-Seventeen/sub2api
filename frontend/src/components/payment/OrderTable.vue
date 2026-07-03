@@ -14,7 +14,7 @@
     </template>
     <template #cell-pay_amount="{ value, row }">
       <div class="text-sm">
-        <span class="font-medium text-gray-900 dark:text-white">{{ formatCurrencyAmount(value) }}</span>
+        <span class="font-medium text-gray-900 dark:text-white">{{ formatGatewayAmount(value, row.currency) }}</span>
         <span v-if="row.fee_rate > 0" class="ml-1 text-xs text-gray-400" :title="t('payment.orders.fee') + ': ' + row.fee_rate + '%'">
           ({{ t('payment.orders.fee') }} {{ row.fee_rate }}%)
         </span>
@@ -46,6 +46,7 @@ import type { Column } from '@/components/common/types'
 import DataTable from '@/components/common/DataTable.vue'
 import OrderStatusBadge from '@/components/payment/OrderStatusBadge.vue'
 import { formatCurrencyAmount } from '@/utils/format'
+import { formatPaymentAmount } from '@/components/payment/currency'
 
 const { t } = useI18n()
 
@@ -56,6 +57,10 @@ const props = defineProps<{
 }>()
 
 function formatDate(dateStr: string) { return new Date(dateStr).toLocaleString() }
+
+function formatGatewayAmount(value: number, currency?: string | null): string {
+  return formatPaymentAmount(value, currency)
+}
 
 const columns = computed((): Column[] => {
   const cols: Column[] = [

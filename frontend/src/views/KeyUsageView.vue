@@ -422,6 +422,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { buildGatewayUrl } from '@/api/client'
 import { formatCurrencyAmount } from '@/utils/format'
 
 const { t, locale } = useI18n()
@@ -458,6 +459,10 @@ const showDatePicker = ref(false)
 const resultData = ref<any>(null)
 const now = ref(new Date())
 let resetTimer: ReturnType<typeof setInterval> | null = null
+let ringAnimationFrame: number | null = null
+let ringTickFrame: number | null = null
+let ringAnimationTimer: ReturnType<typeof setTimeout> | null = null
+let componentUnmounted = false
 
 // ==================== Date Range State ====================
 
@@ -537,6 +542,29 @@ const displayPcts = ref<number[]>([])
 
 const ringTrackColor = computed(() => isDark.value ? '#222222' : '#F0F0EE')
 
+function clearRingAnimation() {
+  if (ringAnimationFrame !== null && typeof cancelAnimationFrame === 'function') {
+    cancelAnimationFrame(ringAnimationFrame)
+  }
+  if (ringTickFrame !== null && typeof cancelAnimationFrame === 'function') {
+    cancelAnimationFrame(ringTickFrame)
+  }
+  if (ringAnimationTimer !== null) {
+    clearTimeout(ringAnimationTimer)
+  }
+  ringAnimationFrame = null
+  ringTickFrame = null
+  ringAnimationTimer = null
+}
+
+function scheduleRingFrame(callback: FrameRequestCallback): number | null {
+  if (typeof requestAnimationFrame !== 'function') {
+    callback(performance.now())
+    return null
+  }
+  return requestAnimationFrame(callback)
+}
+
 interface RingItem {
   title: string
   pct: number
@@ -553,12 +581,17 @@ function getRingOffset(ring: RingItem): number {
 }
 
 function triggerRingAnimation(items: RingItem[]) {
+  clearRingAnimation()
   ringAnimated.value = false
   displayPcts.value = items.map(() => 0)
 
   nextTick(() => {
-    requestAnimationFrame(() => {
-      setTimeout(() => {
+    if (componentUnmounted) return
+    ringAnimationFrame = scheduleRingFrame(() => {
+      if (componentUnmounted) return
+      ringAnimationTimer = setTimeout(() => {
+        ringAnimationTimer = null
+        if (componentUnmounted) return
         ringAnimated.value = true
 
         // Animate percentage numbers
@@ -567,13 +600,14 @@ function triggerRingAnimation(items: RingItem[]) {
         const targets = items.map(item => item.isBalance ? 0 : item.pct)
 
         function tick() {
+          if (componentUnmounted) return
           const elapsed = performance.now() - startTime
           const p = Math.min(elapsed / duration, 1)
           const ease = 1 - Math.pow(1 - p, 3)
           displayPcts.value = targets.map(target => Math.round(ease * target))
-          if (p < 1) requestAnimationFrame(tick)
+          if (p < 1) ringTickFrame = scheduleRingFrame(tick)
         }
-        requestAnimationFrame(tick)
+        ringTickFrame = scheduleRingFrame(tick)
       }, 50)
     })
   })
@@ -865,7 +899,7 @@ function getBrowserTimezone(): string {
 
 async function fetchUsage(key: string) {
   const dateParams = getDateParams()
-  const url = '/v1/usage' + (dateParams ? '?' + dateParams : '')
+  const url = buildGatewayUrl('/v1/usage') + (dateParams ? '?' + dateParams : '')
   const res = await fetch(url, {
     headers: { 'Authorization': 'Bearer ' + key },
   })
@@ -934,6 +968,7 @@ function formatResetTime(resetAt: string | null | undefined): string {
 }
 
 onMounted(() => {
+  componentUnmounted = false
   initTheme()
   if (!appStore.publicSettingsLoaded) {
     appStore.fetchPublicSettings()
@@ -942,6 +977,8 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  componentUnmounted = true
+  clearRingAnimation()
   if (resetTimer) clearInterval(resetTimer)
 })
 </script>

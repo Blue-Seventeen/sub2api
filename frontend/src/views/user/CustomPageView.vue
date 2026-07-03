@@ -51,7 +51,50 @@
               </p>
             </div>
           </div>
-          <article v-else class="custom-markdown-body" v-html="markdownHtml"></article>
+          <div v-else class="flex h-full overflow-hidden">
+            <aside
+              v-show="tocVisible && tocItems.length > 0"
+              class="toc-sidebar"
+            >
+              <div class="toc-header">
+                <span class="toc-title">{{ t('customPage.tableOfContents') }}</span>
+                <button class="toc-close-btn" @click="tocVisible = false">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+                </button>
+              </div>
+              <nav class="toc-nav">
+                <a
+                  v-for="item in tocItems"
+                  :key="item.id"
+                  :href="'#' + item.id"
+                  class="toc-item"
+                  :class="[
+                    `toc-level-${item.level}`,
+                    { 'toc-active': activeHeadingId === item.id }
+                  ]"
+                  @click.prevent="scrollToHeading(item.id)"
+                >
+                  {{ item.text }}
+                </a>
+              </nav>
+            </aside>
+
+            <button
+              v-show="!tocVisible && tocItems.length > 0"
+              class="toc-toggle-btn"
+              @click="tocVisible = true"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+              <span class="ml-1 text-xs">{{ t('customPage.tableOfContents') }}</span>
+            </button>
+
+            <article
+              ref="markdownContainer"
+              class="custom-markdown-body markdown-page-content flex-1 h-full overflow-auto p-6 md:p-10"
+              v-html="markdownHtml"
+              @scroll="onContentScroll"
+            ></article>
+          </div>
         </div>
 
         <div v-else-if="!isValidUrl" class="flex h-full items-center justify-center p-10 text-center">
@@ -130,10 +173,17 @@ import { useAuthStore } from '@/stores/auth'
 import { useAdminSettingsStore } from '@/stores/adminSettings'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { buildApiUrl } from '@/api/client'
 import { buildEmbeddedUrl, detectTheme } from '@/utils/embedded-url'
 import { getMarkdownPage } from '@/api/pages'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+
+interface TocItem {
+  id: string
+  text: string
+  level: number
+}
 
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -148,8 +198,13 @@ const lastAutoOpenedId = ref<string | null>(null)
 const markdownLoading = ref(false)
 const markdownHtml = ref('')
 const markdownError = ref('')
+const markdownContainer = ref<HTMLElement | null>(null)
+const tocItems = ref<TocItem[]>([])
+const tocVisible = ref(typeof window !== 'undefined' ? window.innerWidth > 768 : true)
+const activeHeadingId = ref('')
 let themeObserver: MutationObserver | null = null
 let markdownLoadSeq = 0
+let scrollRafId = 0
 
 const menuItemId = computed(() => route.params.id as string)
 
@@ -165,6 +220,8 @@ const menuItem = computed(() => {
 })
 
 const markdownSlug = computed(() => {
+  const pageSlug = String(menuItem.value?.page_slug || '').trim()
+  if (pageSlug) return pageSlug
   const rawUrl = String(menuItem.value?.url || '').trim()
   if (!rawUrl.toLowerCase().startsWith('md:')) return ''
   return rawUrl.slice(3).trim()
@@ -229,23 +286,82 @@ watch(
   { immediate: true }
 )
 
+function generateHeadingId(text: string, index: number): string {
+  const base = text
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9_-]+/g, '')
+    .replace(/^-+|-+$/g, '')
+  return base ? `${base}-${index}` : `heading-${index}`
+}
+
+function isRelativeMarkdownAsset(src: string): boolean {
+  const trimmed = src.trim()
+  if (!trimmed || /^[a-z][a-z0-9+.-]*:/i.test(trimmed) || trimmed.startsWith('//') || trimmed.startsWith('/')) {
+    return false
+  }
+  const [pathPart] = trimmed.split(/([?#].*)/, 2)
+  return pathPart
+    .split('/')
+    .filter((part) => part && part !== '.')
+    .every((part) => part !== '..' && !part.includes('\\'))
+}
+
+function buildPageImageUrl(slug: string, src: string): string {
+  const trimmed = src.trim()
+  const [pathPart, suffix = ''] = trimmed.split(/([?#].*)/, 2)
+  const encodedPath = pathPart
+    .split('/')
+    .filter((part) => part && part !== '.')
+    .map((part) => encodeURIComponent(part))
+    .join('/')
+  return buildApiUrl(`/pages/${encodeURIComponent(slug)}/images/${encodedPath}${suffix}`)
+}
+
 async function loadMarkdownPage() {
   const seq = ++markdownLoadSeq
   if (!isMarkdownPage.value) {
     markdownLoading.value = false
     markdownHtml.value = ''
     markdownError.value = ''
+    tocItems.value = []
+    activeHeadingId.value = ''
     return
   }
 
   markdownLoading.value = true
   markdownError.value = ''
+  tocItems.value = []
+  activeHeadingId.value = ''
   try {
     const slug = markdownSlug.value
-    const content = await getMarkdownPage(slug)
+    let content = await getMarkdownPage(slug)
     if (seq !== markdownLoadSeq || slug !== markdownSlug.value) return
-    const rendered = await marked.parse(content)
-    markdownHtml.value = DOMPurify.sanitize(rendered)
+
+    content = content.replace(
+      /!\[([^\]]*)\]\(([^)]+)\)/g,
+      (match, alt, src) => isRelativeMarkdownAsset(src) ? `![${alt}](${buildPageImageUrl(slug, src)})` : match
+    )
+
+    const rendered = String(await marked.parse(content))
+    const sanitized = DOMPurify.sanitize(rendered)
+
+    const toc: TocItem[] = []
+    let headingIndex = 0
+    const withIds = sanitized.replace(
+      /<(h[1-4])[^>]*>(.*?)<\/h[1-4]>/gi,
+      (_, tag: string, content: string) => {
+        const level = parseInt(tag[1])
+        const text = content.replace(/<[^>]+>/g, '').trim()
+        const id = generateHeadingId(text, headingIndex++)
+        toc.push({ id, text, level })
+        return `<${tag} id="${id}">${content}</${tag}>`
+      }
+    )
+
+    markdownHtml.value = withIds
+    tocItems.value = toc
   } catch (error: unknown) {
     if (seq !== markdownLoadSeq) return
     markdownHtml.value = ''
@@ -256,8 +372,73 @@ async function loadMarkdownPage() {
   } finally {
     if (seq === markdownLoadSeq) {
       markdownLoading.value = false
+      await nextTick()
+      if (!markdownError.value) {
+        injectCopyButtons()
+      }
     }
   }
+}
+
+function scrollToHeading(id: string) {
+  const container = markdownContainer.value
+  if (!container) return
+  const el = container.querySelector(`#${CSS.escape(id)}`)
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    activeHeadingId.value = id
+    if (typeof window !== 'undefined' && window.innerWidth <= 640) {
+      tocVisible.value = false
+    }
+  }
+}
+
+function onContentScroll() {
+  if (scrollRafId) return
+  scrollRafId = requestAnimationFrame(() => {
+    scrollRafId = 0
+    const container = markdownContainer.value
+    if (!container || tocItems.value.length === 0) return
+
+    const containerRect = container.getBoundingClientRect()
+    let current = ''
+
+    for (const item of tocItems.value) {
+      const el = container.querySelector(`#${CSS.escape(item.id)}`) as HTMLElement | null
+      if (el) {
+        const elRect = el.getBoundingClientRect()
+        if (elRect.top - containerRect.top <= 100) {
+          current = item.id
+        }
+      }
+    }
+    activeHeadingId.value = current
+  })
+}
+
+function injectCopyButtons() {
+  const container = markdownContainer.value
+  if (!container) return
+
+  container.querySelectorAll('pre').forEach((pre) => {
+    if (pre.querySelector('.copy-btn')) return
+    const btn = document.createElement('button')
+    btn.className = 'copy-btn'
+    btn.textContent = t('customPage.copyCode')
+    btn.addEventListener('click', async () => {
+      const code = pre.querySelector('code')?.textContent ?? pre.textContent ?? ''
+      try {
+        await navigator.clipboard.writeText(code)
+        btn.textContent = t('customPage.copiedCode')
+        setTimeout(() => { btn.textContent = t('customPage.copyCode') }, 2000)
+      } catch {
+        btn.textContent = t('customPage.copyCodeFailed')
+        setTimeout(() => { btn.textContent = t('customPage.copyCode') }, 2000)
+      }
+    })
+    pre.style.position = 'relative'
+    pre.appendChild(btn)
+  })
 }
 
 onMounted(async () => {
@@ -283,6 +464,10 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  if (scrollRafId) {
+    cancelAnimationFrame(scrollRafId)
+    scrollRafId = 0
+  }
   if (themeObserver) {
     themeObserver.disconnect()
     themeObserver = null

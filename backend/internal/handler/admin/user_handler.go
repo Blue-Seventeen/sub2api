@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math"
 	"strconv"
@@ -649,8 +650,8 @@ func (h *UserHandler) UpdateUserPlatformQuotas(c *gin.Context) {
 		return
 	}
 
-	if len(req.Quotas) > 4 {
-		response.BadRequest(c, "quotas length must be <= 4")
+	if len(req.Quotas) > len(service.AllowedQuotaPlatforms) {
+		response.BadRequest(c, fmt.Sprintf("quotas length must be <= %d", len(service.AllowedQuotaPlatforms)))
 		return
 	}
 	seen := make(map[string]struct{}, len(req.Quotas))
@@ -771,6 +772,18 @@ func (h *UserHandler) UpdateUserPlatformQuotas(c *gin.Context) {
 		"platform_count", len(records),
 		"before_snapshot_available", beforeErr == nil,
 		"changes", changes)
+
+	// 失效 cache：对全部允许的 platform 统一 invalidate。
+	// Trade-off：精确失效（仅 req 涉及平台 + 被软删平台）需 upsert 前额外 ListByUser，
+	// 增加一次 DB 查询和逻辑复杂度。由于 AllowedQuotaPlatforms 数量很少，
+	// 全量 invalidate 的额外开销可接受，且能可靠覆盖软删除场景。
+	if h.billingCache != nil {
+		for _, p := range service.AllowedQuotaPlatforms {
+			if err := h.billingCache.DeleteUserPlatformQuotaCache(ctx, userID, p); err != nil {
+				slog.Error("ALERT: quota cache invalidation failed after UpsertForUser; limit 生效可能延迟至 sentinel TTL(最长 1h),需人工确认或重试失效", "user_id", userID, "platform", p, "err", err)
+			}
+		}
+	}
 
 	// 返回最新状态
 	now := time.Now().UTC()
