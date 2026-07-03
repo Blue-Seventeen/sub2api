@@ -37,6 +37,8 @@ var (
 	ErrSubscriptionSuspended           = infraerrors.Forbidden("SUBSCRIPTION_SUSPENDED", "subscription is suspended")
 	ErrSubscriptionAlreadyExists       = infraerrors.Conflict("SUBSCRIPTION_ALREADY_EXISTS", "subscription already exists for this user and group")
 	ErrSubscriptionAssignConflict      = infraerrors.Conflict("SUBSCRIPTION_ASSIGN_CONFLICT", "subscription exists but request conflicts with existing assignment semantics")
+	ErrSubscriptionNotRevoked          = infraerrors.Conflict("SUBSCRIPTION_NOT_REVOKED", "subscription is not revoked")
+	ErrSubscriptionRestoreConflict     = infraerrors.Conflict("SUBSCRIPTION_RESTORE_CONFLICT", "subscription already exists for this user and group")
 	ErrGroupNotSubscriptionType        = infraerrors.BadRequest("GROUP_NOT_SUBSCRIPTION_TYPE", "group is not a subscription type")
 	ErrInvalidInput                    = infraerrors.BadRequest("INVALID_INPUT", "at least one of resetDaily, resetWeekly, resetMonthly, or resetCustom must be true")
 	ErrDailyLimitExceeded              = infraerrors.TooManyRequests("DAILY_LIMIT_EXCEEDED", "daily usage limit exceeded")
@@ -75,7 +77,7 @@ type userSubscriptionHistoryRepository interface {
 
 type userSubscriptionAdminMutationRepository interface {
 	GetByIDIncludeDeleted(ctx context.Context, id int64) (*UserSubscription, error)
-	Restore(ctx context.Context, id int64) error
+	Restore(ctx context.Context, id int64, restoredStatus string) (*UserSubscription, error)
 	HardDelete(ctx context.Context, id int64) error
 }
 
@@ -896,6 +898,61 @@ func (s *SubscriptionService) RevokeSubscription(ctx context.Context, subscripti
 	return nil
 }
 
+// RestoreSubscription 恢复已撤销订阅
+func (s *SubscriptionService) RestoreSubscription(ctx context.Context, subscriptionID int64) (*UserSubscription, error) {
+	repo, ok := s.userSubRepo.(userSubscriptionAdminMutationRepository)
+	if !ok {
+		return nil, fmt.Errorf("subscription repository does not support restore")
+	}
+
+	var restored *UserSubscription
+	var cacheUserID, cacheGroupID int64
+	if err := s.withSubscriptionUpdateTx(ctx, func(txCtx context.Context) error {
+		sub, err := repo.GetByIDIncludeDeleted(txCtx, subscriptionID)
+		if err != nil {
+			return err
+		}
+		if sub.DeletedAt == nil && sub.Status != SubscriptionStatusRevoked {
+			return ErrSubscriptionNotRevoked
+		}
+		exists, err := s.userSubRepo.ExistsActiveByUserIDAndGroupID(txCtx, sub.UserID, sub.GroupID)
+		if err != nil {
+			return err
+		}
+		if exists {
+			return ErrSubscriptionRestoreConflict
+		}
+
+		restoredStatus := SubscriptionStatusActive
+		if !sub.ExpiresAt.After(time.Now()) {
+			restoredStatus = SubscriptionStatusExpired
+		}
+		if restoredStatus == SubscriptionStatusActive {
+			if err := s.ensureSubscriptionCanReactivate(txCtx, sub); err != nil {
+				return err
+			}
+		}
+
+		restored, err = repo.Restore(txCtx, subscriptionID, restoredStatus)
+		if err != nil {
+			return err
+		}
+		cacheUserID, cacheGroupID = sub.UserID, sub.GroupID
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	if restored != nil {
+		cacheUserID, cacheGroupID = restored.UserID, restored.GroupID
+		normalizeSubscriptionSnapshot(restored)
+	}
+	if err := s.invalidateSubscriptionCaches(cacheUserID, cacheGroupID); err != nil {
+		return nil, err
+	}
+	return restored, nil
+}
+
 // ExtendSubscription 调整订阅时长（正数延长，负数缩短）
 func (s *SubscriptionService) ExtendSubscription(ctx context.Context, subscriptionID int64, days int) (*UserSubscription, error) {
 	sub, err := s.userSubRepo.GetByID(ctx, subscriptionID)
@@ -967,43 +1024,6 @@ func (s *SubscriptionService) ExtendSubscription(ctx context.Context, subscripti
 	}
 
 	return s.userSubRepo.GetByID(ctx, subscriptionID)
-}
-
-// RestoreSubscription restores a revoked or soft-deleted subscription.
-func (s *SubscriptionService) RestoreSubscription(ctx context.Context, subscriptionID int64) (*UserSubscription, error) {
-	repo, ok := s.userSubRepo.(userSubscriptionAdminMutationRepository)
-	if !ok {
-		return nil, fmt.Errorf("subscription repository does not support restore")
-	}
-
-	var sub *UserSubscription
-	if err := s.withSubscriptionUpdateTx(ctx, func(txCtx context.Context) error {
-		var err error
-		sub, err = repo.GetByIDIncludeDeleted(txCtx, subscriptionID)
-		if err != nil {
-			return err
-		}
-		if sub.DeletedAt == nil && sub.Status != SubscriptionStatusRevoked {
-			return ErrSubscriptionRestoreInvalid
-		}
-		if err := s.ensureSubscriptionCanReactivate(txCtx, sub); err != nil {
-			return err
-		}
-		if err := repo.Restore(txCtx, subscriptionID); err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-
-	s.invalidateSubscriptionCaches(sub.UserID, sub.GroupID)
-	restored, err := repo.GetByIDIncludeDeleted(ctx, subscriptionID)
-	if err != nil {
-		return nil, err
-	}
-	normalizeSubscriptionSnapshot(restored)
-	return restored, nil
 }
 
 // HardDeleteSubscription physically deletes a revoked, soft-deleted, or expired subscription record.

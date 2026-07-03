@@ -251,6 +251,8 @@ export default {
     loading: '加载中...',
     submitting: '提交中...',
     justNow: '刚刚',
+    peakRateTooltip: '高峰倍率：{window}',
+    peakRateImageNote: '；token 计费的图片 token 同样适用，图片按次计费不受高峰影响',
     save: '保存',
     saved: '保存成功',
     deleted: '删除成功',
@@ -1004,6 +1006,21 @@ export default {
     exportExcelFailed: '使用数据导出失败',
     imageUnit: '张',
     userAgent: 'User-Agent',
+    ipGeo: {
+      fetch: '获取地区',
+      fetching: '获取中...',
+      failed: '获取失败',
+      private: '内网地址',
+      refreshTitle: '刷新地区信息',
+      batchFetch: '批量获取地区',
+      batchFetching: '获取中...',
+      pending: '{count} 个 IP 待获取地区',
+      batchFailed: '批量获取地区信息失败',
+      detailOrg: '运营商',
+      detailTimezone: '时区',
+      detailAccuracy: '定位精度',
+      detailCoordinates: '坐标',
+    },
     tabs: { usage: '用量明细', errors: '错误请求' },
     errors: {
       time: '时间', model: '模型', endpoint: '端点', status: '状态码',
@@ -2155,6 +2172,7 @@ export default {
       editGroup: '编辑分组',
       deleteGroup: '删除分组',
       sortOrder: '排序',
+      columnSettings: '列设置',
       sortOrderHint: '拖拽分组调整显示顺序，排在前面的分组会优先显示',
       sortOrderUpdated: '排序已更新',
       failedToUpdateSortOrder: '更新排序失败',
@@ -2346,6 +2364,13 @@ export default {
         modeHint: '默认关闭独立倍率时，图片费用 = 图片价格 × 当前分组有效倍率；开启独立倍率后，图片费用 = 图片价格 × 生图独立倍率。',
         finalPricePreview: '最终单张价格预览',
         notConfigured: '未配置'
+      },
+      peakRate: {
+        enable: '启用高峰倍率',
+        peakStart: '高峰开始',
+        peakEnd: '高峰结束',
+        peakMultiplier: '高峰倍率',
+        multiplierHint: '作用于 token 计费倍率；token 计费的图片 token 同样适用，0 表示高峰 token 请求按 0 倍计费'
       },
       modelsList: {
         title: '自定义 /v1/models 模型列表',
@@ -3058,7 +3083,9 @@ export default {
       adjustSubscription: '调整订阅',
       revokeSubscription: '撤销订阅',
       restoreSubscription: '恢复订阅',
+
       hardDeleteSubscription: '永久删除订阅',
+
       allStatus: '全部状态',
       allGroups: '全部分组',
       allPlatforms: '全部平台',
@@ -3082,7 +3109,8 @@ export default {
       status: {
         active: '生效中',
         expired: '已过期',
-        revoked: '已撤销'
+        revoked: '已撤销',
+        suspended: '已暂停'
       },
       columns: {
         user: '用户',
@@ -3123,6 +3151,7 @@ export default {
       adjusting: '调整中...',
       revoke: '撤销',
       restore: '恢复',
+
       copyRecord: '复制',
       copySuccess: '订阅信息已复制',
       copyFields: {
@@ -3138,6 +3167,7 @@ export default {
       reactivateBlockedMessage: "该订阅关联的真实分组 '{group}' 已不存在、已禁用或不再是订阅类型，不能恢复为生效中，也不能通过调整时间重新激活。",
       reactivateBlockedHint: '这类历史记录仅保留证据展示与永久删除操作。如需继续给用户授权，请重新分配一个有效订阅分组。',
       reactivateBlockedToast: '该订阅关联的分组已失效，不能恢复或调整为生效状态',
+
       resetQuota: '重置配额',
       resetQuotaTitle: '重置用量配额',
       resetQuotaConfirm: "请选择要重置 '{user}' 的配额窗口。勾选窗口的用量将归零并从当前时刻重新计算。",
@@ -3156,22 +3186,28 @@ export default {
       subscriptionAssigned: '订阅分配成功',
       subscriptionAdjusted: '订阅调整成功',
       subscriptionRevoked: '订阅撤销成功',
+
       subscriptionRestored: '订阅恢复成功',
       subscriptionDeleted: '订阅已永久删除',
+
       failedToLoad: '加载订阅列表失败',
       failedToAssign: '分配订阅失败',
       failedToAdjust: '调整订阅失败',
       failedToRevoke: '撤销订阅失败',
       failedToRestore: '恢复订阅失败',
+
       failedToDelete: '永久删除订阅失败',
+
       adjustWouldExpire: '调整后剩余天数必须大于0',
       adjustOutOfRange: '调整天数必须在 -36500 到 36500 之间',
       pleaseSelectUser: '请选择用户',
       pleaseSelectGroup: '请选择分组',
       validityDaysRequired: '请输入有效的天数（至少1天）',
+
       revokeConfirm: "确定要撤销 '{user}' 的订阅吗？撤销后会进入已撤销分类，可稍后恢复。",
       restoreConfirm: "确定要恢复 '{user}' 的已撤销订阅吗？恢复后会按到期时间自动显示为生效中或已过期。",
       hardDeleteConfirm: "确定要永久删除 '{user}' 的订阅记录吗？这是硬删除，删除后不可恢复。",
+
       guide: {
         title: '订阅管理教程',
         subtitle: '订阅模式允许你按时间周期为用户分配使用额度，支持日/周/月/自定义配额限制。按照以下步骤即可完成配置。',
@@ -3552,6 +3588,11 @@ export default {
         resetTooltipNeedQuery: '先点击「次数」加载剩余重置次数',
         resetTooltipNoCredits: '没有可用的重置次数',
         resetTooltipShadow: 'Spark 影子账号不能重置次数;请在母账号上重置',
+        expiresAt: '到期 {time}',
+        expiresAtFull: '重置次数到期时间: {time}',
+        expandExpirations: '展开其余 {count} 张重置次数到期时间',
+        collapseExpirations: '收起重置次数到期时间',
+        expirationDetails: '重置次数到期明细',
         noCreditsAvailable: '没有可用的重置次数',
         resetSuccess: '已重置 {windows} 个窗口',
         confirmTitle: '确认重置周限',
@@ -3920,6 +3961,7 @@ export default {
         wsModeOff: '关闭（off）',
         wsModeCtxPool: '上下文池（ctx_pool）',
         wsModePassthrough: '透传（passthrough）',
+        wsModeHttpBridge: 'HTTP 桥接（http_bridge）',
         wsModeShared: '共享（shared）',
         wsModeDedicated: '独享（dedicated）',
         wsModeConcurrencyHint: '启用 WS mode 后，该账号并发数将作为该账号 WS 连接池上限。',
@@ -3995,6 +4037,10 @@ export default {
         apiKeyPassthrough: '自动透传（仅替换认证）',
         apiKeyPassthroughDesc:
           '仅对 Anthropic API Key 生效。开启后，messages/count_tokens 请求将透传上游并仅替换认证，保留计费/并发/审计及必要安全过滤；关闭即可回滚到现有兼容链路。',
+        apiKeyAuthScheme: '上游认证方式',
+        apiKeyAuthSchemeDesc: '选择转发到 Anthropic-compatible 上游时使用的 API Key 认证头。Ollama Cloud 使用 Authorization: Bearer。',
+        apiKeyAuthSchemeXApiKey: 'x-api-key',
+        apiKeyAuthSchemeBearer: 'Authorization: Bearer',
         webSearchEmulation: 'Web Search 模拟',
         webSearchEmulationDesc:
           '为该 API Key 账号启用 web search 模拟。客户端发送纯 web_search 请求时，由网关调用第三方搜索 API 并构造响应返回。默认跟随渠道配置。',
@@ -7819,6 +7865,7 @@ export default {
     planFeatures: '功能特性',
     planCard: {
       rate: '倍率',
+      peakRate: '高峰倍率',
       dailyLimit: '日限额',
       weeklyLimit: '周限额',
       monthlyLimit: '月限额',

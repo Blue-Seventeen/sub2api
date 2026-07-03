@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { createPinia } from 'pinia'
 
 import GroupBadge from '../GroupBadge.vue'
 
@@ -28,6 +29,7 @@ describe('GroupBadge', () => {
         effectiveRateMultiplier: 1.8,
       },
       global: {
+        plugins: [createPinia()],
         stubs: {
           PlatformIcon: true,
         },
@@ -49,6 +51,7 @@ describe('GroupBadge', () => {
         effectiveRateMultiplier: 1.5,
       },
       global: {
+        plugins: [createPinia()],
         stubs: {
           PlatformIcon: true,
         },

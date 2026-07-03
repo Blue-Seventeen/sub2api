@@ -24,14 +24,19 @@ func (r *adminMutationSubRepoStub) GetByIDIncludeDeleted(context.Context, int64)
 	return &cp, nil
 }
 
-func (r *adminMutationSubRepoStub) Restore(context.Context, int64) error {
+func (r *adminMutationSubRepoStub) ExistsActiveByUserIDAndGroupID(context.Context, int64, int64) (bool, error) {
+	return false, nil
+}
+
+func (r *adminMutationSubRepoStub) Restore(_ context.Context, _ int64, restoredStatus string) (*UserSubscription, error) {
 	if r.sub == nil {
-		return ErrSubscriptionNotFound
+		return nil, ErrSubscriptionNotFound
 	}
 	r.restoreCalls++
 	r.sub.DeletedAt = nil
-	r.sub.Status = SubscriptionStatusActive
-	return nil
+	r.sub.Status = restoredStatus
+	cp := *r.sub
+	return &cp, nil
 }
 
 func (r *adminMutationSubRepoStub) HardDelete(context.Context, int64) error {
@@ -159,11 +164,11 @@ func TestRestoreSubscription_RestoresExpiredSubscriptionButDisplaysExpired(t *te
 	sub, err := svc.RestoreSubscription(context.Background(), 11)
 
 	require.NoError(t, err)
-	require.Equal(t, SubscriptionStatusActive, repo.sub.Status)
+	require.Equal(t, SubscriptionStatusExpired, repo.sub.Status)
 	require.Equal(t, SubscriptionStatusExpired, sub.Status)
 }
 
-func TestRestoreSubscription_RejectsExpiredSubscriptionWhenGroupMissing(t *testing.T) {
+func TestRestoreSubscription_RestoresExpiredSubscriptionWhenGroupMissing(t *testing.T) {
 	deletedAt := time.Now().Add(-time.Hour)
 	repo := &adminMutationSubRepoStub{
 		sub: &UserSubscription{
@@ -177,10 +182,12 @@ func TestRestoreSubscription_RejectsExpiredSubscriptionWhenGroupMissing(t *testi
 	}
 	svc := NewSubscriptionService(&subscriptionGroupRepoStub{}, repo, nil, nil, nil)
 
-	_, err := svc.RestoreSubscription(context.Background(), 19)
+	sub, err := svc.RestoreSubscription(context.Background(), 19)
 
-	require.ErrorIs(t, err, ErrSubscriptionRestoreGroupInvalid)
-	require.Zero(t, repo.restoreCalls)
+	require.NoError(t, err)
+	require.Equal(t, 1, repo.restoreCalls)
+	require.Equal(t, SubscriptionStatusExpired, repo.sub.Status)
+	require.Equal(t, SubscriptionStatusExpired, sub.Status)
 }
 
 func TestRestoreSubscription_RejectsNonRevokedNonDeletedSubscription(t *testing.T) {
@@ -197,7 +204,7 @@ func TestRestoreSubscription_RejectsNonRevokedNonDeletedSubscription(t *testing.
 
 	_, err := svc.RestoreSubscription(context.Background(), 12)
 
-	require.ErrorIs(t, err, ErrSubscriptionRestoreInvalid)
+	require.ErrorIs(t, err, ErrSubscriptionNotRevoked)
 	require.Zero(t, repo.restoreCalls)
 }
 
