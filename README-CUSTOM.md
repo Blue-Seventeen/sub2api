@@ -70,7 +70,7 @@ Bug 修复：
 | 项目 | 当前约定 |
 |---|---|
 | 当前主线 | `dev` |
-| 当前 upstream 基线 | 已同步到 `v0.1.137`，`backend/cmd/server/VERSION` 已按 release 号对齐为 `0.1.137` |
+| 当前 upstream 基线 | 已同步到 `v0.1.144`，`backend/cmd/server/VERSION` 已按 release 号对齐为 `0.1.144` |
 | 早期 fork 保护基线 | `2b72deb8fd45dc3a526bda2299b16df8d471107c` |
 | 部署策略 | `dev` 是真实可部署主线；`sub2api-custom-localtest` 仅用于本地测试 |
 | 架构原则 | 保留 Sub2API 的 Account / Group / Channel / 调度 / sticky / failover / billing，渐进吸收协议优先兼容内核 |
@@ -908,6 +908,10 @@ Protect files:
 - v0.1.137 低版本升级兼容补丁：`133_allow_email_oauth_provider_types.sql` 与 `135_allow_email_oauth_provider_types.sql` 必须把 `dingtalk` 一并保留在 OAuth provider check 约束中，避免从已支持 DingTalk 的 v0.1.134/v0.1.136 数据库升级时先执行低编号上游迁移并阻断启动；这两个迁移的旧 checksum 已纳入兼容白名单，只用于允许已执行旧文件的环境继续启动，不得扩大成通用跳过校验。
 - v0.1.137 的 scheduler outbox 能力只用于多实例周期任务去重与可靠调度，不得替代现有 Redis leader lease、usage billing dedup、订阅扣费事务锁或 proxy 节点本地化语义。多实例部署专项验收时必须覆盖 leader lock、outbox dedup、登录限流 Redis 容错、订阅 cache 失效和失败请求记录。
 - v0.1.137 的错误透传、cyber_policy 和图片 failover 属于上游错误可观测性与故障转移优化；用户侧 `/usage/errors` 仍必须执行域名/IP/API Key/Bearer Token 脱敏，管理侧 `/admin/ops/request-errors*` 保持原文用于运维归因。
+- 当前 `codex/sync-v0.1.144` 已合入 upstream `v0.1.144`，`backend/cmd/server/VERSION` 对齐为 `0.1.144`。已吸收官方 Responses mapped billing model、Codex session import refresh token 保护、Codex image tool 四态策略、Antigravity Gemini 3.1 Pro 路由修复、Grok OAuth 管理侧修复、migration timeout 配置、usage log queue overflow fallback、group capacity hotpath 优化、并发槽清理、token_expired 不可重试、错误请求 UI 对齐和 Fable 7d_oi 模型级限流识别。
+- v0.1.144 同步不得回退本 fork 的 Promotion、CompatibleGateway、NewAPI-style、mandatory usage/billing、usage fallback、统一倍率、GroupRates、AccountAutoOps、ProxyAutoProbe、订阅堆叠和用户侧错误请求脱敏。Responses mapped billing model 必须和本 fork 的模型映射链路、渠道级定价优先级、订阅/余额扣费和 real_actual_cost 记录共存。
+- 从本 fork 的 `codex/sync-v0.1.143` 升级到 `codex/sync-v0.1.144` 未新增 migrations / ent schema 变更；云上可继续按只替换 `sub2api` 应用容器执行该小版本升级，不要求重建 PostgreSQL/Redis 容器或数据卷。若从官方 `v0.1.143` tag 直接跳到当前 fork，历史迁移差异不等同于本 fork 小版本升级，必须单独评估。
+- `deploy` 默认 `SUB2API_IMAGE`、Compose 默认镜像和本地 build 默认 tag 必须与 `backend/cmd/server/VERSION` 保持一致；v0.1.144 当前默认值为 `sub2api-custom:0.1.144`。
 - `/admin/proxies` 仍以本 fork 为准；v0.1.133 合并不得改写 Clash/mihomo 托管订阅、订阅节点拆分、proxy stats、active usage、sticky、auto-probe、增量刷新或 gateway 代理解析链路。
 - `/admin/proxies` 分布式部署语义：代理配置、托管订阅、订阅节点列表、启停状态和账号绑定关系继续共享 DB；latency/quality、auto-probe 最优选择、sticky proxy、managed mihomo runtime 实例目录和 runtime 健康状态必须按当前节点本地化。节点身份解析顺序为 `NODE_ID` -> 本机公网 IP -> hostname -> 随机 fallback；公网多节点部署时允许不显式设置 `NODE_ID`，系统会优先用本机公网 IP 生成类似 `ip-203.0.113.10` 的节点身份。多节点共用同一 DB/Redis 时必须保证每个正在运行的节点身份唯一且稳定；如果多节点共用同一个公网出口/NAT、无法探测公网 IP、或需要自定义名称，则必须在 `deploy/.env` 显式设置不同 `NODE_ID`（例如 `sub2api-node-01`、`sub2api-node-02`），`docker-compose.yml` 已透传该变量。Redis 新 key 使用 `proxy:latency:{node_id}:{proxy_id}` 与 `proxy_sticky_account:{node_id}:{account_id}`，旧全局 key 只允许兼容 fallback，新写入不得再污染全局 key。DB `last_error` 仅保留订阅刷新/配置类共享错误，本地 mihomo 启动/进程错误只进入当前节点 runtime status。
 - 订阅管理仍以本 fork 为准；v0.1.133 合并不得回退兑换时刻滚动窗口、自定义小时限额、`starts_at` 排序、开始时间列、秒级时间展示、列设置持久化或相关迁移。
