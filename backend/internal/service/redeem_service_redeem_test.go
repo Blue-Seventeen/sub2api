@@ -77,6 +77,10 @@ func (r *redeemRejectRepo) SumPositiveBalanceByUser(ctx context.Context, userID 
 	panic("unexpected SumPositiveBalanceByUser call")
 }
 
+func (r *redeemRejectRepo) GetStats(ctx context.Context) (*RedeemCodeStats, error) {
+	panic("unexpected GetStats call")
+}
+
 func TestRedeemRejectsInvitationCodeBeforeTransaction(t *testing.T) {
 	ctx := context.Background()
 	redeemRepo := &redeemRejectRepo{
@@ -87,7 +91,7 @@ func TestRedeemRejectsInvitationCodeBeforeTransaction(t *testing.T) {
 			Status: StatusUnused,
 		},
 	}
-	redeemService := NewRedeemService(redeemRepo, nil, nil, nil, nil, nil, nil, nil)
+	redeemService := NewRedeemService(redeemRepo, nil, nil, nil, nil, nil, nil)
 
 	got, err := redeemService.Redeem(ctx, 2, redeemRepo.code.Code)
 
