@@ -580,7 +580,6 @@ func registerSubscriptionRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		subscriptions.POST("/:id/restore", h.Admin.Subscription.Restore)
 		subscriptions.DELETE("/:id/hard-delete", h.Admin.Subscription.HardDelete)
 		subscriptions.POST("/:id/revoke", h.Admin.Subscription.Revoke)
-		subscriptions.POST("/:id/restore", h.Admin.Subscription.Restore)
 		subscriptions.DELETE("/:id", h.Admin.Subscription.Revoke)
 	}
 
