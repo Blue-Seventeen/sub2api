@@ -70,7 +70,7 @@ Bug 修复：
 | 项目 | 当前约定 |
 |---|---|
 | 当前主线 | `dev` |
-| 当前 upstream 基线 | 已同步到 `v0.1.145`，`backend/cmd/server/VERSION` 已按 release 号对齐为 `0.1.145` |
+| 当前 upstream 基线 | 已同步到 `v0.1.146`，`backend/cmd/server/VERSION` 已按 release 号对齐为 `0.1.146` |
 | 早期 fork 保护基线 | `2b72deb8fd45dc3a526bda2299b16df8d471107c` |
 | 部署策略 | `dev` 是真实可部署主线；`sub2api-custom-localtest` 仅用于本地测试 |
 | 架构原则 | 保留 Sub2API 的 Account / Group / Channel / 调度 / sticky / failover / billing，渐进吸收协议优先兼容内核 |
@@ -913,6 +913,8 @@ Protect files:
 - v0.1.144 同步不得回退本 fork 的 Promotion、CompatibleGateway、NewAPI-style、mandatory usage/billing、usage fallback、统一倍率、GroupRates、AccountAutoOps、ProxyAutoProbe、订阅堆叠和用户侧错误请求脱敏。Responses mapped billing model 必须和本 fork 的模型映射链路、渠道级定价优先级、订阅/余额扣费和 real_actual_cost 记录共存。
 - 当前 `codex/sync-v0.1.145` 已合入 upstream `v0.1.145`，`backend/cmd/server/VERSION` 对齐为 `0.1.145`。已吸收官方 EasyPay 自定义支付方式、OpenAI advanced scheduler 权重/审计修复、订阅 USD/CNY 汇率独立配置、Antigravity token refresh 修复、Anthropic 自定义模型列表按分组配置过滤、Usage CSV UTF-8 BOM、侧边栏 Logo/站点名返回首页，以及 Docker 部署默认值调整。
 - v0.1.145 同步不得回退本 fork 的 Promotion、CompatibleGateway、NewAPI-style、mandatory usage/billing、usage fallback、统一倍率、GroupRates、AccountAutoOps、ProxyAutoProbe、订阅堆叠、用户侧错误请求脱敏和多时段高峰倍率；上游 EasyPay/advanced scheduler/usage CSV 变更必须与本 fork 的支付、调度、计费和 usage 导出字段共存。
+- 当前 `codex/sync-v0.1.146` 已合入 upstream `v0.1.146`，`backend/cmd/server/VERSION` 对齐为 `0.1.146`。已吸收官方 API Key 并发统计展示、账号请求头覆写与敏感 header 保护、账号数据拖拽/批量导入、OpenAI `gpt-5.6-sol` / `gpt-5.6-terra` / `gpt-5.6-luna` 模型、Grok 图片定价控制、订阅计划 CNY 金额预览、账号测试 compact 探测、Redis SCAN 清理加固、Codex 版本门禁差异化提示、OAuth 账号测试 Codex CLI header 修复、Responses compact endpoint/usage 统计修复和非 `/v1` base_url 模型同步修复。
+- v0.1.146 同步不得回退本 fork 的 Promotion、CompatibleGateway、NewAPI-style、mandatory usage/billing、usage fallback、统一倍率、GroupRates、AccountAutoOps、ProxyAutoProbe、用户侧错误请求脱敏和多时段高峰倍率；上游账号 Header 覆写必须与现有代理解析、测试类型选择和 OpenAI compact 探测共存。
 - 本 fork 在 v0.1.145 分支保留并增强分组高峰倍率：标准余额分组和订阅分组都可启用 `peak_rate_windows` 多时段配置，每段独立 `start` / `end` / `multiplier`，时间段按 `[start,end)` 生效，不允许跨天、不允许重叠、最多 24 段，`multiplier=0` 合法。旧字段 `peak_start`、`peak_end`、`peak_rate_multiplier` 必须继续接收和返回，并始终同步为第一段窗口，保证旧客户端和旧容器回退仍能按单段高峰配置工作。
 - 高峰倍率属于计费热路径能力，不得只作用于订阅分组或 token 计费。命中窗口后，token、per_request、image、duration、character 计费都必须乘高峰倍率；标准余额分组的 `ActualCost`、`RealActualCost`、真实余额扣减、API Key 限额和用户平台配额必须使用高峰倍率后的成本。用户统一倍率为 0 的既有语义不得改变，真实成本仍按现有逻辑归 0。
 - API Key 认证缓存快照必须携带 `peak_rate_windows`，并在修改分组高峰配置后失效缓存；否则中转热路径会拿到旧分组配置导致高峰倍率不生效。当前快照版本为 v15，后续修改高峰相关字段时必须同步递增快照版本或确认兼容。
@@ -920,7 +922,7 @@ Protect files:
 - 高峰倍率的前端展示必须区分密集和详情场景：账号/用户 Key、订阅卡片、支付计划卡片等密集位置默认只显示摘要（例如 `高峰 x1.5` 或 `高峰 3 段`），完整窗口列表放在 tooltip；分组管理和支付计划编辑等空间充足的配置位置才展示完整窗口，避免多个时间段把弹窗、卡片和表格撑乱。
 - 上线前必须保留并通过高峰倍率专项测试：标准分组高峰生效、订阅分组高峰生效、多窗口命中、边界 `[start,end)`、跨天/重叠/负倍率拒绝、0 倍率允许、旧字段兼容、认证缓存往返、token/per_request/image/duration/character 计费和图片直算路径高峰倍率。常规门禁仍为 `cd backend && go test ./...`、`cd frontend && npm run typecheck && npm run build && npm run test:run`、`git diff --check`。
 - 当前分支在 `codex/sync-v0.1.145` 基线上保留 migration `159_add_group_peak_rate_windows.sql`，只对 `groups` 增加 additive JSONB 字段并从旧单段字段回填第一段窗口；云上仍可按只替换 `sub2api` 应用容器执行升级，不要求重建 PostgreSQL/Redis 容器或数据卷。新二进制启动前必须让应用内 migration 正常执行完成，否则访问旧库会因为缺少 `groups.peak_rate_windows` 失败；这属于替换应用容器的启动流程，不是单独重建数据库容器。旧容器回退会忽略 `peak_rate_windows` 并继续读取旧 `peak_start` / `peak_end` / `peak_rate_multiplier`，多窗口会退化为第一段生效；回退期间如果编辑高峰配置，再升级时新容器读路径会优先使用旧字段第一段以保持兼容，只有在新版本再次保存分组后，`peak_rate_windows` 才会被持久同步。若从官方 `v0.1.143` tag 直接跳到当前 fork，历史迁移差异不等同于本 fork 小版本升级，必须单独评估。
-- `deploy` 默认 `SUB2API_IMAGE`、Compose 默认镜像和本地 build 默认 tag 必须与 `backend/cmd/server/VERSION` 保持一致；v0.1.145 当前默认值为 `sub2api-custom:0.1.145`。
+- `deploy` 默认 `SUB2API_IMAGE`、Compose 默认镜像和本地 build 默认 tag 必须与 `backend/cmd/server/VERSION` 保持一致；v0.1.146 当前默认值为 `sub2api-custom:0.1.146`。
 - `/admin/proxies` 仍以本 fork 为准；v0.1.133 合并不得改写 Clash/mihomo 托管订阅、订阅节点拆分、proxy stats、active usage、sticky、auto-probe、增量刷新或 gateway 代理解析链路。
 - `/admin/proxies` 分布式部署语义：代理配置、托管订阅、订阅节点列表、启停状态和账号绑定关系继续共享 DB；latency/quality、auto-probe 最优选择、sticky proxy、managed mihomo runtime 实例目录和 runtime 健康状态必须按当前节点本地化。节点身份解析顺序为 `NODE_ID` -> 本机公网 IP -> hostname -> 随机 fallback；公网多节点部署时允许不显式设置 `NODE_ID`，系统会优先用本机公网 IP 生成类似 `ip-203.0.113.10` 的节点身份。多节点共用同一 DB/Redis 时必须保证每个正在运行的节点身份唯一且稳定；如果多节点共用同一个公网出口/NAT、无法探测公网 IP、或需要自定义名称，则必须在 `deploy/.env` 显式设置不同 `NODE_ID`（例如 `sub2api-node-01`、`sub2api-node-02`），`docker-compose.yml` 已透传该变量。Redis 新 key 使用 `proxy:latency:{node_id}:{proxy_id}` 与 `proxy_sticky_account:{node_id}:{account_id}`，旧全局 key 只允许兼容 fallback，新写入不得再污染全局 key。DB `last_error` 仅保留订阅刷新/配置类共享错误，本地 mihomo 启动/进程错误只进入当前节点 runtime status。
 - 订阅管理仍以本 fork 为准；v0.1.133 合并不得回退兑换时刻滚动窗口、自定义小时限额、`starts_at` 排序、开始时间列、秒级时间展示、列设置持久化或相关迁移。
