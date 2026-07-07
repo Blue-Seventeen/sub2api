@@ -23,7 +23,13 @@
             v-else-if="getGroup(value)"
             :name="getGroup(value)!.name"
             :platform="getGroup(value)!.platform"
+            :subscription-type="getGroup(value)!.subscription_type"
             :rate-multiplier="getGroup(value)!.rate_multiplier"
+            :peak-rate-enabled="getGroup(value)!.peak_rate_enabled"
+            :peak-start="getGroup(value)!.peak_start"
+            :peak-end="getGroup(value)!.peak_end"
+            :peak-rate-multiplier="getGroup(value)!.peak_rate_multiplier"
+            :peak-rate-windows="getGroup(value)!.peak_rate_windows"
           />
           <span v-else class="text-sm text-gray-400">-</span>
         </template>

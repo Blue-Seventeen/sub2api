@@ -238,9 +238,11 @@ type CreateGroupInput struct {
 	ImageRateMultiplier  *float64
 	// 高峰时段倍率配置（PeakRateMultiplier 为 nil 时按 1.0 处理）
 	PeakRateEnabled    bool
+	PeakRateEnabledSet bool
 	PeakStart          string
 	PeakEnd            string
 	PeakRateMultiplier *float64
+	PeakRateWindows    []PeakRateWindow
 	ImagePrice1K       *float64
 	ImagePrice2K       *float64
 	ImagePrice4K       *float64
@@ -291,6 +293,7 @@ type UpdateGroupInput struct {
 	PeakStart          *string
 	PeakEnd            *string
 	PeakRateMultiplier *float64
+	PeakRateWindows    *[]PeakRateWindow
 	ImagePrice1K       *float64
 	ImagePrice2K       *float64
 	ImagePrice4K       *float64
@@ -1970,13 +1973,8 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		imageRateMultiplier = *input.ImageRateMultiplier
 	}
 
-	peakRateMultiplier := 1.0
-	if input.PeakRateMultiplier != nil {
-		peakRateMultiplier = *input.PeakRateMultiplier
-	}
-	// 先归一化（非订阅分组清空高峰配置、清洗停用状态下的脏字段）再校验，与 UpdateGroup 同一收口。
-	peakRateEnabled, peakStart, peakEnd, peakRateMultiplier := NormalizePeakRateConfig(subscriptionType, input.PeakRateEnabled, input.PeakStart, input.PeakEnd, peakRateMultiplier)
-	if err := ValidatePeakRateConfig(subscriptionType, peakRateEnabled, peakStart, peakEnd, peakRateMultiplier); err != nil {
+	peakRateEnabled, peakRateWindows, peakStart, peakEnd, peakRateMultiplier, err := normalizeCreateGroupPeakRateConfig(input)
+	if err != nil {
 		return nil, err
 	}
 
@@ -2057,6 +2055,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		PeakStart:                       peakStart,
 		PeakEnd:                         peakEnd,
 		PeakRateMultiplier:              peakRateMultiplier,
+		PeakRateWindows:                 peakRateWindows,
 		ImagePrice1K:                    imagePrice1K,
 		ImagePrice2K:                    imagePrice2K,
 		ImagePrice4K:                    imagePrice4K,
@@ -2110,6 +2109,127 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	}
 
 	return group, nil
+}
+
+func normalizeCreateGroupPeakRateConfig(input *CreateGroupInput) (bool, []PeakRateWindow, string, string, float64, error) {
+	if input == nil {
+		return false, []PeakRateWindow{}, "", "", 1.0, nil
+	}
+	enabled := input.PeakRateEnabled
+	if !input.PeakRateEnabledSet && len(input.PeakRateWindows) > 0 {
+		enabled = true
+	}
+	if !enabled {
+		return false, []PeakRateWindow{}, "", "", 1.0, nil
+	}
+	multiplier := 1.0
+	if input.PeakRateMultiplier != nil {
+		multiplier = *input.PeakRateMultiplier
+	}
+	windows := input.PeakRateWindows
+	if len(windows) == 0 {
+		windows = singlePeakRateWindowFromLegacy(input.PeakStart, input.PeakEnd, multiplier)
+	}
+	normalized, err := NormalizePeakRateWindows(true, windows)
+	if err != nil {
+		return false, nil, "", "", 1.0, peakRateWindowsBadRequest(err)
+	}
+	start, end, firstMultiplier := PeakRateLegacyFields(normalized)
+	return true, normalized, start, end, firstMultiplier, nil
+}
+
+func applyUpdateGroupPeakRateConfig(group *Group, input *UpdateGroupInput) error {
+	if group == nil || input == nil {
+		return nil
+	}
+	existingWindows := PeakRateWindowsForRead(group.PeakRateWindows, group.PeakStart, group.PeakEnd, group.PeakRateMultiplier)
+	if input.PeakRateEnabled != nil {
+		group.PeakRateEnabled = *input.PeakRateEnabled
+	}
+	if input.PeakStart != nil {
+		group.PeakStart = *input.PeakStart
+	}
+	if input.PeakEnd != nil {
+		group.PeakEnd = *input.PeakEnd
+	}
+	if input.PeakRateMultiplier != nil {
+		group.PeakRateMultiplier = *input.PeakRateMultiplier
+	}
+
+	if input.PeakRateWindows != nil {
+		if len(*input.PeakRateWindows) == 0 {
+			if group.PeakRateEnabled {
+				return infraerrors.BadRequest("INVALID_PEAK_RATE_WINDOWS", "peak_rate_windows cannot be empty when peak_rate_enabled is true")
+			}
+			clearGroupPeakRateConfig(group)
+			return nil
+		}
+		if input.PeakRateEnabled == nil {
+			group.PeakRateEnabled = true
+		}
+		normalized, err := NormalizePeakRateWindows(group.PeakRateEnabled, *input.PeakRateWindows)
+		if err != nil {
+			return peakRateWindowsBadRequest(err)
+		}
+		if !group.PeakRateEnabled || len(normalized) == 0 {
+			clearGroupPeakRateConfig(group)
+			return nil
+		}
+		setGroupPeakRateWindows(group, normalized)
+		return nil
+	}
+
+	legacyProvided := input.PeakStart != nil || input.PeakEnd != nil || input.PeakRateMultiplier != nil
+	if input.PeakRateEnabled != nil || legacyProvided {
+		windows := existingWindows
+		if legacyProvided {
+			legacyWindow := singlePeakRateWindowFromLegacy(group.PeakStart, group.PeakEnd, group.PeakRateMultiplier)
+			if len(legacyWindow) == 0 {
+				windows = nil
+			} else if len(existingWindows) == 0 {
+				windows = legacyWindow
+			} else {
+				windows = append(legacyWindow, existingWindows[1:]...)
+			}
+		}
+		if len(windows) == 0 {
+			windows = singlePeakRateWindowFromLegacy(group.PeakStart, group.PeakEnd, group.PeakRateMultiplier)
+		}
+		normalized, err := NormalizePeakRateWindows(group.PeakRateEnabled, windows)
+		if err != nil {
+			return peakRateWindowsBadRequest(err)
+		}
+		if !group.PeakRateEnabled || len(normalized) == 0 {
+			clearGroupPeakRateConfig(group)
+			return nil
+		}
+		setGroupPeakRateWindows(group, normalized)
+	}
+	return nil
+}
+
+func setGroupPeakRateWindows(group *Group, windows []PeakRateWindow) {
+	group.PeakRateEnabled = true
+	group.PeakRateWindows = PeakRateWindowsForStorage(windows)
+	group.PeakStart, group.PeakEnd, group.PeakRateMultiplier = PeakRateLegacyFields(group.PeakRateWindows)
+}
+
+func clearGroupPeakRateConfig(group *Group) {
+	group.PeakRateEnabled = false
+	group.PeakRateWindows = []PeakRateWindow{}
+	group.PeakStart = ""
+	group.PeakEnd = ""
+	group.PeakRateMultiplier = 1.0
+}
+
+func peakRateWindowsBadRequest(err error) error {
+	if err == nil {
+		return nil
+	}
+	if infraerrors.IsBadRequest(err) {
+		return err
+	}
+	return infraerrors.BadRequest("INVALID_PEAK_RATE_WINDOWS", err.Error())
 }
 
 // normalizeLimit 将负数转换为 nil（表示无限制），0 保留（表示限额为零）
@@ -2266,23 +2386,7 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		}
 		group.ImageRateMultiplier = *input.ImageRateMultiplier
 	}
-	if input.PeakRateEnabled != nil {
-		group.PeakRateEnabled = *input.PeakRateEnabled
-	}
-	if input.PeakStart != nil {
-		group.PeakStart = *input.PeakStart
-	}
-	if input.PeakEnd != nil {
-		group.PeakEnd = *input.PeakEnd
-	}
-	if input.PeakRateMultiplier != nil {
-		group.PeakRateMultiplier = *input.PeakRateMultiplier
-	}
-	// 先归一化（非订阅分组——含本次更新转为非订阅——静默清空高峰配置，清洗停用状态下的脏字段），
-	// 再收敛校验：Update 可能只传部分 peak 字段，需对合并后的最终配置统一校验，
-	// 防止单独修改 start/end 导致最终 start>=end 等非法配置入库。与 CreateGroup 同一收口。
-	group.PeakRateEnabled, group.PeakStart, group.PeakEnd, group.PeakRateMultiplier = NormalizePeakRateConfig(group.SubscriptionType, group.PeakRateEnabled, group.PeakStart, group.PeakEnd, group.PeakRateMultiplier)
-	if err := ValidatePeakRateConfig(group.SubscriptionType, group.PeakRateEnabled, group.PeakStart, group.PeakEnd, group.PeakRateMultiplier); err != nil {
+	if err := applyUpdateGroupPeakRateConfig(group, input); err != nil {
 		return nil, err
 	}
 	if input.ImagePrice1K != nil {

@@ -1078,8 +1078,8 @@
           </div>
         </div>
 
-        <!-- 高峰时段倍率配置（仅订阅类型分组） -->
-        <div v-if="createForm.subscription_type === 'subscription'" class="border-t pt-4">
+        <!-- 高峰时段倍率配置 -->
+        <div class="border-t pt-4">
           <div class="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2">
             <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
               <input
@@ -1092,36 +1092,48 @@
           </div>
           <div
             v-if="createForm.peak_rate_enabled"
-            class="mb-4 grid grid-cols-3 gap-3"
+            class="mb-4 space-y-3"
           >
-            <div>
-              <label class="input-label">{{ t("admin.groups.peakRate.peakStart") }}</label>
-              <input
-                v-model="createForm.peak_start"
-                type="time"
-                class="input"
-              />
+            <div
+              v-for="(window, index) in createForm.peak_rate_windows"
+              :key="`create-peak-${index}`"
+              class="grid grid-cols-1 gap-3 rounded-lg border border-gray-200 p-3 dark:border-dark-600 md:grid-cols-[1fr_1fr_1fr_auto]"
+            >
+              <div>
+                <label class="input-label">{{ t("admin.groups.peakRate.peakStart") }}</label>
+                <input v-model="window.start" type="time" class="input" />
+              </div>
+              <div>
+                <label class="input-label">{{ t("admin.groups.peakRate.peakEnd") }}</label>
+                <input v-model="window.end" type="time" class="input" />
+              </div>
+              <div>
+                <label class="input-label">{{ t("admin.groups.peakRate.peakMultiplier") }}</label>
+                <input
+                  v-model.number="window.multiplier"
+                  type="number"
+                  step="0.001"
+                  min="0"
+                  class="input"
+                  placeholder="1"
+                  :title="t('admin.groups.peakRate.multiplierHint')"
+                />
+              </div>
+              <button
+                type="button"
+                class="btn btn-secondary self-end"
+                @click="removePeakRateWindow(createForm.peak_rate_windows, index)"
+              >
+                {{ t("common.delete") }}
+              </button>
             </div>
-            <div>
-              <label class="input-label">{{ t("admin.groups.peakRate.peakEnd") }}</label>
-              <input
-                v-model="createForm.peak_end"
-                type="time"
-                class="input"
-              />
-            </div>
-            <div>
-              <label class="input-label">{{ t("admin.groups.peakRate.peakMultiplier") }}</label>
-              <input
-                v-model.number="createForm.peak_rate_multiplier"
-                type="number"
-                step="0.001"
-                min="0"
-                class="input"
-                placeholder="1"
-                :title="t('admin.groups.peakRate.multiplierHint')"
-              />
-            </div>
+            <button
+              type="button"
+              class="btn btn-secondary"
+              @click="addPeakRateWindow(createForm.peak_rate_windows)"
+            >
+              + {{ t("admin.groups.peakRate.addWindow") }}
+            </button>
           </div>
         </div>
 
@@ -2507,8 +2519,8 @@
           </div>
         </div>
 
-        <!-- 高峰时段倍率配置（仅订阅类型分组） -->
-        <div v-if="editForm.subscription_type === 'subscription'" class="border-t pt-4">
+        <!-- 高峰时段倍率配置 -->
+        <div class="border-t pt-4">
           <div class="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2">
             <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
               <input
@@ -2521,36 +2533,48 @@
           </div>
           <div
             v-if="editForm.peak_rate_enabled"
-            class="mb-4 grid grid-cols-3 gap-3"
+            class="mb-4 space-y-3"
           >
-            <div>
-              <label class="input-label">{{ t("admin.groups.peakRate.peakStart") }}</label>
-              <input
-                v-model="editForm.peak_start"
-                type="time"
-                class="input"
-              />
+            <div
+              v-for="(window, index) in editForm.peak_rate_windows"
+              :key="`edit-peak-${index}`"
+              class="grid grid-cols-1 gap-3 rounded-lg border border-gray-200 p-3 dark:border-dark-600 md:grid-cols-[1fr_1fr_1fr_auto]"
+            >
+              <div>
+                <label class="input-label">{{ t("admin.groups.peakRate.peakStart") }}</label>
+                <input v-model="window.start" type="time" class="input" />
+              </div>
+              <div>
+                <label class="input-label">{{ t("admin.groups.peakRate.peakEnd") }}</label>
+                <input v-model="window.end" type="time" class="input" />
+              </div>
+              <div>
+                <label class="input-label">{{ t("admin.groups.peakRate.peakMultiplier") }}</label>
+                <input
+                  v-model.number="window.multiplier"
+                  type="number"
+                  step="0.001"
+                  min="0"
+                  class="input"
+                  placeholder="1"
+                  :title="t('admin.groups.peakRate.multiplierHint')"
+                />
+              </div>
+              <button
+                type="button"
+                class="btn btn-secondary self-end"
+                @click="removePeakRateWindow(editForm.peak_rate_windows, index)"
+              >
+                {{ t("common.delete") }}
+              </button>
             </div>
-            <div>
-              <label class="input-label">{{ t("admin.groups.peakRate.peakEnd") }}</label>
-              <input
-                v-model="editForm.peak_end"
-                type="time"
-                class="input"
-              />
-            </div>
-            <div>
-              <label class="input-label">{{ t("admin.groups.peakRate.peakMultiplier") }}</label>
-              <input
-                v-model.number="editForm.peak_rate_multiplier"
-                type="number"
-                step="0.001"
-                min="0"
-                class="input"
-                placeholder="1"
-                :title="t('admin.groups.peakRate.multiplierHint')"
-              />
-            </div>
+            <button
+              type="button"
+              class="btn btn-secondary"
+              @click="addPeakRateWindow(editForm.peak_rate_windows)"
+            >
+              + {{ t("admin.groups.peakRate.addWindow") }}
+            </button>
           </div>
         </div>
 
@@ -3467,7 +3491,7 @@ import { useI18n } from "vue-i18n";
 import { useAppStore } from "@/stores/app";
 import { useOnboardingStore } from "@/stores/onboarding";
 import { adminAPI } from "@/api/admin";
-import type { AdminGroup, GroupPlatform, SubscriptionType } from "@/types";
+import type { AdminGroup, CreateGroupRequest, GroupPlatform, SubscriptionType, UpdateGroupRequest } from "@/types";
 import type { Column } from "@/components/common/types";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import TablePageLayout from "@/components/layout/TablePageLayout.vue";
@@ -3494,6 +3518,14 @@ import {
   resetMessagesDispatchFormState,
   type MessagesDispatchMappingRow,
 } from "./groupsMessagesDispatch";
+import {
+  appendPeakRateWindow,
+  buildPeakRatePayload,
+  normalizeRateMultiplier,
+  peakRateWindowsFromGroup,
+  removePeakRateWindow,
+  type PeakRateWindowForm,
+} from "./groupsPeakRateForm";
 import {
   addModelsListItem,
   buildModelsListConfig,
@@ -4057,6 +4089,7 @@ const createForm = reactive({
   peak_start: "",
   peak_end: "",
   peak_rate_multiplier: 1.0,
+  peak_rate_windows: [] as PeakRateWindowForm[],
   // Claude Code 客户端限制（仅 anthropic 平台使用）
   claude_code_only: false,
   fallback_group_id: null as number | null,
@@ -4447,6 +4480,7 @@ const editForm = reactive({
   peak_start: "",
   peak_end: "",
   peak_rate_multiplier: 1.0,
+  peak_rate_windows: [] as PeakRateWindowForm[],
   // Claude Code 客户端限制（仅 anthropic 平台使用）
   claude_code_only: false,
   fallback_group_id: null as number | null,
@@ -4727,6 +4761,7 @@ const closeCreateModal = () => {
   createForm.peak_start = "";
   createForm.peak_end = "";
   createForm.peak_rate_multiplier = 1.0;
+  createForm.peak_rate_windows = [];
   createForm.claude_code_only = false;
   createForm.fallback_group_id = null;
   createForm.fallback_group_id_on_invalid_request = null;
@@ -4776,14 +4811,14 @@ const normalizeOptionalHours = (
   return Math.min(Math.floor(parsed), MAX_CUSTOM_LIMIT_HOURS);
 };
 
-const normalizeRateMultiplier = (
-  value: number | string | null | undefined,
-): number => {
-  if (value === null || value === undefined || value === "") {
-    return 1;
+const addPeakRateWindow = (windows: PeakRateWindowForm[]) => {
+  if (!appendPeakRateWindow(windows)) {
+    appStore.showError(t("admin.groups.peakRate.errors.maxWindows"));
   }
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 1;
+};
+
+const showPeakRateError = (key: string) => {
+  appStore.showError(t(`admin.groups.peakRate.errors.${key}`));
 };
 
 const handleCreateGroup = async () => {
@@ -4791,6 +4826,8 @@ const handleCreateGroup = async () => {
     appStore.showError(t("admin.groups.nameRequired"));
     return;
   }
+  const peakPayload = buildPeakRatePayload(createForm, showPeakRateError);
+  if (!peakPayload) return;
   submitting.value = true;
   try {
     // 构建请求数据，包含模型路由配置
@@ -4837,13 +4874,8 @@ const handleCreateGroup = async () => {
     requestData.image_rate_multiplier = normalizeRateMultiplier(
       requestData.image_rate_multiplier,
     );
-    requestData.peak_rate_enabled = createForm.peak_rate_enabled;
-    requestData.peak_start = createForm.peak_start;
-    requestData.peak_end = createForm.peak_end;
-    requestData.peak_rate_multiplier = normalizeRateMultiplier(
-      createForm.peak_rate_multiplier,
-    );
-    await adminAPI.groups.create(requestData);
+    const requestPayload: CreateGroupRequest = { ...requestData, ...peakPayload };
+    await adminAPI.groups.create(requestPayload);
     appStore.showSuccess(t("admin.groups.groupCreated"));
     closeCreateModal();
     loadGroups();
@@ -4886,6 +4918,7 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.peak_start = group.peak_start ?? "";
   editForm.peak_end = group.peak_end ?? "";
   editForm.peak_rate_multiplier = group.peak_rate_multiplier ?? 1.0;
+  editForm.peak_rate_windows = peakRateWindowsFromGroup(group);
   editForm.claude_code_only = group.claude_code_only || false;
   editForm.fallback_group_id = group.fallback_group_id;
   editForm.fallback_group_id_on_invalid_request =
@@ -4936,6 +4969,7 @@ const closeEditModal = () => {
   editForm.peak_start = "";
   editForm.peak_end = "";
   editForm.peak_rate_multiplier = 1.0;
+  editForm.peak_rate_windows = [];
   resetMessagesDispatchFormState(editForm);
   resetModelsListState(editModelsListState);
 };
@@ -4946,6 +4980,8 @@ const handleUpdateGroup = async () => {
     appStore.showError(t("admin.groups.nameRequired"));
     return;
   }
+  const peakPayload = buildPeakRatePayload(editForm, showPeakRateError);
+  if (!peakPayload) return;
 
   submitting.value = true;
   try {
@@ -4999,13 +5035,8 @@ const handleUpdateGroup = async () => {
     payload.image_rate_multiplier = normalizeRateMultiplier(
       payload.image_rate_multiplier,
     );
-    payload.peak_rate_enabled = editForm.peak_rate_enabled;
-    payload.peak_start = editForm.peak_start;
-    payload.peak_end = editForm.peak_end;
-    payload.peak_rate_multiplier = normalizeRateMultiplier(
-      editForm.peak_rate_multiplier,
-    );
-    await adminAPI.groups.update(editingGroup.value.id, payload);
+    const requestPayload: UpdateGroupRequest = { ...payload, ...peakPayload };
+    await adminAPI.groups.update(editingGroup.value.id, requestPayload);
     appStore.showSuccess(t("admin.groups.groupUpdated"));
     closeEditModal();
     loadGroups();
@@ -5075,31 +5106,31 @@ const confirmDelete = async () => {
   }
 };
 
-// 监听 subscription_type 变化，订阅模式时 is_exclusive 默认为 true；标准模式清空高峰配置
+// 监听 subscription_type 变化：订阅模式时 is_exclusive 默认为 true；标准余额分组也保留高峰配置。
 watch(
   () => createForm.subscription_type,
   (newVal) => {
     if (newVal === "subscription") {
       createForm.is_exclusive = true;
       createForm.fallback_group_id_on_invalid_request = null;
-    } else {
-      createForm.peak_rate_enabled = false;
-      createForm.peak_start = "";
-      createForm.peak_end = "";
-      createForm.peak_rate_multiplier = 1.0;
     }
   },
 );
 
-// 编辑表单：切回标准模式时清空高峰配置，避免残留随更新请求提交被后端拒绝
 watch(
-  () => editForm.subscription_type,
-  (newVal) => {
-    if (newVal !== "subscription") {
-      editForm.peak_rate_enabled = false;
-      editForm.peak_start = "";
-      editForm.peak_end = "";
-      editForm.peak_rate_multiplier = 1.0;
+  () => createForm.peak_rate_enabled,
+  (enabled) => {
+    if (enabled && createForm.peak_rate_windows.length === 0) {
+      addPeakRateWindow(createForm.peak_rate_windows);
+    }
+  },
+);
+
+watch(
+  () => editForm.peak_rate_enabled,
+  (enabled) => {
+    if (enabled && editForm.peak_rate_windows.length === 0) {
+      addPeakRateWindow(editForm.peak_rate_windows);
     }
   },
 );
@@ -5141,19 +5172,6 @@ watch(
     }
   },
 );
-
-watch(
-  () => editForm.platform,
-  (newVal) => {
-    if (!['anthropic', 'antigravity'].includes(newVal)) {
-      editForm.fallback_group_id_on_invalid_request = null
-    }
-    if (newVal !== 'openai') {
-      editForm.allow_messages_dispatch = false
-      editForm.default_mapped_model = ''
-    }
-  }
-)
 
 // 点击外部关闭账号搜索下拉框
 const handleClickOutside = (event: MouseEvent) => {

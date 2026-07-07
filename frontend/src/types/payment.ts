@@ -117,6 +117,7 @@ export interface SubscriptionPlan {
   peak_start?: string
   peak_end?: string
   peak_rate_multiplier?: number
+  peak_rate_windows?: PeakRateWindow[]
   daily_limit_usd?: number | null
   weekly_limit_usd?: number | null
   monthly_limit_usd?: number | null
@@ -133,6 +134,12 @@ export interface SubscriptionPlan {
   features: string[]
   for_sale: boolean
   sort_order: number
+}
+
+export interface PeakRateWindow {
+  start: string
+  end: string
+  multiplier: number
 }
 
 export interface PaymentChannel {

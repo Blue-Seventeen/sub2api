@@ -202,6 +202,7 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 				group.FieldPeakStart,
 				group.FieldPeakEnd,
 				group.FieldPeakRateMultiplier,
+				group.FieldPeakRateWindows,
 			)
 		}).
 		Only(ctx)
@@ -851,6 +852,7 @@ func groupEntityToService(g *dbent.Group) *service.Group {
 		PeakStart:                       g.PeakStart,
 		PeakEnd:                         g.PeakEnd,
 		PeakRateMultiplier:              g.PeakRateMultiplier,
+		PeakRateWindows:                 service.PeakRateWindowsForRead(g.PeakRateWindows, g.PeakStart, g.PeakEnd, g.PeakRateMultiplier),
 		CreatedAt:                       g.CreatedAt,
 		UpdatedAt:                       g.UpdatedAt,
 	}

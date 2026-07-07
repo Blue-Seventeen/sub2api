@@ -195,6 +195,32 @@ func TestMigration158BackfillsGrokMediaGenerationGroups(t *testing.T) {
 	require.Contains(t, sql, "AND allow_image_generation = false")
 }
 
+func TestMigration159AddsGroupPeakRateWindowsSafely(t *testing.T) {
+	content, err := FS.ReadFile("159_add_group_peak_rate_windows.sql")
+	require.NoError(t, err)
+
+	sql := string(content)
+	require.Contains(t, sql, "ALTER TABLE groups ADD COLUMN IF NOT EXISTS peak_rate_windows JSONB NOT NULL DEFAULT '[]'::jsonb")
+	require.Contains(t, sql, "ALTER TABLE groups ALTER COLUMN peak_rate_windows SET DEFAULT '[]'::jsonb")
+	require.Contains(t, sql, "WHERE peak_rate_windows IS NULL")
+	require.Contains(t, sql, "ALTER TABLE groups ALTER COLUMN peak_rate_windows SET NOT NULL")
+	require.Contains(t, sql, "UPDATE groups")
+	require.Contains(t, sql, "jsonb_build_array")
+	require.Contains(t, sql, "jsonb_build_object")
+	require.Contains(t, sql, "'start'")
+	require.Contains(t, sql, "'end'")
+	require.Contains(t, sql, "'multiplier'")
+	require.Contains(t, sql, "lpad(split_part(peak_start, ':', 1), 2, '0')")
+	require.Contains(t, sql, "lpad(split_part(peak_end, ':', 1), 2, '0')")
+	require.Contains(t, sql, "WHERE peak_rate_enabled = TRUE")
+	require.Contains(t, sql, "COALESCE(peak_start, '') ~ '^([01]?[0-9]|2[0-3]):[0-5][0-9]$'")
+	require.Contains(t, sql, "COALESCE(peak_end, '') ~ '^([01]?[0-9]|2[0-3]):[0-5][0-9]$'")
+	require.Contains(t, sql, "< (split_part(peak_end, ':', 1)::int * 60 + split_part(peak_end, ':', 2)::int)")
+	require.Contains(t, sql, "peak_rate_multiplier >= 0")
+	require.Contains(t, sql, "peak_rate_windows = '[]'::jsonb")
+	require.NotContains(t, sql, "DROP COLUMN")
+}
+
 func TestMigration154AddsSparkShadowColumnsAndConstraintsWithoutHotIndexes(t *testing.T) {
 	content, err := FS.ReadFile("154_account_spark_shadow.sql")
 	require.NoError(t, err)

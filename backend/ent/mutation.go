@@ -15344,6 +15344,8 @@ type GroupMutation struct {
 	peak_end                                *string
 	peak_rate_multiplier                    *float64
 	addpeak_rate_multiplier                 *float64
+	peak_rate_windows                       *[]domain.PeakRateWindow
+	appendpeak_rate_windows                 []domain.PeakRateWindow
 	is_exclusive                            *bool
 	status                                  *string
 	platform                                *string
@@ -15937,6 +15939,57 @@ func (m *GroupMutation) AddedPeakRateMultiplier() (r float64, exists bool) {
 func (m *GroupMutation) ResetPeakRateMultiplier() {
 	m.peak_rate_multiplier = nil
 	m.addpeak_rate_multiplier = nil
+}
+
+// SetPeakRateWindows sets the "peak_rate_windows" field.
+func (m *GroupMutation) SetPeakRateWindows(drw []domain.PeakRateWindow) {
+	m.peak_rate_windows = &drw
+	m.appendpeak_rate_windows = nil
+}
+
+// PeakRateWindows returns the value of the "peak_rate_windows" field in the mutation.
+func (m *GroupMutation) PeakRateWindows() (r []domain.PeakRateWindow, exists bool) {
+	v := m.peak_rate_windows
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPeakRateWindows returns the old "peak_rate_windows" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldPeakRateWindows(ctx context.Context) (v []domain.PeakRateWindow, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPeakRateWindows is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPeakRateWindows requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPeakRateWindows: %w", err)
+	}
+	return oldValue.PeakRateWindows, nil
+}
+
+// AppendPeakRateWindows adds drw to the "peak_rate_windows" field.
+func (m *GroupMutation) AppendPeakRateWindows(drw []domain.PeakRateWindow) {
+	m.appendpeak_rate_windows = append(m.appendpeak_rate_windows, drw...)
+}
+
+// AppendedPeakRateWindows returns the list of values that were appended to the "peak_rate_windows" field in this mutation.
+func (m *GroupMutation) AppendedPeakRateWindows() ([]domain.PeakRateWindow, bool) {
+	if len(m.appendpeak_rate_windows) == 0 {
+		return nil, false
+	}
+	return m.appendpeak_rate_windows, true
+}
+
+// ResetPeakRateWindows resets all changes to the "peak_rate_windows" field.
+func (m *GroupMutation) ResetPeakRateWindows() {
+	m.peak_rate_windows = nil
+	m.appendpeak_rate_windows = nil
 }
 
 // SetIsExclusive sets the "is_exclusive" field.
@@ -17883,7 +17936,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 42)
+	fields := make([]string, 0, 43)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -17913,6 +17966,9 @@ func (m *GroupMutation) Fields() []string {
 	}
 	if m.peak_rate_multiplier != nil {
 		fields = append(fields, group.FieldPeakRateMultiplier)
+	}
+	if m.peak_rate_windows != nil {
+		fields = append(fields, group.FieldPeakRateWindows)
 	}
 	if m.is_exclusive != nil {
 		fields = append(fields, group.FieldIsExclusive)
@@ -18038,6 +18094,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.PeakEnd()
 	case group.FieldPeakRateMultiplier:
 		return m.PeakRateMultiplier()
+	case group.FieldPeakRateWindows:
+		return m.PeakRateWindows()
 	case group.FieldIsExclusive:
 		return m.IsExclusive()
 	case group.FieldStatus:
@@ -18131,6 +18189,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldPeakEnd(ctx)
 	case group.FieldPeakRateMultiplier:
 		return m.OldPeakRateMultiplier(ctx)
+	case group.FieldPeakRateWindows:
+		return m.OldPeakRateWindows(ctx)
 	case group.FieldIsExclusive:
 		return m.OldIsExclusive(ctx)
 	case group.FieldStatus:
@@ -18273,6 +18333,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetPeakRateMultiplier(v)
+		return nil
+	case group.FieldPeakRateWindows:
+		v, ok := value.([]domain.PeakRateWindow)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPeakRateWindows(v)
 		return nil
 	case group.FieldIsExclusive:
 		v, ok := value.(bool)
@@ -18846,6 +18913,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldPeakRateMultiplier:
 		m.ResetPeakRateMultiplier()
+		return nil
+	case group.FieldPeakRateWindows:
+		m.ResetPeakRateWindows()
 		return nil
 	case group.FieldIsExclusive:
 		m.ResetIsExclusive()

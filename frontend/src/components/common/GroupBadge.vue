@@ -1,7 +1,8 @@
 <template>
   <span
     :class="[
-      'inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium transition-colors',
+      'inline-flex max-w-full items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium transition-colors',
+      props.peakDisplayMode === 'full' ? 'flex-wrap' : 'min-w-0',
       badgeClass
     ]"
   >
@@ -31,7 +32,14 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { SubscriptionType, GroupPlatform } from '@/types'
 import { useAppStore } from '@/stores/app'
-import { formatPeakRateWindow, serverTimezoneLabel } from '@/utils/peak-rate'
+import {
+  formatPeakRateWindow,
+  hasPeakRate as hasPeakRateFields,
+  peakRateWindowsForDisplay,
+  serverTimezoneLabel,
+  type PeakRateDisplayMode,
+  type PeakRateWindow,
+} from '@/utils/peak-rate'
 import PlatformIcon from './PlatformIcon.vue'
 
 interface Props {
@@ -45,6 +53,8 @@ interface Props {
   peakStart?: string
   peakEnd?: string
   peakRateMultiplier?: number
+  peakRateWindows?: PeakRateWindow[]
+  peakDisplayMode?: PeakRateDisplayMode
   showRate?: boolean
   daysRemaining?: number | null // 剩余天数（订阅类型时使用）
   /**
@@ -62,6 +72,7 @@ const props = withDefaults(defineProps<Props>(), {
   effectiveRateMultiplier: null,
   userRateMultiplier: null,
   peakRateEnabled: false,
+  peakDisplayMode: 'compact',
   alwaysShowRate: false
 })
 
@@ -83,24 +94,36 @@ const hasEffectiveRate = computed(() => {
 
 const appStore = useAppStore()
 
+const peakRateFields = computed(() => ({
+  peak_rate_enabled: props.peakRateEnabled,
+  peak_start: props.peakStart,
+  peak_end: props.peakEnd,
+  peak_rate_multiplier: props.peakRateMultiplier,
+  peak_rate_windows: props.peakRateWindows
+}))
+
 const hasPeakRate = computed(() => {
-  return Boolean(props.showRate && props.peakRateEnabled && props.peakStart && props.peakEnd)
+  return Boolean(props.showRate && hasPeakRateFields(peakRateFields.value))
 })
 
-const peakRateText = computed(() => {
+const peakRateFullText = computed(() => {
   return formatPeakRateWindow(
-    {
-      peak_rate_enabled: props.peakRateEnabled,
-      peak_start: props.peakStart,
-      peak_end: props.peakEnd,
-      peak_rate_multiplier: props.peakRateMultiplier
-    },
+    peakRateFields.value,
     serverTimezoneLabel(appStore.cachedPublicSettings?.server_utc_offset)
   )
 })
 
+const peakRateText = computed(() => {
+  if (props.peakDisplayMode === 'full') return peakRateFullText.value
+  const windows = peakRateWindowsForDisplay(peakRateFields.value)
+  if (windows.length === 1) {
+    return t('common.peakRateCompactSingle', { multiplier: windows[0].multiplier ?? 1 })
+  }
+  return t('common.peakRateCompactMultiple', { count: windows.length })
+})
+
 const peakRateTitle = computed(() => {
-  return t('common.peakRateTooltip', { window: peakRateText.value })
+  return t('common.peakRateTooltip', { window: peakRateFullText.value }) + t('common.peakRateImageNote')
 })
 
 // 是否显示右侧标签
@@ -185,7 +208,11 @@ const labelClass = computed(() => {
 })
 
 const peakRateClass = computed(() => {
-  return 'px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+  const base = 'px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+  if (props.peakDisplayMode === 'full') {
+    return `${base} max-w-full whitespace-normal break-words leading-4`
+  }
+  return `${base} whitespace-nowrap`
 })
 
 // Badge color based on platform and subscription type

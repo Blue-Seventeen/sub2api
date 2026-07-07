@@ -35,6 +35,29 @@ func (r *revokeCacheUserSubRepoStub) Delete(_ context.Context, id int64) error {
 	return nil
 }
 
+func (r *revokeCacheUserSubRepoStub) UpdateStatus(_ context.Context, id int64, status string) error {
+	if r.sub == nil || r.sub.ID != id || r.deleted {
+		return ErrSubscriptionNotFound
+	}
+	r.sub.Status = status
+	return nil
+}
+
+func (r *revokeCacheUserSubRepoStub) UpdateGroupSnapshot(_ context.Context, sub *UserSubscription) error {
+	if r.sub == nil || sub == nil || r.sub.ID != sub.ID || r.deleted {
+		return ErrSubscriptionNotFound
+	}
+	r.sub.GroupNameSnapshot = sub.GroupNameSnapshot
+	r.sub.GroupPlatformSnapshot = sub.GroupPlatformSnapshot
+	r.sub.GroupRateMultiplierSnapshot = sub.GroupRateMultiplierSnapshot
+	r.sub.DailyLimitUSDSnapshot = sub.DailyLimitUSDSnapshot
+	r.sub.WeeklyLimitUSDSnapshot = sub.WeeklyLimitUSDSnapshot
+	r.sub.MonthlyLimitUSDSnapshot = sub.MonthlyLimitUSDSnapshot
+	r.sub.CustomLimitHoursSnapshot = sub.CustomLimitHoursSnapshot
+	r.sub.CustomLimitUSDSnapshot = sub.CustomLimitUSDSnapshot
+	return nil
+}
+
 func (r *revokeCacheUserSubRepoStub) GetActiveByUserIDAndGroupID(_ context.Context, userID, groupID int64) (*UserSubscription, error) {
 	r.getActiveCalls++
 	if r.deleted || r.sub == nil || r.sub.UserID != userID || r.sub.GroupID != groupID {
@@ -42,6 +65,15 @@ func (r *revokeCacheUserSubRepoStub) GetActiveByUserIDAndGroupID(_ context.Conte
 	}
 	cp := *r.sub
 	return &cp, nil
+}
+
+func (r *revokeCacheUserSubRepoStub) ListActiveByUserIDAndGroupID(_ context.Context, userID, groupID int64) ([]UserSubscription, error) {
+	r.getActiveCalls++
+	if r.deleted || r.sub == nil || r.sub.UserID != userID || r.sub.GroupID != groupID {
+		return nil, nil
+	}
+	cp := *r.sub
+	return []UserSubscription{cp}, nil
 }
 
 func TestRevokeSubscription_InvalidatesL1CacheSynchronously(t *testing.T) {
@@ -54,7 +86,13 @@ func TestRevokeSubscription_InvalidatesL1CacheSynchronously(t *testing.T) {
 			ExpiresAt: time.Now().Add(time.Hour),
 		},
 	}
-	svc := NewSubscriptionService(groupRepoNoop{}, repo, nil, nil, &config.Config{
+	svc := NewSubscriptionService(&subscriptionGroupRepoStub{group: &Group{
+		ID:               20,
+		Name:             "sub-group",
+		Platform:         PlatformOpenAI,
+		RateMultiplier:   1,
+		SubscriptionType: SubscriptionTypeSubscription,
+	}}, repo, nil, nil, &config.Config{
 		SubscriptionCache: config.SubscriptionCacheConfig{
 			L1Size:       16,
 			L1TTLSeconds: 60,
@@ -107,6 +145,10 @@ func (r *restoreUserSubRepoStub) Restore(_ context.Context, id int64, restoredSt
 	cp.DeletedAt = nil
 	r.sub = &cp
 	return &cp, nil
+}
+
+func (r *restoreUserSubRepoStub) HardDelete(context.Context, int64) error {
+	panic("unexpected HardDelete call")
 }
 
 func TestRestoreSubscription_ExpiredActiveRestoresAsExpired(t *testing.T) {

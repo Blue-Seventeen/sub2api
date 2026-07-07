@@ -121,9 +121,10 @@ describe('BulkEditAccountModal', () => {
     expect(mappingTab).toBeTruthy()
     await mappingTab!.trigger('click')
 
-    expect(wrapper.text()).toContain('3.1-Flash-Image passthrough')
-    expect(wrapper.text()).toContain('3-Pro-Image→3.1')
-    expect(wrapper.text()).not.toContain('GPT-5.3 Codex Spark')
+    const text = wrapper.text()
+    expect(text).toMatch(/3\.1-Flash-Image(?: passthrough|透传)/)
+    expect(text).toContain('3-Pro-Image')
+    expect(text).not.toContain('GPT-5.3 Codex Spark')
   })
 
   it('仅勾选模型限制且白名单留空时，应提交空 model_mapping 以支持所有模型', async () => {

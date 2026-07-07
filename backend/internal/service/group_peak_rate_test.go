@@ -78,6 +78,94 @@ func TestPeakMultiplierAt_Boundaries(t *testing.T) {
 	}
 }
 
+func TestPeakMultiplierAt_MultipleWindows(t *testing.T) {
+	g := &Group{
+		SubscriptionType: "standard",
+		PeakRateEnabled:  true,
+		PeakRateWindows: []PeakRateWindow{
+			{Start: "18:00", End: "22:00", Multiplier: 2.0},
+			{Start: "09:00", End: "12:00", Multiplier: 1.5},
+		},
+	}
+	cases := []struct {
+		name string
+		t    time.Time
+		want float64
+	}{
+		{"before first window", at(8, 59), 1.0},
+		{"first window start inclusive", at(9, 0), 1.5},
+		{"first window inside", at(11, 59), 1.5},
+		{"first window end exclusive", at(12, 0), 1.0},
+		{"second window start inclusive", at(18, 0), 2.0},
+		{"second window inside", at(21, 59), 2.0},
+		{"second window end exclusive", at(22, 0), 1.0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := g.PeakMultiplierAt(c.t); got != c.want {
+				t.Fatalf("at %s: expect %v, got %v", c.t.Format("15:04"), c.want, got)
+			}
+		})
+	}
+}
+
+func TestPeakRateWindowsForRead_CanonicalizesLegacyClockFormat(t *testing.T) {
+	g := &Group{
+		SubscriptionType: "standard",
+		PeakRateEnabled:  true,
+		PeakRateWindows: []PeakRateWindow{
+			{Start: "9:00", End: "12:00", Multiplier: 1.5},
+		},
+	}
+
+	windows := PeakRateWindowsForRead(g.PeakRateWindows, g.PeakStart, g.PeakEnd, g.PeakRateMultiplier)
+	if len(windows) != 1 || windows[0].Start != "09:00" || windows[0].End != "12:00" {
+		t.Fatalf("expected canonical HH:MM window, got %+v", windows)
+	}
+	if got := g.PeakMultiplierAt(at(9, 30)); got != 1.5 {
+		t.Fatalf("legacy clock window should remain billable: got %v, want 1.5", got)
+	}
+}
+
+func TestPeakRateWindowsForRead_LegacyFirstWindowOverridesStaleJSON(t *testing.T) {
+	g := &Group{
+		SubscriptionType: "standard",
+		PeakRateEnabled:  true,
+		PeakRateWindows: []PeakRateWindow{
+			{Start: "09:00", End: "12:00", Multiplier: 1.5},
+			{Start: "18:00", End: "22:00", Multiplier: 2.0},
+		},
+		PeakStart:          "10:00",
+		PeakEnd:            "11:00",
+		PeakRateMultiplier: 1.8,
+	}
+
+	windows := PeakRateWindowsForRead(g.PeakRateWindows, g.PeakStart, g.PeakEnd, g.PeakRateMultiplier)
+	if len(windows) != 2 || windows[0].Start != "10:00" || windows[0].End != "11:00" || windows[0].Multiplier != 1.8 {
+		t.Fatalf("legacy first window should override stale JSON first window, got %+v", windows)
+	}
+	if got := g.PeakMultiplierAt(at(9, 30)); got != 1.0 {
+		t.Fatalf("stale JSON first window should not apply: got %v, want 1.0", got)
+	}
+	if got := g.PeakMultiplierAt(at(10, 30)); got != 1.8 {
+		t.Fatalf("legacy first window should apply: got %v, want 1.8", got)
+	}
+	if got := g.PeakMultiplierAt(at(19, 0)); got != 2.0 {
+		t.Fatalf("non-overlapping second JSON window should remain: got %v, want 2.0", got)
+	}
+}
+
+func TestPeakRateWindowsForRead_LegacyFirstWindowFallsBackWhenMergeOverlaps(t *testing.T) {
+	windows := PeakRateWindowsForRead([]PeakRateWindow{
+		{Start: "09:00", End: "12:00", Multiplier: 1.5},
+		{Start: "18:00", End: "22:00", Multiplier: 2.0},
+	}, "19:00", "20:00", 1.8)
+
+	if len(windows) != 1 || windows[0].Start != "19:00" || windows[0].End != "20:00" || windows[0].Multiplier != 1.8 {
+		t.Fatalf("overlapping rollback edit should fall back to legacy-only window, got %+v", windows)
+	}
+}
+
 func TestPeakMultiplierAt_RespectsTimezoneLocation(t *testing.T) {
 	// 全局时区为 UTC。北京 15:00 = UTC 07:00，不在 [14:00,18:00)。
 	nonUTC := time.Date(2026, 6, 29, 15, 0, 0, 0, mustLoad("Asia/Shanghai"))
@@ -107,8 +195,8 @@ func TestValidatePeakRateConfig(t *testing.T) {
 	}{
 		{"disabled passes through", "subscription", false, "", "", 0, false},
 		{"subscription enabled valid", "subscription", true, "14:00", "18:00", 3.0, false},
-		{"standard enabled rejected", "standard", true, "14:00", "18:00", 3.0, true},
-		{"empty type treated as standard", "", true, "14:00", "18:00", 3.0, true},
+		{"standard enabled accepted", "standard", true, "14:00", "18:00", 3.0, false},
+		{"empty type accepted", "", true, "14:00", "18:00", 3.0, false},
 		{"standard disabled passes", "standard", false, "", "", 0, false},
 		{"enabled empty start", "subscription", true, "", "18:00", 1.0, true},
 		{"enabled empty end", "subscription", true, "14:00", "", 1.0, true},
@@ -132,11 +220,91 @@ func TestValidatePeakRateConfig(t *testing.T) {
 	}
 }
 
-func TestPeakMultiplierAt_StandardTypeDegradesToOne(t *testing.T) {
+func TestValidatePeakRateWindows(t *testing.T) {
+	normalized, err := NormalizePeakRateWindows(true, []PeakRateWindow{
+		{Start: "18:00", End: "22:00", Multiplier: 2.0},
+		{Start: "09:00", End: "12:00", Multiplier: 1.5},
+	})
+	if err != nil {
+		t.Fatalf("valid unsorted windows should pass: %v", err)
+	}
+	if len(normalized) != 2 || normalized[0].Start != "09:00" || normalized[1].Start != "18:00" {
+		t.Fatalf("windows should be sorted by start time, got %+v", normalized)
+	}
+
+	validAdjacent := []PeakRateWindow{
+		{Start: "09:00", End: "10:00", Multiplier: 1.5},
+		{Start: "10:00", End: "11:00", Multiplier: 2.0},
+	}
+	if err := ValidatePeakRateWindows(true, validAdjacent); err != nil {
+		t.Fatalf("adjacent [start,end) windows should be allowed: %v", err)
+	}
+
+	cases := []struct {
+		name    string
+		windows []PeakRateWindow
+		wantErr bool
+	}{
+		{
+			name: "overlap rejected",
+			windows: []PeakRateWindow{
+				{Start: "09:00", End: "10:30", Multiplier: 1.5},
+				{Start: "10:00", End: "11:00", Multiplier: 2.0},
+			},
+			wantErr: true,
+		},
+		{
+			name:    "cross-day rejected",
+			windows: []PeakRateWindow{{Start: "22:00", End: "02:00", Multiplier: 1.5}},
+			wantErr: true,
+		},
+		{
+			name:    "negative multiplier rejected",
+			windows: []PeakRateWindow{{Start: "09:00", End: "10:00", Multiplier: -0.1}},
+			wantErr: true,
+		},
+		{
+			name:    "zero multiplier allowed",
+			windows: []PeakRateWindow{{Start: "09:00", End: "10:00", Multiplier: 0}},
+			wantErr: false,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := ValidatePeakRateWindows(true, c.windows)
+			if c.wantErr && err == nil {
+				t.Fatalf("expect error, got nil")
+			}
+			if !c.wantErr && err != nil {
+				t.Fatalf("expect no error, got %v", err)
+			}
+		})
+	}
+
+	legacy, err := NormalizePeakRateWindows(true, []PeakRateWindow{
+		{Start: "9:00", End: "10:00", Multiplier: 1.5},
+	})
+	if err != nil {
+		t.Fatalf("single-digit legacy hour should pass: %v", err)
+	}
+	if len(legacy) != 1 || legacy[0].Start != "09:00" || legacy[0].End != "10:00" {
+		t.Fatalf("legacy hour should be canonicalized, got %+v", legacy)
+	}
+
+	tooMany := make([]PeakRateWindow, MaxPeakRateWindows+1)
+	for i := range tooMany {
+		tooMany[i] = PeakRateWindow{Start: "09:00", End: "10:00", Multiplier: 1}
+	}
+	if err := ValidatePeakRateWindows(true, tooMany); err == nil {
+		t.Fatalf("more than %d windows should be rejected", MaxPeakRateWindows)
+	}
+}
+
+func TestPeakMultiplierAt_StandardTypeAppliesPeak(t *testing.T) {
 	g := newPeakGroup(true, "14:00", "18:00", 3.0)
 	g.SubscriptionType = "standard"
-	if got := g.PeakMultiplierAt(at(15, 30)); got != 1.0 {
-		t.Fatalf("standard group must degrade to 1.0, got %v", got)
+	if got := g.PeakMultiplierAt(at(15, 30)); got != 3.0 {
+		t.Fatalf("standard group peak multiplier: got %v, want 3.0", got)
 	}
 
 	sub := newPeakGroup(true, "14:00", "18:00", 3.0)
@@ -148,18 +316,18 @@ func TestPeakMultiplierAt_StandardTypeDegradesToOne(t *testing.T) {
 
 // TestPeakMultiplier_GatewayBillingSequence 调用 gateway_service.recordUsageCore 与
 // openai_gateway_service.RecordUsage 共用的 computePeakAwareMultipliers，验证计费叠加顺序：
-// 图片按次倍率基于基础倍率算出且不受高峰影响，高峰因子只乘入 token 倍率。
-// 若有人调换叠加顺序或把高峰并入 imageMultiplier，此测试会失败。
+// 图片按次倍率基于基础倍率算出，并与 token 倍率一样叠加高峰因子。
+// 若有人调换叠加顺序或遗漏高峰倍率，此测试会失败。
 func TestPeakMultiplier_GatewayBillingSequence(t *testing.T) {
 	const baseMultiplier = 0.8
 	apiKey := &APIKey{Group: newPeakGroup(true, "14:00", "18:00", 3.0)}
 	approxEq := func(a, b float64) bool { return math.Abs(a-b) < 1e-9 }
 
-	t.Run("peak hour amplifies token multiplier only", func(t *testing.T) {
+	t.Run("peak hour amplifies token and image multipliers", func(t *testing.T) {
 		now := at(15, 30) // 处于 [14:00, 18:00)
 		tokenMultiplier, imageMultiplier := computePeakAwareMultipliers(apiKey, baseMultiplier, now)
-		if !approxEq(imageMultiplier, baseMultiplier) {
-			t.Fatalf("image multiplier must not be affected by peak: got %v, want %v", imageMultiplier, baseMultiplier)
+		if want := baseMultiplier * 3.0; !approxEq(imageMultiplier, want) {
+			t.Fatalf("image multiplier should include peak factor: got %v, want %v", imageMultiplier, want)
 		}
 		if want := baseMultiplier * 3.0; !approxEq(tokenMultiplier, want) {
 			t.Fatalf("token multiplier should include peak factor: got %v, want %v", tokenMultiplier, want)
@@ -177,15 +345,15 @@ func TestPeakMultiplier_GatewayBillingSequence(t *testing.T) {
 		}
 	})
 
-	t.Run("image independent mode decoupled from peak", func(t *testing.T) {
+	t.Run("image independent mode still applies peak", func(t *testing.T) {
 		indGroup := newPeakGroup(true, "14:00", "18:00", 3.0)
 		indGroup.ImageRateIndependent = true
 		indGroup.ImageRateMultiplier = 0.5
 		indKey := &APIKey{Group: indGroup}
 		now := at(15, 30)
 		tokenMultiplier, imageMultiplier := computePeakAwareMultipliers(indKey, baseMultiplier, now)
-		if !approxEq(imageMultiplier, 0.5) {
-			t.Fatalf("independent image multiplier: got %v, want 0.5", imageMultiplier)
+		if want := 0.5 * 3.0; !approxEq(imageMultiplier, want) {
+			t.Fatalf("independent image multiplier should include peak factor: got %v, want %v", imageMultiplier, want)
 		}
 		if want := baseMultiplier * 3.0; !approxEq(tokenMultiplier, want) {
 			t.Fatalf("token multiplier should include peak factor: got %v, want %v", tokenMultiplier, want)
@@ -204,13 +372,157 @@ func TestPeakMultiplier_GatewayBillingSequence(t *testing.T) {
 	})
 }
 
-// TestPeakMultiplier_SnapshotRoundTrip 防回归：认证缓存快照（APIKeyAuthGroupSnapshot）
-// 必须携带高峰倍率 4 字段，否则扣费路径拿到的 apiKey.Group 会缺字段、PeakMultiplierAt 恒降级为 1.0。
-// 调用真实链路 snapshotFromAPIKey → snapshotToAPIKey，验证 peak 配置经快照往返后仍生效。
+func TestPeakMultiplier_AllBillingModesUsePeakAwareMultiplier(t *testing.T) {
+	const baseMultiplier = 1.2
+	const peakRate = 2.5
+	apiKey := &APIKey{Group: &Group{
+		SubscriptionType: "standard",
+		PeakRateEnabled:  true,
+		PeakRateWindows: []PeakRateWindow{{
+			Start:      "14:00",
+			End:        "18:00",
+			Multiplier: peakRate,
+		}},
+	}}
+	textMultiplier, imageMultiplier := computePeakAwareMultipliers(apiKey, baseMultiplier, at(15, 0))
+	wantMultiplier := baseMultiplier * peakRate
+	if math.Abs(textMultiplier-wantMultiplier) > 1e-9 {
+		t.Fatalf("text multiplier = %v, want %v", textMultiplier, wantMultiplier)
+	}
+	if math.Abs(imageMultiplier-wantMultiplier) > 1e-9 {
+		t.Fatalf("image multiplier = %v, want %v", imageMultiplier, wantMultiplier)
+	}
+
+	svc := &BillingService{}
+	resolver := &ModelPricingResolver{}
+	cases := []struct {
+		name           string
+		input          CostInput
+		wantTotalCost  float64
+		wantActualCost float64
+	}{
+		{
+			name: "token",
+			input: CostInput{
+				Ctx:            context.Background(),
+				Model:          "peak-token-model",
+				Tokens:         UsageTokens{InputTokens: 10, OutputTokens: 5},
+				RateMultiplier: textMultiplier,
+				Resolver:       resolver,
+				Resolved: &ResolvedPricing{
+					Mode: BillingModeToken,
+					BasePricing: &ModelPricing{
+						InputPricePerToken:  0.001,
+						OutputPricePerToken: 0.002,
+					},
+				},
+			},
+			wantTotalCost:  0.02,
+			wantActualCost: 0.02 * wantMultiplier,
+		},
+		{
+			name: "per request",
+			input: CostInput{
+				Ctx:            context.Background(),
+				Model:          "peak-per-request-model",
+				RequestCount:   3,
+				RateMultiplier: textMultiplier,
+				Resolver:       resolver,
+				Resolved: &ResolvedPricing{
+					Mode:                   BillingModePerRequest,
+					DefaultPerRequestPrice: 0.04,
+				},
+			},
+			wantTotalCost:  0.12,
+			wantActualCost: 0.12 * wantMultiplier,
+		},
+		{
+			name: "image",
+			input: CostInput{
+				Ctx:            context.Background(),
+				Model:          "peak-image-model",
+				RequestCount:   2,
+				RateMultiplier: imageMultiplier,
+				Resolver:       resolver,
+				Resolved: &ResolvedPricing{
+					Mode:                   BillingModeImage,
+					DefaultPerRequestPrice: 0.10,
+				},
+			},
+			wantTotalCost:  0.20,
+			wantActualCost: 0.20 * wantMultiplier,
+		},
+		{
+			name: "duration",
+			input: CostInput{
+				Ctx:             context.Background(),
+				Model:           "peak-duration-model",
+				DurationSeconds: 13,
+				RateMultiplier:  textMultiplier,
+				Resolver:        resolver,
+				Resolved: &ResolvedPricing{
+					Mode:                   BillingModeDuration,
+					DefaultPerRequestPrice: 0.02,
+				},
+			},
+			wantTotalCost:  0.26,
+			wantActualCost: 0.26 * wantMultiplier,
+		},
+		{
+			name: "character",
+			input: CostInput{
+				Ctx:            context.Background(),
+				Model:          "peak-character-model",
+				CharacterCount: 2500,
+				RateMultiplier: textMultiplier,
+				Resolver:       resolver,
+				Resolved: &ResolvedPricing{
+					Mode:                   BillingModeCharacter,
+					DefaultPerRequestPrice: 0.03,
+				},
+			},
+			wantTotalCost:  0.075,
+			wantActualCost: 0.075 * wantMultiplier,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cost, err := svc.CalculateCostUnified(c.input)
+			if err != nil {
+				t.Fatalf("CalculateCostUnified error: %v", err)
+			}
+			if math.Abs(cost.TotalCost-c.wantTotalCost) > 1e-9 {
+				t.Fatalf("total cost = %v, want %v", cost.TotalCost, c.wantTotalCost)
+			}
+			if math.Abs(cost.ActualCost-c.wantActualCost) > 1e-9 {
+				t.Fatalf("actual cost = %v, want %v", cost.ActualCost, c.wantActualCost)
+			}
+		})
+	}
+
+	imagePrice2K := 0.20
+	imageCost := svc.CalculateImageCost("peak-image-direct-model", "2K", 2, &ImagePriceConfig{
+		Price2K: &imagePrice2K,
+	}, imageMultiplier)
+	if math.Abs(imageCost.TotalCost-0.40) > 1e-9 {
+		t.Fatalf("direct image total cost = %v, want 0.40", imageCost.TotalCost)
+	}
+	if math.Abs(imageCost.ActualCost-0.40*wantMultiplier) > 1e-9 {
+		t.Fatalf("direct image actual cost = %v, want %v", imageCost.ActualCost, 0.40*wantMultiplier)
+	}
+}
+
+// TestPeakMultiplier_SnapshotRoundTrip prevents auth-cache snapshots from losing peak-rate fields.
 func TestPeakMultiplier_SnapshotRoundTrip(t *testing.T) {
 	apiKey := &APIKey{
-		User:  &User{ID: 1, Status: StatusActive, Role: RoleUser},
-		Group: newPeakGroup(true, "14:00", "18:00", 3.0),
+		User: &User{ID: 1, Status: StatusActive, Role: RoleUser},
+		Group: &Group{
+			PeakRateEnabled: true,
+			PeakRateWindows: []PeakRateWindow{
+				{Start: "14:00", End: "18:00", Multiplier: 3.0},
+				{Start: "20:00", End: "22:00", Multiplier: 2.0},
+			},
+		},
 	}
 	svc := &APIKeyService{}
 
@@ -229,10 +541,16 @@ func TestPeakMultiplier_SnapshotRoundTrip(t *testing.T) {
 		restored.Group.PeakRateMultiplier != 3.0 {
 		t.Fatalf("peak fields lost in snapshot round-trip: %+v", restored.Group)
 	}
+	if len(restored.Group.PeakRateWindows) != 2 || restored.Group.PeakRateWindows[1].Start != "20:00" {
+		t.Fatalf("peak windows lost in snapshot round-trip: %+v", restored.Group.PeakRateWindows)
+	}
 	if got := restored.Group.PeakMultiplierAt(at(15, 30)); got != 3.0 {
 		t.Fatalf("peak hour multiplier after round-trip: got %v, want 3.0", got)
 	}
-	if got := restored.Group.PeakMultiplierAt(at(20, 0)); got != 1.0 {
+	if got := restored.Group.PeakMultiplierAt(at(20, 30)); got != 2.0 {
+		t.Fatalf("second peak window after round-trip: got %v, want 2.0", got)
+	}
+	if got := restored.Group.PeakMultiplierAt(at(22, 0)); got != 1.0 {
 		t.Fatalf("off-peak multiplier after round-trip: got %v, want 1.0", got)
 	}
 }

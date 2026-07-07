@@ -6470,9 +6470,11 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}
 	unifiedMultiplier := effectiveUnifiedMultiplier(user)
 	multiplier := baseMultiplier * unifiedMultiplier
-	// token 倍率叠加高峰因子（token 计费含图片 token，图片按次倍率不受影响）。高峰因子按请求时刻现算，
+	// Peak is applied after cached group/user rates and covers token, image, request, duration, and character billing.
 	// 不并入上面的 Resolve，以免污染 user:group 倍率缓存。
-	multiplier, imageMultiplier := computePeakAwareMultipliers(apiKey, multiplier, timezone.Now())
+	usageNow := timezone.Now()
+	multiplier, imageMultiplier := computePeakAwareMultipliers(apiKey, multiplier, usageNow)
+	realMultiplier, realImageMultiplier := computePeakAwareMultipliers(apiKey, baseMultiplier, usageNow)
 	usageRateMultiplier := multiplier
 
 	var cost *CostBreakdown
@@ -6515,10 +6517,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		).Warn("openai_usage.pricing_missing_record_zero_cost", zap.Error(err))
 		cost = &CostBreakdown{BillingMode: string(BillingModeToken)}
 	}
-	if cost != nil {
-		cost.RealActualCost = realCostFromBase(cost.TotalCost, baseMultiplier, user)
-	}
-	if result.ImageCount > 0 && (cost == nil || cost.BillingMode != string(BillingModeToken)) {
+	useImageRate := usageUsesImageMultiplier(result.ImageCount, costBillingMode(cost), result.RequestCount, result.TaskCount, result.BillableDurationSeconds, result.BillableCharacterCount)
+	applyRealActualCostFromRates(cost, useImageRate, multiplier, imageMultiplier, realMultiplier, realImageMultiplier, user)
+	if useImageRate {
 		usageRateMultiplier = imageMultiplier
 	}
 
@@ -6711,12 +6712,6 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 	serviceTier string,
 ) (*CostBreakdown, error) {
 	billingModel := firstUsageBillingModel(billingModels)
-	if result != nil && result.ImageCount > 0 {
-		// 渠道定价为 token 且上游返回 token usage 时走 token 路径，否则走图片计费。
-		if resolved := s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey); resolved == nil || resolved.Mode != BillingModeToken || !usageTokensHaveTokenUsage(tokens) {
-			return s.calculateOpenAIImageCost(ctx, billingModel, apiKey, result, imageMultiplier), nil
-		}
-	}
 	if len(billingModels) == 0 || billingModel == "" {
 		return nil, errors.New("openai usage billing model is empty")
 	}
@@ -6726,7 +6721,7 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 		if candidate == "" {
 			continue
 		}
-		cost, err := s.calculateOpenAIRecordUsageTokenCost(ctx, result, apiKey, candidate, multiplier, tokens, serviceTier)
+		cost, err := s.calculateOpenAIRecordUsageTokenCost(ctx, result, apiKey, candidate, multiplier, imageMultiplier, tokens, serviceTier)
 		if err == nil {
 			return cost, nil
 		}
@@ -6755,6 +6750,7 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageTokenCost(
 	apiKey *APIKey,
 	billingModel string,
 	multiplier float64,
+	imageMultiplier float64,
 	tokens UsageTokens,
 	serviceTier string,
 ) (*CostBreakdown, error) {
@@ -6848,7 +6844,7 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageTokenCost(
 				Resolved:       resolved,
 			})
 		}
-		return s.calculateOpenAIImageCost(ctx, billingModel, apiKey, result, multiplier), nil
+		return s.calculateOpenAIImageCost(ctx, billingModel, apiKey, result, imageMultiplier), nil
 	}
 	if s.resolver != nil && apiKey.Group != nil {
 		gid := apiKey.Group.ID

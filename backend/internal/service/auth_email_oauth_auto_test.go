@@ -65,6 +65,7 @@ func TestEmailOAuthAuto_SnapshotsPlatformQuotaDefaults(t *testing.T) {
 		"newoauth",
 		"github",
 		"",
+		"",
 	)
 	require.NoError(t, err)
 	require.NotNil(t, user)

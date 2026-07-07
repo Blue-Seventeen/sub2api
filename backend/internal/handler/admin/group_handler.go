@@ -94,19 +94,20 @@ type CreateGroupRequest struct {
 	CustomLimitHours int                `json:"custom_limit_hours"`
 	CustomLimitUSD   optionalLimitField `json:"custom_limit_usd"`
 	// 图片生成计费配置（antigravity 和 gemini 平台使用，负数表示清除配置）
-	AllowImageGeneration            bool     `json:"allow_image_generation"`
-	ImageRateIndependent            bool     `json:"image_rate_independent"`
-	ImageRateMultiplier             *float64 `json:"image_rate_multiplier"`
-	PeakRateEnabled                 bool     `json:"peak_rate_enabled"`
-	PeakStart                       string   `json:"peak_start"`
-	PeakEnd                         string   `json:"peak_end"`
-	PeakRateMultiplier              *float64 `json:"peak_rate_multiplier"`
-	ImagePrice1K                    *float64 `json:"image_price_1k"`
-	ImagePrice2K                    *float64 `json:"image_price_2k"`
-	ImagePrice4K                    *float64 `json:"image_price_4k"`
-	ClaudeCodeOnly                  bool     `json:"claude_code_only"`
-	FallbackGroupID                 *int64   `json:"fallback_group_id"`
-	FallbackGroupIDOnInvalidRequest *int64   `json:"fallback_group_id_on_invalid_request"`
+	AllowImageGeneration            bool                     `json:"allow_image_generation"`
+	ImageRateIndependent            bool                     `json:"image_rate_independent"`
+	ImageRateMultiplier             *float64                 `json:"image_rate_multiplier"`
+	PeakRateEnabled                 *bool                    `json:"peak_rate_enabled"`
+	PeakStart                       string                   `json:"peak_start"`
+	PeakEnd                         string                   `json:"peak_end"`
+	PeakRateMultiplier              *float64                 `json:"peak_rate_multiplier"`
+	PeakRateWindows                 []service.PeakRateWindow `json:"peak_rate_windows"`
+	ImagePrice1K                    *float64                 `json:"image_price_1k"`
+	ImagePrice2K                    *float64                 `json:"image_price_2k"`
+	ImagePrice4K                    *float64                 `json:"image_price_4k"`
+	ClaudeCodeOnly                  bool                     `json:"claude_code_only"`
+	FallbackGroupID                 *int64                   `json:"fallback_group_id"`
+	FallbackGroupIDOnInvalidRequest *int64                   `json:"fallback_group_id_on_invalid_request"`
 	// 模型路由配置（仅 anthropic 平台使用）
 	ModelRouting        map[string][]int64 `json:"model_routing"`
 	ModelRoutingEnabled bool               `json:"model_routing_enabled"`
@@ -142,19 +143,20 @@ type UpdateGroupRequest struct {
 	CustomLimitHours *int               `json:"custom_limit_hours"`
 	CustomLimitUSD   optionalLimitField `json:"custom_limit_usd"`
 	// 图片生成计费配置（antigravity 和 gemini 平台使用，负数表示清除配置）
-	AllowImageGeneration            *bool    `json:"allow_image_generation"`
-	ImageRateIndependent            *bool    `json:"image_rate_independent"`
-	ImageRateMultiplier             *float64 `json:"image_rate_multiplier"`
-	PeakRateEnabled                 *bool    `json:"peak_rate_enabled"`
-	PeakStart                       *string  `json:"peak_start"`
-	PeakEnd                         *string  `json:"peak_end"`
-	PeakRateMultiplier              *float64 `json:"peak_rate_multiplier"`
-	ImagePrice1K                    *float64 `json:"image_price_1k"`
-	ImagePrice2K                    *float64 `json:"image_price_2k"`
-	ImagePrice4K                    *float64 `json:"image_price_4k"`
-	ClaudeCodeOnly                  *bool    `json:"claude_code_only"`
-	FallbackGroupID                 *int64   `json:"fallback_group_id"`
-	FallbackGroupIDOnInvalidRequest *int64   `json:"fallback_group_id_on_invalid_request"`
+	AllowImageGeneration            *bool                     `json:"allow_image_generation"`
+	ImageRateIndependent            *bool                     `json:"image_rate_independent"`
+	ImageRateMultiplier             *float64                  `json:"image_rate_multiplier"`
+	PeakRateEnabled                 *bool                     `json:"peak_rate_enabled"`
+	PeakStart                       *string                   `json:"peak_start"`
+	PeakEnd                         *string                   `json:"peak_end"`
+	PeakRateMultiplier              *float64                  `json:"peak_rate_multiplier"`
+	PeakRateWindows                 *[]service.PeakRateWindow `json:"peak_rate_windows"`
+	ImagePrice1K                    *float64                  `json:"image_price_1k"`
+	ImagePrice2K                    *float64                  `json:"image_price_2k"`
+	ImagePrice4K                    *float64                  `json:"image_price_4k"`
+	ClaudeCodeOnly                  *bool                     `json:"claude_code_only"`
+	FallbackGroupID                 *int64                    `json:"fallback_group_id"`
+	FallbackGroupIDOnInvalidRequest *int64                    `json:"fallback_group_id_on_invalid_request"`
 	// 模型路由配置（仅 anthropic 平台使用）
 	ModelRouting        map[string][]int64 `json:"model_routing"`
 	ModelRoutingEnabled *bool              `json:"model_routing_enabled"`
@@ -299,9 +301,21 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		}
 		rateMultiplier = *req.RateMultiplier
 	}
-	if err := service.ValidatePeakRateConfig(req.SubscriptionType, req.PeakRateEnabled, req.PeakStart, req.PeakEnd, float64ValueOrDefault(req.PeakRateMultiplier, 1.0)); err != nil {
-		response.BadRequest(c, err.Error())
-		return
+	peakRateEnabled := boolValueOrDefault(req.PeakRateEnabled, false)
+	peakRateEnabledForValidation := peakRateEnabled
+	if req.PeakRateEnabled == nil && len(req.PeakRateWindows) > 0 {
+		peakRateEnabledForValidation = true
+	}
+	if len(req.PeakRateWindows) > 0 {
+		if err := service.ValidatePeakRateWindows(peakRateEnabledForValidation, req.PeakRateWindows); err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
+	} else {
+		if err := service.ValidatePeakRateConfig(req.SubscriptionType, peakRateEnabledForValidation, req.PeakStart, req.PeakEnd, float64ValueOrDefault(req.PeakRateMultiplier, 1.0)); err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
 	}
 
 	group, err := h.adminService.CreateGroup(c.Request.Context(), &service.CreateGroupInput{
@@ -319,10 +333,12 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		AllowImageGeneration:            req.AllowImageGeneration,
 		ImageRateIndependent:            req.ImageRateIndependent,
 		ImageRateMultiplier:             req.ImageRateMultiplier,
-		PeakRateEnabled:                 req.PeakRateEnabled,
+		PeakRateEnabled:                 peakRateEnabled,
+		PeakRateEnabledSet:              req.PeakRateEnabled != nil,
 		PeakStart:                       req.PeakStart,
 		PeakEnd:                         req.PeakEnd,
 		PeakRateMultiplier:              req.PeakRateMultiplier,
+		PeakRateWindows:                 req.PeakRateWindows,
 		ImagePrice1K:                    req.ImagePrice1K,
 		ImagePrice2K:                    req.ImagePrice2K,
 		ImagePrice4K:                    req.ImagePrice4K,
@@ -391,6 +407,7 @@ func (h *GroupHandler) Update(c *gin.Context) {
 		PeakStart:                       req.PeakStart,
 		PeakEnd:                         req.PeakEnd,
 		PeakRateMultiplier:              req.PeakRateMultiplier,
+		PeakRateWindows:                 req.PeakRateWindows,
 		ImagePrice1K:                    req.ImagePrice1K,
 		ImagePrice2K:                    req.ImagePrice2K,
 		ImagePrice4K:                    req.ImagePrice4K,

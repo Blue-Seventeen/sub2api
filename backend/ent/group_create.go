@@ -161,6 +161,12 @@ func (_c *GroupCreate) SetNillablePeakRateMultiplier(v *float64) *GroupCreate {
 	return _c
 }
 
+// SetPeakRateWindows sets the "peak_rate_windows" field.
+func (_c *GroupCreate) SetPeakRateWindows(v []domain.PeakRateWindow) *GroupCreate {
+	_c.mutation.SetPeakRateWindows(v)
+	return _c
+}
+
 // SetIsExclusive sets the "is_exclusive" field.
 func (_c *GroupCreate) SetIsExclusive(v bool) *GroupCreate {
 	_c.mutation.SetIsExclusive(v)
@@ -754,6 +760,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultPeakRateMultiplier
 		_c.mutation.SetPeakRateMultiplier(v)
 	}
+	if _, ok := _c.mutation.PeakRateWindows(); !ok {
+		v := group.DefaultPeakRateWindows
+		_c.mutation.SetPeakRateWindows(v)
+	}
 	if _, ok := _c.mutation.IsExclusive(); !ok {
 		v := group.DefaultIsExclusive
 		_c.mutation.SetIsExclusive(v)
@@ -885,6 +895,9 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.PeakRateMultiplier(); !ok {
 		return &ValidationError{Name: "peak_rate_multiplier", err: errors.New(`ent: missing required field "Group.peak_rate_multiplier"`)}
+	}
+	if _, ok := _c.mutation.PeakRateWindows(); !ok {
+		return &ValidationError{Name: "peak_rate_windows", err: errors.New(`ent: missing required field "Group.peak_rate_windows"`)}
 	}
 	if _, ok := _c.mutation.IsExclusive(); !ok {
 		return &ValidationError{Name: "is_exclusive", err: errors.New(`ent: missing required field "Group.is_exclusive"`)}
@@ -1038,6 +1051,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.PeakRateMultiplier(); ok {
 		_spec.SetField(group.FieldPeakRateMultiplier, field.TypeFloat64, value)
 		_node.PeakRateMultiplier = value
+	}
+	if value, ok := _c.mutation.PeakRateWindows(); ok {
+		_spec.SetField(group.FieldPeakRateWindows, field.TypeJSON, value)
+		_node.PeakRateWindows = value
 	}
 	if value, ok := _c.mutation.IsExclusive(); ok {
 		_spec.SetField(group.FieldIsExclusive, field.TypeBool, value)
@@ -1452,6 +1469,18 @@ func (u *GroupUpsert) UpdatePeakRateMultiplier() *GroupUpsert {
 // AddPeakRateMultiplier adds v to the "peak_rate_multiplier" field.
 func (u *GroupUpsert) AddPeakRateMultiplier(v float64) *GroupUpsert {
 	u.Add(group.FieldPeakRateMultiplier, v)
+	return u
+}
+
+// SetPeakRateWindows sets the "peak_rate_windows" field.
+func (u *GroupUpsert) SetPeakRateWindows(v []domain.PeakRateWindow) *GroupUpsert {
+	u.Set(group.FieldPeakRateWindows, v)
+	return u
+}
+
+// UpdatePeakRateWindows sets the "peak_rate_windows" field to the value that was provided on create.
+func (u *GroupUpsert) UpdatePeakRateWindows() *GroupUpsert {
+	u.SetExcluded(group.FieldPeakRateWindows)
 	return u
 }
 
@@ -2179,6 +2208,20 @@ func (u *GroupUpsertOne) AddPeakRateMultiplier(v float64) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdatePeakRateMultiplier() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdatePeakRateMultiplier()
+	})
+}
+
+// SetPeakRateWindows sets the "peak_rate_windows" field.
+func (u *GroupUpsertOne) SetPeakRateWindows(v []domain.PeakRateWindow) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetPeakRateWindows(v)
+	})
+}
+
+// UpdatePeakRateWindows sets the "peak_rate_windows" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdatePeakRateWindows() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdatePeakRateWindows()
 	})
 }
 
@@ -3160,6 +3203,20 @@ func (u *GroupUpsertBulk) AddPeakRateMultiplier(v float64) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdatePeakRateMultiplier() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdatePeakRateMultiplier()
+	})
+}
+
+// SetPeakRateWindows sets the "peak_rate_windows" field.
+func (u *GroupUpsertBulk) SetPeakRateWindows(v []domain.PeakRateWindow) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetPeakRateWindows(v)
+	})
+}
+
+// UpdatePeakRateWindows sets the "peak_rate_windows" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdatePeakRateWindows() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdatePeakRateWindows()
 	})
 }
 

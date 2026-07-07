@@ -379,6 +379,7 @@ func TestAPIContracts(t *testing.T) {
 						"peak_start": "",
 						"peak_end": "",
 						"peak_rate_multiplier": 1,
+						"peak_rate_windows": [],
 						"is_exclusive": false,
 						"status": "active",
 						"subscription_type": "standard",
@@ -450,6 +451,11 @@ func TestAPIContracts(t *testing.T) {
 							"description": "",
 							"platform": "",
 							"rate_multiplier": 0,
+							"peak_rate_enabled": false,
+							"peak_start": "",
+							"peak_end": "",
+							"peak_rate_multiplier": 0,
+							"peak_rate_windows": [],
 							"is_exclusive": false,
 							"status": "",
 							"subscription_type": "subscription",
@@ -580,6 +586,7 @@ func TestAPIContracts(t *testing.T) {
 					"total_tokens": 53,
 					"total_cost": 0.75,
 					"total_actual_cost": 0.75,
+					"real_total_actual_cost": 0,
 					"average_duration_ms": 200
 				}
 			}`,
@@ -965,7 +972,6 @@ func TestAPIContracts(t *testing.T) {
 					"openai_advanced_scheduler_effective_weight_session_sticky": "3",
 					"openai_codex_user_agent": "codex-tui/0.125.0 (Ubuntu 22.4.0; x86_64) xterm-256color (codex-tui; 0.125.0)",
 					"antigravity_user_agent_version": "1.23.2",
-					"openai_allow_claude_code_codex_plugin": false,
 					"openai_fast_policy_settings": {
 						"rules": []
 					},
@@ -1007,6 +1013,10 @@ func TestAPIContracts(t *testing.T) {
 					"cyber_session_block_enabled": false,
 					"cyber_session_block_ttl_seconds": 3600,
 					"affiliate_enabled": false,
+					"affiliate_rebate_rate": 0,
+					"affiliate_rebate_duration_days": 0,
+					"affiliate_rebate_per_invitee_cap": 0,
+					"affiliate_rebate_freeze_hours": 0,
 					"wechat_connect_enabled": false,
 					"wechat_connect_app_id": "",
 					"wechat_connect_app_secret_configured": false,
@@ -1250,7 +1260,6 @@ func TestAPIContracts(t *testing.T) {
 					"openai_advanced_scheduler_effective_weight_session_sticky": "3",
 					"openai_codex_user_agent": "codex-tui/0.125.0 (Ubuntu 22.4.0; x86_64) xterm-256color (codex-tui; 0.125.0)",
 					"antigravity_user_agent_version": "1.23.2",
-					"openai_allow_claude_code_codex_plugin": false,
 					"openai_fast_policy_settings": {
 						"rules": []
 					},
@@ -1290,6 +1299,10 @@ func TestAPIContracts(t *testing.T) {
 					"cyber_session_block_enabled": false,
 					"cyber_session_block_ttl_seconds": 3600,
 					"affiliate_enabled": false,
+					"affiliate_rebate_rate": 0,
+					"affiliate_rebate_duration_days": 0,
+					"affiliate_rebate_per_invitee_cap": 0,
+					"affiliate_rebate_freeze_hours": 0,
 					"wechat_connect_enabled": true,
 					"wechat_connect_app_id": "wx-open-config",
 					"wechat_connect_app_secret_configured": true,

@@ -33,6 +33,13 @@
 - Nginx 建议只暴露 80 / 443，Sub2API 容器端口应仅本机可访问。
 - 多实例共用数据库时，定时备份不再依赖 Redis 锁；只有本机 `DATA_DIR/backup_schedule.local.json` 中启用的节点会执行，默认不启用。
 
+## 版本升级注意事项
+
+- 常规小版本升级只替换 `sub2api` 应用容器，不重建 PostgreSQL/Redis 容器，也不要动数据卷。
+- 如果新版本包含应用内 migration，必须让新应用容器启动并完成迁移后再切流；多实例部署时先保留一个新应用节点执行迁移，健康检查通过后再滚动升级剩余节点。
+- v0.1.145 自定义多时段高峰倍率包含 `159_add_group_peak_rate_windows.sql`，该 migration 只给 `groups` 增加 additive JSONB 字段并从旧单段高峰字段回填第一段。旧容器回退会忽略 `peak_rate_windows`，多窗口只按 legacy 第一段生效。
+- 多时段高峰倍率同时覆盖标准余额分组和订阅分组，token、per_request、image、duration、character 计费都会叠加命中的高峰倍率。回退期间如果编辑高峰配置，再升级时新容器读路径会优先使用 legacy 第一段以保持兼容；只有在新版本再次保存分组后，`peak_rate_windows` 才会被持久同步。
+
 ## 迁移注意事项
 
 如果从旧机器迁移：

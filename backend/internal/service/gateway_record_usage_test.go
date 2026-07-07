@@ -288,6 +288,170 @@ func TestGatewayServiceRecordUsage_PeakRateAffectsTokenModeImageOutputTokens(t *
 	require.InDelta(t, expectedActual, userRepo.lastAmount, 1e-12)
 }
 
+func TestGatewayServiceRecordUsage_PeakRateAffectsQuotaCosts(t *testing.T) {
+	groupID := int64(912)
+	usage := ClaudeUsage{InputTokens: 1000, OutputTokens: 600}
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
+	quotaSvc := &openAIRecordUsageAPIKeyQuotaStub{}
+	quotaRepo := &openAIRecordUsagePlatformQuotaRepoStub{ch: make(chan string, 1)}
+	svc := newGatewayRecordUsageServiceWithBillingRepoForTest(
+		usageRepo,
+		billingRepo,
+		&openAIRecordUsageUserRepoStub{},
+		&openAIRecordUsageSubRepoStub{},
+	)
+	svc.userPlatformQuotaRepo = quotaRepo
+
+	err := svc.RecordUsage(context.Background(), &RecordUsageInput{
+		Result: &ForwardResult{
+			RequestID: "gateway_peak_quota_costs",
+			Usage:     usage,
+			Model:     "claude-sonnet-4",
+			Duration:  time.Second,
+		},
+		APIKey: &APIKey{
+			ID:          812,
+			Quota:       100,
+			RateLimit5h: 100,
+			GroupID:     i64p(groupID),
+			Group: &Group{
+				ID:                 groupID,
+				Platform:           PlatformAnthropic,
+				RateMultiplier:     1,
+				SubscriptionType:   SubscriptionTypeStandard,
+				PeakRateEnabled:    true,
+				PeakStart:          "00:00",
+				PeakEnd:            "23:59",
+				PeakRateMultiplier: 3.0,
+			},
+		},
+		User:          &User{ID: 612},
+		Account:       &Account{ID: 712, Type: AccountTypeAPIKey},
+		APIKeyService: quotaSvc,
+		QuotaPlatform: PlatformAnthropic,
+	})
+
+	require.NoError(t, err)
+	select {
+	case got := <-quotaRepo.ch:
+		require.Equal(t, PlatformAnthropic, got)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for user platform quota increment")
+	}
+
+	expected, err := svc.billingService.CalculateCostWithServiceTier("claude-sonnet-4", UsageTokens{
+		InputTokens:  usage.InputTokens,
+		OutputTokens: usage.OutputTokens,
+	}, 3.0, "")
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.NotNil(t, billingRepo.lastCmd)
+	require.InDelta(t, expected.ActualCost, usageRepo.lastLog.ActualCost, 1e-12)
+	require.InDelta(t, expected.ActualCost, billingRepo.lastCmd.APIKeyQuotaCost, 1e-12)
+	require.InDelta(t, expected.ActualCost, billingRepo.lastCmd.APIKeyRateLimitCost, 1e-12)
+	require.InDelta(t, expected.ActualCost, quotaRepo.lastCost, 1e-12)
+}
+
+func TestGatewayServiceRecordUsage_ImageIndependentPeakRealCost(t *testing.T) {
+	imagePrice2K := 0.20
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	userRepo := &openAIRecordUsageUserRepoStub{}
+	svc := newGatewayRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{})
+
+	err := svc.RecordUsage(context.Background(), &RecordUsageInput{
+		Result: &ForwardResult{
+			RequestID:  "gateway_peak_image_independent",
+			Model:      "image-model",
+			ImageCount: 2,
+			ImageSize:  "2K",
+			Duration:   time.Second,
+		},
+		APIKey: &APIKey{
+			ID:      803,
+			GroupID: i64p(903),
+			Group: &Group{
+				ID:                   903,
+				RateMultiplier:       1.25,
+				ImagePrice2K:         &imagePrice2K,
+				ImageRateIndependent: true,
+				ImageRateMultiplier:  0.5,
+				SubscriptionType:     SubscriptionTypeStandard,
+				PeakRateEnabled:      true,
+				PeakStart:            "00:00",
+				PeakEnd:              "23:59",
+				PeakRateMultiplier:   3.0,
+			},
+		},
+		User: &User{
+			ID:                    603,
+			UnifiedRateEnabled:    true,
+			UnifiedRateMultiplier: 2.0,
+		},
+		Account: &Account{ID: 703},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.NotNil(t, usageRepo.lastLog.BillingMode)
+	require.Equal(t, string(BillingModeImage), *usageRepo.lastLog.BillingMode)
+	require.InDelta(t, 1.5, usageRepo.lastLog.RateMultiplier, 1e-12)
+	require.InDelta(t, 0.40, usageRepo.lastLog.TotalCost, 1e-12)
+	require.InDelta(t, 0.60, usageRepo.lastLog.ActualCost, 1e-12)
+	require.InDelta(t, 0.60, usageRepo.lastLog.RealActualCost, 1e-12)
+	require.InDelta(t, usageRepo.lastLog.RealActualCost, userRepo.lastAmount, 1e-12)
+}
+
+func TestGatewayServiceRecordUsageWithLongContext_RealCostKeepsExtraMultiplier(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	userRepo := &openAIRecordUsageUserRepoStub{}
+	svc := newGatewayRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{})
+
+	usage := ClaudeUsage{InputTokens: 10, OutputTokens: 2}
+	err := svc.RecordUsageWithLongContext(context.Background(), &RecordUsageLongContextInput{
+		Result: &ForwardResult{
+			RequestID: "gateway_long_context_real_cost",
+			Usage:     usage,
+			Model:     "claude-sonnet-4",
+			Duration:  time.Second,
+		},
+		APIKey: &APIKey{
+			ID:      804,
+			GroupID: i64p(904),
+			Group: &Group{
+				ID:             904,
+				RateMultiplier: 1.0,
+			},
+		},
+		User: &User{
+			ID:                    604,
+			UnifiedRateEnabled:    true,
+			UnifiedRateMultiplier: 2.0,
+		},
+		Account:               &Account{ID: 704},
+		LongContextThreshold:  5,
+		LongContextMultiplier: 2,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	expectedDisplay, err := svc.billingService.CalculateCostWithLongContext("claude-sonnet-4", UsageTokens{
+		InputTokens:  usage.InputTokens,
+		OutputTokens: usage.OutputTokens,
+	}, 2.0, 5, 2)
+	require.NoError(t, err)
+	expectedReal, err := svc.billingService.CalculateCostWithLongContext("claude-sonnet-4", UsageTokens{
+		InputTokens:  usage.InputTokens,
+		OutputTokens: usage.OutputTokens,
+	}, 1.0, 5, 2)
+	require.NoError(t, err)
+
+	require.InDelta(t, expectedDisplay.ActualCost, usageRepo.lastLog.ActualCost, 1e-12)
+	require.InDelta(t, expectedReal.ActualCost, usageRepo.lastLog.RealActualCost, 1e-12)
+	require.InDelta(t, usageRepo.lastLog.RealActualCost, userRepo.lastAmount, 1e-12)
+	require.Greater(t, usageRepo.lastLog.RealActualCost, usageRepo.lastLog.TotalCost)
+}
+
 func TestGatewayServiceRecordUsage_UsageLogWriteErrorDoesNotSkipBilling(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: false, err: MarkUsageLogCreateNotPersisted(context.Canceled)}
 	userRepo := &openAIRecordUsageUserRepoStub{}

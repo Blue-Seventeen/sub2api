@@ -49,3 +49,56 @@ func realCostFromBase(baseCost float64, baseMultiplier float64, user *User) floa
 	}
 	return baseCost * baseMultiplier
 }
+
+func realCostFromActualRate(actualCost, finalRateMultiplier, realRateMultiplier float64, user *User) float64 {
+	if actualCost <= 0 {
+		return 0
+	}
+	if effectiveUnifiedMultiplier(user) == 0 {
+		return 0
+	}
+	if finalRateMultiplier <= 0 {
+		return 0
+	}
+	if realRateMultiplier < 0 {
+		realRateMultiplier = 0
+	}
+	return actualCost * realRateMultiplier / finalRateMultiplier
+}
+
+func usageRateMultiplierForRealCost(useImageRate bool, textMultiplier, imageMultiplier float64) float64 {
+	if useImageRate {
+		return imageMultiplier
+	}
+	return textMultiplier
+}
+
+func applyRealActualCostFromRates(cost *CostBreakdown, useImageRate bool, finalTextMultiplier, finalImageMultiplier, realTextMultiplier, realImageMultiplier float64, user *User) {
+	if cost == nil {
+		return
+	}
+	finalRate := usageRateMultiplierForRealCost(useImageRate, finalTextMultiplier, finalImageMultiplier)
+	realRate := usageRateMultiplierForRealCost(useImageRate, realTextMultiplier, realImageMultiplier)
+	cost.RealActualCost = realCostFromActualRate(cost.ActualCost, finalRate, realRate, user)
+}
+
+func costBillingMode(cost *CostBreakdown) string {
+	if cost == nil {
+		return ""
+	}
+	return cost.BillingMode
+}
+
+func usageUsesImageMultiplier(imageCount int, billingMode string, requestCount, taskCount, durationSeconds, characterCount int) bool {
+	if imageCount <= 0 {
+		return false
+	}
+	switch billingMode {
+	case string(BillingModeImage):
+		return true
+	case string(BillingModePerRequest):
+		return requestCount <= 0 && taskCount <= 0 && durationSeconds <= 0 && characterCount <= 0
+	default:
+		return false
+	}
+}

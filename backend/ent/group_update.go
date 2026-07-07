@@ -180,6 +180,18 @@ func (_u *GroupUpdate) AddPeakRateMultiplier(v float64) *GroupUpdate {
 	return _u
 }
 
+// SetPeakRateWindows sets the "peak_rate_windows" field.
+func (_u *GroupUpdate) SetPeakRateWindows(v []domain.PeakRateWindow) *GroupUpdate {
+	_u.mutation.SetPeakRateWindows(v)
+	return _u
+}
+
+// AppendPeakRateWindows appends value to the "peak_rate_windows" field.
+func (_u *GroupUpdate) AppendPeakRateWindows(v []domain.PeakRateWindow) *GroupUpdate {
+	_u.mutation.AppendPeakRateWindows(v)
+	return _u
+}
+
 // SetIsExclusive sets the "is_exclusive" field.
 func (_u *GroupUpdate) SetIsExclusive(v bool) *GroupUpdate {
 	_u.mutation.SetIsExclusive(v)
@@ -1130,6 +1142,14 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.AddedPeakRateMultiplier(); ok {
 		_spec.AddField(group.FieldPeakRateMultiplier, field.TypeFloat64, value)
 	}
+	if value, ok := _u.mutation.PeakRateWindows(); ok {
+		_spec.SetField(group.FieldPeakRateWindows, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedPeakRateWindows(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, group.FieldPeakRateWindows, value)
+		})
+	}
 	if value, ok := _u.mutation.IsExclusive(); ok {
 		_spec.SetField(group.FieldIsExclusive, field.TypeBool, value)
 	}
@@ -1758,6 +1778,18 @@ func (_u *GroupUpdateOne) SetNillablePeakRateMultiplier(v *float64) *GroupUpdate
 // AddPeakRateMultiplier adds value to the "peak_rate_multiplier" field.
 func (_u *GroupUpdateOne) AddPeakRateMultiplier(v float64) *GroupUpdateOne {
 	_u.mutation.AddPeakRateMultiplier(v)
+	return _u
+}
+
+// SetPeakRateWindows sets the "peak_rate_windows" field.
+func (_u *GroupUpdateOne) SetPeakRateWindows(v []domain.PeakRateWindow) *GroupUpdateOne {
+	_u.mutation.SetPeakRateWindows(v)
+	return _u
+}
+
+// AppendPeakRateWindows appends value to the "peak_rate_windows" field.
+func (_u *GroupUpdateOne) AppendPeakRateWindows(v []domain.PeakRateWindow) *GroupUpdateOne {
+	_u.mutation.AppendPeakRateWindows(v)
 	return _u
 }
 
@@ -2740,6 +2772,14 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.AddedPeakRateMultiplier(); ok {
 		_spec.AddField(group.FieldPeakRateMultiplier, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.PeakRateWindows(); ok {
+		_spec.SetField(group.FieldPeakRateWindows, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedPeakRateWindows(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, group.FieldPeakRateWindows, value)
+		})
 	}
 	if value, ok := _u.mutation.IsExclusive(); ok {
 		_spec.SetField(group.FieldIsExclusive, field.TypeBool, value)

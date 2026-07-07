@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/stretchr/testify/require"
 )
@@ -614,7 +615,7 @@ func TestAdminService_UpdateGroup_InvalidatesActiveSubscriptionCaches(t *testing
 	}, cache.invalidations)
 }
 
-func TestAdminService_UpdateGroup_ClearsPeakRateWhenChangingToStandard(t *testing.T) {
+func TestAdminService_UpdateGroup_PreservesPeakRateWhenChangingToStandard(t *testing.T) {
 	existingGroup := &Group{
 		ID:                 1,
 		Name:               "existing-group",
@@ -636,9 +637,182 @@ func TestAdminService_UpdateGroup_ClearsPeakRateWhenChangingToStandard(t *testin
 	require.NotNil(t, group)
 	require.NotNil(t, repo.updated)
 	require.Equal(t, SubscriptionTypeStandard, repo.updated.SubscriptionType)
+	require.True(t, repo.updated.PeakRateEnabled)
+	require.Equal(t, "14:00", repo.updated.PeakStart)
+	require.Equal(t, "18:00", repo.updated.PeakEnd)
+	require.Equal(t, 3.0, repo.updated.PeakRateMultiplier)
+}
+
+func TestAdminService_CreateGroup_PeakWindowsAutoEnable(t *testing.T) {
+	repo := &groupRepoStubForAdmin{}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	group, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
+		Name:           "peak-windows",
+		Platform:       PlatformOpenAI,
+		RateMultiplier: 1.0,
+		PeakRateWindows: []PeakRateWindow{
+			{Start: "18:00", End: "22:00", Multiplier: 2.0},
+			{Start: "09:00", End: "12:00", Multiplier: 1.5},
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, group)
+	require.NotNil(t, repo.created)
+	require.True(t, repo.created.PeakRateEnabled)
+	require.Equal(t, []PeakRateWindow{
+		{Start: "09:00", End: "12:00", Multiplier: 1.5},
+		{Start: "18:00", End: "22:00", Multiplier: 2.0},
+	}, repo.created.PeakRateWindows)
+	require.Equal(t, "09:00", repo.created.PeakStart)
+	require.Equal(t, "12:00", repo.created.PeakEnd)
+	require.Equal(t, 1.5, repo.created.PeakRateMultiplier)
+}
+
+func TestAdminService_CreateGroup_ExplicitDisabledPeakWindowsStayDisabled(t *testing.T) {
+	repo := &groupRepoStubForAdmin{}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	group, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
+		Name:               "peak-windows-draft",
+		Platform:           PlatformOpenAI,
+		RateMultiplier:     1.0,
+		PeakRateEnabled:    false,
+		PeakRateEnabledSet: true,
+		PeakRateWindows: []PeakRateWindow{
+			{Start: "09:00", End: "12:00", Multiplier: 1.5},
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, group)
+	require.NotNil(t, repo.created)
+	require.False(t, repo.created.PeakRateEnabled)
+	require.Empty(t, repo.created.PeakRateWindows)
+	require.Empty(t, repo.created.PeakStart)
+	require.Empty(t, repo.created.PeakEnd)
+	require.Equal(t, 1.0, repo.created.PeakRateMultiplier)
+}
+
+func TestAdminService_UpdateGroup_LegacyPeakFieldsOnlyUpdateFirstWindow(t *testing.T) {
+	existingGroup := &Group{
+		ID:               1,
+		Name:             "existing-group",
+		Platform:         PlatformOpenAI,
+		Status:           StatusActive,
+		SubscriptionType: SubscriptionTypeStandard,
+		PeakRateEnabled:  true,
+		PeakRateWindows: []PeakRateWindow{
+			{Start: "09:00", End: "11:00", Multiplier: 1.2},
+			{Start: "18:00", End: "22:00", Multiplier: 2.0},
+		},
+		PeakStart:          "09:00",
+		PeakEnd:            "11:00",
+		PeakRateMultiplier: 1.2,
+	}
+	repo := &groupRepoStubForAdmin{getByID: existingGroup}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	start := "08:00"
+	end := "10:00"
+	multiplier := 1.5
+	group, err := svc.UpdateGroup(context.Background(), 1, &UpdateGroupInput{
+		PeakStart:          &start,
+		PeakEnd:            &end,
+		PeakRateMultiplier: &multiplier,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, group)
+	require.NotNil(t, repo.updated)
+	require.Equal(t, []PeakRateWindow{
+		{Start: "08:00", End: "10:00", Multiplier: 1.5},
+		{Start: "18:00", End: "22:00", Multiplier: 2.0},
+	}, repo.updated.PeakRateWindows)
+	require.Equal(t, "08:00", repo.updated.PeakStart)
+	require.Equal(t, "10:00", repo.updated.PeakEnd)
+	require.Equal(t, 1.5, repo.updated.PeakRateMultiplier)
+}
+
+func TestAdminService_UpdateGroup_RejectsEnabledEmptyPeakWindows(t *testing.T) {
+	existingGroup := &Group{
+		ID:                 1,
+		Name:               "existing-group",
+		Platform:           PlatformOpenAI,
+		Status:             StatusActive,
+		SubscriptionType:   SubscriptionTypeStandard,
+		PeakRateEnabled:    true,
+		PeakStart:          "09:00",
+		PeakEnd:            "11:00",
+		PeakRateMultiplier: 1.2,
+		PeakRateWindows: []PeakRateWindow{
+			{Start: "09:00", End: "11:00", Multiplier: 1.2},
+		},
+	}
+	repo := &groupRepoStubForAdmin{getByID: existingGroup}
+	svc := &adminServiceImpl{groupRepo: repo}
+	windows := []PeakRateWindow{}
+
+	group, err := svc.UpdateGroup(context.Background(), 1, &UpdateGroupInput{
+		PeakRateWindows: &windows,
+	})
+
+	require.Error(t, err)
+	require.True(t, infraerrors.IsBadRequest(err))
+	require.Nil(t, group)
+	require.Nil(t, repo.updated)
+}
+
+func TestAdminService_CreateGroup_RejectsEnabledEmptyPeakConfigAsBadRequest(t *testing.T) {
+	repo := &groupRepoStubForAdmin{}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	group, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
+		Name:            "bad-peak",
+		Platform:        PlatformOpenAI,
+		RateMultiplier:  1.0,
+		PeakRateEnabled: true,
+	})
+
+	require.Error(t, err)
+	require.True(t, infraerrors.IsBadRequest(err))
+	require.Nil(t, group)
+	require.Nil(t, repo.created)
+}
+
+func TestAdminService_UpdateGroup_DisabledEmptyPeakWindowsClearsConfig(t *testing.T) {
+	existingGroup := &Group{
+		ID:                 1,
+		Name:               "existing-group",
+		Platform:           PlatformOpenAI,
+		Status:             StatusActive,
+		SubscriptionType:   SubscriptionTypeStandard,
+		PeakRateEnabled:    true,
+		PeakStart:          "09:00",
+		PeakEnd:            "11:00",
+		PeakRateMultiplier: 1.2,
+		PeakRateWindows: []PeakRateWindow{
+			{Start: "09:00", End: "11:00", Multiplier: 1.2},
+		},
+	}
+	repo := &groupRepoStubForAdmin{getByID: existingGroup}
+	svc := &adminServiceImpl{groupRepo: repo}
+	enabled := false
+	windows := []PeakRateWindow{}
+
+	group, err := svc.UpdateGroup(context.Background(), 1, &UpdateGroupInput{
+		PeakRateEnabled: &enabled,
+		PeakRateWindows: &windows,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, group)
+	require.NotNil(t, repo.updated)
 	require.False(t, repo.updated.PeakRateEnabled)
-	require.Equal(t, "", repo.updated.PeakStart)
-	require.Equal(t, "", repo.updated.PeakEnd)
+	require.Empty(t, repo.updated.PeakRateWindows)
+	require.Empty(t, repo.updated.PeakStart)
+	require.Empty(t, repo.updated.PeakEnd)
 	require.Equal(t, 1.0, repo.updated.PeakRateMultiplier)
 }
 

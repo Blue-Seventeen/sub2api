@@ -57,10 +57,15 @@ func (Group) Fields() []ent.Field {
 			MaxLen(5).
 			Default("").
 			Comment("高峰结束时间 HH:MM（不含），必须大于 peak_start；不支持跨天，如 22:00-02:00"),
+		// Runtime peak-rate billing applies to all billing modes; this legacy field mirrors the first JSON window.
 		field.Float("peak_rate_multiplier").
 			SchemaType(map[string]string{dialect.Postgres: "decimal(10,4)"}).
 			Default(1.0).
-			Comment("高峰时段叠加倍率，仅在 peak_rate_enabled 且处于 [peak_start, peak_end) 时乘入文本倍率"),
+			Comment("高峰时段叠加倍率，仅在 peak_rate_enabled 且处于 [peak_start, peak_end) 时乘入所有计费模式"),
+		field.JSON("peak_rate_windows", []domain.PeakRateWindow{}).
+			Default([]domain.PeakRateWindow{}).
+			SchemaType(map[string]string{dialect.Postgres: "jsonb"}).
+			Comment("高峰时段多窗口配置，旧单段字段保留为第一段兼容快照"),
 		field.Bool("is_exclusive").
 			Default(false),
 		field.String("status").

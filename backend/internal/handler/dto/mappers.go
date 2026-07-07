@@ -199,6 +199,7 @@ func groupFromServiceBase(g *service.Group) Group {
 		PeakStart:                       g.PeakStart,
 		PeakEnd:                         g.PeakEnd,
 		PeakRateMultiplier:              g.PeakRateMultiplier,
+		PeakRateWindows:                 service.PeakRateWindowsForRead(g.PeakRateWindows, g.PeakStart, g.PeakEnd, g.PeakRateMultiplier),
 		ImagePrice1K:                    g.ImagePrice1K,
 		ImagePrice2K:                    g.ImagePrice2K,
 		ImagePrice4K:                    g.ImagePrice4K,

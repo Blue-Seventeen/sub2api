@@ -252,7 +252,9 @@ export default {
     submitting: '提交中...',
     justNow: '刚刚',
     peakRateTooltip: '高峰倍率：{window}',
-    peakRateImageNote: '；token 计费的图片 token 同样适用，图片按次计费不受高峰影响',
+    peakRateCompactSingle: '高峰 x{multiplier}',
+    peakRateCompactMultiple: '高峰 {count} 段',
+    peakRateImageNote: '；token、按次、图片、时长、字符等计费模式都会叠加高峰倍率',
     save: '保存',
     saved: '保存成功',
     deleted: '删除成功',
@@ -2370,7 +2372,16 @@ export default {
         peakStart: '高峰开始',
         peakEnd: '高峰结束',
         peakMultiplier: '高峰倍率',
-        multiplierHint: '作用于 token 计费倍率；token 计费的图片 token 同样适用，0 表示高峰 token 请求按 0 倍计费'
+        addWindow: '添加时段',
+        multiplierHint: '作用于 token、按次、图片、时长、字符等计费模式；0 表示命中高峰窗口的请求按 0 倍计费',
+        errors: {
+          required: '启用高峰倍率时至少需要一个高峰时段',
+          maxWindows: '高峰时段最多 24 段',
+          multiplier: '高峰时段倍率必须是非负数字',
+          timeFormat: '高峰时段时间必须使用 HH:MM',
+          range: '高峰结束时间必须晚于开始时间，且不允许跨天',
+          overlap: '高峰时段不允许重叠'
+        }
       },
       modelsList: {
         title: '自定义 /v1/models 模型列表',

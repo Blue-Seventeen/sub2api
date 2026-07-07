@@ -42,6 +42,11 @@
           :platform="group.platform"
           :subscription-type="group.subscription_type"
           :rate-multiplier="group.rate_multiplier"
+          :peak-rate-enabled="group.peak_rate_enabled"
+          :peak-start="group.peak_start"
+          :peak-end="group.peak_end"
+          :peak-rate-multiplier="group.peak_rate_multiplier"
+          :peak-rate-windows="group.peak_rate_windows"
           class="min-w-0 flex-1"
         />
         <span class="shrink-0 text-xs text-gray-400">{{ group.account_count || 0 }}</span>

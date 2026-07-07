@@ -1,5 +1,5 @@
 <template>
-  <div class="flex min-w-0 flex-1 items-start justify-between gap-3">
+  <div :class="optionRootClass">
     <!-- Left: name + description -->
     <div
       class="flex min-w-0 flex-1 flex-col items-start"
@@ -37,7 +37,7 @@
         </span>
         <span
           v-if="hasPeakRate"
-          class="inline-flex items-center whitespace-nowrap rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 dark:bg-amber-900/20 dark:text-amber-300"
+          :class="peakRatePillClass"
           :title="peakRateTitle"
         >
           {{ peakRateText }}
@@ -65,7 +65,14 @@ import GroupBadge from './GroupBadge.vue'
 import type { SubscriptionType, GroupPlatform } from '@/types'
 import { platformBadgeLightClass } from '@/utils/platformColors'
 import { useAppStore } from '@/stores/app'
-import { formatPeakRateWindow, serverTimezoneLabel } from '@/utils/peak-rate'
+import {
+  formatPeakRateWindow,
+  hasPeakRate as hasPeakRateFields,
+  peakRateWindowsForDisplay,
+  serverTimezoneLabel,
+  type PeakRateDisplayMode,
+  type PeakRateWindow,
+} from '@/utils/peak-rate'
 
 const { t } = useI18n()
 
@@ -80,6 +87,8 @@ interface Props {
   peakStart?: string
   peakEnd?: string
   peakRateMultiplier?: number
+  peakRateWindows?: PeakRateWindow[]
+  peakDisplayMode?: PeakRateDisplayMode
   description?: string | null
   selected?: boolean
   showCheckmark?: boolean
@@ -91,7 +100,8 @@ const props = withDefaults(defineProps<Props>(), {
   showCheckmark: true,
   effectiveRateMultiplier: null,
   userRateMultiplier: null,
-  peakRateEnabled: false
+  peakRateEnabled: false,
+  peakDisplayMode: 'compact'
 })
 
 // Whether effective/final rate differs from the default group rate.
@@ -108,24 +118,52 @@ const hasEffectiveRate = computed(() => {
 
 const appStore = useAppStore()
 
+const peakRateFields = computed(() => ({
+  peak_rate_enabled: props.peakRateEnabled,
+  peak_start: props.peakStart,
+  peak_end: props.peakEnd,
+  peak_rate_multiplier: props.peakRateMultiplier,
+  peak_rate_windows: props.peakRateWindows
+}))
+
 const hasPeakRate = computed(() => {
-  return Boolean(props.peakRateEnabled && props.peakStart && props.peakEnd)
+  return hasPeakRateFields(peakRateFields.value)
 })
 
-const peakRateText = computed(() => {
+const peakRateFullText = computed(() => {
   return formatPeakRateWindow(
-    {
-      peak_rate_enabled: props.peakRateEnabled,
-      peak_start: props.peakStart,
-      peak_end: props.peakEnd,
-      peak_rate_multiplier: props.peakRateMultiplier
-    },
+    peakRateFields.value,
     serverTimezoneLabel(appStore.cachedPublicSettings?.server_utc_offset)
   )
 })
 
+const peakRateText = computed(() => {
+  if (props.peakDisplayMode === 'full') return peakRateFullText.value
+  const windows = peakRateWindowsForDisplay(peakRateFields.value)
+  if (windows.length === 1) {
+    return t('common.peakRateCompactSingle', { multiplier: windows[0].multiplier ?? 1 })
+  }
+  return t('common.peakRateCompactMultiple', { count: windows.length })
+})
+
 const peakRateTitle = computed(() => {
-  return t('common.peakRateTooltip', { window: peakRateText.value })
+  return t('common.peakRateTooltip', { window: peakRateFullText.value })
+})
+
+const peakRatePillClass = computed(() => {
+  const base = 'inline-flex items-center rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 dark:bg-amber-900/20 dark:text-amber-300'
+  if (props.peakDisplayMode === 'full') {
+    return `${base} max-w-64 whitespace-normal break-words text-right leading-4`
+  }
+  return `${base} whitespace-nowrap`
+})
+
+const optionRootClass = computed(() => {
+  const base = 'flex min-w-0 flex-1 gap-3'
+  if (props.peakDisplayMode === 'full') {
+    return `${base} flex-col items-stretch sm:flex-row sm:items-start sm:justify-between`
+  }
+  return `${base} items-start justify-between`
 })
 
 // Rate pill color matches platform badge color

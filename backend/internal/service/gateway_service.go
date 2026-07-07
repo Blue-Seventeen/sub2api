@@ -9996,9 +9996,11 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	}
 	unifiedMultiplier := effectiveUnifiedMultiplier(user)
 	multiplier := baseMultiplier * unifiedMultiplier
-	// token 倍率叠加高峰因子（token 计费含图片 token，图片按次倍率不受影响）。高峰因子按请求时刻现算，
+	// Peak is applied after cached group/user rates and covers token, image, request, duration, and character billing.
 	// 不并入上面的 getUserGroupRateMultiplier，以免污染 user:group 倍率缓存。
-	multiplier, imageMultiplier := computePeakAwareMultipliers(apiKey, multiplier, timezone.Now())
+	usageNow := timezone.Now()
+	multiplier, imageMultiplier := computePeakAwareMultipliers(apiKey, multiplier, usageNow)
+	realMultiplier, realImageMultiplier := computePeakAwareMultipliers(apiKey, baseMultiplier, usageNow)
 
 	// 确定计费模型
 	billingModel := forwardResultBillingModel(result.Model, result.UpstreamModel)
@@ -10017,9 +10019,8 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 
 	// 计算费用
 	cost := s.calculateRecordUsageCost(ctx, result, apiKey, billingModel, multiplier, imageMultiplier, opts)
-	if cost != nil {
-		cost.RealActualCost = realCostFromBase(cost.TotalCost, baseMultiplier, user)
-	}
+	useImageRate := usageUsesImageMultiplier(result.ImageCount, costBillingMode(cost), result.RequestCount, result.TaskCount, result.BillableDurationSeconds, result.BillableCharacterCount)
+	applyRealActualCostFromRates(cost, useImageRate, multiplier, imageMultiplier, realMultiplier, realImageMultiplier, user)
 	if shouldWarnCompatibleZeroCost(account, apiKey.Group, result, cost) {
 		logger.LegacyPrintf(
 			"service.gateway",
@@ -10449,7 +10450,7 @@ func (s *GatewayService) buildRecordUsageLog(
 		SubscriptionID:          optionalSubscriptionID(subscription),
 		CreatedAt:               time.Now(),
 	}
-	if result.ImageCount > 0 && (cost == nil || cost.BillingMode != string(BillingModeToken)) {
+	if usageUsesImageMultiplier(result.ImageCount, costBillingMode(cost), result.RequestCount, result.TaskCount, result.BillableDurationSeconds, result.BillableCharacterCount) {
 		usageLog.RateMultiplier = imageMultiplier
 	}
 	if cost != nil {

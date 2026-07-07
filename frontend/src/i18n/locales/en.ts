@@ -254,7 +254,9 @@ export default {
     submitting: 'Submitting...',
     justNow: 'just now',
     peakRateTooltip: 'Peak rate: {window}',
-    peakRateImageNote: '; image tokens billed as tokens are also affected, per-image billing is unaffected',
+    peakRateCompactSingle: 'Peak x{multiplier}',
+    peakRateCompactMultiple: 'Peak {count} windows',
+    peakRateImageNote: '; token, per-request, image, duration, and character billing all include the peak multiplier',
     save: 'Save',
     saved: 'Saved successfully',
     deleted: 'Deleted successfully',
@@ -2286,11 +2288,20 @@ export default {
       },
       peakRate: {
         enable: 'Enable peak rate multiplier',
-        peakStart: 'Peak start',
-        peakEnd: 'Peak end',
-        peakMultiplier: 'Peak multiplier',
-        multiplierHint: 'Applies to token billing multiplier; image tokens in token billing are also affected. 0 means peak token requests are billed at 0x.'
-      },
+      peakStart: 'Peak start',
+      peakEnd: 'Peak end',
+      peakMultiplier: 'Peak multiplier',
+      addWindow: 'Add window',
+      multiplierHint: 'Applies to token, per-request, image, duration, and character billing. 0 means matching peak-window requests are billed at 0x.',
+      errors: {
+        required: 'At least one peak window is required when peak rate is enabled',
+        maxWindows: 'Peak windows can contain at most 24 entries',
+        multiplier: 'Peak window multiplier must be a non-negative number',
+        timeFormat: 'Peak window time must use HH:MM',
+        range: 'Peak window end must be after start and cannot cross days',
+        overlap: 'Peak windows cannot overlap'
+      }
+    },
       modelsList: {
         title: 'Custom /v1/models Model List',
         hint: 'When enabled, this controls both the /v1/models response and callable models for this group. Matching is case-insensitive and supports suffix * wildcards.',
