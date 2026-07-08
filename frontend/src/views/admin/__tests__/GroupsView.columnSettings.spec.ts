@@ -43,6 +43,7 @@ const messages: Record<string, string> = {
   'common.peakRateTooltip': 'Peak rate: {window}',
   'common.peakRateCompactSingle': 'Peak x{multiplier}',
   'common.peakRateCompactMultiple': 'Peak {count} windows',
+  'common.peakRateFormula': '{window} base x peak = {base} x {peak} = {final} final',
   'common.peakRateImageNote': '; all billing modes include the peak multiplier',
 }
 
@@ -385,8 +386,8 @@ describe('admin GroupsView column settings', () => {
     expect(tooltip.classes()).toContain('z-[9999]')
     expect(tooltip.text()).toContain('Peak rate:')
     expect(windowLines).toHaveLength(2)
-    expect(windowLines[0].text()).toBe('09:00-12:00 ×1.5')
-    expect(windowLines[1].text()).toBe('18:00-22:00 ×2')
+    expect(windowLines[0].text()).toBe('09:00-12:00 base x peak = 1.2 x 1.5 = 1.8 final')
+    expect(windowLines[1].text()).toBe('18:00-22:00 base x peak = 1.2 x 2 = 2.4 final')
     expect(peakBadge.attributes('title')).toBeUndefined()
   })
 })

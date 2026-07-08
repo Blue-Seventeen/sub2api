@@ -16,6 +16,7 @@ vi.mock('vue-i18n', async () => {
         if (key === 'common.peakRateCompactSingle') return `Peak x${params?.multiplier}`
         if (key === 'common.peakRateCompactMultiple') return `Peak ${params?.count} windows`
         if (key === 'common.peakRateTooltip') return `Peak rate: ${params?.window}`
+        if (key === 'common.peakRateFormula') return `${params?.window} base x peak = ${params?.base} x ${params?.peak} = ${params?.final} final`
         if (key === 'common.peakRateImageNote') return '; all billing modes include the peak multiplier'
         return key
       },
@@ -88,14 +89,15 @@ describe('GroupBadge', () => {
     expect(tooltip.classes()).toContain('z-[9999]')
     expect(tooltip.text()).toContain('Peak rate:')
     expect(windowLines).toHaveLength(1)
-    expect(windowLines[0].text()).toBe('09:00-12:00 ×1.5')
+    expect(windowLines[0].text()).toBe('09:00-12:00 base x peak = 1 x 1.5 = 1.5 final')
   })
 
   it('summarizes multiple peak windows in compact mode', async () => {
     const wrapper = mountBadge({
       name: 'multi-peak-group',
       platform: 'openai',
-      rateMultiplier: 1,
+      rateMultiplier: 1.2,
+      effectiveRateMultiplier: 1.8,
       peakRateEnabled: true,
       peakRateWindows: [
         { start: '09:00', end: '12:00', multiplier: 1.5 },
@@ -111,8 +113,8 @@ describe('GroupBadge', () => {
     await peakBadge.trigger('mouseenter')
     const windowLines = wrapper.findAll('[data-test="peak-rate-window"]')
     expect(windowLines).toHaveLength(2)
-    expect(windowLines[0].text()).toBe('09:00-12:00 ×1.5')
-    expect(windowLines[1].text()).toBe('18:00-22:00 ×2')
+    expect(windowLines[0].text()).toBe('09:00-12:00 base x peak = 1.8 x 1.5 = 2.7 final')
+    expect(windowLines[1].text()).toBe('18:00-22:00 base x peak = 1.8 x 2 = 3.6 final')
   })
 
   it('shows full peak windows when full mode is requested', () => {

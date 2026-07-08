@@ -254,6 +254,7 @@ export default {
     peakRateTooltip: '高峰倍率：{window}',
     peakRateCompactSingle: '高峰 x{multiplier}',
     peakRateCompactMultiple: '高峰 {count} 段',
+    peakRateFormula: '{window} 基础倍率 x 高峰倍率 = {base} x {peak} = {final}（最终倍率）',
     peakRateImageNote: '；token、按次、图片、时长、字符等计费模式都会叠加高峰倍率',
     save: '保存',
     saved: '保存成功',

@@ -3723,7 +3723,7 @@ interface PeakRateTooltipState {
 }
 
 const PEAK_RATE_TOOLTIP_MARGIN = 12;
-const PEAK_RATE_TOOLTIP_MAX_WIDTH = 448;
+const PEAK_RATE_TOOLTIP_MAX_WIDTH = 560;
 const PEAK_RATE_TOOLTIP_MIN_WIDTH = 320;
 
 const peakRateTooltip = ref<PeakRateTooltipState | null>(null);
@@ -3749,9 +3749,27 @@ const groupPeakRateText = (group: AdminGroup) => {
   return t("common.peakRateCompactMultiple", { count: windows.length });
 };
 
+const formatMultiplier = (value: number) => {
+  if (!Number.isFinite(value)) return "1";
+  return Number(value.toFixed(6)).toString();
+};
+
+const groupPeakRateBaseMultiplier = (group: AdminGroup) => group.rate_multiplier ?? 1;
+
+const formatGroupPeakRateWindowLine = (group: AdminGroup, window: { start: string; end: string; multiplier?: number }) => {
+  const base = groupPeakRateBaseMultiplier(group);
+  const peak = window.multiplier ?? 1;
+  return t("common.peakRateFormula", {
+    window: `${window.start}-${window.end}`,
+    base: formatMultiplier(base),
+    peak: formatMultiplier(peak),
+    final: formatMultiplier(base * peak),
+  });
+};
+
 const groupPeakRateWindowLines = (group: AdminGroup) =>
   peakRateWindowsForDisplay(groupPeakRateFields(group)).map(
-    (window) => `${window.start}-${window.end} ×${window.multiplier ?? 1}`,
+    (window) => formatGroupPeakRateWindowLine(group, window),
   );
 
 const groupPeakRateTooltipHeader = (_group: AdminGroup) => {
@@ -3790,7 +3808,7 @@ const showGroupPeakRateTooltip = (group: AdminGroup, event: MouseEvent | FocusEv
     Math.max(PEAK_RATE_TOOLTIP_MARGIN, window.innerWidth - width - PEAK_RATE_TOOLTIP_MARGIN),
   );
   const estimatedHeight = Math.min(
-    Math.max(128, 94 + groupPeakRateWindowLines(group).length * 30),
+    Math.max(128, 94 + groupPeakRateWindowLines(group).length * 38),
     Math.max(128, window.innerHeight - PEAK_RATE_TOOLTIP_MARGIN * 2),
   );
   const placement: PeakRateTooltipState["placement"] =

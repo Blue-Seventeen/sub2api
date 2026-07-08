@@ -43,6 +43,7 @@
           :peak-rate-multiplier="props.peakRateMultiplier"
           :peak-rate-windows="props.peakRateWindows"
           :display-mode="props.peakDisplayMode"
+          :base-multiplier="peakBaseMultiplier"
           :pill-class="peakRatePillClass"
           include-billing-note
           data-test="group-option-peak-rate"
@@ -129,6 +130,8 @@ const peakRateFields = computed(() => ({
 const hasPeakRate = computed(() => {
   return hasPeakRateFields(peakRateFields.value)
 })
+
+const peakBaseMultiplier = computed(() => displayRateMultiplier.value ?? props.rateMultiplier ?? 1)
 
 const peakRatePillClass = computed(() => {
   const base = 'inline-flex items-center rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 dark:bg-amber-900/20 dark:text-amber-300'

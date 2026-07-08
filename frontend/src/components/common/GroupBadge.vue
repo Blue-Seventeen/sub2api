@@ -29,6 +29,7 @@
       :peak-rate-multiplier="props.peakRateMultiplier"
       :peak-rate-windows="props.peakRateWindows"
       :display-mode="props.peakDisplayMode"
+      :base-multiplier="peakBaseMultiplier"
       :pill-class="peakRateClass"
       include-billing-note
       data-test="group-badge-peak-rate"
@@ -109,6 +110,8 @@ const peakRateFields = computed(() => ({
 const hasPeakRate = computed(() => {
   return Boolean(props.showRate && hasPeakRateFields(peakRateFields.value))
 })
+
+const peakBaseMultiplier = computed(() => displayRateMultiplier.value ?? props.rateMultiplier ?? 1)
 
 // 是否显示右侧标签
 const showLabel = computed(() => {

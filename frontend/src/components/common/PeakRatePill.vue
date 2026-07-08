@@ -84,6 +84,7 @@ interface Props {
   peakRateMultiplier?: number
   peakRateWindows?: PeakRateWindow[]
   displayMode?: PeakRateDisplayMode
+  baseMultiplier?: number
   includeBillingNote?: boolean
   pillClass?: string
   dataTest?: string
@@ -98,6 +99,7 @@ interface TooltipState {
 const props = withDefaults(defineProps<Props>(), {
   peakRateEnabled: false,
   displayMode: 'compact',
+  baseMultiplier: 1,
   includeBillingNote: false,
   pillClass: '',
   dataTest: 'peak-rate-pill',
@@ -107,7 +109,7 @@ const { t } = useI18n()
 const appStore = useAppStore()
 
 const TOOLTIP_MARGIN = 12
-const TOOLTIP_MAX_WIDTH = 448
+const TOOLTIP_MAX_WIDTH = 560
 const TOOLTIP_MIN_WIDTH = 320
 
 const tooltipState = ref<TooltipState | null>(null)
@@ -134,8 +136,24 @@ const displayText = computed(() => {
   return t('common.peakRateCompactMultiple', { count: windows.value.length })
 })
 
+const formatMultiplier = (value: number) => {
+  if (!Number.isFinite(value)) return '1'
+  return Number(value.toFixed(6)).toString()
+}
+
+const formatPeakRateLine = (window: PeakRateWindow) => {
+  const base = props.baseMultiplier ?? 1
+  const peak = window.multiplier ?? 1
+  return t('common.peakRateFormula', {
+    window: `${window.start}-${window.end}`,
+    base: formatMultiplier(base),
+    peak: formatMultiplier(peak),
+    final: formatMultiplier(base * peak),
+  })
+}
+
 const windowLines = computed(() =>
-  windows.value.map((window) => `${window.start}-${window.end} ×${window.multiplier ?? 1}`),
+  windows.value.map(formatPeakRateLine),
 )
 
 const tooltipHeader = computed(() => {

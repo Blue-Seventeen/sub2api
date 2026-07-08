@@ -256,6 +256,7 @@ export default {
     peakRateTooltip: 'Peak rate: {window}',
     peakRateCompactSingle: 'Peak x{multiplier}',
     peakRateCompactMultiple: 'Peak {count} windows',
+    peakRateFormula: '{window} base x peak = {base} x {peak} = {final} (final multiplier)',
     peakRateImageNote: '; token, per-request, image, duration, and character billing all include the peak multiplier',
     save: 'Save',
     saved: 'Saved successfully',
