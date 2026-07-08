@@ -40,6 +40,10 @@ const messages: Record<string, string> = {
   'admin.groups.columns.usage': 'Usage',
   'admin.groups.columns.status': 'Status',
   'admin.groups.columns.actions': 'Actions',
+  'common.peakRateTooltip': 'Peak rate: {window}',
+  'common.peakRateCompactSingle': 'Peak x{multiplier}',
+  'common.peakRateCompactMultiple': 'Peak {count} windows',
+  'common.peakRateImageNote': '; all billing modes include the peak multiplier',
 }
 
 vi.mock('@/api/admin', () => ({
@@ -80,7 +84,13 @@ vi.mock('vue-i18n', async () => {
   return {
     ...actual,
     useI18n: () => ({
-      t: (key: string) => messages[key] ?? key,
+      t: (key: string, params?: Record<string, unknown>) => {
+        let message = messages[key] ?? key
+        Object.entries(params ?? {}).forEach(([name, value]) => {
+          message = message.replace(`{${name}}`, String(value))
+        })
+        return message
+      },
     }),
   }
 })
@@ -104,6 +114,11 @@ const createGroup = (overrides: Partial<AdminGroup> = {}): AdminGroup => ({
   image_price_1k: null,
   image_price_2k: null,
   image_price_4k: null,
+  peak_rate_enabled: false,
+  peak_start: '',
+  peak_end: '',
+  peak_rate_multiplier: 1,
+  peak_rate_windows: [],
   claude_code_only: false,
   fallback_group_id: null,
   fallback_group_id_on_invalid_request: null,
@@ -147,6 +162,15 @@ const DataTableStub = {
     <div>
       <div data-test="columns">{{ columns.map((col) => col.key).join(',') }}</div>
       <div data-test="rows">{{ data.map((row) => row.name).join(',') }}</div>
+      <div
+        v-for="row in data"
+        :key="row.id"
+        :data-test="'rate-cell-' + row.id"
+      >
+        <slot name="cell-rate_multiplier" :value="row.rate_multiplier" :row="row">
+          {{ row.rate_multiplier }}
+        </slot>
+      </div>
     </div>
   `,
 }
@@ -193,6 +217,7 @@ const mountView = async () => {
         GroupCapacityBadge: true,
         GroupRateMultipliersModal: true,
         GroupRPMOverridesModal: true,
+        Teleport: true,
         VueDraggable: { template: '<div><slot /></div>' },
       },
     },
@@ -249,6 +274,7 @@ describe('admin GroupsView column settings', () => {
 
   afterEach(() => {
     localStorage.clear()
+    document.body.innerHTML = ''
   })
 
   it('renders all group columns by default in the current order', async () => {
@@ -324,5 +350,43 @@ describe('admin GroupsView column settings', () => {
     await clickColumnToggle(wrapper, 'Capacity')
     expect(getUsageSummary).toHaveBeenCalledTimes(1)
     expect(getCapacitySummary).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders peak-rate summary in the rate multiplier column', async () => {
+    listGroups.mockResolvedValue({
+      items: [
+        createGroup({
+          rate_multiplier: 1.2,
+          peak_rate_enabled: true,
+          peak_rate_windows: [
+            { start: '09:00', end: '12:00', multiplier: 1.5 },
+            { start: '18:00', end: '22:00', multiplier: 2 },
+          ],
+        }),
+      ],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    })
+
+    const wrapper = await mountView()
+    const rateCell = wrapper.get('[data-test="rate-cell-1"]')
+    const peakBadge = rateCell.get('[data-test="group-rate-peak"]')
+    expect(rateCell.find('[data-test="group-rate-peak-tooltip"]').exists()).toBe(false)
+
+    await peakBadge.trigger('mouseenter')
+    const tooltip = wrapper.get('[data-test="group-rate-peak-tooltip"]')
+    const windowLines = tooltip.findAll('[data-test="group-rate-peak-window"]')
+
+    expect(rateCell.text()).toContain('1.2x')
+    expect(peakBadge.text()).toBe('Peak 2 windows')
+    expect(tooltip.classes()).toContain('fixed')
+    expect(tooltip.classes()).toContain('z-[9999]')
+    expect(tooltip.text()).toContain('Peak rate:')
+    expect(windowLines).toHaveLength(2)
+    expect(windowLines[0].text()).toBe('09:00-12:00 ×1.5')
+    expect(windowLines[1].text()).toBe('18:00-22:00 ×2')
+    expect(peakBadge.attributes('title')).toBeUndefined()
   })
 })

@@ -21,9 +21,18 @@
         {{ labelText }}
       </template>
     </span>
-    <span v-if="hasPeakRate" :class="peakRateClass" :title="peakRateTitle">
-      {{ peakRateText }}
-    </span>
+    <PeakRatePill
+      v-if="hasPeakRate"
+      :peak-rate-enabled="props.peakRateEnabled"
+      :peak-start="props.peakStart"
+      :peak-end="props.peakEnd"
+      :peak-rate-multiplier="props.peakRateMultiplier"
+      :peak-rate-windows="props.peakRateWindows"
+      :display-mode="props.peakDisplayMode"
+      :pill-class="peakRateClass"
+      include-billing-note
+      data-test="group-badge-peak-rate"
+    />
   </span>
 </template>
 
@@ -31,16 +40,13 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { SubscriptionType, GroupPlatform } from '@/types'
-import { useAppStore } from '@/stores/app'
 import {
-  formatPeakRateWindow,
   hasPeakRate as hasPeakRateFields,
-  peakRateWindowsForDisplay,
-  serverTimezoneLabel,
   type PeakRateDisplayMode,
   type PeakRateWindow,
 } from '@/utils/peak-rate'
 import PlatformIcon from './PlatformIcon.vue'
+import PeakRatePill from './PeakRatePill.vue'
 
 interface Props {
   name: string
@@ -92,8 +98,6 @@ const hasEffectiveRate = computed(() => {
   )
 })
 
-const appStore = useAppStore()
-
 const peakRateFields = computed(() => ({
   peak_rate_enabled: props.peakRateEnabled,
   peak_start: props.peakStart,
@@ -104,26 +108,6 @@ const peakRateFields = computed(() => ({
 
 const hasPeakRate = computed(() => {
   return Boolean(props.showRate && hasPeakRateFields(peakRateFields.value))
-})
-
-const peakRateFullText = computed(() => {
-  return formatPeakRateWindow(
-    peakRateFields.value,
-    serverTimezoneLabel(appStore.cachedPublicSettings?.server_utc_offset)
-  )
-})
-
-const peakRateText = computed(() => {
-  if (props.peakDisplayMode === 'full') return peakRateFullText.value
-  const windows = peakRateWindowsForDisplay(peakRateFields.value)
-  if (windows.length === 1) {
-    return t('common.peakRateCompactSingle', { multiplier: windows[0].multiplier ?? 1 })
-  }
-  return t('common.peakRateCompactMultiple', { count: windows.length })
-})
-
-const peakRateTitle = computed(() => {
-  return t('common.peakRateTooltip', { window: peakRateFullText.value }) + t('common.peakRateImageNote')
 })
 
 // 是否显示右侧标签

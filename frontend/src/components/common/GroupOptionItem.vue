@@ -35,13 +35,18 @@
             {{ rateMultiplier }}x {{ t('admin.groups.rateLabel') }}
           </template>
         </span>
-        <span
+        <PeakRatePill
           v-if="hasPeakRate"
-          :class="peakRatePillClass"
-          :title="peakRateTitle"
-        >
-          {{ peakRateText }}
-        </span>
+          :peak-rate-enabled="props.peakRateEnabled"
+          :peak-start="props.peakStart"
+          :peak-end="props.peakEnd"
+          :peak-rate-multiplier="props.peakRateMultiplier"
+          :peak-rate-windows="props.peakRateWindows"
+          :display-mode="props.peakDisplayMode"
+          :pill-class="peakRatePillClass"
+          include-billing-note
+          data-test="group-option-peak-rate"
+        />
       </div>
       <!-- Checkmark -->
       <svg
@@ -62,14 +67,11 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import GroupBadge from './GroupBadge.vue'
+import PeakRatePill from './PeakRatePill.vue'
 import type { SubscriptionType, GroupPlatform } from '@/types'
 import { platformBadgeLightClass } from '@/utils/platformColors'
-import { useAppStore } from '@/stores/app'
 import {
-  formatPeakRateWindow,
   hasPeakRate as hasPeakRateFields,
-  peakRateWindowsForDisplay,
-  serverTimezoneLabel,
   type PeakRateDisplayMode,
   type PeakRateWindow,
 } from '@/utils/peak-rate'
@@ -116,8 +118,6 @@ const hasEffectiveRate = computed(() => {
   )
 })
 
-const appStore = useAppStore()
-
 const peakRateFields = computed(() => ({
   peak_rate_enabled: props.peakRateEnabled,
   peak_start: props.peakStart,
@@ -128,26 +128,6 @@ const peakRateFields = computed(() => ({
 
 const hasPeakRate = computed(() => {
   return hasPeakRateFields(peakRateFields.value)
-})
-
-const peakRateFullText = computed(() => {
-  return formatPeakRateWindow(
-    peakRateFields.value,
-    serverTimezoneLabel(appStore.cachedPublicSettings?.server_utc_offset)
-  )
-})
-
-const peakRateText = computed(() => {
-  if (props.peakDisplayMode === 'full') return peakRateFullText.value
-  const windows = peakRateWindowsForDisplay(peakRateFields.value)
-  if (windows.length === 1) {
-    return t('common.peakRateCompactSingle', { multiplier: windows[0].multiplier ?? 1 })
-  }
-  return t('common.peakRateCompactMultiple', { count: windows.length })
-})
-
-const peakRateTitle = computed(() => {
-  return t('common.peakRateTooltip', { window: peakRateFullText.value })
 })
 
 const peakRatePillClass = computed(() => {

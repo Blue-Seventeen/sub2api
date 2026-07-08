@@ -240,10 +240,31 @@
             </div>
           </template>
 
-          <template #cell-rate_multiplier="{ value }">
-            <span class="text-sm text-gray-700 dark:text-gray-300"
-              >{{ value }}x</span
-            >
+          <template #cell-rate_multiplier="{ value, row }">
+            <div class="flex flex-wrap items-center gap-1.5">
+              <span class="text-sm text-gray-700 dark:text-gray-300"
+                >{{ value }}x</span
+              >
+              <span
+                v-if="hasGroupPeakRate(row)"
+                class="inline-flex"
+              >
+                <span
+                  class="cursor-help rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 outline-none ring-amber-300 transition-colors hover:bg-amber-200 focus:ring-2 dark:bg-amber-900/30 dark:text-amber-300 dark:hover:bg-amber-900/50"
+                  role="button"
+                  tabindex="0"
+                  :aria-label="groupPeakRateAccessibleLabel(row)"
+                  data-test="group-rate-peak"
+                  @mouseenter="showGroupPeakRateTooltip(row, $event)"
+                  @focus="showGroupPeakRateTooltip(row, $event)"
+                  @mouseleave="hideGroupPeakRateTooltip"
+                  @blur="hideGroupPeakRateTooltip"
+                  @keydown.escape="hideGroupPeakRateTooltip"
+                >
+                  {{ groupPeakRateText(row) }}
+                </span>
+              </span>
+            </div>
           </template>
 
           <template #cell-is_exclusive="{ value }">
@@ -3474,6 +3495,50 @@
       @close="showRPMOverridesModal = false"
       @success="loadGroups"
     />
+    <Teleport to="body">
+      <Transition
+        enter-active-class="transition duration-150 ease-out"
+        enter-from-class="opacity-0 scale-95"
+        enter-to-class="opacity-100 scale-100"
+        leave-active-class="transition duration-100 ease-in"
+        leave-from-class="opacity-100 scale-100"
+        leave-to-class="opacity-0 scale-95"
+      >
+        <div
+          v-if="peakRateTooltip"
+          class="pointer-events-none fixed z-[9999] rounded-xl border border-amber-200 bg-white px-3 py-2.5 text-left shadow-[0_24px_70px_-28px_rgba(120,53,15,0.55)] ring-1 ring-amber-100 dark:border-amber-800/70 dark:bg-dark-800 dark:ring-amber-900/40"
+          :class="peakRateTooltip.placement === 'top' ? '-translate-y-full' : ''"
+          :style="peakRateTooltip.style"
+          data-test="group-rate-peak-tooltip"
+        >
+          <div class="text-[11px] font-semibold text-amber-700 dark:text-amber-300">
+            {{ groupPeakRateTooltipHeader(peakRateTooltip.group) }}
+          </div>
+          <div class="mt-1.5 space-y-1">
+            <div
+              v-for="line in groupPeakRateWindowLines(peakRateTooltip.group)"
+              :key="line"
+              class="rounded-md bg-amber-50 px-2 py-1 font-mono text-[11px] leading-4 text-amber-900 break-words dark:bg-amber-950/40 dark:text-amber-100"
+              data-test="group-rate-peak-window"
+            >
+              {{ line }}
+            </div>
+          </div>
+          <div class="mt-1.5 text-[11px] leading-4 text-gray-500 break-words dark:text-gray-400">
+            {{ groupPeakRateBillingNote }}
+          </div>
+          <div
+            class="absolute h-3 w-3 rotate-45 border-amber-200 bg-white dark:border-amber-800/70 dark:bg-dark-800"
+            :class="
+              peakRateTooltip.placement === 'top'
+                ? 'top-full -translate-x-1/2 -translate-y-1/2 border-b border-r'
+                : 'bottom-full -translate-x-1/2 translate-y-1/2 border-l border-t'
+            "
+            :style="peakRateTooltip.arrowStyle"
+          ></div>
+        </div>
+      </Transition>
+    </Teleport>
   </AppLayout>
 </template>
 
@@ -3518,6 +3583,11 @@ import {
   removePeakRateWindow,
   type PeakRateWindowForm,
 } from "./groupsPeakRateForm";
+import {
+  hasPeakRate as hasPeakRateFields,
+  peakRateWindowsForDisplay,
+  serverTimezoneLabel,
+} from "@/utils/peak-rate";
 import {
   addModelsListItem,
   buildModelsListConfig,
@@ -3644,6 +3714,112 @@ const columns = computed<Column[]>(() =>
     (col) => ALWAYS_VISIBLE_COLUMNS.has(col.key) || !hiddenColumns.has(col.key),
   ),
 );
+
+interface PeakRateTooltipState {
+  group: AdminGroup;
+  placement: "top" | "bottom";
+  style: Record<string, string>;
+  arrowStyle: Record<string, string>;
+}
+
+const PEAK_RATE_TOOLTIP_MARGIN = 12;
+const PEAK_RATE_TOOLTIP_MAX_WIDTH = 448;
+const PEAK_RATE_TOOLTIP_MIN_WIDTH = 320;
+
+const peakRateTooltip = ref<PeakRateTooltipState | null>(null);
+
+const groupPeakRateFields = (group: AdminGroup) => ({
+  peak_rate_enabled: group.peak_rate_enabled,
+  peak_start: group.peak_start,
+  peak_end: group.peak_end,
+  peak_rate_multiplier: group.peak_rate_multiplier,
+  peak_rate_windows: group.peak_rate_windows,
+});
+
+const hasGroupPeakRate = (group: AdminGroup) =>
+  hasPeakRateFields(groupPeakRateFields(group));
+
+const groupPeakRateText = (group: AdminGroup) => {
+  const windows = peakRateWindowsForDisplay(groupPeakRateFields(group));
+  if (windows.length === 1) {
+    return t("common.peakRateCompactSingle", {
+      multiplier: windows[0].multiplier ?? 1,
+    });
+  }
+  return t("common.peakRateCompactMultiple", { count: windows.length });
+};
+
+const groupPeakRateWindowLines = (group: AdminGroup) =>
+  peakRateWindowsForDisplay(groupPeakRateFields(group)).map(
+    (window) => `${window.start}-${window.end} ×${window.multiplier ?? 1}`,
+  );
+
+const groupPeakRateTooltipHeader = (_group: AdminGroup) => {
+  const base = t("common.peakRateTooltip", { window: "" }).trim();
+  const tzLabel = serverTimezoneLabel(appStore.cachedPublicSettings?.server_utc_offset);
+  return tzLabel ? `${base} (${tzLabel})` : base;
+};
+
+const groupPeakRateBillingNote = computed(() =>
+  t("common.peakRateImageNote").replace(/^[；;]\s*/, ""),
+);
+
+const groupPeakRateAccessibleLabel = (group: AdminGroup) =>
+  `${groupPeakRateTooltipHeader(group)} ${groupPeakRateWindowLines(group).join("; ")} ${groupPeakRateBillingNote.value}`;
+
+const getPeakRateTooltipWidth = () => {
+  if (typeof window === "undefined") return PEAK_RATE_TOOLTIP_MAX_WIDTH;
+  const viewportSafeWidth = window.innerWidth - PEAK_RATE_TOOLTIP_MARGIN * 2;
+  return Math.max(
+    Math.min(PEAK_RATE_TOOLTIP_MIN_WIDTH, viewportSafeWidth),
+    Math.min(PEAK_RATE_TOOLTIP_MAX_WIDTH, viewportSafeWidth),
+  );
+};
+
+const showGroupPeakRateTooltip = (group: AdminGroup, event: MouseEvent | FocusEvent) => {
+  if (typeof window === "undefined") return;
+
+  const target = (event.currentTarget || event.target) as HTMLElement | null;
+  if (!target) return;
+
+  const rect = target.getBoundingClientRect();
+  const width = getPeakRateTooltipWidth();
+  const anchorCenter = rect.left + rect.width / 2;
+  const left = Math.min(
+    Math.max(PEAK_RATE_TOOLTIP_MARGIN, anchorCenter - width / 2),
+    Math.max(PEAK_RATE_TOOLTIP_MARGIN, window.innerWidth - width - PEAK_RATE_TOOLTIP_MARGIN),
+  );
+  const estimatedHeight = Math.min(
+    Math.max(128, 94 + groupPeakRateWindowLines(group).length * 30),
+    Math.max(128, window.innerHeight - PEAK_RATE_TOOLTIP_MARGIN * 2),
+  );
+  const placement: PeakRateTooltipState["placement"] =
+    rect.top > estimatedHeight + PEAK_RATE_TOOLTIP_MARGIN ? "top" : "bottom";
+  const top =
+    placement === "top"
+      ? Math.max(PEAK_RATE_TOOLTIP_MARGIN, rect.top - 10)
+      : Math.min(window.innerHeight - PEAK_RATE_TOOLTIP_MARGIN, rect.bottom + 10);
+  const arrowLeft = Math.min(Math.max(16, anchorCenter - left), width - 16);
+
+  peakRateTooltip.value = {
+    group,
+    placement,
+    style: {
+      left: `${left}px`,
+      top: `${top}px`,
+      width: `${width}px`,
+      maxHeight: `${Math.max(128, window.innerHeight - PEAK_RATE_TOOLTIP_MARGIN * 2)}px`,
+      overflowY: "auto",
+    },
+    arrowStyle: {
+      left: `${arrowLeft}px`,
+    },
+  };
+};
+
+const hideGroupPeakRateTooltip = () => {
+  peakRateTooltip.value = null;
+};
 
 if (typeof window !== "undefined") {
   loadSavedColumns();
@@ -5228,10 +5404,14 @@ onMounted(() => {
   loadGroups();
   loadModelsListCandidates("create", 0, createForm.platform);
   document.addEventListener("click", handleClickOutside);
+  window.addEventListener("resize", hideGroupPeakRateTooltip);
+  window.addEventListener("scroll", hideGroupPeakRateTooltip, true);
 });
 
 onUnmounted(() => {
   document.removeEventListener("click", handleClickOutside);
+  window.removeEventListener("resize", hideGroupPeakRateTooltip);
+  window.removeEventListener("scroll", hideGroupPeakRateTooltip, true);
   accountSearchRunner.clearAll();
   clearAllAccountSearchState();
 });

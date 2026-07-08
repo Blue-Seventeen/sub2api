@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 
@@ -16,6 +16,7 @@ vi.mock('vue-i18n', async () => {
         if (key === 'common.peakRateCompactSingle') return `Peak x${params?.multiplier}`
         if (key === 'common.peakRateCompactMultiple') return `Peak ${params?.count} windows`
         if (key === 'common.peakRateTooltip') return `Peak rate: ${params?.window}`
+        if (key === 'common.peakRateImageNote') return '; all billing modes include the peak multiplier'
         return key
       },
     }),
@@ -65,7 +66,11 @@ const makeGroup = (overrides: Partial<AdminGroup> = {}): AdminGroup => ({
 })
 
 describe('GroupSelector', () => {
-  it('shows peak-rate windows compactly and keeps full details in the badge tooltip', () => {
+  afterEach(() => {
+    document.body.innerHTML = ''
+  })
+
+  it('shows peak-rate windows compactly and keeps full details in the badge tooltip', async () => {
     const wrapper = mount(GroupSelector, {
       props: {
         modelValue: [],
@@ -81,6 +86,7 @@ describe('GroupSelector', () => {
         stubs: {
           Icon: true,
           PlatformIcon: true,
+          Teleport: true,
         },
       },
     })
@@ -91,11 +97,13 @@ describe('GroupSelector', () => {
     expect(text).not.toContain('09:00-12:00')
     expect(text).not.toContain('18:00-22:00')
 
-    const peakTitle = wrapper
-      .findAll('[title]')
-      .map((node) => node.attributes('title') ?? '')
-      .find((title) => title.includes('09:00-12:00'))
+    const peakPill = wrapper.get('[data-test="group-badge-peak-rate"]')
+    expect(peakPill.attributes('title')).toBeUndefined()
+    await peakPill.trigger('mouseenter')
+    const windowLines = wrapper.findAll('[data-test="peak-rate-window"]')
 
-    expect(peakTitle).toContain('18:00-22:00')
+    expect(windowLines).toHaveLength(2)
+    expect(windowLines[0].text()).toBe('09:00-12:00 ×1.5')
+    expect(windowLines[1].text()).toBe('18:00-22:00 ×2')
   })
 })

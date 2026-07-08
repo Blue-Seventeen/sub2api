@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 
@@ -16,6 +16,7 @@ vi.mock('vue-i18n', async () => {
         if (key === 'common.peakRateCompactSingle') return `Peak x${params?.multiplier}`
         if (key === 'common.peakRateCompactMultiple') return `Peak ${params?.count} windows`
         if (key === 'common.peakRateTooltip') return `Peak rate: ${params?.window}`
+        if (key === 'common.peakRateImageNote') return '; all billing modes include the peak multiplier'
         return key
       },
     }),
@@ -28,11 +29,16 @@ const mountBadge = (props: Record<string, unknown>) => mount(GroupBadge, {
     plugins: [createPinia()],
     stubs: {
       PlatformIcon: true,
+      Teleport: true,
     },
   },
 })
 
 describe('GroupBadge', () => {
+  afterEach(() => {
+    document.body.innerHTML = ''
+  })
+
   it('highlights effective rate when it differs from the default rate', () => {
     const wrapper = mountBadge({
       name: 'vip-group',
@@ -59,7 +65,7 @@ describe('GroupBadge', () => {
     expect(wrapper.find('.line-through').exists()).toBe(false)
   })
 
-  it('shows a compact single peak window with a full tooltip by default', () => {
+  it('shows a compact single peak window with a full tooltip by default', async () => {
     const wrapper = mountBadge({
       name: 'peak-group',
       platform: 'openai',
@@ -71,12 +77,21 @@ describe('GroupBadge', () => {
     expect(wrapper.text()).toContain('Peak x1.5')
     expect(wrapper.text()).not.toContain('09:00-12:00')
 
-    const peakBadge = wrapper.find('[title*="09:00-12:00"]')
+    const peakBadge = wrapper.get('[data-test="group-badge-peak-rate"]')
+    expect(peakBadge.attributes('title')).toBeUndefined()
+    await peakBadge.trigger('mouseenter')
+    const tooltip = wrapper.get('[data-test="peak-rate-tooltip"]')
+    const windowLines = tooltip.findAll('[data-test="peak-rate-window"]')
+
     expect(peakBadge.exists()).toBe(true)
-    expect(peakBadge.attributes('title')).toContain('Peak rate:')
+    expect(tooltip.classes()).toContain('fixed')
+    expect(tooltip.classes()).toContain('z-[9999]')
+    expect(tooltip.text()).toContain('Peak rate:')
+    expect(windowLines).toHaveLength(1)
+    expect(windowLines[0].text()).toBe('09:00-12:00 ×1.5')
   })
 
-  it('summarizes multiple peak windows in compact mode', () => {
+  it('summarizes multiple peak windows in compact mode', async () => {
     const wrapper = mountBadge({
       name: 'multi-peak-group',
       platform: 'openai',
@@ -92,8 +107,12 @@ describe('GroupBadge', () => {
     expect(wrapper.text()).not.toContain('09:00-12:00')
     expect(wrapper.text()).not.toContain('18:00-22:00')
 
-    const title = wrapper.find('[title*="09:00-12:00"]').attributes('title')
-    expect(title).toContain('18:00-22:00')
+    const peakBadge = wrapper.get('[data-test="group-badge-peak-rate"]')
+    await peakBadge.trigger('mouseenter')
+    const windowLines = wrapper.findAll('[data-test="peak-rate-window"]')
+    expect(windowLines).toHaveLength(2)
+    expect(windowLines[0].text()).toBe('09:00-12:00 ×1.5')
+    expect(windowLines[1].text()).toBe('18:00-22:00 ×2')
   })
 
   it('shows full peak windows when full mode is requested', () => {
