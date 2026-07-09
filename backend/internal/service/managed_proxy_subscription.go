@@ -52,7 +52,17 @@ var managedProxySubscriptionBlockedCIDRs = mustParseManagedProxySubscriptionCIDR
 	"ff00::/8",
 })
 
-func FetchProxySubscriptionNodes(ctx context.Context, subscriptionURL string) ([]ProxySubscriptionNode, error) {
+// ParsedProxySubscription 保存从 Clash/Mihomo 订阅解析出的节点与顶层 DNS 配置。
+type ParsedProxySubscription struct {
+	Nodes []ProxySubscriptionNode
+	// RawDNSConfig 是订阅顶层 dns 配置的 YAML 文本（保留完整 map，含 nameserver-policy）。
+	// 订阅不含 dns 时为空字符串。
+	RawDNSConfig string
+}
+
+// FetchProxySubscription 拉取订阅并解析出节点与 DNS 配置。
+// 订阅 URL 的 SSRF 校验（validateManagedProxySubscriptionURL + 定制 DialContext）保持不变。
+func FetchProxySubscription(ctx context.Context, subscriptionURL string) (*ParsedProxySubscription, error) {
 	if err := validateHTTPURL(subscriptionURL, "subscription_url"); err != nil {
 		return nil, err
 	}
@@ -80,7 +90,16 @@ func FetchProxySubscriptionNodes(ctx context.Context, subscriptionURL string) ([
 	if len(body) > maxManagedProxySubscriptionBytes {
 		return nil, errors.New("subscription is too large")
 	}
-	return ParseProxySubscriptionNodes(body)
+	return ParseProxySubscription(body)
+}
+
+// FetchProxySubscriptionNodes 保留旧签名，只返回解析出的节点。
+func FetchProxySubscriptionNodes(ctx context.Context, subscriptionURL string) ([]ProxySubscriptionNode, error) {
+	parsed, err := FetchProxySubscription(ctx, subscriptionURL)
+	if err != nil {
+		return nil, err
+	}
+	return parsed.Nodes, nil
 }
 
 func managedProxySubscriptionHTTPClient() *http.Client {
@@ -202,9 +221,21 @@ func mustParseManagedProxySubscriptionCIDRs(values []string) []*net.IPNet {
 	return cidrs
 }
 
+// ParseProxySubscriptionNodes 保留旧签名，只返回解析出的节点。
 func ParseProxySubscriptionNodes(data []byte) ([]ProxySubscriptionNode, error) {
+	parsed, err := ParseProxySubscription(data)
+	if err != nil {
+		return nil, err
+	}
+	return parsed.Nodes, nil
+}
+
+// ParseProxySubscription 解析 Clash/Mihomo 订阅的 proxies 与顶层 dns 配置。
+// 顶层 dns 完整保留（re-marshal 为 YAML），后续用于恢复订阅自带的 nameserver-policy。
+func ParseProxySubscription(data []byte) (*ParsedProxySubscription, error) {
 	var doc struct {
 		Proxies []map[string]any `yaml:"proxies"`
+		DNS     map[string]any   `yaml:"dns"`
 	}
 	if err := yaml.Unmarshal(data, &doc); err != nil {
 		return nil, fmt.Errorf("parse clash subscription: %w", err)
@@ -232,7 +263,16 @@ func ParseProxySubscriptionNodes(data []byte) ([]ProxySubscriptionNode, error) {
 	if len(nodes) == 0 {
 		return nil, errors.New("subscription contains no usable Clash proxies")
 	}
-	return nodes, nil
+
+	parsed := &ParsedProxySubscription{Nodes: nodes}
+	if len(doc.DNS) > 0 {
+		rawDNS, err := yaml.Marshal(doc.DNS)
+		if err != nil {
+			return nil, fmt.Errorf("encode subscription dns config: %w", err)
+		}
+		parsed.RawDNSConfig = string(rawDNS)
+	}
+	return parsed, nil
 }
 
 func proxySubscriptionNodeFromConfig(raw map[string]any) (ProxySubscriptionNode, bool, error) {
@@ -249,7 +289,7 @@ func proxySubscriptionNodeFromConfig(raw map[string]any) (ProxySubscriptionNode,
 	if port <= 0 || port > 65535 {
 		return ProxySubscriptionNode{}, false, fmt.Errorf("managed proxy node %q has invalid port", name)
 	}
-	if err := validateManagedProxyNodeServer(context.Background(), server); err != nil {
+	if err := validateManagedProxyNodeServer(server); err != nil {
 		return ProxySubscriptionNode{}, false, fmt.Errorf("managed proxy node %q: %w", name, err)
 	}
 
@@ -270,7 +310,7 @@ func proxySubscriptionNodeFromConfig(raw map[string]any) (ProxySubscriptionNode,
 	}, true, nil
 }
 
-func validateManagedProxyNodeConfig(ctx context.Context, nodeName string, raw map[string]any) error {
+func validateManagedProxyNodeConfig(nodeName string, raw map[string]any) error {
 	server := strings.TrimSpace(proxySubscriptionConfigString(raw["server"]))
 	if server == "" {
 		return fmt.Errorf("managed proxy node %s is missing server", nodeName)
@@ -279,19 +319,36 @@ func validateManagedProxyNodeConfig(ctx context.Context, nodeName string, raw ma
 	if port <= 0 || port > 65535 {
 		return fmt.Errorf("managed proxy node %s has invalid port", nodeName)
 	}
-	if err := validateManagedProxyNodeServer(ctx, server); err != nil {
+	if err := validateManagedProxyNodeServer(server); err != nil {
 		return fmt.Errorf("managed proxy node %s: %w", nodeName, err)
 	}
 	return nil
 }
 
-func validateManagedProxyNodeServer(ctx context.Context, server string) error {
+// validateManagedProxyNodeServer 校验节点 server。
+// 说明：节点 server 不同于订阅 URL，不能对域名强制走系统 DNS 判定 —— 某些订阅依赖
+// 自带的 dns.nameserver-policy 才能把节点域名解析到真实公网 IP，系统 DNS 可能返回
+// 内网/loopback 占位地址（如 127.127.127.5）。因此：
+//   - 字面私网/loopback/元数据/保留 IP 仍然拒绝（防止明显的内网直连）；
+//   - localhost 及其子域拒绝；
+//   - 其余域名一律放行，交由 Mihomo 按订阅 DNS policy 解析。
+//
+// 订阅 URL 自身的 SSRF 防护仍在 validateManagedProxySubscriptionURL 中保留，未放宽。
+func validateManagedProxyNodeServer(server string) error {
 	server = strings.TrimSpace(server)
 	if server == "" {
 		return errors.New("proxy node server is required")
 	}
-	if _, err := resolveManagedProxyNodeServer(ctx, server); err != nil {
-		return fmt.Errorf("proxy node server is not allowed: %w", err)
+	host := strings.Trim(server, "[]")
+	if ip := net.ParseIP(host); ip != nil {
+		if !isManagedProxySubscriptionAllowedIP(ip) {
+			return fmt.Errorf("proxy node server is not allowed: %s", ip.String())
+		}
+		return nil
+	}
+	lower := strings.ToLower(host)
+	if lower == "localhost" || strings.HasSuffix(lower, ".localhost") {
+		return fmt.Errorf("proxy node server is not allowed: %s", host)
 	}
 	return nil
 }

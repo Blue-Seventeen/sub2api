@@ -30,19 +30,23 @@ var (
 )
 
 type ProxySubscription struct {
-	ID                 int64                   `json:"id"`
-	Name               string                  `json:"name"`
-	SubscriptionURL    string                  `json:"subscription_url"`
-	Status             string                  `json:"status"`
-	RefreshIntervalSec int                     `json:"refresh_interval_sec"`
-	TestURL            string                  `json:"test_url"`
-	Revision           int64                   `json:"revision"`
-	LastError          string                  `json:"last_error,omitempty"`
-	ProxyID            *int64                  `json:"proxy_id,omitempty"`
-	ProxyIDs           []int64                 `json:"proxy_ids,omitempty"`
-	Nodes              []ProxySubscriptionNode `json:"nodes,omitempty"`
-	CreatedAt          time.Time               `json:"created_at"`
-	UpdatedAt          time.Time               `json:"updated_at"`
+	ID                 int64  `json:"id"`
+	Name               string `json:"name"`
+	SubscriptionURL    string `json:"subscription_url"`
+	Status             string `json:"status"`
+	RefreshIntervalSec int    `json:"refresh_interval_sec"`
+	TestURL            string `json:"test_url"`
+	Revision           int64  `json:"revision"`
+	LastError          string `json:"last_error,omitempty"`
+	// RawDNSConfig 保存订阅顶层 dns 配置（YAML，尤其是 nameserver-policy）。
+	// 用于在生成 Mihomo runtime config 时恢复订阅自带的 DNS 策略解析节点域名；
+	// 不对外暴露，避免泄露订阅自带的 DNS 服务器地址。
+	RawDNSConfig string                  `json:"-"`
+	ProxyID      *int64                  `json:"proxy_id,omitempty"`
+	ProxyIDs     []int64                 `json:"proxy_ids,omitempty"`
+	Nodes        []ProxySubscriptionNode `json:"nodes,omitempty"`
+	CreatedAt    time.Time               `json:"created_at"`
+	UpdatedAt    time.Time               `json:"updated_at"`
 }
 
 type ProxySubscriptionNode struct {
@@ -101,7 +105,7 @@ type ProxySubscriptionRepository interface {
 	UpdateWithNodes(ctx context.Context, sub *ProxySubscription, nodes []ProxySubscriptionNode) error
 	DeleteWithProxy(ctx context.Context, id int64) error
 	IncrementRevision(ctx context.Context, id int64) (*ProxySubscription, error)
-	SyncNodes(ctx context.Context, subscriptionID int64, nodes []ProxySubscriptionNode) ([]Proxy, error)
+	SyncNodes(ctx context.Context, subscriptionID int64, rawDNSConfig string, nodes []ProxySubscriptionNode) ([]Proxy, error)
 	GetNodeByProxyID(ctx context.Context, proxyID int64) (*ProxySubscriptionNode, error)
 	SetNodeStatusByProxyID(ctx context.Context, proxyID int64, status string) error
 	ListProxyIDsBySubscriptionID(ctx context.Context, subscriptionID int64) ([]int64, error)
