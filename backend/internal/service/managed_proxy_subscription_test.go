@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -76,5 +77,93 @@ proxies:
 `))
 	if err == nil {
 		t.Fatal("expected metadata node server to be blocked")
+	}
+}
+
+// TestParseProxySubscriptionPreservesDNSNameserverPolicy 覆盖验收标准 1/5a/5b：
+// 带 dns.nameserver-policy 且节点为域名的订阅可以解析成功，即使系统 DNS 会把该域名
+// 解析成 loopback 占位地址 —— 因为域名节点不再走系统 DNS 判定，而是保留 DNS policy
+// 交给 Mihomo 解析。
+func TestParseProxySubscriptionPreservesDNSNameserverPolicy(t *testing.T) {
+	parsed, err := ParseProxySubscription([]byte(`
+dns:
+  enable: true
+  nameserver-policy:
+    "+.entry.example.qpon": tcp://dns.example:8080
+proxies:
+  - name: HK-01
+    type: ss
+    server: t.hk01.entry.example.qpon
+    port: 8388
+    cipher: aes-128-gcm
+    password: remote-secret
+`))
+	if err != nil {
+		t.Fatalf("parse subscription with dns policy: %v", err)
+	}
+	if len(parsed.Nodes) != 1 {
+		t.Fatalf("node count mismatch: got=%d want=1", len(parsed.Nodes))
+	}
+	if parsed.Nodes[0].Server != "t.hk01.entry.example.qpon" {
+		t.Fatalf("unexpected node server: %q", parsed.Nodes[0].Server)
+	}
+	if !strings.Contains(parsed.RawDNSConfig, "nameserver-policy") {
+		t.Fatalf("raw dns config missing nameserver-policy: %q", parsed.RawDNSConfig)
+	}
+	if !strings.Contains(parsed.RawDNSConfig, "entry.example.qpon") {
+		t.Fatalf("raw dns config missing policy domain: %q", parsed.RawDNSConfig)
+	}
+}
+
+// TestParseProxySubscriptionWithoutDNSHasEmptyConfig 确认无 dns 段的订阅不会产生 DNS 配置。
+func TestParseProxySubscriptionWithoutDNSHasEmptyConfig(t *testing.T) {
+	parsed, err := ParseProxySubscription([]byte(`
+proxies:
+  - name: HK-01
+    type: ss
+    server: 8.8.8.8
+    port: 8388
+    cipher: aes-128-gcm
+    password: remote-secret
+`))
+	if err != nil {
+		t.Fatalf("parse subscription without dns: %v", err)
+	}
+	if parsed.RawDNSConfig != "" {
+		t.Fatalf("expected empty raw dns config, got: %q", parsed.RawDNSConfig)
+	}
+}
+
+// TestValidateManagedProxyNodeServer 覆盖验收标准 2/5c：域名放行，字面私网/loopback/元数据 IP 拒绝。
+func TestValidateManagedProxyNodeServer(t *testing.T) {
+	allowed := []string{
+		"t.hk01.entry.example.qpon",
+		"example.com",
+		"8.8.8.8",
+		"1.1.1.1",
+		"2606:4700:4700::1111",
+	}
+	for _, server := range allowed {
+		if err := validateManagedProxyNodeServer(server); err != nil {
+			t.Errorf("expected server %q to be allowed, got: %v", server, err)
+		}
+	}
+
+	blocked := []string{
+		"127.0.0.1",
+		"127.127.127.5",
+		"10.0.0.1",
+		"192.168.1.10",
+		"172.16.0.1",
+		"169.254.169.254",
+		"::1",
+		"localhost",
+		"foo.localhost",
+		"",
+	}
+	for _, server := range blocked {
+		if err := validateManagedProxyNodeServer(server); err == nil {
+			t.Errorf("expected server %q to be blocked", server)
+		}
 	}
 }

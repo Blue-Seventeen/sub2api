@@ -390,7 +390,7 @@ func (s *proxySubscriptionRepoStub) DeleteWithProxy(ctx context.Context, id int6
 func (s *proxySubscriptionRepoStub) IncrementRevision(ctx context.Context, id int64) (*ProxySubscription, error) {
 	panic("unexpected IncrementRevision call")
 }
-func (s *proxySubscriptionRepoStub) SyncNodes(ctx context.Context, subscriptionID int64, nodes []ProxySubscriptionNode) ([]Proxy, error) {
+func (s *proxySubscriptionRepoStub) SyncNodes(ctx context.Context, subscriptionID int64, rawDNSConfig string, nodes []ProxySubscriptionNode) ([]Proxy, error) {
 	panic("unexpected SyncNodes call")
 }
 func (s *proxySubscriptionRepoStub) GetNodeByProxyID(ctx context.Context, proxyID int64) (*ProxySubscriptionNode, error) {
