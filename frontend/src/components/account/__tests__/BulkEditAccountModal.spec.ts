@@ -102,7 +102,7 @@ describe('BulkEditAccountModal', () => {
     } as any)
   })
 
-  it('antigravity 白名单包含 Gemini 图片模型且过滤掉普通 GPT 模型', async () => {
+  it('includes Gemini image models in Antigravity whitelist and filters GPT models', async () => {
     const wrapper = mountModal()
     const selector = wrapper.findComponent(ModelWhitelistSelector)
     expect(selector.exists()).toBe(true)
@@ -114,7 +114,7 @@ describe('BulkEditAccountModal', () => {
     expect(wrapper.text()).not.toContain('gpt-5.3-codex')
   })
 
-  it('antigravity 映射预设包含图片映射并过滤 OpenAI 预设', async () => {
+  it('includes image mappings in Antigravity presets and filters OpenAI presets', async () => {
     const wrapper = mountModal()
 
     const mappingTab = wrapper.findAll('button').find((btn) => btn.text().includes('admin.accounts.modelMapping'))
@@ -127,7 +127,7 @@ describe('BulkEditAccountModal', () => {
     expect(text).not.toContain('GPT-5.3 Codex Spark')
   })
 
-  it('仅勾选模型限制且白名单留空时，应提交空 model_mapping 以支持所有模型', async () => {
+  it('submits null model_mapping when model restriction is enabled with an empty whitelist', async () => {
     const wrapper = mountModal({
       selectedPlatforms: ['anthropic'],
       selectedTypes: ['apikey']
@@ -145,7 +145,7 @@ describe('BulkEditAccountModal', () => {
     })
   })
 
-  it('OpenAI 账号批量编辑可开启自动透传', async () => {
+  it('enables OpenAI account passthrough in bulk edit', async () => {
     const wrapper = mountModal({
       selectedPlatforms: ['openai'],
       selectedTypes: ['oauth']
@@ -164,7 +164,7 @@ describe('BulkEditAccountModal', () => {
     })
   })
 
-  it('OpenAI OAuth 批量编辑应提交 OAuth 专属 WS mode 字段（含 http_bridge）', async () => {
+  it('submits OpenAI OAuth websocket mode including http_bridge in bulk edit', async () => {
     const wrapper = mountModal({
       selectedPlatforms: ['openai'],
       selectedTypes: ['oauth']
@@ -184,7 +184,7 @@ describe('BulkEditAccountModal', () => {
     })
   })
 
-  it('OpenAI API Key 批量编辑不显示 WS mode 入口', () => {
+  it('hides websocket mode entry for OpenAI API key bulk edit', () => {
     const wrapper = mountModal({
       selectedPlatforms: ['openai'],
       selectedTypes: ['apikey']
@@ -193,7 +193,7 @@ describe('BulkEditAccountModal', () => {
     expect(wrapper.find('#bulk-edit-openai-ws-mode-enabled').exists()).toBe(false)
   })
 
-  it('OpenAI OAuth 批量编辑应提交 codex_cli_only 字段', async () => {
+  it('submits codex_cli_only for OpenAI OAuth bulk edit', async () => {
     const wrapper = mountModal({
       selectedPlatforms: ['openai'],
       selectedTypes: ['oauth']
@@ -212,7 +212,7 @@ describe('BulkEditAccountModal', () => {
     })
   })
 
-  it('OpenAI OAuth 批量编辑应提交 codex_cli_only_allow_app_server 字段（需同时开启父开关）', async () => {
+  it('submits codex_cli_only_allow_app_server when parent switch is enabled', async () => {
     const wrapper = mountModal({
       selectedPlatforms: ['openai'],
       selectedTypes: ['oauth']
@@ -235,14 +235,13 @@ describe('BulkEditAccountModal', () => {
     })
   })
 
-  it('未同时开启父开关时不应写入 codex_cli_only_allow_app_server', async () => {
+  it('does not submit codex_cli_only_allow_app_server without the parent switch', async () => {
     const wrapper = mountModal({
       selectedPlatforms: ['openai'],
       selectedTypes: ['oauth']
     })
 
-    // 仅开启子开关、不批量设置父开关 codex_cli_only：不应写入孤立字段，也不应调用接口
-    await wrapper.get('#bulk-edit-openai-codex-app-server-enabled').setValue(true)
+    // 仅开启子开关、不批量设置父开�?codex_cli_only：不应写入孤立字段，也不应调用接�?    await wrapper.get('#bulk-edit-openai-codex-app-server-enabled').setValue(true)
     await wrapper.get('#bulk-edit-openai-codex-app-server-toggle').trigger('click')
     await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
     await flushPromises()
@@ -250,7 +249,7 @@ describe('BulkEditAccountModal', () => {
     expect(adminAPI.accounts.bulkUpdate).not.toHaveBeenCalled()
   })
 
-  it('OpenAI API Key 批量编辑应提交 API Key 专属 WS mode 字段', async () => {
+  it('submits API-key websocket mode for OpenAI API key bulk edit', async () => {
     const wrapper = mountModal({
       selectedPlatforms: ['openai'],
       selectedTypes: ['apikey']
@@ -270,7 +269,7 @@ describe('BulkEditAccountModal', () => {
     })
   })
 
-  it('筛选 OpenAI 账号批量编辑应提交 Compact 模式和专属模型映射', async () => {
+  it('submits Compact mode and dedicated model mappings for filtered OpenAI bulk edit', async () => {
     const wrapper = mountModal({
       accountIds: [],
       selectedPlatforms: [],
@@ -308,7 +307,7 @@ describe('BulkEditAccountModal', () => {
     })
   })
 
-  it('OpenAI 账号批量编辑可关闭自动透传', async () => {
+  it('disables OpenAI account passthrough in bulk edit', async () => {
     const wrapper = mountModal({
       selectedPlatforms: ['openai'],
       selectedTypes: ['apikey']
@@ -327,7 +326,7 @@ describe('BulkEditAccountModal', () => {
     })
   })
 
-  it('开启 OpenAI 自动透传时不再同时提交模型限制', async () => {
+  it('does not submit model restrictions when OpenAI passthrough is enabled', async () => {
     const wrapper = mountModal({
       selectedPlatforms: ['openai'],
       selectedTypes: ['oauth']
@@ -349,7 +348,7 @@ describe('BulkEditAccountModal', () => {
   })
 
 
-  it('批量编辑可选择自动最优代理并提交 auto_select_proxy', async () => {
+  it('submits auto_select_proxy when choosing automatic best proxy in bulk edit', async () => {
     const wrapper = mountModal({
       proxies: [{ id: 9, name: 'proxy-9' }]
     })

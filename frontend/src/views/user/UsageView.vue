@@ -236,6 +236,7 @@ import {
   BILLING_MODE_IMAGE,
   BILLING_MODE_PER_REQUEST,
   BILLING_MODE_TOKEN,
+  BILLING_MODE_VIDEO,
   getBillingModeLabel,
 } from '@/utils/billingMode'
 import { textOutputTokens } from '@/utils/imageUsage'
@@ -398,6 +399,7 @@ const billingModeOptions = computed<SelectOption[]>(() => [
   { value: BILLING_MODE_IMAGE, label: t('admin.usage.billingModeImage') },
   { value: BILLING_MODE_DURATION, label: t('admin.usage.billingModeDuration') },
   { value: BILLING_MODE_CHARACTER, label: t('admin.usage.billingModeCharacter') },
+  { value: BILLING_MODE_VIDEO, label: t('admin.usage.billingModeVideo') },
 ])
 
 const apiKeys = ref<ApiKey[]>([])
@@ -612,7 +614,7 @@ const getRequestTypeExportText = (log: UsageLog): string => {
 const getDisplayBillingMode = (
   row: Pick<UsageLog, 'billing_mode' | 'image_count'> | null | undefined
 ): string | null | undefined => {
-  if ((row?.image_count ?? 0) > 0 && row?.billing_mode !== BILLING_MODE_TOKEN) {
+  if ((row?.image_count ?? 0) > 0 && row?.billing_mode !== BILLING_MODE_TOKEN && row?.billing_mode !== BILLING_MODE_VIDEO) {
     return row?.billing_mode ?? BILLING_MODE_IMAGE
   }
   return row?.billing_mode
@@ -727,8 +729,7 @@ const allColumns = computed<Column[]>(() => [
   { key: 'billing_mode', label: t('admin.usage.billingMode'), sortable: false },
   { key: 'tokens', label: t('usage.tokens'), sortable: false },
   { key: 'cost', label: t('usage.cost'), sortable: false },
-  { key: 'first_token', label: t('usage.firstToken'), sortable: false },
-  { key: 'duration', label: t('usage.duration'), sortable: false },
+  { key: 'latency', label: t('usage.latency'), sortable: false },
   { key: 'created_at', label: t('usage.time'), sortable: true },
   { key: 'user_agent', label: t('usage.userAgent'), sortable: false },
 ])

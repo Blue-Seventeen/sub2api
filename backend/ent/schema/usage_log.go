@@ -118,6 +118,8 @@ func (UsageLog) Fields() []ent.Field {
 		// 其他字段
 		field.Int8("billing_type").
 			Default(0),
+		field.Int16("request_type").
+			Default(0),
 		field.Bool("stream").
 			Default(false),
 		field.Int("duration_ms").
@@ -161,7 +163,62 @@ func (UsageLog) Fields() []ent.Field {
 		field.JSON("image_size_breakdown", map[string]int{}).
 			Optional().
 			SchemaType(map[string]string{dialect.Postgres: "jsonb"}),
+		field.Int("request_count").
+			Default(0),
+		field.Int("task_count").
+			Default(0),
+		field.Bool("usage_estimated").
+			Default(false),
+		field.String("billable_unit_type").
+			MaxLen(32).
+			Optional().
+			Nillable(),
+
+		// 视频生成字段（Grok 视频按秒计费；billing_mode 走 token/其他模式时这些列仍标记视频用量）
+		field.Int("video_count").
+			Default(0).
+			Comment("视频生成数量；>0 表示本行是视频生成用量"),
+		field.String("video_resolution").
+			MaxLen(10).
+			Optional().
+			Nillable().
+			Comment("计费用视频分辨率 480p/720p/1080p"),
+		field.Int("video_duration_seconds").
+			Optional().
+			Nillable().
+			Comment("提交时请求的视频时长（秒），按秒计费的乘数"),
 		// Cache TTL Override 标记（管理员强制替换了缓存 TTL 计费）
+		field.String("service_tier").
+			MaxLen(16).
+			Optional().
+			Nillable(),
+		field.String("reasoning_effort").
+			MaxLen(20).
+			Optional().
+			Nillable(),
+		field.String("inbound_endpoint").
+			MaxLen(128).
+			Optional().
+			Nillable(),
+		field.String("upstream_endpoint").
+			MaxLen(128).
+			Optional().
+			Nillable(),
+		field.String("client_profile").
+			MaxLen(64).
+			Optional().
+			Nillable(),
+		field.String("compatibility_route").
+			MaxLen(128).
+			Optional().
+			Nillable(),
+		field.String("fallback_chain").
+			Optional().
+			Nillable(),
+		field.String("upstream_transport").
+			MaxLen(64).
+			Optional().
+			Nillable(),
 		field.Bool("cache_ttl_overridden").
 			Default(false),
 

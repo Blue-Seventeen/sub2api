@@ -74,6 +74,8 @@ const (
 	FieldAccountRateMultiplier = "account_rate_multiplier"
 	// FieldBillingType holds the string denoting the billing_type field in the database.
 	FieldBillingType = "billing_type"
+	// FieldRequestType holds the string denoting the request_type field in the database.
+	FieldRequestType = "request_type"
 	// FieldStream holds the string denoting the stream field in the database.
 	FieldStream = "stream"
 	// FieldDurationMs holds the string denoting the duration_ms field in the database.
@@ -100,6 +102,36 @@ const (
 	FieldImageSizeSource = "image_size_source"
 	// FieldImageSizeBreakdown holds the string denoting the image_size_breakdown field in the database.
 	FieldImageSizeBreakdown = "image_size_breakdown"
+	// FieldRequestCount holds the string denoting the request_count field in the database.
+	FieldRequestCount = "request_count"
+	// FieldTaskCount holds the string denoting the task_count field in the database.
+	FieldTaskCount = "task_count"
+	// FieldUsageEstimated holds the string denoting the usage_estimated field in the database.
+	FieldUsageEstimated = "usage_estimated"
+	// FieldBillableUnitType holds the string denoting the billable_unit_type field in the database.
+	FieldBillableUnitType = "billable_unit_type"
+	// FieldVideoCount holds the string denoting the video_count field in the database.
+	FieldVideoCount = "video_count"
+	// FieldVideoResolution holds the string denoting the video_resolution field in the database.
+	FieldVideoResolution = "video_resolution"
+	// FieldVideoDurationSeconds holds the string denoting the video_duration_seconds field in the database.
+	FieldVideoDurationSeconds = "video_duration_seconds"
+	// FieldServiceTier holds the string denoting the service_tier field in the database.
+	FieldServiceTier = "service_tier"
+	// FieldReasoningEffort holds the string denoting the reasoning_effort field in the database.
+	FieldReasoningEffort = "reasoning_effort"
+	// FieldInboundEndpoint holds the string denoting the inbound_endpoint field in the database.
+	FieldInboundEndpoint = "inbound_endpoint"
+	// FieldUpstreamEndpoint holds the string denoting the upstream_endpoint field in the database.
+	FieldUpstreamEndpoint = "upstream_endpoint"
+	// FieldClientProfile holds the string denoting the client_profile field in the database.
+	FieldClientProfile = "client_profile"
+	// FieldCompatibilityRoute holds the string denoting the compatibility_route field in the database.
+	FieldCompatibilityRoute = "compatibility_route"
+	// FieldFallbackChain holds the string denoting the fallback_chain field in the database.
+	FieldFallbackChain = "fallback_chain"
+	// FieldUpstreamTransport holds the string denoting the upstream_transport field in the database.
+	FieldUpstreamTransport = "upstream_transport"
 	// FieldCacheTTLOverridden holds the string denoting the cache_ttl_overridden field in the database.
 	FieldCacheTTLOverridden = "cache_ttl_overridden"
 	// FieldCreatedAt holds the string denoting the created_at field in the database.
@@ -186,6 +218,7 @@ var Columns = []string{
 	FieldRateMultiplier,
 	FieldAccountRateMultiplier,
 	FieldBillingType,
+	FieldRequestType,
 	FieldStream,
 	FieldDurationMs,
 	FieldFirstTokenMs,
@@ -199,6 +232,21 @@ var Columns = []string{
 	FieldImageOutputSize,
 	FieldImageSizeSource,
 	FieldImageSizeBreakdown,
+	FieldRequestCount,
+	FieldTaskCount,
+	FieldUsageEstimated,
+	FieldBillableUnitType,
+	FieldVideoCount,
+	FieldVideoResolution,
+	FieldVideoDurationSeconds,
+	FieldServiceTier,
+	FieldReasoningEffort,
+	FieldInboundEndpoint,
+	FieldUpstreamEndpoint,
+	FieldClientProfile,
+	FieldCompatibilityRoute,
+	FieldFallbackChain,
+	FieldUpstreamTransport,
 	FieldCacheTTLOverridden,
 	FieldCreatedAt,
 }
@@ -260,6 +308,8 @@ var (
 	DefaultRateMultiplier float64
 	// DefaultBillingType holds the default value on creation for the "billing_type" field.
 	DefaultBillingType int8
+	// DefaultRequestType holds the default value on creation for the "request_type" field.
+	DefaultRequestType int16
 	// DefaultStream holds the default value on creation for the "stream" field.
 	DefaultStream bool
 	// UserAgentValidator is a validator for the "user_agent" field. It is called by the builders before save.
@@ -280,6 +330,32 @@ var (
 	ImageOutputSizeValidator func(string) error
 	// ImageSizeSourceValidator is a validator for the "image_size_source" field. It is called by the builders before save.
 	ImageSizeSourceValidator func(string) error
+	// DefaultRequestCount holds the default value on creation for the "request_count" field.
+	DefaultRequestCount int
+	// DefaultTaskCount holds the default value on creation for the "task_count" field.
+	DefaultTaskCount int
+	// DefaultUsageEstimated holds the default value on creation for the "usage_estimated" field.
+	DefaultUsageEstimated bool
+	// BillableUnitTypeValidator is a validator for the "billable_unit_type" field. It is called by the builders before save.
+	BillableUnitTypeValidator func(string) error
+	// DefaultVideoCount holds the default value on creation for the "video_count" field.
+	DefaultVideoCount int
+	// VideoResolutionValidator is a validator for the "video_resolution" field. It is called by the builders before save.
+	VideoResolutionValidator func(string) error
+	// ServiceTierValidator is a validator for the "service_tier" field. It is called by the builders before save.
+	ServiceTierValidator func(string) error
+	// ReasoningEffortValidator is a validator for the "reasoning_effort" field. It is called by the builders before save.
+	ReasoningEffortValidator func(string) error
+	// InboundEndpointValidator is a validator for the "inbound_endpoint" field. It is called by the builders before save.
+	InboundEndpointValidator func(string) error
+	// UpstreamEndpointValidator is a validator for the "upstream_endpoint" field. It is called by the builders before save.
+	UpstreamEndpointValidator func(string) error
+	// ClientProfileValidator is a validator for the "client_profile" field. It is called by the builders before save.
+	ClientProfileValidator func(string) error
+	// CompatibilityRouteValidator is a validator for the "compatibility_route" field. It is called by the builders before save.
+	CompatibilityRouteValidator func(string) error
+	// UpstreamTransportValidator is a validator for the "upstream_transport" field. It is called by the builders before save.
+	UpstreamTransportValidator func(string) error
 	// DefaultCacheTTLOverridden holds the default value on creation for the "cache_ttl_overridden" field.
 	DefaultCacheTTLOverridden bool
 	// DefaultCreatedAt holds the default value on creation for the "created_at" field.
@@ -444,6 +520,11 @@ func ByBillingType(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldBillingType, opts...).ToFunc()
 }
 
+// ByRequestType orders the results by the request_type field.
+func ByRequestType(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldRequestType, opts...).ToFunc()
+}
+
 // ByStream orders the results by the stream field.
 func ByStream(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldStream, opts...).ToFunc()
@@ -502,6 +583,81 @@ func ByImageOutputSize(opts ...sql.OrderTermOption) OrderOption {
 // ByImageSizeSource orders the results by the image_size_source field.
 func ByImageSizeSource(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldImageSizeSource, opts...).ToFunc()
+}
+
+// ByRequestCount orders the results by the request_count field.
+func ByRequestCount(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldRequestCount, opts...).ToFunc()
+}
+
+// ByTaskCount orders the results by the task_count field.
+func ByTaskCount(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldTaskCount, opts...).ToFunc()
+}
+
+// ByUsageEstimated orders the results by the usage_estimated field.
+func ByUsageEstimated(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldUsageEstimated, opts...).ToFunc()
+}
+
+// ByBillableUnitType orders the results by the billable_unit_type field.
+func ByBillableUnitType(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldBillableUnitType, opts...).ToFunc()
+}
+
+// ByVideoCount orders the results by the video_count field.
+func ByVideoCount(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldVideoCount, opts...).ToFunc()
+}
+
+// ByVideoResolution orders the results by the video_resolution field.
+func ByVideoResolution(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldVideoResolution, opts...).ToFunc()
+}
+
+// ByVideoDurationSeconds orders the results by the video_duration_seconds field.
+func ByVideoDurationSeconds(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldVideoDurationSeconds, opts...).ToFunc()
+}
+
+// ByServiceTier orders the results by the service_tier field.
+func ByServiceTier(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldServiceTier, opts...).ToFunc()
+}
+
+// ByReasoningEffort orders the results by the reasoning_effort field.
+func ByReasoningEffort(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldReasoningEffort, opts...).ToFunc()
+}
+
+// ByInboundEndpoint orders the results by the inbound_endpoint field.
+func ByInboundEndpoint(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldInboundEndpoint, opts...).ToFunc()
+}
+
+// ByUpstreamEndpoint orders the results by the upstream_endpoint field.
+func ByUpstreamEndpoint(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldUpstreamEndpoint, opts...).ToFunc()
+}
+
+// ByClientProfile orders the results by the client_profile field.
+func ByClientProfile(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldClientProfile, opts...).ToFunc()
+}
+
+// ByCompatibilityRoute orders the results by the compatibility_route field.
+func ByCompatibilityRoute(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCompatibilityRoute, opts...).ToFunc()
+}
+
+// ByFallbackChain orders the results by the fallback_chain field.
+func ByFallbackChain(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldFallbackChain, opts...).ToFunc()
+}
+
+// ByUpstreamTransport orders the results by the upstream_transport field.
+func ByUpstreamTransport(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldUpstreamTransport, opts...).ToFunc()
 }
 
 // ByCacheTTLOverridden orders the results by the cache_ttl_overridden field.

@@ -786,4 +786,5 @@ func TestGatewayServiceRecordUsage_MoonshotCompatibleFallbackEstimatesInputToken
 	require.NotNil(t, usageRepo.lastLog)
 	require.Equal(t, compatibleInputTokens, usageRepo.lastLog.InputTokens)
 	require.Equal(t, 200, usageRepo.lastLog.OutputTokens)
+	require.True(t, usageRepo.lastLog.UsageEstimated)
 }

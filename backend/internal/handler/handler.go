@@ -61,6 +61,7 @@ type Handlers struct {
 	PaymentWebhook     *PaymentWebhookHandler
 	AvailableChannel   *AvailableChannelHandler
 	Promotion          *PromotionHandler
+	BatchImage       *BatchImageHandler
 }
 
 // BuildInfo contains build-time information

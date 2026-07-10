@@ -83,6 +83,8 @@ type UsageLog struct {
 	AccountRateMultiplier *float64 `json:"account_rate_multiplier,omitempty"`
 	// BillingType holds the value of the "billing_type" field.
 	BillingType int8 `json:"billing_type,omitempty"`
+	// RequestType holds the value of the "request_type" field.
+	RequestType int16 `json:"request_type,omitempty"`
 	// Stream holds the value of the "stream" field.
 	Stream bool `json:"stream,omitempty"`
 	// DurationMs holds the value of the "duration_ms" field.
@@ -109,6 +111,36 @@ type UsageLog struct {
 	ImageSizeSource *string `json:"image_size_source,omitempty"`
 	// ImageSizeBreakdown holds the value of the "image_size_breakdown" field.
 	ImageSizeBreakdown map[string]int `json:"image_size_breakdown,omitempty"`
+	// RequestCount holds the value of the "request_count" field.
+	RequestCount int `json:"request_count,omitempty"`
+	// TaskCount holds the value of the "task_count" field.
+	TaskCount int `json:"task_count,omitempty"`
+	// UsageEstimated holds the value of the "usage_estimated" field.
+	UsageEstimated bool `json:"usage_estimated,omitempty"`
+	// BillableUnitType holds the value of the "billable_unit_type" field.
+	BillableUnitType *string `json:"billable_unit_type,omitempty"`
+	// 视频生成数量；>0 表示本行是视频生成用量
+	VideoCount int `json:"video_count,omitempty"`
+	// 计费用视频分辨率 480p/720p/1080p
+	VideoResolution *string `json:"video_resolution,omitempty"`
+	// 提交时请求的视频时长（秒），按秒计费的乘数
+	VideoDurationSeconds *int `json:"video_duration_seconds,omitempty"`
+	// ServiceTier holds the value of the "service_tier" field.
+	ServiceTier *string `json:"service_tier,omitempty"`
+	// ReasoningEffort holds the value of the "reasoning_effort" field.
+	ReasoningEffort *string `json:"reasoning_effort,omitempty"`
+	// InboundEndpoint holds the value of the "inbound_endpoint" field.
+	InboundEndpoint *string `json:"inbound_endpoint,omitempty"`
+	// UpstreamEndpoint holds the value of the "upstream_endpoint" field.
+	UpstreamEndpoint *string `json:"upstream_endpoint,omitempty"`
+	// ClientProfile holds the value of the "client_profile" field.
+	ClientProfile *string `json:"client_profile,omitempty"`
+	// CompatibilityRoute holds the value of the "compatibility_route" field.
+	CompatibilityRoute *string `json:"compatibility_route,omitempty"`
+	// FallbackChain holds the value of the "fallback_chain" field.
+	FallbackChain *string `json:"fallback_chain,omitempty"`
+	// UpstreamTransport holds the value of the "upstream_transport" field.
+	UpstreamTransport *string `json:"upstream_transport,omitempty"`
 	// CacheTTLOverridden holds the value of the "cache_ttl_overridden" field.
 	CacheTTLOverridden bool `json:"cache_ttl_overridden,omitempty"`
 	// CreatedAt holds the value of the "created_at" field.
@@ -198,13 +230,13 @@ func (*UsageLog) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case usagelog.FieldImageSizeBreakdown:
 			values[i] = new([]byte)
-		case usagelog.FieldStream, usagelog.FieldCacheTTLOverridden:
+		case usagelog.FieldStream, usagelog.FieldUsageEstimated, usagelog.FieldCacheTTLOverridden:
 			values[i] = new(sql.NullBool)
 		case usagelog.FieldInputCost, usagelog.FieldOutputCost, usagelog.FieldCacheCreationCost, usagelog.FieldCacheReadCost, usagelog.FieldTotalCost, usagelog.FieldActualCost, usagelog.FieldRealActualCost, usagelog.FieldUnifiedRateMultiplier, usagelog.FieldRateMultiplier, usagelog.FieldAccountRateMultiplier:
 			values[i] = new(sql.NullFloat64)
-		case usagelog.FieldID, usagelog.FieldUserID, usagelog.FieldAPIKeyID, usagelog.FieldAccountID, usagelog.FieldChannelID, usagelog.FieldGroupID, usagelog.FieldSubscriptionID, usagelog.FieldInputTokens, usagelog.FieldOutputTokens, usagelog.FieldCacheCreationTokens, usagelog.FieldCacheReadTokens, usagelog.FieldCacheCreation5mTokens, usagelog.FieldCacheCreation1hTokens, usagelog.FieldBillingType, usagelog.FieldDurationMs, usagelog.FieldFirstTokenMs, usagelog.FieldImageCount, usagelog.FieldBillableDurationSeconds, usagelog.FieldBillableCharacterCount:
+		case usagelog.FieldID, usagelog.FieldUserID, usagelog.FieldAPIKeyID, usagelog.FieldAccountID, usagelog.FieldChannelID, usagelog.FieldGroupID, usagelog.FieldSubscriptionID, usagelog.FieldInputTokens, usagelog.FieldOutputTokens, usagelog.FieldCacheCreationTokens, usagelog.FieldCacheReadTokens, usagelog.FieldCacheCreation5mTokens, usagelog.FieldCacheCreation1hTokens, usagelog.FieldBillingType, usagelog.FieldRequestType, usagelog.FieldDurationMs, usagelog.FieldFirstTokenMs, usagelog.FieldImageCount, usagelog.FieldBillableDurationSeconds, usagelog.FieldBillableCharacterCount, usagelog.FieldRequestCount, usagelog.FieldTaskCount, usagelog.FieldVideoCount, usagelog.FieldVideoDurationSeconds:
 			values[i] = new(sql.NullInt64)
-		case usagelog.FieldRequestID, usagelog.FieldModel, usagelog.FieldRequestedModel, usagelog.FieldUpstreamModel, usagelog.FieldModelMappingChain, usagelog.FieldBillingTier, usagelog.FieldBillingMode, usagelog.FieldUserAgent, usagelog.FieldIPAddress, usagelog.FieldImageSize, usagelog.FieldImageInputSize, usagelog.FieldImageOutputSize, usagelog.FieldImageSizeSource:
+		case usagelog.FieldRequestID, usagelog.FieldModel, usagelog.FieldRequestedModel, usagelog.FieldUpstreamModel, usagelog.FieldModelMappingChain, usagelog.FieldBillingTier, usagelog.FieldBillingMode, usagelog.FieldUserAgent, usagelog.FieldIPAddress, usagelog.FieldImageSize, usagelog.FieldImageInputSize, usagelog.FieldImageOutputSize, usagelog.FieldImageSizeSource, usagelog.FieldBillableUnitType, usagelog.FieldVideoResolution, usagelog.FieldServiceTier, usagelog.FieldReasoningEffort, usagelog.FieldInboundEndpoint, usagelog.FieldUpstreamEndpoint, usagelog.FieldClientProfile, usagelog.FieldCompatibilityRoute, usagelog.FieldFallbackChain, usagelog.FieldUpstreamTransport:
 			values[i] = new(sql.NullString)
 		case usagelog.FieldCreatedAt:
 			values[i] = new(sql.NullTime)
@@ -418,6 +450,12 @@ func (_m *UsageLog) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.BillingType = int8(value.Int64)
 			}
+		case usagelog.FieldRequestType:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field request_type", values[i])
+			} else if value.Valid {
+				_m.RequestType = int16(value.Int64)
+			}
 		case usagelog.FieldStream:
 			if value, ok := values[i].(*sql.NullBool); !ok {
 				return fmt.Errorf("unexpected type %T for field stream", values[i])
@@ -505,6 +543,107 @@ func (_m *UsageLog) assignValues(columns []string, values []any) error {
 				if err := json.Unmarshal(*value, &_m.ImageSizeBreakdown); err != nil {
 					return fmt.Errorf("unmarshal field image_size_breakdown: %w", err)
 				}
+			}
+		case usagelog.FieldRequestCount:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field request_count", values[i])
+			} else if value.Valid {
+				_m.RequestCount = int(value.Int64)
+			}
+		case usagelog.FieldTaskCount:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field task_count", values[i])
+			} else if value.Valid {
+				_m.TaskCount = int(value.Int64)
+			}
+		case usagelog.FieldUsageEstimated:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field usage_estimated", values[i])
+			} else if value.Valid {
+				_m.UsageEstimated = value.Bool
+			}
+		case usagelog.FieldBillableUnitType:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field billable_unit_type", values[i])
+			} else if value.Valid {
+				_m.BillableUnitType = new(string)
+				*_m.BillableUnitType = value.String
+			}
+		case usagelog.FieldVideoCount:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field video_count", values[i])
+			} else if value.Valid {
+				_m.VideoCount = int(value.Int64)
+			}
+		case usagelog.FieldVideoResolution:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field video_resolution", values[i])
+			} else if value.Valid {
+				_m.VideoResolution = new(string)
+				*_m.VideoResolution = value.String
+			}
+		case usagelog.FieldVideoDurationSeconds:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field video_duration_seconds", values[i])
+			} else if value.Valid {
+				_m.VideoDurationSeconds = new(int)
+				*_m.VideoDurationSeconds = int(value.Int64)
+			}
+		case usagelog.FieldServiceTier:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field service_tier", values[i])
+			} else if value.Valid {
+				_m.ServiceTier = new(string)
+				*_m.ServiceTier = value.String
+			}
+		case usagelog.FieldReasoningEffort:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field reasoning_effort", values[i])
+			} else if value.Valid {
+				_m.ReasoningEffort = new(string)
+				*_m.ReasoningEffort = value.String
+			}
+		case usagelog.FieldInboundEndpoint:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field inbound_endpoint", values[i])
+			} else if value.Valid {
+				_m.InboundEndpoint = new(string)
+				*_m.InboundEndpoint = value.String
+			}
+		case usagelog.FieldUpstreamEndpoint:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field upstream_endpoint", values[i])
+			} else if value.Valid {
+				_m.UpstreamEndpoint = new(string)
+				*_m.UpstreamEndpoint = value.String
+			}
+		case usagelog.FieldClientProfile:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field client_profile", values[i])
+			} else if value.Valid {
+				_m.ClientProfile = new(string)
+				*_m.ClientProfile = value.String
+			}
+		case usagelog.FieldCompatibilityRoute:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field compatibility_route", values[i])
+			} else if value.Valid {
+				_m.CompatibilityRoute = new(string)
+				*_m.CompatibilityRoute = value.String
+			}
+		case usagelog.FieldFallbackChain:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field fallback_chain", values[i])
+			} else if value.Valid {
+				_m.FallbackChain = new(string)
+				*_m.FallbackChain = value.String
+			}
+		case usagelog.FieldUpstreamTransport:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field upstream_transport", values[i])
+			} else if value.Valid {
+				_m.UpstreamTransport = new(string)
+				*_m.UpstreamTransport = value.String
 			}
 		case usagelog.FieldCacheTTLOverridden:
 			if value, ok := values[i].(*sql.NullBool); !ok {
@@ -687,6 +826,9 @@ func (_m *UsageLog) String() string {
 	builder.WriteString("billing_type=")
 	builder.WriteString(fmt.Sprintf("%v", _m.BillingType))
 	builder.WriteString(", ")
+	builder.WriteString("request_type=")
+	builder.WriteString(fmt.Sprintf("%v", _m.RequestType))
+	builder.WriteString(", ")
 	builder.WriteString("stream=")
 	builder.WriteString(fmt.Sprintf("%v", _m.Stream))
 	builder.WriteString(", ")
@@ -741,6 +883,73 @@ func (_m *UsageLog) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("image_size_breakdown=")
 	builder.WriteString(fmt.Sprintf("%v", _m.ImageSizeBreakdown))
+	builder.WriteString(", ")
+	builder.WriteString("request_count=")
+	builder.WriteString(fmt.Sprintf("%v", _m.RequestCount))
+	builder.WriteString(", ")
+	builder.WriteString("task_count=")
+	builder.WriteString(fmt.Sprintf("%v", _m.TaskCount))
+	builder.WriteString(", ")
+	builder.WriteString("usage_estimated=")
+	builder.WriteString(fmt.Sprintf("%v", _m.UsageEstimated))
+	builder.WriteString(", ")
+	if v := _m.BillableUnitType; v != nil {
+		builder.WriteString("billable_unit_type=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	builder.WriteString("video_count=")
+	builder.WriteString(fmt.Sprintf("%v", _m.VideoCount))
+	builder.WriteString(", ")
+	if v := _m.VideoResolution; v != nil {
+		builder.WriteString("video_resolution=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	if v := _m.VideoDurationSeconds; v != nil {
+		builder.WriteString("video_duration_seconds=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.ServiceTier; v != nil {
+		builder.WriteString("service_tier=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	if v := _m.ReasoningEffort; v != nil {
+		builder.WriteString("reasoning_effort=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	if v := _m.InboundEndpoint; v != nil {
+		builder.WriteString("inbound_endpoint=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	if v := _m.UpstreamEndpoint; v != nil {
+		builder.WriteString("upstream_endpoint=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	if v := _m.ClientProfile; v != nil {
+		builder.WriteString("client_profile=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	if v := _m.CompatibilityRoute; v != nil {
+		builder.WriteString("compatibility_route=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	if v := _m.FallbackChain; v != nil {
+		builder.WriteString("fallback_chain=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	if v := _m.UpstreamTransport; v != nil {
+		builder.WriteString("upstream_transport=")
+		builder.WriteString(*v)
+	}
 	builder.WriteString(", ")
 	builder.WriteString("cache_ttl_overridden=")
 	builder.WriteString(fmt.Sprintf("%v", _m.CacheTTLOverridden))

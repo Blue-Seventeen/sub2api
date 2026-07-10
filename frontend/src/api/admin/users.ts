@@ -121,6 +121,7 @@ export async function create(userData: {
   password: string
   username?: string
   notes?: string
+  role?: 'admin' | 'user'
   balance?: number
   unified_rate_enabled?: boolean
   unified_rate_multiplier?: number

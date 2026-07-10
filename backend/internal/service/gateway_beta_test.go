@@ -16,6 +16,21 @@ func TestMergeAnthropicBeta(t *testing.T) {
 	require.Equal(t, "oauth-2025-04-20,interleaved-thinking-2025-05-14,foo,bar", got)
 }
 
+func TestTruncateForLog_RedactsSensitiveFieldsBeforeLogging(t *testing.T) {
+	body := []byte(`{"error":{"message":"bad request","api_key":"sk-secret","access_token":"tok-secret"},"Authorization":"Bearer bearer-secret","Set-Cookie":"sid=cookie-secret"}`)
+
+	got := truncateForLog(body, 2048)
+
+	require.NotContains(t, got, "sk-secret")
+	require.NotContains(t, got, "tok-secret")
+	require.NotContains(t, got, "bearer-secret")
+	require.NotContains(t, got, "cookie-secret")
+	require.Contains(t, got, `"api_key":"***"`)
+	require.Contains(t, got, `"access_token":"***"`)
+	require.Contains(t, got, `"Authorization":"***"`)
+	require.Contains(t, got, `"Set-Cookie":"***"`)
+}
+
 func TestMergeAnthropicBeta_EmptyIncoming(t *testing.T) {
 	got := mergeAnthropicBeta(
 		[]string{"oauth-2025-04-20", "interleaved-thinking-2025-05-14"},

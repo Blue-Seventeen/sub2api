@@ -178,64 +178,85 @@
               <!-- Subscription Limits - compact single line -->
               <div
                 v-if="row.subscription_type === 'subscription'"
-                class="text-xs text-gray-500 dark:text-gray-400"
+                class="space-y-0.5 text-xs text-gray-500 dark:text-gray-400"
               >
-                <template
+                <div
                   v-if="
                     row.daily_limit_usd ||
                     row.weekly_limit_usd ||
                     row.monthly_limit_usd ||
                     (row.custom_limit_hours && row.custom_limit_usd)
                   "
+                  class="flex flex-wrap items-center gap-x-1 gap-y-0.5"
                 >
-                  <span v-if="row.daily_limit_usd"
-                    >{{ formatCurrencyAmount(row.daily_limit_usd) }}/{{
-                      t("admin.groups.limitDay")
-                    }}</span
-                  >
+                  <span v-if="row.daily_limit_usd" class="whitespace-nowrap">
+                    <span
+                      v-if="usageLoading"
+                      class="font-medium text-gray-400 dark:text-gray-500"
+                      >-</span
+                    >
+                    <span
+                      v-else
+                      :class="
+                        getQuotaUsageClass(
+                          usageMap.get(row.id)?.today_cost ?? 0,
+                          row.daily_limit_usd
+                        )
+                      "
+                      >{{
+                        formatUsd(usageMap.get(row.id)?.today_cost ?? 0)
+                      }}</span
+                    >
+                    <span class="text-gray-400 dark:text-gray-500">
+                      / {{ formatUsd(row.daily_limit_usd) }}/{{
+                        t("admin.groups.limitDay")
+                      }}</span
+                    >
+                  </span>
                   <span
-                    v-if="
-                      row.daily_limit_usd &&
-                      (row.weekly_limit_usd || row.monthly_limit_usd)
-                    "
+                    v-if="row.daily_limit_usd && (row.weekly_limit_usd || row.monthly_limit_usd || (row.custom_limit_hours && row.custom_limit_usd))"
                     class="mx-1 text-gray-300 dark:text-gray-600"
                     >·</span
                   >
-                  <span v-if="row.weekly_limit_usd"
-                    >{{ formatCurrencyAmount(row.weekly_limit_usd) }}/{{
+                  <span v-if="row.weekly_limit_usd" class="whitespace-nowrap"
+                    >{{ formatUsd(row.weekly_limit_usd) }}/{{
                       t("admin.groups.limitWeek")
                     }}</span
                   >
                   <span
-                    v-if="row.weekly_limit_usd && row.monthly_limit_usd"
+                    v-if="row.weekly_limit_usd && (row.monthly_limit_usd || (row.custom_limit_hours && row.custom_limit_usd))"
                     class="mx-1 text-gray-300 dark:text-gray-600"
                     >·</span
                   >
-                  <span v-if="row.monthly_limit_usd"
-                    >{{ formatCurrencyAmount(row.monthly_limit_usd) }}/{{
+                  <span v-if="row.monthly_limit_usd" class="whitespace-nowrap"
+                    >{{ formatUsd(row.monthly_limit_usd) }}/{{
                       t("admin.groups.limitMonth")
                     }}</span
                   >
                   <span
-                    v-if="
-                      row.custom_limit_hours &&
-                      row.custom_limit_usd &&
-                      (row.daily_limit_usd ||
-                        row.weekly_limit_usd ||
-                        row.monthly_limit_usd)
-                    "
+                    v-if="row.monthly_limit_usd && row.custom_limit_hours && row.custom_limit_usd"
                     class="mx-1 text-gray-300 dark:text-gray-600"
-                    >/</span
+                    >·</span
                   >
-                  <span v-if="row.custom_limit_hours && row.custom_limit_usd"
-                    >{{ formatCurrencyAmount(row.custom_limit_usd) }}/{{
+                  <span v-if="row.custom_limit_hours && row.custom_limit_usd" class="whitespace-nowrap"
+                    >{{ formatUsd(row.custom_limit_usd) }}/{{
                       row.custom_limit_hours
                     }}H</span
                   >
-                </template>
+                </div>
                 <span v-else class="text-gray-400 dark:text-gray-500">{{
                   t("admin.groups.subscription.noLimit")
                 }}</span>
+                <div class="text-gray-400 dark:text-gray-500">
+                  {{ t("admin.groups.usageTotal") }}
+                  <span class="ml-1 font-medium text-gray-600 dark:text-gray-300"
+                    >{{
+                      usageLoading
+                        ? "-"
+                        : formatUsd(usageMap.get(row.id)?.total_cost ?? 0)
+                    }}</span
+                  >
+                </div>
               </div>
             </div>
           </template>
@@ -329,11 +350,11 @@
               :rpm-used="capacityMap.get(row.id)!.rpmUsed"
               :rpm-max="capacityMap.get(row.id)!.rpmMax"
             />
-            <span v-else class="text-xs text-gray-400">—</span>
+            <span v-else class="text-xs text-gray-400">-</span>
           </template>
 
           <template #cell-usage="{ row }">
-            <div v-if="usageLoading" class="text-xs text-gray-400">—</div>
+            <div v-if="usageLoading" class="text-xs text-gray-400">-</div>
             <div v-else class="space-y-0.5 text-xs">
               <div class="text-gray-500 dark:text-gray-400">
                 <span class="text-gray-400 dark:text-gray-500">{{
@@ -545,7 +566,7 @@
           </div>
           <p class="input-hint">{{ t("admin.groups.platformHint") }}</p>
         </div>
-        <!-- 从分组复制账号 -->
+        <!-- 浠庡垎缁勫鍒惰处鍙?-->
         <div v-if="copyAccountsGroupOptions.length > 0">
           <div class="mb-1.5 flex items-center gap-1">
             <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -574,7 +595,7 @@
               </div>
             </div>
           </div>
-          <!-- 已选分组标签 -->
+          <!-- 宸查€夊垎缁勬爣绛?-->
           <div
             v-if="createForm.copy_accounts_from_group_ids.length > 0"
             class="flex flex-wrap gap-1.5 mb-2"
@@ -995,7 +1016,7 @@
           </div>
         </div>
 
-        <!-- 图片生成计费配置 -->
+        <!-- 鍥剧墖鐢熸垚璁¤垂閰嶇疆 -->
         <div
           v-if="supportsImagePricingPlatform(createForm.platform)"
           class="border-t pt-4"
@@ -1003,10 +1024,10 @@
           <label
             class="block mb-2 font-medium text-gray-700 dark:text-gray-300"
           >
-            {{ t("admin.groups.imagePricing.title") }}
+            {{ t(imagePricingI18nKey(createForm.platform, "title")) }}
           </label>
           <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
-            {{ t("admin.groups.imagePricing.description") }}
+            {{ t(imagePricingI18nKey(createForm.platform, "description")) }}
           </p>
           <div class="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2">
             <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
@@ -1015,7 +1036,7 @@
                 type="checkbox"
                 class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
               />
-              {{ t("admin.groups.imagePricing.allowImageGeneration") }}
+              {{ t(imagePricingI18nKey(createForm.platform, "allowImageGeneration")) }}
             </label>
             <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
               <input
@@ -1023,7 +1044,7 @@
                 type="checkbox"
                 class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
               />
-              {{ t("admin.groups.imagePricing.independentMultiplier") }}
+              {{ t(imagePricingI18nKey(createForm.platform, "independentMultiplier")) }}
             </label>
           </div>
           <div
@@ -1031,7 +1052,7 @@
             class="mb-4"
           >
             <label class="input-label">{{
-              t("admin.groups.imagePricing.imageMultiplier")
+              t(imagePricingI18nKey(createForm.platform, "imageMultiplier"))
             }}</label>
             <input
               v-model.number="createForm.image_rate_multiplier"
@@ -1051,7 +1072,7 @@
                 step="0.001"
                 min="0"
                 class="input"
-                placeholder="0.134"
+                :placeholder="getImagePricePlaceholder(createForm.platform, 'image_price_1k')"
               />
             </div>
             <div>
@@ -1062,7 +1083,7 @@
                 step="0.001"
                 min="0"
                 class="input"
-                placeholder="0.201"
+                :placeholder="getImagePricePlaceholder(createForm.platform, 'image_price_2k')"
               />
             </div>
             <div>
@@ -1073,16 +1094,16 @@
                 step="0.001"
                 min="0"
                 class="input"
-                placeholder="0.268"
+                :placeholder="getImagePricePlaceholder(createForm.platform, 'image_price_4k')"
               />
             </div>
           </div>
           <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
-            {{ t("admin.groups.imagePricing.modeHint") }}
+            {{ t(imagePricingI18nKey(createForm.platform, "modeHint")) }}
           </p>
           <div class="mt-2 rounded-lg bg-gray-50 p-3 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
             <div class="mb-1 font-medium">
-              {{ t("admin.groups.imagePricing.finalPricePreview") }}
+              {{ t(imagePricingI18nKey(createForm.platform, "finalPricePreview")) }}
             </div>
             <div class="grid grid-cols-3 gap-2">
               <div
@@ -1093,9 +1114,153 @@
               </div>
             </div>
           </div>
+          <div v-if="createForm.platform === 'gemini' && createForm.allow_image_generation" class="mt-4 border-t border-dashed border-gray-200 pt-4 dark:border-dark-700">
+            <label
+              class="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300"
+            >
+              <input
+                v-model="createForm.allow_batch_image_generation"
+                type="checkbox"
+                class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              {{ t("admin.groups.imagePricing.allowBatchImageGeneration") }}
+            </label>
+            <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+              {{ t("admin.groups.imagePricing.batchSectionHint") }}
+            </p>
+            <div
+              v-if="createForm.allow_batch_image_generation"
+              class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2"
+            >
+              <div>
+                <label class="input-label">{{
+                  t("admin.groups.imagePricing.batchDiscountMultiplier")
+                }}</label>
+                <input
+                  v-model.number="createForm.batch_image_discount_multiplier"
+                  type="number"
+                  step="0.0001"
+                  min="0"
+                  class="input"
+                  placeholder="0.5"
+                />
+              </div>
+              <div>
+                <label class="input-label">{{
+                  t("admin.groups.imagePricing.batchHoldMultiplier")
+                }}</label>
+                <input
+                  v-model.number="createForm.batch_image_hold_multiplier"
+                  type="number"
+                  step="0.0001"
+                  min="0"
+                  class="input"
+                  placeholder="0.6"
+                />
+              </div>
+            </div>
+          </div>
+          <p
+            v-else-if="createForm.platform !== 'gemini'"
+            class="mt-4 border-t border-dashed border-gray-200 pt-4 text-xs text-gray-500 dark:border-dark-700 dark:text-gray-400"
+          >
+            {{ t("admin.groups.imagePricing.batchGeminiOnlyHint") }}
+          </p>
         </div>
 
-        <!-- 高峰时段倍率配置 -->
+        <!-- 瑙嗛鐢熸垚璁¤垂閰嶇疆锛堜粎 Grok 骞冲彴锛?-->
+        <div
+          v-if="supportsVideoPricingPlatform(createForm.platform)"
+          class="border-t pt-4"
+        >
+          <label
+            class="block mb-2 font-medium text-gray-700 dark:text-gray-300"
+          >
+            {{ t(videoPricingI18nKey("title")) }}
+          </label>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
+            {{ t(videoPricingI18nKey("description")) }}
+          </p>
+          <div class="mb-4">
+            <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+              <input
+                v-model="createForm.video_rate_independent"
+                type="checkbox"
+                class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              {{ t(videoPricingI18nKey("independentMultiplier")) }}
+            </label>
+          </div>
+          <div
+            v-if="createForm.video_rate_independent"
+            class="mb-4"
+          >
+            <label class="input-label">{{
+              t(videoPricingI18nKey("videoMultiplier"))
+            }}</label>
+            <input
+              v-model.number="createForm.video_rate_multiplier"
+              type="number"
+              step="0.0001"
+              min="0"
+              class="input"
+              placeholder="1"
+            />
+          </div>
+          <div class="grid grid-cols-3 gap-3">
+            <div>
+              <label class="input-label">480p ($/s)</label>
+              <input
+                v-model.number="createForm.video_price_480p"
+                type="number"
+                step="0.001"
+                min="0"
+                class="input"
+                :placeholder="getVideoPricePlaceholder(createForm.platform, 'video_price_480p')"
+              />
+            </div>
+            <div>
+              <label class="input-label">720p ($/s)</label>
+              <input
+                v-model.number="createForm.video_price_720p"
+                type="number"
+                step="0.001"
+                min="0"
+                class="input"
+                :placeholder="getVideoPricePlaceholder(createForm.platform, 'video_price_720p')"
+              />
+            </div>
+            <div>
+              <label class="input-label">1080p ($/s)</label>
+              <input
+                v-model.number="createForm.video_price_1080p"
+                type="number"
+                step="0.001"
+                min="0"
+                class="input"
+                :placeholder="getVideoPricePlaceholder(createForm.platform, 'video_price_1080p')"
+              />
+            </div>
+          </div>
+          <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
+            {{ t(videoPricingI18nKey("modeHint")) }}
+          </p>
+          <div class="mt-2 rounded-lg bg-gray-50 p-3 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+            <div class="mb-1 font-medium">
+              {{ t(videoPricingI18nKey("finalPricePreview")) }}
+            </div>
+            <div class="grid grid-cols-3 gap-2">
+              <div
+                v-for="item in createVideoFinalPricePreview"
+                :key="item.label"
+              >
+                {{ item.label }}: {{ item.value }}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 楂樺嘲鏃舵鍊嶇巼閰嶇疆 -->
         <div class="border-t pt-4">
           <div class="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2">
             <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
@@ -1154,7 +1319,7 @@
           </div>
         </div>
 
-        <!-- 支持的模型系列（仅 antigravity 平台） -->
+        <!-- 鏀寔鐨勬ā鍨嬬郴鍒楋紙浠?antigravity 骞冲彴锛?-->
         <div v-if="createForm.platform === 'antigravity'" class="border-t pt-4">
           <div class="mb-1.5 flex items-center gap-1">
             <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -1228,7 +1393,7 @@
           </p>
         </div>
 
-        <!-- MCP XML 协议注入（仅 antigravity 平台） -->
+        <!-- MCP XML 鍗忚娉ㄥ叆锛堜粎 antigravity 骞冲彴锛?-->
         <div v-if="createForm.platform === 'antigravity'" class="border-t pt-4">
           <div class="mb-1.5 flex items-center gap-1">
             <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -1285,7 +1450,7 @@
           </div>
         </div>
 
-        <!-- Claude Code 客户端限制（仅 anthropic 平台） -->
+        <!-- Claude Code 瀹㈡埛绔檺鍒讹紙浠?anthropic 骞冲彴锛?-->
         <div v-if="createForm.platform === 'anthropic'" class="border-t pt-4">
           <div class="mb-1.5 flex items-center gap-1">
             <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -1345,7 +1510,7 @@
               }}
             </span>
           </div>
-          <!-- 降级分组选择（仅当启用 claude_code_only 时显示） -->
+          <!-- 闄嶇骇鍒嗙粍閫夋嫨锛堜粎褰撳惎鐢?claude_code_only 鏃舵樉绀猴級 -->
           <div v-if="createForm.claude_code_only" class="mt-3">
             <label class="input-label">{{
               t("admin.groups.claudeCode.fallbackGroup")
@@ -1361,7 +1526,7 @@
           </div>
         </div>
 
-        <!-- OpenAI Messages 调度配置（仅 openai 平台） -->
+        <!-- OpenAI Messages 璋冨害閰嶇疆锛堜粎 openai 骞冲彴锛?-->
         <div
           v-if="createForm.platform === 'openai'"
           class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4"
@@ -1370,7 +1535,7 @@
             {{ t("admin.groups.openaiMessages.title") }}
           </h4>
 
-          <!-- 允许 Messages 调度开关 -->
+          <!-- 鍏佽 Messages 璋冨害寮€鍏?-->
           <div class="flex items-center justify-between">
             <label class="text-sm text-gray-600 dark:text-gray-400">{{
               t("admin.groups.openaiMessages.allowDispatch")
@@ -1676,7 +1841,7 @@
           </div>
         </div>
 
-        <!-- 无效请求兜底（仅 anthropic/antigravity 平台，且非订阅分组） -->
+        <!-- 鏃犳晥璇锋眰鍏滃簳锛堜粎 anthropic/antigravity 骞冲彴锛屼笖闈炶闃呭垎缁勶級 -->
         <div
           v-if="
             ['anthropic', 'antigravity'].includes(createForm.platform) &&
@@ -1697,7 +1862,7 @@
           </p>
         </div>
 
-        <!-- 模型路由配置（仅 anthropic 平台） -->
+        <!-- 妯″瀷璺敱閰嶇疆锛堜粎 anthropic 骞冲彴锛?-->
         <div v-if="createForm.platform === 'anthropic'" class="border-t pt-4">
           <div class="mb-1.5 flex items-center gap-1">
             <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -1727,7 +1892,7 @@
               </div>
             </div>
           </div>
-          <!-- 启用开关 -->
+          <!-- 鍚敤寮€鍏?-->
           <div class="flex items-center gap-3 mb-3">
             <button
               type="button"
@@ -1768,7 +1933,7 @@
           <p v-else class="text-xs text-gray-500 dark:text-gray-400 mb-3">
             {{ t("admin.groups.modelRouting.noRulesHint") }}
           </p>
-          <!-- 路由规则列表（仅在启用时显示） -->
+          <!-- 璺敱瑙勫垯鍒楄〃锛堜粎鍦ㄥ惎鐢ㄦ椂鏄剧ず锛?-->
           <div v-if="createForm.model_routing_enabled" class="space-y-3">
             <div
               v-for="rule in createModelRoutingRules"
@@ -1794,7 +1959,7 @@
                     <label class="input-label text-xs">{{
                       t("admin.groups.modelRouting.accounts")
                     }}</label>
-                    <!-- 已选账号标签 -->
+                    <!-- 宸查€夎处鍙锋爣绛?-->
                     <div
                       v-if="rule.accounts.length > 0"
                       class="flex flex-wrap gap-1.5 mb-2"
@@ -1814,7 +1979,7 @@
                         </button>
                       </span>
                     </div>
-                    <!-- 账号搜索输入框 -->
+                    <!-- 璐﹀彿鎼滅储杈撳叆妗?-->
                     <div class="relative account-search-container">
                       <input
                         v-model="
@@ -1830,7 +1995,7 @@
                         @input="searchAccountsByRule(rule)"
                         @focus="onAccountSearchFocus(rule)"
                       />
-                      <!-- 搜索结果下拉框 -->
+                      <!-- 鎼滅储缁撴灉涓嬫媺妗?-->
                       <div
                         v-if="
                           showAccountDropdown[getCreateRuleSearchKey(rule)] &&
@@ -1879,7 +2044,7 @@
               </div>
             </div>
           </div>
-          <!-- 添加规则按钮（仅在启用时显示） -->
+          <!-- 娣诲姞瑙勫垯鎸夐挳锛堜粎鍦ㄥ惎鐢ㄦ椂鏄剧ず锛?-->
           <button
             v-if="createForm.model_routing_enabled"
             type="button"
@@ -1979,7 +2144,7 @@
           />
           <p class="input-hint">{{ t("admin.groups.platformNotEditable") }}</p>
         </div>
-        <!-- 从分组复制账号（编辑时） -->
+        <!-- 浠庡垎缁勫鍒惰处鍙凤紙缂栬緫鏃讹級 -->
         <div v-if="copyAccountsGroupOptionsForEdit.length > 0">
           <div class="mb-1.5 flex items-center gap-1">
             <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -2008,7 +2173,7 @@
               </div>
             </div>
           </div>
-          <!-- 已选分组标签 -->
+          <!-- 宸查€夊垎缁勬爣绛?-->
           <div
             v-if="editForm.copy_accounts_from_group_ids.length > 0"
             class="flex flex-wrap gap-1.5 mb-2"
@@ -2432,7 +2597,7 @@
           </div>
         </div>
 
-        <!-- 图片生成计费配置 -->
+        <!-- 鍥剧墖鐢熸垚璁¤垂閰嶇疆 -->
         <div
           v-if="supportsImagePricingPlatform(editForm.platform)"
           class="border-t pt-4"
@@ -2440,10 +2605,10 @@
           <label
             class="block mb-2 font-medium text-gray-700 dark:text-gray-300"
           >
-            {{ t("admin.groups.imagePricing.title") }}
+            {{ t(imagePricingI18nKey(editForm.platform, "title")) }}
           </label>
           <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
-            {{ t("admin.groups.imagePricing.description") }}
+            {{ t(imagePricingI18nKey(editForm.platform, "description")) }}
           </p>
           <div class="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2">
             <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
@@ -2452,7 +2617,7 @@
                 type="checkbox"
                 class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
               />
-              {{ t("admin.groups.imagePricing.allowImageGeneration") }}
+              {{ t(imagePricingI18nKey(editForm.platform, "allowImageGeneration")) }}
             </label>
             <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
               <input
@@ -2460,7 +2625,7 @@
                 type="checkbox"
                 class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
               />
-              {{ t("admin.groups.imagePricing.independentMultiplier") }}
+              {{ t(imagePricingI18nKey(editForm.platform, "independentMultiplier")) }}
             </label>
           </div>
           <div
@@ -2468,7 +2633,7 @@
             class="mb-4"
           >
             <label class="input-label">{{
-              t("admin.groups.imagePricing.imageMultiplier")
+              t(imagePricingI18nKey(editForm.platform, "imageMultiplier"))
             }}</label>
             <input
               v-model.number="editForm.image_rate_multiplier"
@@ -2488,7 +2653,7 @@
                 step="0.001"
                 min="0"
                 class="input"
-                placeholder="0.134"
+                :placeholder="getImagePricePlaceholder(editForm.platform, 'image_price_1k')"
               />
             </div>
             <div>
@@ -2499,7 +2664,7 @@
                 step="0.001"
                 min="0"
                 class="input"
-                placeholder="0.201"
+                :placeholder="getImagePricePlaceholder(editForm.platform, 'image_price_2k')"
               />
             </div>
             <div>
@@ -2510,16 +2675,16 @@
                 step="0.001"
                 min="0"
                 class="input"
-                placeholder="0.268"
+                :placeholder="getImagePricePlaceholder(editForm.platform, 'image_price_4k')"
               />
             </div>
           </div>
           <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
-            {{ t("admin.groups.imagePricing.modeHint") }}
+            {{ t(imagePricingI18nKey(editForm.platform, "modeHint")) }}
           </p>
           <div class="mt-2 rounded-lg bg-gray-50 p-3 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
             <div class="mb-1 font-medium">
-              {{ t("admin.groups.imagePricing.finalPricePreview") }}
+              {{ t(imagePricingI18nKey(editForm.platform, "finalPricePreview")) }}
             </div>
             <div class="grid grid-cols-3 gap-2">
               <div
@@ -2530,9 +2695,153 @@
               </div>
             </div>
           </div>
+          <div v-if="editForm.platform === 'gemini' && editForm.allow_image_generation" class="mt-4 border-t border-dashed border-gray-200 pt-4 dark:border-dark-700">
+            <label
+              class="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300"
+            >
+              <input
+                v-model="editForm.allow_batch_image_generation"
+                type="checkbox"
+                class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              {{ t("admin.groups.imagePricing.allowBatchImageGeneration") }}
+            </label>
+            <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+              {{ t("admin.groups.imagePricing.batchSectionHint") }}
+            </p>
+            <div
+              v-if="editForm.allow_batch_image_generation"
+              class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2"
+            >
+              <div>
+                <label class="input-label">{{
+                  t("admin.groups.imagePricing.batchDiscountMultiplier")
+                }}</label>
+                <input
+                  v-model.number="editForm.batch_image_discount_multiplier"
+                  type="number"
+                  step="0.0001"
+                  min="0"
+                  class="input"
+                  placeholder="0.5"
+                />
+              </div>
+              <div>
+                <label class="input-label">{{
+                  t("admin.groups.imagePricing.batchHoldMultiplier")
+                }}</label>
+                <input
+                  v-model.number="editForm.batch_image_hold_multiplier"
+                  type="number"
+                  step="0.0001"
+                  min="0"
+                  class="input"
+                  placeholder="0.6"
+                />
+              </div>
+            </div>
+          </div>
+          <p
+            v-else-if="editForm.platform !== 'gemini'"
+            class="mt-4 border-t border-dashed border-gray-200 pt-4 text-xs text-gray-500 dark:border-dark-700 dark:text-gray-400"
+          >
+            {{ t("admin.groups.imagePricing.batchGeminiOnlyHint") }}
+          </p>
         </div>
 
-        <!-- 高峰时段倍率配置 -->
+        <!-- 瑙嗛鐢熸垚璁¤垂閰嶇疆锛堜粎 Grok 骞冲彴锛?-->
+        <div
+          v-if="supportsVideoPricingPlatform(editForm.platform)"
+          class="border-t pt-4"
+        >
+          <label
+            class="block mb-2 font-medium text-gray-700 dark:text-gray-300"
+          >
+            {{ t(videoPricingI18nKey("title")) }}
+          </label>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
+            {{ t(videoPricingI18nKey("description")) }}
+          </p>
+          <div class="mb-4">
+            <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+              <input
+                v-model="editForm.video_rate_independent"
+                type="checkbox"
+                class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              {{ t(videoPricingI18nKey("independentMultiplier")) }}
+            </label>
+          </div>
+          <div
+            v-if="editForm.video_rate_independent"
+            class="mb-4"
+          >
+            <label class="input-label">{{
+              t(videoPricingI18nKey("videoMultiplier"))
+            }}</label>
+            <input
+              v-model.number="editForm.video_rate_multiplier"
+              type="number"
+              step="0.0001"
+              min="0"
+              class="input"
+              placeholder="1"
+            />
+          </div>
+          <div class="grid grid-cols-3 gap-3">
+            <div>
+              <label class="input-label">480p ($/s)</label>
+              <input
+                v-model.number="editForm.video_price_480p"
+                type="number"
+                step="0.001"
+                min="0"
+                class="input"
+                :placeholder="getVideoPricePlaceholder(editForm.platform, 'video_price_480p')"
+              />
+            </div>
+            <div>
+              <label class="input-label">720p ($/s)</label>
+              <input
+                v-model.number="editForm.video_price_720p"
+                type="number"
+                step="0.001"
+                min="0"
+                class="input"
+                :placeholder="getVideoPricePlaceholder(editForm.platform, 'video_price_720p')"
+              />
+            </div>
+            <div>
+              <label class="input-label">1080p ($/s)</label>
+              <input
+                v-model.number="editForm.video_price_1080p"
+                type="number"
+                step="0.001"
+                min="0"
+                class="input"
+                :placeholder="getVideoPricePlaceholder(editForm.platform, 'video_price_1080p')"
+              />
+            </div>
+          </div>
+          <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
+            {{ t(videoPricingI18nKey("modeHint")) }}
+          </p>
+          <div class="mt-2 rounded-lg bg-gray-50 p-3 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+            <div class="mb-1 font-medium">
+              {{ t(videoPricingI18nKey("finalPricePreview")) }}
+            </div>
+            <div class="grid grid-cols-3 gap-2">
+              <div
+                v-for="item in editVideoFinalPricePreview"
+                :key="item.label"
+              >
+                {{ item.label }}: {{ item.value }}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 楂樺嘲鏃舵鍊嶇巼閰嶇疆 -->
         <div class="border-t pt-4">
           <div class="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2">
             <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
@@ -2591,7 +2900,7 @@
           </div>
         </div>
 
-        <!-- 支持的模型系列（仅 antigravity 平台） -->
+        <!-- 鏀寔鐨勬ā鍨嬬郴鍒楋紙浠?antigravity 骞冲彴锛?-->
         <div v-if="editForm.platform === 'antigravity'" class="border-t pt-4">
           <div class="mb-1.5 flex items-center gap-1">
             <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -2665,7 +2974,7 @@
           </p>
         </div>
 
-        <!-- MCP XML 协议注入（仅 antigravity 平台） -->
+        <!-- MCP XML 鍗忚娉ㄥ叆锛堜粎 antigravity 骞冲彴锛?-->
         <div v-if="editForm.platform === 'antigravity'" class="border-t pt-4">
           <div class="mb-1.5 flex items-center gap-1">
             <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -2722,7 +3031,7 @@
           </div>
         </div>
 
-        <!-- Claude Code 客户端限制（仅 anthropic 平台） -->
+        <!-- Claude Code 瀹㈡埛绔檺鍒讹紙浠?anthropic 骞冲彴锛?-->
         <div v-if="editForm.platform === 'anthropic'" class="border-t pt-4">
           <div class="mb-1.5 flex items-center gap-1">
             <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -2778,7 +3087,7 @@
               }}
             </span>
           </div>
-          <!-- 降级分组选择（仅当启用 claude_code_only 时显示） -->
+          <!-- 闄嶇骇鍒嗙粍閫夋嫨锛堜粎褰撳惎鐢?claude_code_only 鏃舵樉绀猴級 -->
           <div v-if="editForm.claude_code_only" class="mt-3">
             <label class="input-label">{{
               t("admin.groups.claudeCode.fallbackGroup")
@@ -2794,7 +3103,7 @@
           </div>
         </div>
 
-        <!-- OpenAI Messages 调度配置（仅 openai 平台） -->
+        <!-- OpenAI Messages 璋冨害閰嶇疆锛堜粎 openai 骞冲彴锛?-->
         <div
           v-if="editForm.platform === 'openai'"
           class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4"
@@ -2803,7 +3112,7 @@
             {{ t("admin.groups.openaiMessages.title") }}
           </h4>
 
-          <!-- 允许 Messages 调度开关 -->
+          <!-- 鍏佽 Messages 璋冨害寮€鍏?-->
           <div class="flex items-center justify-between">
             <label class="text-sm text-gray-600 dark:text-gray-400">{{
               t("admin.groups.openaiMessages.allowDispatch")
@@ -3109,7 +3418,7 @@
           </div>
         </div>
 
-        <!-- 无效请求兜底（仅 anthropic/antigravity 平台，且非订阅分组） -->
+        <!-- 鏃犳晥璇锋眰鍏滃簳锛堜粎 anthropic/antigravity 骞冲彴锛屼笖闈炶闃呭垎缁勶級 -->
         <div
           v-if="
             ['anthropic', 'antigravity'].includes(editForm.platform) &&
@@ -3130,7 +3439,7 @@
           </p>
         </div>
 
-        <!-- 模型路由配置（仅 anthropic 平台） -->
+        <!-- 妯″瀷璺敱閰嶇疆锛堜粎 anthropic 骞冲彴锛?-->
         <div v-if="editForm.platform === 'anthropic'" class="border-t pt-4">
           <div class="mb-1.5 flex items-center gap-1">
             <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -3160,7 +3469,7 @@
               </div>
             </div>
           </div>
-          <!-- 启用开关 -->
+          <!-- 鍚敤寮€鍏?-->
           <div class="flex items-center gap-3 mb-3">
             <button
               type="button"
@@ -3200,7 +3509,7 @@
           <p v-else class="text-xs text-gray-500 dark:text-gray-400 mb-3">
             {{ t("admin.groups.modelRouting.noRulesHint") }}
           </p>
-          <!-- 路由规则列表（仅在启用时显示） -->
+          <!-- 璺敱瑙勫垯鍒楄〃锛堜粎鍦ㄥ惎鐢ㄦ椂鏄剧ず锛?-->
           <div v-if="editForm.model_routing_enabled" class="space-y-3">
             <div
               v-for="rule in editModelRoutingRules"
@@ -3226,7 +3535,7 @@
                     <label class="input-label text-xs">{{
                       t("admin.groups.modelRouting.accounts")
                     }}</label>
-                    <!-- 已选账号标签 -->
+                    <!-- 宸查€夎处鍙锋爣绛?-->
                     <div
                       v-if="rule.accounts.length > 0"
                       class="flex flex-wrap gap-1.5 mb-2"
@@ -3246,7 +3555,7 @@
                         </button>
                       </span>
                     </div>
-                    <!-- 账号搜索输入框 -->
+                    <!-- 璐﹀彿鎼滅储杈撳叆妗?-->
                     <div class="relative account-search-container">
                       <input
                         v-model="
@@ -3262,7 +3571,7 @@
                         @input="searchAccountsByRule(rule, true)"
                         @focus="onAccountSearchFocus(rule, true)"
                       />
-                      <!-- 搜索结果下拉框 -->
+                      <!-- 鎼滅储缁撴灉涓嬫媺妗?-->
                       <div
                         v-if="
                           showAccountDropdown[getEditRuleSearchKey(rule)] &&
@@ -3311,7 +3620,7 @@
               </div>
             </div>
           </div>
-          <!-- 添加规则按钮（仅在启用时显示） -->
+          <!-- 娣诲姞瑙勫垯鎸夐挳锛堜粎鍦ㄥ惎鐢ㄦ椂鏄剧ず锛?-->
           <button
             v-if="editForm.model_routing_enabled"
             type="button"
@@ -3602,7 +3911,16 @@ import {
 } from "./groupsModelsList";
 import { createModelsListCandidatesTracker } from "./groupsModelsListCandidates";
 import { normalizeSupportedModelScopesForPlatform } from "./groupsSupportedModelScopes";
-import { supportsImagePricingPlatform } from "./groupsImagePricing";
+import {
+  getDefaultImagePreviewPrice,
+  getDefaultVideoPreviewPrice,
+  getImagePricePlaceholder,
+  getVideoPricePlaceholder,
+  imagePricingI18nKey,
+  supportsImagePricingPlatform,
+  supportsVideoPricingPlatform,
+  videoPricingI18nKey,
+} from "./groupsImagePricing";
 
 const { t } = useI18n();
 const appStore = useAppStore();
@@ -3686,7 +4004,9 @@ const saveColumnsToStorage = () => {
 };
 
 const isColumnVisible = (key: string) => !hiddenColumns.has(key);
-const hasVisibleUsageColumn = computed(() => isColumnVisible("usage"));
+const hasVisibleUsageSummaryConsumer = computed(
+  () => isColumnVisible("usage") || isColumnVisible("billing_type"),
+);
 const hasVisibleCapacityColumn = computed(() => isColumnVisible("capacity"));
 
 const toggleColumn = (key: string) => {
@@ -3701,7 +4021,7 @@ const toggleColumn = (key: string) => {
   }
   saveColumnsToStorage();
 
-  if (wasHidden && key === "usage") {
+  if (wasHidden && (key === "usage" || key === "billing_type")) {
     loadUsageSummary();
   }
   if (wasHidden && key === "capacity") {
@@ -3974,7 +4294,7 @@ const createPlatformSearchMeta: Record<
   },
   moonshot: {
     subtitle: "Moonshot / Kimi",
-    searchTerms: ["moonshot", "kimi", "月之暗面", "moonshot-v1"],
+    searchTerms: ["moonshot", "kimi", "鏈堜箣鏆楅潰", "moonshot-v1"],
     activeClass:
       "border-fuchsia-200 bg-white shadow-sm dark:border-fuchsia-900/50 dark:bg-dark-600",
     iconActiveClass:
@@ -4001,7 +4321,7 @@ const createPlatformSearchMeta: Record<
   },
   siliconflow: {
     subtitle: "SiliconCloud / New-API",
-    searchTerms: ["siliconflow", "silicon", "硅基流动"],
+    searchTerms: ["siliconflow", "silicon", "纭呭熀娴佸姩"],
     activeClass:
       "border-teal-200 bg-white shadow-sm dark:border-teal-900/50 dark:bg-dark-600",
     iconActiveClass:
@@ -4087,7 +4407,6 @@ const subscriptionTypeOptions = computed(() => [
   { value: "subscription", label: t("admin.groups.subscription.subscription") },
 ]);
 
-// 降级分组选项（创建时）- 仅包含 anthropic 平台且未启用 claude_code_only 的分组
 const fallbackGroupOptions = computed(() => {
   const options: { value: number | null; label: string }[] = [
     { value: null, label: t("admin.groups.claudeCode.noFallback") },
@@ -4104,7 +4423,7 @@ const fallbackGroupOptions = computed(() => {
   return options;
 });
 
-// 降级分组选项（编辑时）- 排除自身
+// 闄嶇骇鍒嗙粍閫夐」锛堢紪杈戞椂锛? 鎺掗櫎鑷韩
 const fallbackGroupOptionsForEdit = computed(() => {
   const options: { value: number | null; label: string }[] = [
     { value: null, label: t("admin.groups.claudeCode.noFallback") },
@@ -4123,7 +4442,6 @@ const fallbackGroupOptionsForEdit = computed(() => {
   return options;
 });
 
-// 无效请求兜底分组选项（创建时）- 仅包含 anthropic 平台、非订阅且未配置兜底的分组
 const invalidRequestFallbackOptions = computed(() => {
   const options: { value: number | null; label: string }[] = [
     { value: null, label: t("admin.groups.invalidRequestFallback.noFallback") },
@@ -4141,7 +4459,7 @@ const invalidRequestFallbackOptions = computed(() => {
   return options;
 });
 
-// 无效请求兜底分组选项（编辑时）- 排除自身
+// 鏃犳晥璇锋眰鍏滃簳鍒嗙粍閫夐」锛堢紪杈戞椂锛? 鎺掗櫎鑷韩
 const invalidRequestFallbackOptionsForEdit = computed(() => {
   const options: { value: number | null; label: string }[] = [
     { value: null, label: t("admin.groups.invalidRequestFallback.noFallback") },
@@ -4161,7 +4479,7 @@ const invalidRequestFallbackOptionsForEdit = computed(() => {
   return options;
 });
 
-// 复制账号的源分组选项（创建时）- 仅包含相同平台且有账号的分组
+// 澶嶅埗璐﹀彿鐨勬簮鍒嗙粍閫夐」锛堝垱寤烘椂锛? 浠呭寘鍚浉鍚屽钩鍙颁笖鏈夎处鍙风殑鍒嗙粍
 const copyAccountsGroupOptions = computed(() => {
   const eligibleGroups = groups.value.filter(
     (g) => g.platform === createForm.platform && (g.account_count || 0) > 0,
@@ -4172,8 +4490,8 @@ const copyAccountsGroupOptions = computed(() => {
   }));
 });
 
-// 复制账号的源分组选项（编辑时）- 仅包含相同平台且有账号的分组，排除自身
 const copyAccountsGroupOptionsForEdit = computed(() => {
+// 澶嶅埗璐﹀彿鐨勬簮鍒嗙粍閫夐」锛堢紪杈戞椂锛? 浠呭寘鍚浉鍚屽钩鍙颁笖鏈夎处鍙风殑鍒嗙粍锛屾帓闄よ嚜韬?const copyAccountsGroupOptionsForEdit = computed(() => {
   const currentId = editingGroup.value?.id;
   const eligibleGroups = groups.value.filter(
     (g) =>
@@ -4189,10 +4507,10 @@ const copyAccountsGroupOptionsForEdit = computed(() => {
 
 const groups = ref<AdminGroup[]>([]);
 const loading = ref(false);
-const usageMap = ref<Map<number, { today_cost: number; total_cost: number; real_today_cost?: number; real_total_cost?: number }>>(
-  new Map(),
-);
 const usageLoading = ref(false);
+const usageMap = ref(
+  new Map<number, { today_cost: number; total_cost: number; real_today_cost?: number; real_total_cost?: number }>(),
+);
 const capacityMap = ref<
   Map<
     number,
@@ -4264,41 +4582,50 @@ const createForm = reactive({
   monthly_limit_usd: null as number | null,
   custom_limit_hours: 0 as number,
   custom_limit_usd: null as number | null,
-  // 图片生成计费配置
+  // 鍥剧墖鐢熸垚璁¤垂閰嶇疆
   allow_image_generation: false,
+  allow_batch_image_generation: false,
   image_rate_independent: false,
   image_rate_multiplier: 1,
+  batch_image_discount_multiplier: 0.5,
+  batch_image_hold_multiplier: 0.6,
   image_price_1k: null as number | null,
   image_price_2k: null as number | null,
   image_price_4k: null as number | null,
-  // 高峰时段倍率配置
+  video_rate_independent: false,
+  // 瑙嗛鐢熸垚璁¤垂閰嶇疆锛堜粎 Grok 骞冲彴锛?  video_rate_independent: false,
+  video_rate_multiplier: 1,
+  video_price_480p: null as number | null,
+  video_price_720p: null as number | null,
+  video_price_1080p: null as number | null,
+  // 楂樺嘲鏃舵鍊嶇巼閰嶇疆
   peak_rate_enabled: false,
   peak_start: "",
   peak_end: "",
   peak_rate_multiplier: 1.0,
   peak_rate_windows: [] as PeakRateWindowForm[],
-  // Claude Code 客户端限制（仅 anthropic 平台使用）
   claude_code_only: false,
+  // Claude Code 瀹㈡埛绔檺鍒讹紙浠?anthropic 骞冲彴浣跨敤锛?  claude_code_only: false,
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
-  // OpenAI Messages 调度配置（仅 openai 平台使用）
   allow_messages_dispatch: false,
+  // OpenAI Messages 璋冨害閰嶇疆锛堜粎 openai 骞冲彴浣跨敤锛?  allow_messages_dispatch: false,
   opus_mapped_model: createMessagesDispatchDefaults.opus_mapped_model,
   sonnet_mapped_model: createMessagesDispatchDefaults.sonnet_mapped_model,
   haiku_mapped_model: createMessagesDispatchDefaults.haiku_mapped_model,
   exact_model_mappings: [] as MessagesDispatchMappingRow[],
-  // 账号过滤控制（OpenAI/Antigravity 平台）
   require_oauth_only: false,
+  // 璐﹀彿杩囨护鎺у埗锛圤penAI/Antigravity 骞冲彴锛?  require_oauth_only: false,
   require_privacy_set: false,
-  // 模型路由开关
   model_routing_enabled: false,
-  // 支持的模型系列（仅 antigravity 平台）
   supported_model_scopes: ["claude", "gemini_text", "gemini_image"] as string[],
-  // MCP XML 协议注入开关（仅 antigravity 平台）
   mcp_xml_inject: true,
-  // 从分组复制账号
   copy_accounts_from_group_ids: [] as number[],
-  // 分组级 RPM 限制（每用户每分钟最大请求数；0 = 不限制）
+  // 妯″瀷璺敱寮€鍏?  model_routing_enabled: false,
+  // 鏀寔鐨勬ā鍨嬬郴鍒楋紙浠?antigravity 骞冲彴锛?  supported_model_scopes: ["claude", "gemini_text", "gemini_image"] as string[],
+  // MCP XML 鍗忚娉ㄥ叆寮€鍏筹紙浠?antigravity 骞冲彴锛?  mcp_xml_inject: true,
+  // 浠庡垎缁勫鍒惰处鍙?  copy_accounts_from_group_ids: [] as number[],
+  // 鍒嗙粍绾?RPM 闄愬埗锛堟瘡鐢ㄦ埛姣忓垎閽熸渶澶ц姹傛暟锛? = 涓嶉檺鍒讹級
   rpm_limit: 0 as number,
   newapi_style_interface_enabled: false,
 });
@@ -4352,25 +4679,26 @@ const handleCreatePlatformWheel = (event: WheelEvent) => {
   container.scrollBy({ left: delta, behavior: "auto" });
 };
 
-// 简单账号类型（用于模型路由选择）
 interface SimpleAccount {
+// 绠€鍗曡处鍙风被鍨嬶紙鐢ㄤ簬妯″瀷璺敱閫夋嫨锛?interface SimpleAccount {
   id: number;
   name: string;
 }
 
-// 模型路由规则类型
+// 妯″瀷璺敱瑙勫垯绫诲瀷
 interface ModelRoutingRule {
   pattern: string;
-  accounts: SimpleAccount[]; // 选中的账号对象数组
+  accounts: SimpleAccount[];
+// 閫変腑鐨勮处鍙峰璞℃暟缁?}
 }
 
-// 创建表单的模型路由规则
 const createModelRoutingRules = ref<ModelRoutingRule[]>([]);
+// 鍒涘缓琛ㄥ崟鐨勬ā鍨嬭矾鐢辫鍒?const createModelRoutingRules = ref<ModelRoutingRule[]>([]);
 
-// 编辑表单的模型路由规则
 const editModelRoutingRules = ref<ModelRoutingRule[]>([]);
+// 缂栬緫琛ㄥ崟鐨勬ā鍨嬭矾鐢辫鍒?const editModelRoutingRules = ref<ModelRoutingRule[]>([]);
 
-// 规则对象稳定 key（避免使用 index 导致状态错位）
+// 瑙勫垯瀵硅薄绋冲畾 key锛堥伩鍏嶄娇鐢?index 瀵艰嚧鐘舵€侀敊浣嶏級
 const resolveCreateRuleKey =
   createStableObjectKeyResolver<ModelRoutingRule>("create-rule");
 const resolveEditRuleKey =
@@ -4402,8 +4730,8 @@ const getRuleSearchKey = (rule: ModelRoutingRule, isEdit: boolean = false) => {
   return isEdit ? getEditRuleSearchKey(rule) : getCreateRuleSearchKey(rule);
 };
 
-// 账号搜索相关状态
 const accountSearchKeyword = ref<Record<string, string>>({});
+// 璐﹀彿鎼滅储鐩稿叧鐘舵€?const accountSearchKeyword = ref<Record<string, string>>({});
 const accountSearchResults = ref<Record<string, SimpleAccount[]>>({});
 const showAccountDropdown = ref<Record<string, boolean>>({});
 
@@ -4441,8 +4769,8 @@ const accountSearchRunner = useKeyedDebouncedSearch<SimpleAccount[]>({
   },
 });
 
-// 搜索账号（仅限 anthropic 平台）
 const searchAccounts = (key: string) => {
+// 鎼滅储璐﹀彿锛堜粎闄?anthropic 骞冲彴锛?const searchAccounts = (key: string) => {
   accountSearchRunner.trigger(key, accountSearchKeyword.value[key] || "");
 };
 
@@ -4461,7 +4789,7 @@ const selectAccount = (
 ) => {
   if (!rule) return;
 
-  // 检查是否已选择
+  // 妫€鏌ユ槸鍚﹀凡閫夋嫨
   if (!rule.accounts.some((a) => a.id === account.id)) {
     rule.accounts.push(account);
   }
@@ -4472,8 +4800,8 @@ const selectAccount = (
   showAccountDropdown.value[key] = false;
 };
 
-// 移除已选账号
 const removeSelectedAccount = (
+// 绉婚櫎宸查€夎处鍙?const removeSelectedAccount = (
   rule: ModelRoutingRule,
   accountId: number,
   _isEdit: boolean = false,
@@ -4483,7 +4811,7 @@ const removeSelectedAccount = (
   rule.accounts = rule.accounts.filter((a) => a.id !== accountId);
 };
 
-// 切换创建表单的模型系列选择
+// 鍒囨崲鍒涘缓琛ㄥ崟鐨勬ā鍨嬬郴鍒楅€夋嫨
 const toggleCreateScope = (scope: string) => {
   const idx = createForm.supported_model_scopes.indexOf(scope);
   if (idx === -1) {
@@ -4493,7 +4821,7 @@ const toggleCreateScope = (scope: string) => {
   }
 };
 
-// 切换编辑表单的模型系列选择
+// 鍒囨崲缂栬緫琛ㄥ崟鐨勬ā鍨嬬郴鍒楅€夋嫨
 const toggleEditScope = (scope: string) => {
   const idx = editForm.supported_model_scopes.indexOf(scope);
   if (idx === -1) {
@@ -4503,26 +4831,26 @@ const toggleEditScope = (scope: string) => {
   }
 };
 
-// 处理账号搜索输入框聚焦
 const onAccountSearchFocus = (
+// 澶勭悊璐﹀彿鎼滅储杈撳叆妗嗚仛鐒?const onAccountSearchFocus = (
   rule: ModelRoutingRule,
   isEdit: boolean = false,
 ) => {
   const key = getRuleSearchKey(rule, isEdit);
   showAccountDropdown.value[key] = true;
-  // 如果没有搜索结果，触发一次搜索
   if (!accountSearchResults.value[key]?.length) {
+  // 濡傛灉娌℃湁鎼滅储缁撴灉锛岃Е鍙戜竴娆℃悳绱?  if (!accountSearchResults.value[key]?.length) {
     searchAccounts(key);
   }
 };
 
-// 添加创建表单的路由规则
 const addCreateRoutingRule = () => {
+// 娣诲姞鍒涘缓琛ㄥ崟鐨勮矾鐢辫鍒?const addCreateRoutingRule = () => {
   createModelRoutingRules.value.push({ pattern: "", accounts: [] });
 };
 
-// 删除创建表单的路由规则
 const removeCreateRoutingRule = (rule: ModelRoutingRule) => {
+// 鍒犻櫎鍒涘缓琛ㄥ崟鐨勮矾鐢辫鍒?const removeCreateRoutingRule = (rule: ModelRoutingRule) => {
   const index = createModelRoutingRules.value.indexOf(rule);
   if (index === -1) return;
 
@@ -4532,13 +4860,13 @@ const removeCreateRoutingRule = (rule: ModelRoutingRule) => {
   createModelRoutingRules.value.splice(index, 1);
 };
 
-// 添加编辑表单的路由规则
 const addEditRoutingRule = () => {
+// 娣诲姞缂栬緫琛ㄥ崟鐨勮矾鐢辫鍒?const addEditRoutingRule = () => {
   editModelRoutingRules.value.push({ pattern: "", accounts: [] });
 };
 
-// 删除编辑表单的路由规则
 const removeEditRoutingRule = (rule: ModelRoutingRule) => {
+// 鍒犻櫎缂栬緫琛ㄥ崟鐨勮矾鐢辫鍒?const removeEditRoutingRule = (rule: ModelRoutingRule) => {
   const index = editModelRoutingRules.value.indexOf(rule);
   if (index === -1) return;
 
@@ -4596,7 +4924,7 @@ const moveEditModelsListItem = (fromIndex: number, toIndex: number) => {
   moveModelsListItem(editModelsListState, fromIndex, toIndex);
 };
 
-// 将 UI 格式的路由规则转换为 API 格式
+// 灏?UI 鏍煎紡鐨勮矾鐢辫鍒欒浆鎹负 API 鏍煎紡
 const convertRoutingRulesToApiFormat = (
   rules: ModelRoutingRule[],
 ): Record<string, number[]> | null => {
@@ -4618,7 +4946,7 @@ const convertRoutingRulesToApiFormat = (
   return hasValidRules ? result : null;
 };
 
-// 将 API 格式的路由规则转换为 UI 格式（需要加载账号名称）
+// 灏?API 鏍煎紡鐨勮矾鐢辫鍒欒浆鎹负 UI 鏍煎紡锛堥渶瑕佸姞杞借处鍙峰悕绉帮級
 const convertApiFormatToRoutingRules = async (
   apiFormat: Record<string, number[]> | null,
 ): Promise<ModelRoutingRule[]> => {
@@ -4633,7 +4961,7 @@ const convertApiFormatToRoutingRules = async (
         const account = await adminAPI.accounts.getById(id);
         accounts.push({ id: account.id, name: account.name });
       } catch {
-        // 如果账号不存在，仍然显示 ID
+        // 濡傛灉璐﹀彿涓嶅瓨鍦紝浠嶇劧鏄剧ず ID
         accounts.push({ id, name: `#${id}` });
       }
     }
@@ -4655,50 +4983,64 @@ const editForm = reactive({
   monthly_limit_usd: null as number | null,
   custom_limit_hours: 0 as number,
   custom_limit_usd: null as number | null,
-  // 图片生成计费配置
+  // 鍥剧墖鐢熸垚璁¤垂閰嶇疆
   allow_image_generation: false,
+  allow_batch_image_generation: false,
   image_rate_independent: false,
   image_rate_multiplier: 1,
+  batch_image_discount_multiplier: 0.5,
+  batch_image_hold_multiplier: 0.6,
   image_price_1k: null as number | null,
   image_price_2k: null as number | null,
   image_price_4k: null as number | null,
-  // 高峰时段倍率配置
+  video_rate_independent: false,
+  // 瑙嗛鐢熸垚璁¤垂閰嶇疆锛堜粎 Grok 骞冲彴锛?  video_rate_independent: false,
+  video_rate_multiplier: 1,
+  video_price_480p: null as number | null,
+  video_price_720p: null as number | null,
+  video_price_1080p: null as number | null,
+  // 楂樺嘲鏃舵鍊嶇巼閰嶇疆
   peak_rate_enabled: false,
   peak_start: "",
   peak_end: "",
   peak_rate_multiplier: 1.0,
   peak_rate_windows: [] as PeakRateWindowForm[],
-  // Claude Code 客户端限制（仅 anthropic 平台使用）
   claude_code_only: false,
+  // Claude Code 瀹㈡埛绔檺鍒讹紙浠?anthropic 骞冲彴浣跨敤锛?  claude_code_only: false,
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
-  // OpenAI Messages 调度配置（仅 openai 平台使用）
   allow_messages_dispatch: false,
+  // OpenAI Messages 璋冨害閰嶇疆锛堜粎 openai 骞冲彴浣跨敤锛?  allow_messages_dispatch: false,
   default_mapped_model: '',
   opus_mapped_model: editMessagesDispatchDefaults.opus_mapped_model,
   sonnet_mapped_model: editMessagesDispatchDefaults.sonnet_mapped_model,
   haiku_mapped_model: editMessagesDispatchDefaults.haiku_mapped_model,
   exact_model_mappings: [] as MessagesDispatchMappingRow[],
-  // 账号过滤控制（OpenAI/Antigravity 平台）
   require_oauth_only: false,
+  // 璐﹀彿杩囨护鎺у埗锛圤penAI/Antigravity 骞冲彴锛?  require_oauth_only: false,
   require_privacy_set: false,
-  // 模型路由开关
   model_routing_enabled: false,
-  // 支持的模型系列（仅 antigravity 平台）
   supported_model_scopes: ["claude", "gemini_text", "gemini_image"] as string[],
-  // MCP XML 协议注入开关（仅 antigravity 平台）
   mcp_xml_inject: true,
-  // 从分组复制账号
   copy_accounts_from_group_ids: [] as number[],
-  // 分组级 RPM 限制（每用户每分钟最大请求数；0 = 不限制）
+  // 妯″瀷璺敱寮€鍏?  model_routing_enabled: false,
+  // 鏀寔鐨勬ā鍨嬬郴鍒楋紙浠?antigravity 骞冲彴锛?  supported_model_scopes: ["claude", "gemini_text", "gemini_image"] as string[],
+  // MCP XML 鍗忚娉ㄥ叆寮€鍏筹紙浠?antigravity 骞冲彴锛?  mcp_xml_inject: true,
+  // 浠庡垎缁勫鍒惰处鍙?  copy_accounts_from_group_ids: [] as number[],
+  // 鍒嗙粍绾?RPM 闄愬埗锛堟瘡鐢ㄦ埛姣忓垎閽熸渶澶ц姹傛暟锛? = 涓嶉檺鍒讹級
   rpm_limit: 0 as number,
   newapi_style_interface_enabled: false,
 });
 
 type ImagePricingFormState = {
+  platform: GroupPlatform;
+  allow_image_generation: boolean;
+  allow_batch_image_generation: boolean;
   rate_multiplier: number;
   image_rate_independent: boolean;
   image_rate_multiplier: number;
+  batch_image_discount_multiplier: number;
+  batch_image_hold_multiplier: number;
   image_price_1k: number | string | null;
   image_price_2k: number | string | null;
   image_price_4k: number | string | null;
@@ -4708,10 +5050,26 @@ type ImagePricingFormState = {
   peak_rate_multiplier: number;
 };
 
+type VideoPricingFormState = {
+  platform: GroupPlatform;
+  rate_multiplier: number;
+  video_rate_independent: boolean;
+  video_rate_multiplier: number;
+  video_price_480p: number | string | null;
+  video_price_720p: number | string | null;
+  video_price_1080p: number | string | null;
+};
+
 const imagePricingTiers = [
   { key: "image_price_1k", label: "1K" },
   { key: "image_price_2k", label: "2K" },
   { key: "image_price_4k", label: "4K" },
+] as const;
+
+const videoPricingTiers = [
+  { key: "video_price_480p", label: "480p" },
+  { key: "video_price_720p", label: "720p" },
+  { key: "video_price_1080p", label: "1080p" },
 ] as const;
 
 const normalizePreviewNumber = (value: number | string | null | undefined, fallback = 0) => {
@@ -4720,6 +5078,14 @@ const normalizePreviewNumber = (value: number | string | null | undefined, fallb
   }
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const parsePreviewPrice = (value: number | string | null | undefined) => {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 };
 
 const formatImagePricePreview = (value: number | string | null | undefined) => {
@@ -4733,17 +5099,48 @@ const formatImagePricePreview = (value: number | string | null | undefined) => {
   return `$${price.toFixed(6).replace(/0+$/, "").replace(/\.$/, "")}`;
 };
 
+const formatVideoPricePreview = (value: number | string | null | undefined) => {
+  if (value === null || value === undefined || value === "") {
+    return t("admin.groups.videoPricing.notConfigured");
+  }
+  const price = Number(value);
+  if (!Number.isFinite(price) || price < 0) {
+    return t("admin.groups.videoPricing.notConfigured");
+  }
+  return `$${price.toFixed(6).replace(/0+$/, "").replace(/\.$/, "")}`;
+};
+
 const buildImageFinalPricePreview = (form: ImagePricingFormState) => {
-  const multiplier = form.image_rate_independent
+  const imageMultiplier = form.image_rate_independent
     ? normalizePreviewNumber(form.image_rate_multiplier, 1)
     : normalizePreviewNumber(form.rate_multiplier, 1);
+  const multiplier = imageMultiplier;
   return imagePricingTiers.map((tier) => {
-    const basePrice = normalizePreviewNumber(form[tier.key]);
+    const basePrice =
+      parsePreviewPrice(form[tier.key]) ??
+      getDefaultImagePreviewPrice(form.platform, tier.key);
     return {
       label: tier.label,
-      value: basePrice > 0
+      value: basePrice !== null
         ? formatImagePricePreview(basePrice * multiplier)
         : t("admin.groups.imagePricing.notConfigured"),
+    };
+  });
+};
+
+const buildVideoFinalPricePreview = (form: VideoPricingFormState) => {
+  const multiplier = form.video_rate_independent
+    ? normalizePreviewNumber(form.video_rate_multiplier, 1)
+    : normalizePreviewNumber(form.rate_multiplier, 1);
+  return videoPricingTiers.map((tier) => {
+    const basePrice =
+      parsePreviewPrice(form[tier.key]) ??
+      getDefaultVideoPreviewPrice(form.platform, tier.key);
+    return {
+      label: tier.label,
+      value: basePrice !== null
+        ? formatVideoPricePreview(basePrice * multiplier)
+        : t("admin.groups.videoPricing.notConfigured"),
     };
   });
 };
@@ -4754,9 +5151,30 @@ const createImageFinalPricePreview = computed(() =>
 const editImageFinalPricePreview = computed(() =>
   buildImageFinalPricePreview(editForm),
 );
+const createVideoFinalPricePreview = computed(() =>
+  buildVideoFinalPricePreview(createForm),
+);
+const editVideoFinalPricePreview = computed(() =>
+  buildVideoFinalPricePreview(editForm),
+);
 
-// 根据分组类型返回不同的删除确认消息
+const resetDisabledBatchImagePricing = (
+  form: Pick<
+    ImagePricingFormState,
+    "platform" | "allow_image_generation" | "allow_batch_image_generation" | "batch_image_discount_multiplier" | "batch_image_hold_multiplier"
+  >,
+) => {
+  if (form.platform !== "gemini" || !form.allow_image_generation) {
+    form.allow_batch_image_generation = false;
+  }
+  if (!form.allow_batch_image_generation) {
+    form.batch_image_discount_multiplier = 0.5;
+    form.batch_image_hold_multiplier = 0.6;
+  }
+};
+
 const deleteConfirmMessage = computed(() => {
+// 鏍规嵁鍒嗙粍绫诲瀷杩斿洖涓嶅悓鐨勫垹闄ょ‘璁ゆ秷鎭?const deleteConfirmMessage = computed(() => {
   if (!deletingGroup.value) {
     return "";
   }
@@ -4796,7 +5214,7 @@ const loadGroups = async () => {
     groups.value = response.items;
     pagination.total = response.total;
     pagination.pages = response.pages;
-    if (hasVisibleUsageColumn.value) {
+    if (hasVisibleUsageSummaryConsumer.value) {
       loadUsageSummary();
     } else {
       usageLoading.value = false;
@@ -4827,10 +5245,22 @@ const formatCost = (cost: number): string => {
   return cost.toFixed(2);
 };
 
+const formatUsd = (cost: number): string => formatCurrencyAmount(cost, 2);
+
 const formatDisplayCost = (cost: number): string => `${getDisplayCurrencySymbol()}${formatCost(cost)}`;
 
+const getQuotaUsageClass = (used: number, limit: number) => {
+  if (!Number.isFinite(limit) || limit <= 0) {
+    return "font-medium text-gray-600 dark:text-gray-300";
+  }
+  const ratio = used / limit;
+  if (ratio >= 1) return "font-medium text-red-600 dark:text-red-400";
+  if (ratio >= 0.8) return "font-medium text-amber-600 dark:text-amber-400";
+  return "font-medium text-emerald-600 dark:text-emerald-400";
+};
+
 const loadUsageSummary = async () => {
-  if (!hasVisibleUsageColumn.value) {
+  if (!hasVisibleUsageSummaryConsumer.value) {
     usageLoading.value = false;
     return;
   }
@@ -4939,11 +5369,19 @@ const closeCreateModal = () => {
   createForm.custom_limit_hours = 0;
   createForm.custom_limit_usd = null;
   createForm.allow_image_generation = false;
+  createForm.allow_batch_image_generation = false;
   createForm.image_rate_independent = false;
   createForm.image_rate_multiplier = 1;
+  createForm.batch_image_discount_multiplier = 0.5;
+  createForm.batch_image_hold_multiplier = 0.6;
   createForm.image_price_1k = null;
   createForm.image_price_2k = null;
   createForm.image_price_4k = null;
+  createForm.video_rate_independent = false;
+  createForm.video_rate_multiplier = 1;
+  createForm.video_price_480p = null;
+  createForm.video_price_720p = null;
+  createForm.video_price_1080p = null;
   createForm.peak_rate_enabled = false;
   createForm.peak_start = "";
   createForm.peak_end = "";
@@ -5017,8 +5455,8 @@ const handleCreateGroup = async () => {
   if (!peakPayload) return;
   submitting.value = true;
   try {
-    // 构建请求数据，包含模型路由配置
     const requestData = {
+    // 鏋勫缓璇锋眰鏁版嵁锛屽寘鍚ā鍨嬭矾鐢遍厤缃?    const requestData = {
       ...createForm,
       daily_limit_usd: normalizeOptionalLimit(
         createForm.daily_limit_usd as number | string | null,
@@ -5052,7 +5490,7 @@ const handleCreateGroup = async () => {
             })
           : undefined,
     };
-    // v-model.number 清空输入框时产生 ""，转为 null 让后端设为无限制
+    // v-model.number 娓呯┖杈撳叆妗嗘椂浜х敓 ""锛岃浆涓?null 璁╁悗绔涓烘棤闄愬埗
     const emptyToNull = (v: any) => (v === "" ? null : v);
     requestData.daily_limit_usd = emptyToNull(requestData.daily_limit_usd);
     requestData.weekly_limit_usd = emptyToNull(requestData.weekly_limit_usd);
@@ -5061,7 +5499,26 @@ const handleCreateGroup = async () => {
     requestData.image_rate_multiplier = normalizeRateMultiplier(
       requestData.image_rate_multiplier,
     );
-    const requestPayload: CreateGroupRequest = { ...requestData, ...peakPayload };
+    resetDisabledBatchImagePricing(requestData);
+    requestData.batch_image_discount_multiplier = normalizeRateMultiplier(
+      requestData.batch_image_discount_multiplier,
+    );
+    requestData.batch_image_hold_multiplier = normalizeRateMultiplier(
+      requestData.batch_image_hold_multiplier,
+    );
+    requestData.video_rate_multiplier = normalizeRateMultiplier(
+      requestData.video_rate_multiplier,
+    );
+    requestData.image_price_1k = emptyToNull(requestData.image_price_1k);
+    requestData.image_price_2k = emptyToNull(requestData.image_price_2k);
+    requestData.image_price_4k = emptyToNull(requestData.image_price_4k);
+    requestData.video_price_480p = emptyToNull(requestData.video_price_480p);
+    requestData.video_price_720p = emptyToNull(requestData.video_price_720p);
+    requestData.video_price_1080p = emptyToNull(requestData.video_price_1080p);
+    const requestPayload: CreateGroupRequest = {
+      ...requestData,
+      ...peakPayload,
+    };
     await adminAPI.groups.create(requestPayload);
     appStore.showSuccess(t("admin.groups.groupCreated"));
     closeCreateModal();
@@ -5096,11 +5553,21 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.custom_limit_hours = group.custom_limit_hours ?? 0;
   editForm.custom_limit_usd = group.custom_limit_usd;
   editForm.allow_image_generation = group.allow_image_generation ?? false;
+  editForm.allow_batch_image_generation =
+    group.allow_batch_image_generation ?? false;
   editForm.image_rate_independent = group.image_rate_independent ?? false;
   editForm.image_rate_multiplier = group.image_rate_multiplier ?? 1;
+  editForm.batch_image_discount_multiplier =
+    group.batch_image_discount_multiplier ?? 0.5;
+  editForm.batch_image_hold_multiplier = group.batch_image_hold_multiplier ?? 0.6;
   editForm.image_price_1k = group.image_price_1k;
   editForm.image_price_2k = group.image_price_2k;
   editForm.image_price_4k = group.image_price_4k;
+  editForm.video_rate_independent = group.video_rate_independent ?? false;
+  editForm.video_rate_multiplier = group.video_rate_multiplier ?? 1;
+  editForm.video_price_480p = group.video_price_480p;
+  editForm.video_price_720p = group.video_price_720p;
+  editForm.video_price_1080p = group.video_price_1080p;
   editForm.peak_rate_enabled = group.peak_rate_enabled ?? false;
   editForm.peak_start = group.peak_start ?? "";
   editForm.peak_end = group.peak_end ?? "";
@@ -5130,10 +5597,10 @@ const handleEdit = async (group: AdminGroup) => {
     "gemini_image",
   ];
   editForm.mcp_xml_inject = group.mcp_xml_inject ?? true;
-  editForm.copy_accounts_from_group_ids = []; // 复制账号字段每次编辑时重置为空
+  editForm.copy_accounts_from_group_ids = [];
   editForm.rpm_limit = group.rpm_limit ?? 0;
   resetModelsListState(editModelsListState, group.models_list_config);
-  // 加载模型路由规则（异步加载账号名称）
+  // 鍔犺浇妯″瀷璺敱瑙勫垯锛堝紓姝ュ姞杞借处鍙峰悕绉帮級
   editForm.newapi_style_interface_enabled =
     group.newapi_style_interface_enabled ?? false;
   editModelRoutingRules.value = await convertApiFormatToRoutingRules(
@@ -5157,6 +5624,11 @@ const closeEditModal = () => {
   editForm.peak_end = "";
   editForm.peak_rate_multiplier = 1.0;
   editForm.peak_rate_windows = [];
+  editForm.video_rate_independent = false;
+  editForm.video_rate_multiplier = 1;
+  editForm.video_price_480p = null;
+  editForm.video_price_720p = null;
+  editForm.video_price_1080p = null;
   resetMessagesDispatchFormState(editForm);
   resetModelsListState(editModelsListState);
 };
@@ -5172,7 +5644,7 @@ const handleUpdateGroup = async () => {
 
   submitting.value = true;
   try {
-    // 转换 fallback_group_id: null -> 0 (后端使用 0 表示清除)
+    // 杞崲 fallback_group_id: null -> 0 (鍚庣浣跨敤 0 琛ㄧず娓呴櫎)
     const payload = {
       ...editForm,
       daily_limit_usd: normalizeOptionalLimit(
@@ -5213,7 +5685,7 @@ const handleUpdateGroup = async () => {
             })
           : undefined,
     };
-    // v-model.number 清空输入框时产生 ""，转为 null 让后端设为无限制
+    // v-model.number 娓呯┖杈撳叆妗嗘椂浜х敓 ""锛岃浆涓?null 璁╁悗绔涓烘棤闄愬埗
     const emptyToNull = (v: any) => (v === "" ? null : v);
     payload.daily_limit_usd = emptyToNull(payload.daily_limit_usd);
     payload.weekly_limit_usd = emptyToNull(payload.weekly_limit_usd);
@@ -5222,6 +5694,23 @@ const handleUpdateGroup = async () => {
     payload.image_rate_multiplier = normalizeRateMultiplier(
       payload.image_rate_multiplier,
     );
+    resetDisabledBatchImagePricing(payload);
+    payload.batch_image_discount_multiplier = normalizeRateMultiplier(
+      payload.batch_image_discount_multiplier,
+    );
+    payload.batch_image_hold_multiplier = normalizeRateMultiplier(
+      payload.batch_image_hold_multiplier,
+    );
+    payload.video_rate_multiplier = normalizeRateMultiplier(
+      payload.video_rate_multiplier,
+    );
+    const emptyPriceToClear = (v: any) => (v === "" || v === null ? -1 : v);
+    payload.image_price_1k = emptyPriceToClear(payload.image_price_1k);
+    payload.image_price_2k = emptyPriceToClear(payload.image_price_2k);
+    payload.image_price_4k = emptyPriceToClear(payload.image_price_4k);
+    payload.video_price_480p = emptyPriceToClear(payload.video_price_480p);
+    payload.video_price_720p = emptyPriceToClear(payload.video_price_720p);
+    payload.video_price_1080p = emptyPriceToClear(payload.video_price_1080p);
     const requestPayload: UpdateGroupRequest = { ...payload, ...peakPayload };
     await adminAPI.groups.update(editingGroup.value.id, requestPayload);
     appStore.showSuccess(t("admin.groups.groupUpdated"));
@@ -5293,8 +5782,8 @@ const confirmDelete = async () => {
   }
 };
 
-// 监听 subscription_type 变化：订阅模式时 is_exclusive 默认为 true；标准余额分组也保留高峰配置。
 watch(
+// 鐩戝惉 subscription_type 鍙樺寲锛氳闃呮ā寮忔椂 is_exclusive 榛樿涓?true锛涙爣鍑嗕綑棰濆垎缁勪篃淇濈暀楂樺嘲閰嶇疆銆?watch(
   () => createForm.subscription_type,
   (newVal) => {
     if (newVal === "subscription") {
@@ -5335,8 +5824,23 @@ watch(
       createForm.require_oauth_only = false;
       createForm.require_privacy_set = false;
     }
+    resetDisabledBatchImagePricing(createForm);
     resetModelsListState(createModelsListState);
     loadModelsListCandidates("create", 0, newVal);
+  },
+);
+
+watch(
+  () => createForm.allow_image_generation,
+  () => {
+    resetDisabledBatchImagePricing(createForm);
+  },
+);
+
+watch(
+  () => createForm.allow_batch_image_generation,
+  () => {
+    resetDisabledBatchImagePricing(createForm);
   },
 );
 
@@ -5353,6 +5857,7 @@ watch(
       editForm.require_oauth_only = false;
       editForm.require_privacy_set = false;
     }
+    resetDisabledBatchImagePricing(editForm);
     if (editingGroup.value) {
       resetModelsListState(editModelsListState, editForm.platform === editingGroup.value.platform ? editingGroup.value.models_list_config : undefined);
       loadModelsListCandidates("edit", editingGroup.value.id, newVal);
@@ -5360,10 +5865,10 @@ watch(
   },
 );
 
-// 点击外部关闭账号搜索下拉框
 const handleClickOutside = (event: MouseEvent) => {
+// 鐐瑰嚮澶栭儴鍏抽棴璐﹀彿鎼滅储涓嬫媺妗?const handleClickOutside = (event: MouseEvent) => {
   const target = event.target as HTMLElement;
-  // 检查是否点击在下拉框或输入框内
+  // 妫€鏌ユ槸鍚︾偣鍑诲湪涓嬫媺妗嗘垨杈撳叆妗嗗唴
   if (!target.closest(".account-search-container")) {
     Object.keys(showAccountDropdown.value).forEach((key) => {
       showAccountDropdown.value[key] = false;
@@ -5377,9 +5882,9 @@ const handleClickOutside = (event: MouseEvent) => {
 // 打开排序弹窗
 const openSortModal = async () => {
   try {
-    // 获取所有分组（不分页）
+    // 鑾峰彇鎵€鏈夊垎缁勶紙涓嶅垎椤碉級
     const allGroups = await adminAPI.groups.getAll();
-    // 按 sort_order 排序
+    // 鎸?sort_order 鎺掑簭
     sortableGroups.value = [...allGroups].sort(
       (a, b) => a.sort_order - b.sort_order,
     );
@@ -5396,7 +5901,7 @@ const closeSortModal = () => {
   sortableGroups.value = [];
 };
 
-// 保存排序
+// 淇濆瓨鎺掑簭
 const saveSortOrder = async () => {
   sortSubmitting.value = true;
   try {

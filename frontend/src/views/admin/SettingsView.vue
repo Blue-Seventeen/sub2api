@@ -1188,6 +1188,9 @@
                         )
                       "
                     />
+                    <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                      {{ t("admin.settings.openaiFastPolicy.errorMessageHint") }}
+                    </p>
                   </div>
 
                   <div class="mt-3">
@@ -1246,11 +1249,14 @@
                     </label>
                     <Select
                       :modelValue="rule.fallback_action || 'pass'"
-                      @update:modelValue="
-                        rule.fallback_action = $event as any
-                      "
+                      @update:modelValue="rule.fallback_action = $event as any"
                       :options="openaiFastPolicyActionOptions"
                     />
+                    <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                      {{
+                        t("admin.settings.openaiFastPolicy.fallbackActionHint")
+                      }}
+                    </p>
                     <div v-if="rule.fallback_action === 'block'" class="mt-2">
                       <input
                         v-model="rule.fallback_error_message"
@@ -1258,7 +1264,7 @@
                         class="input"
                         :placeholder="
                           t(
-                            'admin.settings.openaiFastPolicy.errorMessagePlaceholder',
+                            'admin.settings.openaiFastPolicy.fallbackErrorMessagePlaceholder',
                           )
                         "
                       />
@@ -10043,6 +10049,10 @@ const openaiFastPolicyTierOptions = computed(() => [
 const openaiFastPolicyActionOptions = computed(() => [
   { value: "pass", label: t("admin.settings.openaiFastPolicy.actionPass") },
   { value: "filter", label: t("admin.settings.openaiFastPolicy.actionFilter") },
+  {
+    value: "force_priority",
+    label: t("admin.settings.openaiFastPolicy.actionForcePriority"),
+  },
   { value: "block", label: t("admin.settings.openaiFastPolicy.actionBlock") },
 ]);
 

@@ -67,17 +67,37 @@ func TestWSResponseCreate_ExplicitFilterStripsServiceTier(t *testing.T) {
 	require.NotContains(t, string(updated), `"service_tier"`)
 }
 
-func TestWSResponseCreate_FlexStripsByCustomPolicy(t *testing.T) {
+func TestWSResponseCreate_ForcePriorityRewritesKnownTier(t *testing.T) {
+	settings := &OpenAIFastPolicySettings{
+		Rules: []OpenAIFastPolicyRule{{
+			ServiceTier: OpenAIFastTierAny,
+			Action:      OpenAIFastPolicyActionForcePriority,
+			Scope:       BetaPolicyScopeAll,
+		}},
+	}
+	svc := newOpenAIGatewayServiceWithSettings(t, settings)
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+
+	for _, tier := range []string{"flex", "auto", "default", "scale", "fast", "priority"} {
+		frame := []byte(`{"type":"response.create","model":"gpt-5.5","service_tier":"` + tier + `"}`)
+		updated, _, blocked, err := svc.applyOpenAIFastPolicyToWSResponseCreate(context.Background(), account, "gpt-5.5", frame)
+		require.NoError(t, err)
+		require.Nil(t, blocked)
+		require.Equal(t, OpenAIFastTierPriority, gjson.GetBytes(updated, "service_tier").String(),
+			"tier %q should be forced to priority", tier)
+	}
+}
+
+func TestWSResponseCreate_FlexPassThrough(t *testing.T) {
 	svc := newOpenAIGatewayServiceWithSettings(t, DefaultOpenAIFastPolicySettings())
 	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
 
-	// Custom billing semantics treat flex as a local low-cost tier; it must
-	// not reach upstream even when admin policy has no explicit rules.
+	// Default policy has no rules; flex is left untouched.
 	frame := []byte(`{"type":"response.create","model":"gpt-5.5","service_tier":"flex"}`)
 	updated, _, blocked, err := svc.applyOpenAIFastPolicyToWSResponseCreate(context.Background(), account, "gpt-5.5", frame)
 	require.NoError(t, err)
 	require.Nil(t, blocked)
-	require.False(t, gjson.GetBytes(updated, "service_tier").Exists(), "flex frames must be stripped before upstream")
+	require.Equal(t, "flex", gjson.GetBytes(updated, "service_tier").String(), "flex frames must reach upstream untouched under default policy")
 }
 
 func TestWSResponseCreate_BlockReturnsTypedError(t *testing.T) {
@@ -333,6 +353,7 @@ func TestPolicyEnforcingFrameConn_WithoutCapturedFallbackPolicyMisses(t *testing
 // written upstream.
 func TestWSResponseCreate_IngressFiltersServiceTierBeforeUpstream(t *testing.T) {
 	resetOpenAIFastPolicySettingsCache(t)
+
 	gin.SetMode(gin.TestMode)
 
 	cfg := &config.Config{}
@@ -456,6 +477,7 @@ func TestWSResponseCreate_IngressFiltersServiceTierBeforeUpstream(t *testing.T) 
 // error event AND the upstream FrameConn never receives the offending frame.
 func TestWSResponseCreate_IngressBlockSendsErrorEventAndSkipsUpstream(t *testing.T) {
 	resetOpenAIFastPolicySettingsCache(t)
+
 	gin.SetMode(gin.TestMode)
 
 	cfg := &config.Config{}
@@ -910,11 +932,11 @@ func TestApplyOpenAIFastPolicyToBody_NonStringServiceTier(t *testing.T) {
 // This test pins the four legs of the semantic contract:
 //   - turn 1: service_tier=priority hits the explicit filter rule, so
 //     after filter the upstream sees no tier → billing is nil.
-//   - turn 2: service_tier=flex is stripped by the custom low-cost tier rule,
-//     so billing should reflect upstream-actual nil tier.
+//   - turn 2: service_tier=flex passes (the filter rule targets priority only),
+//     billing should now reflect "flex".
 //   - turn 3: response.create without any service_tier — the upstream will
 //     treat it as default; we choose to mirror that and overwrite billing
-//     to nil rather than carry over a previous turn's value.
+//     to nil rather than carry over "flex" from turn 2.
 //   - non-response.create frame (response.cancel here) carrying a stray
 //     service_tier-shaped field must NOT clobber the billing pointer.
 func TestPassthroughBilling_MultiTurnServiceTierFollowsFilteredFrames(t *testing.T) {
@@ -956,14 +978,15 @@ func TestPassthroughBilling_MultiTurnServiceTierFollowsFilteredFrames(t *testing
 	require.Nil(t, requestServiceTierPtr.Load(),
 		"turn 1: filter strips service_tier=priority, billing must reflect upstream-actual nil tier")
 
-	// Turn 2: client switches to flex, which is a local tier and is stripped
-	// before upstream; billing remains nil to mirror upstream-actual state.
+	// Turn 2: client switches to flex, should pass and update billing.
 	turn2 := []byte(`{"type":"response.create","model":"gpt-5.5","service_tier":"flex"}`)
 	out2, blocked2, err2 := filter(coderws.MessageText, turn2)
 	require.NoError(t, err2)
 	require.Nil(t, blocked2)
-	require.False(t, gjson.GetBytes(out2, "service_tier").Exists(), "turn 2: flex must be stripped before upstream")
-	require.Nil(t, requestServiceTierPtr.Load(), "turn 2: billing must remain nil because upstream sees no tier")
+	require.Equal(t, "flex", gjson.GetBytes(out2, "service_tier").String(), "turn 2: flex must pass to upstream untouched")
+	tier2 := requestServiceTierPtr.Load()
+	require.NotNil(t, tier2, "turn 2: billing must update to reflect flex")
+	require.Equal(t, "flex", *tier2)
 
 	// A non-response.create frame with a stray service_tier-shaped field
 	// must NOT overwrite the billing pointer (those frames don't carry
@@ -973,7 +996,8 @@ func TestPassthroughBilling_MultiTurnServiceTierFollowsFilteredFrames(t *testing
 	require.NoError(t, errCancel)
 	require.Nil(t, blockedCancel)
 	tierAfterCancel := requestServiceTierPtr.Load()
-	require.Nil(t, tierAfterCancel,
+	require.NotNil(t, tierAfterCancel, "response.cancel must not clobber billing tier to nil")
+	require.Equal(t, "flex", *tierAfterCancel,
 		"non-response.create frames must not update billing tier even if they carry a service_tier-shaped field")
 
 	// Turn 3: response.create without any service_tier. We deliberately

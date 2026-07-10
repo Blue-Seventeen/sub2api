@@ -93,6 +93,8 @@ var migrationChecksumCompatibilityRules = map[string]migrationChecksumCompatibil
 	"145_subscription_windows_anchor_to_starts_at.sql":        newMigrationChecksumCompatibilityRule("24f0754ad2355d839ddd2d3f01d15bde97f1b89d28ba60f520cd4855041b2f78", "bd2e1d7cf7dea901bba96b030fb41168db129abc84f705d081afec937d52bfd6"),
 	"142_remove_ops_retry_replay_compat.sql":                  newMigrationChecksumCompatibilityRule("e8f288ca3a703457c47cce4d697f36a35da230914efc3d57ecb25d4b4842e643", "88d139daf730c511ffcd9e8ce99769a6dbc781d63a8b1b954f272254c9468c6f", "2683a204e8aed45c0cae0747d38c9db0dfcba4243d944fcfbc18432c2c3bcd70"),
 	"146_subscription_custom_hour_limit.sql":                  newMigrationChecksumCompatibilityRule("2da1855df7d0295b69219d8fe4da55bac18c6dc1998a1ff1963932fa2f722b0f", "e37b17f291d50b1ac96404f3dd56e23e2e8a6e7dba0fd9c4d148b943709c806c"),
+	"159_batch_image_foundation.sql":                          newMigrationChecksumCompatibilityRule("d902b70982025ec519749faf058aab7631e82c3f48167b9a4ae4db718eb72cce", "82da85b5d98e67a0507647b873a40373e84538e4adafdeed6767c0ac8b6570b2"),
+	"161_batch_image_pricing_snapshot.sql":                    newMigrationChecksumCompatibilityRule("4012af3e43636cb6af22e0176d59d1fcc70615c0f310194329461ae462c4fbd6", "96d915c9b7a6941ae99039e0ff3f1a61481eb9bddd933d11c6fadb2274554e87"),
 }
 
 // ApplyMigrations 将嵌入的 SQL 迁移文件应用到指定的数据库。

@@ -184,16 +184,6 @@ func (s *AffiliateService) resolveRebateRatePercent(ctx context.Context, inviter
 	return clampAffiliateRebateRate(s.settingService.GetAffiliateRebateRatePercent(ctx))
 }
 
-func clampAffiliateRebateRate(v float64) float64 {
-	if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
-		return 0
-	}
-	if v > 100 {
-		return 100
-	}
-	return v
-}
-
 func affiliateRoundTo(v float64, scale int) float64 {
 	factor := math.Pow10(scale)
 	return math.Round(v*factor) / factor

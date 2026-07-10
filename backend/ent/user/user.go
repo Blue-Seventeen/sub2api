@@ -33,6 +33,8 @@ const (
 	FieldUnifiedRateEnabled = "unified_rate_enabled"
 	// FieldUnifiedRateMultiplier holds the string denoting the unified_rate_multiplier field in the database.
 	FieldUnifiedRateMultiplier = "unified_rate_multiplier"
+	// FieldFrozenBalance holds the string denoting the frozen_balance field in the database.
+	FieldFrozenBalance = "frozen_balance"
 	// FieldConcurrency holds the string denoting the concurrency field in the database.
 	FieldConcurrency = "concurrency"
 	// FieldStatus holds the string denoting the status field in the database.
@@ -205,6 +207,7 @@ var Columns = []string{
 	FieldBalance,
 	FieldUnifiedRateEnabled,
 	FieldUnifiedRateMultiplier,
+	FieldFrozenBalance,
 	FieldConcurrency,
 	FieldStatus,
 	FieldUsername,
@@ -267,6 +270,8 @@ var (
 	DefaultUnifiedRateEnabled bool
 	// DefaultUnifiedRateMultiplier holds the default value on creation for the "unified_rate_multiplier" field.
 	DefaultUnifiedRateMultiplier float64
+	// DefaultFrozenBalance holds the default value on creation for the "frozen_balance" field.
+	DefaultFrozenBalance float64
 	// DefaultConcurrency holds the default value on creation for the "concurrency" field.
 	DefaultConcurrency int
 	// DefaultStatus holds the default value on creation for the "status" field.
@@ -348,6 +353,11 @@ func ByUnifiedRateEnabled(opts ...sql.OrderTermOption) OrderOption {
 // ByUnifiedRateMultiplier orders the results by the unified_rate_multiplier field.
 func ByUnifiedRateMultiplier(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldUnifiedRateMultiplier, opts...).ToFunc()
+}
+
+// ByFrozenBalance orders the results by the frozen_balance field.
+func ByFrozenBalance(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldFrozenBalance, opts...).ToFunc()
 }
 
 // ByConcurrency orders the results by the concurrency field.
