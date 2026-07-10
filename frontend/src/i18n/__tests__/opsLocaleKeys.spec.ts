@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import en from '@/i18n/locales/en'
+import en from '@/i18n/locales/en/index'
 
 function flattenKeys(obj: Record<string, any>, prefix = ''): string[] {
   const keys: string[] = []

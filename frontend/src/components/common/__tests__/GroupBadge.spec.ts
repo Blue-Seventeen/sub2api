@@ -86,7 +86,7 @@ describe('GroupBadge', () => {
 
     expect(peakBadge.exists()).toBe(true)
     expect(tooltip.classes()).toContain('fixed')
-    expect(tooltip.classes()).toContain('z-[9999]')
+    expect(tooltip.classes()).toContain('z-[100000050]')
     expect(tooltip.text()).toContain('Peak rate:')
     expect(windowLines).toHaveLength(1)
     expect(windowLines[0].text()).toBe('09:00-12:00 base x peak = 1 x 1.5 = 1.5 final')

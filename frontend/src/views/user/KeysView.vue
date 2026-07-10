@@ -1051,12 +1051,13 @@
       <div
         v-if="groupSelectorKeyId !== null && dropdownPosition"
         ref="dropdownRef"
-        class="animate-in fade-in slide-in-from-top-2 fixed z-[100000020] w-max min-w-[380px] overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-black/5 duration-200 dark:bg-dark-800 dark:ring-white/10"
+        class="animate-in fade-in slide-in-from-top-2 fixed z-[100000020] overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-black/5 duration-200 dark:bg-dark-800 dark:ring-white/10"
         style="pointer-events: auto !important;"
         :style="{
           top: dropdownPosition.top !== undefined ? dropdownPosition.top + 'px' : undefined,
           bottom: dropdownPosition.bottom !== undefined ? dropdownPosition.bottom + 'px' : undefined,
-          left: dropdownPosition.left + 'px'
+          left: dropdownPosition.left + 'px',
+          width: dropdownPosition.width + 'px'
         }"
       >
         <!-- Search box -->
@@ -1312,9 +1313,12 @@ const groupSelectorKeyId = ref<number | null>(null)
 const publicSettings = ref<PublicSettings | null>(null)
 const dropdownRef = ref<HTMLElement | null>(null)
 const columnDropdownRef = ref<HTMLElement | null>(null)
-const dropdownPosition = ref<{ top?: number; bottom?: number; left: number } | null>(null)
+const dropdownPosition = ref<{ top?: number; bottom?: number; left: number; width: number } | null>(null)
 const groupButtonRefs = ref<Map<number, HTMLElement>>(new Map())
 let abortController: AbortController | null = null
+
+const GROUP_SELECTOR_DROPDOWN_WIDTH = 520
+const GROUP_SELECTOR_DROPDOWN_MARGIN = 12
 
 // Get the currently selected key for group change
 const selectedKeyForGroup = computed(() => {
@@ -1612,18 +1616,29 @@ const openGroupSelector = (key: ApiKey) => {
       const dropdownEstHeight = 400 // estimated max dropdown height
       const spaceBelow = window.innerHeight - rect.bottom
       const spaceAbove = rect.top
+      const dropdownWidth = Math.min(
+        GROUP_SELECTOR_DROPDOWN_WIDTH,
+        Math.max(240, window.innerWidth - GROUP_SELECTOR_DROPDOWN_MARGIN * 2)
+      )
+      const maxLeft = Math.max(
+        GROUP_SELECTOR_DROPDOWN_MARGIN,
+        window.innerWidth - dropdownWidth - GROUP_SELECTOR_DROPDOWN_MARGIN
+      )
+      const left = Math.min(Math.max(GROUP_SELECTOR_DROPDOWN_MARGIN, rect.left), maxLeft)
 
       if (spaceBelow < dropdownEstHeight && spaceAbove > spaceBelow) {
         // Not enough space below, pop upward
         dropdownPosition.value = {
           bottom: window.innerHeight - rect.top + 4,
-          left: rect.left
+          left,
+          width: dropdownWidth
         }
       } else {
         // Default: pop downward
         dropdownPosition.value = {
           top: rect.bottom + 4,
-          left: rect.left
+          left,
+          width: dropdownWidth
         }
       }
     }

@@ -17,7 +17,7 @@ const props = withDefaults(defineProps<Props>(), {
 const { t } = useI18n()
 
 // 平台/分组视图固定只展示约 3 行卡片，其余通过滚动查看，避免卡片区域被数据量撑高变形。
-const summaryListClass = 'custom-scrollbar h-[280px] space-y-2 overflow-y-auto overscroll-contain p-3'
+const summaryListClass = 'custom-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain p-3'
 const detailListClass = 'custom-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain p-3'
 
 const loading = ref(false)
@@ -345,7 +345,7 @@ watch(
 </script>
 
 <template>
-  <div class="flex h-full flex-col rounded-3xl bg-white p-6 shadow-sm ring-1 ring-gray-900/5 dark:bg-dark-800 dark:ring-dark-700">
+  <div class="flex h-full min-h-0 flex-col rounded-3xl bg-white p-6 shadow-sm ring-1 ring-gray-900/5 dark:bg-dark-800 dark:ring-dark-700">
     <!-- 头部 -->
     <div class="mb-4 flex shrink-0 items-center justify-between gap-3">
       <h3 class="flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-white">
@@ -390,7 +390,7 @@ watch(
     <!-- 禁用状态 -->
     <div
       v-if="!realtimeEnabled"
-      class="flex flex-1 items-center justify-center rounded-xl border border-dashed border-gray-200 text-sm text-gray-500 dark:border-dark-700 dark:text-gray-400"
+      class="flex min-h-0 flex-1 items-center justify-center rounded-xl border border-dashed border-gray-200 text-sm text-gray-500 dark:border-dark-700 dark:text-gray-400"
     >
       {{ t('admin.ops.concurrency.disabledHint') }}
     </div>
@@ -408,7 +408,7 @@ watch(
       </div>
 
       <!-- 空状态 -->
-      <div v-if="displayRows.length === 0" class="flex flex-1 items-center justify-center text-sm text-gray-500 dark:text-gray-400">
+      <div v-if="displayRows.length === 0" class="flex min-h-0 flex-1 items-center justify-center text-sm text-gray-500 dark:text-gray-400">
         {{ t('admin.ops.concurrency.empty') }}
       </div>
 

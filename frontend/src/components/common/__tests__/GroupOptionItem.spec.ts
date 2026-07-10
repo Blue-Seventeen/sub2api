@@ -57,13 +57,16 @@ describe('GroupOptionItem', () => {
     expect(wrapper.text()).not.toContain('18:00-22:00')
 
     const peakPill = wrapper.get('[data-test="group-option-peak-rate"]')
+    const ratePillGroup = peakPill.element.parentElement?.parentElement
+    expect(ratePillGroup?.className).toContain('flex-row')
+    expect(ratePillGroup?.className).not.toContain('flex-col')
     expect(peakPill.attributes('title')).toBeUndefined()
     await peakPill.trigger('mouseenter')
     const tooltip = wrapper.get('[data-test="peak-rate-tooltip"]')
     const windowLines = tooltip.findAll('[data-test="peak-rate-window"]')
 
     expect(tooltip.classes()).toContain('fixed')
-    expect(tooltip.classes()).toContain('z-[9999]')
+    expect(tooltip.classes()).toContain('z-[100000050]')
     expect(windowLines).toHaveLength(2)
     expect(windowLines[0].text()).toBe('09:00-12:00 base x peak = 1 x 1.5 = 1.5 final')
     expect(windowLines[1].text()).toBe('18:00-22:00 base x peak = 1 x 2 = 2 final')
@@ -83,6 +86,7 @@ describe('GroupOptionItem', () => {
     expect(wrapper.text()).toContain('18:00-22:00')
 
     const peakPill = wrapper.get('[data-test="group-option-peak-rate"]')
+    expect(peakPill.element.parentElement?.parentElement?.className).toContain('flex-col')
     expect(peakPill.classes()).toContain('whitespace-normal')
     expect(peakPill.classes()).not.toContain('whitespace-nowrap')
     expect(wrapper.classes()).toContain('flex-col')

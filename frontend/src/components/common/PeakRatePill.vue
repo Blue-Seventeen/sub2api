@@ -25,7 +25,7 @@
       >
         <div
           v-if="tooltipState"
-          class="pointer-events-none fixed z-[9999] rounded-xl border border-amber-200 bg-white px-3 py-2.5 text-left shadow-[0_24px_70px_-28px_rgba(120,53,15,0.55)] ring-1 ring-amber-100 dark:border-amber-800/70 dark:bg-dark-800 dark:ring-amber-900/40"
+          class="pointer-events-none fixed z-[100000050] rounded-xl border border-amber-200 bg-white px-3 py-2.5 text-left shadow-[0_24px_70px_-28px_rgba(120,53,15,0.55)] ring-1 ring-amber-100 dark:border-amber-800/70 dark:bg-dark-800 dark:ring-amber-900/40"
           :class="tooltipState.placement === 'top' ? '-translate-y-full' : ''"
           :style="tooltipState.style"
           data-test="peak-rate-tooltip"

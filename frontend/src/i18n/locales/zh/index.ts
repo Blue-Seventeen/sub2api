@@ -3,11 +3,13 @@ import common from './common'
 import dashboard from './dashboard'
 import admin from './admin'
 import misc from './misc'
+import carryover from './carryover'
+import { mergeLocaleMessages } from '../merge'
 
-export default {
+export default mergeLocaleMessages(carryover, {
   ...landing,
   ...common,
   ...dashboard,
   admin,
   ...misc,
-}
+})

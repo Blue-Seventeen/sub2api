@@ -24,7 +24,7 @@
 
     <!-- Right: rate pill + checkmark (vertically centered to first row) -->
     <div class="flex shrink-0 items-center gap-2 pt-0.5">
-      <div class="flex shrink-0 flex-col items-end gap-1">
+      <div :class="ratePillGroupClass">
         <!-- Rate pill (platform color) -->
         <span v-if="rateMultiplier !== undefined" :class="['inline-flex items-center whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold', ratePillClass]">
           <template v-if="hasEffectiveRate">
@@ -139,6 +139,14 @@ const peakRatePillClass = computed(() => {
     return `${base} max-w-64 whitespace-normal break-words text-right leading-4`
   }
   return `${base} whitespace-nowrap`
+})
+
+const ratePillGroupClass = computed(() => {
+  const base = 'flex shrink-0'
+  if (props.peakDisplayMode === 'full') {
+    return `${base} flex-col items-end gap-1`
+  }
+  return `${base} flex-row flex-wrap items-center justify-end gap-2`
 })
 
 const optionRootClass = computed(() => {
