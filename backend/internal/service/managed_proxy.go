@@ -38,9 +38,8 @@ type ProxySubscription struct {
 	TestURL            string `json:"test_url"`
 	Revision           int64  `json:"revision"`
 	LastError          string `json:"last_error,omitempty"`
-	// RawDNSConfig 保存订阅顶层 dns 配置（YAML，尤其是 nameserver-policy）。
-	// 用于在生成 Mihomo runtime config 时恢复订阅自带的 DNS 策略解析节点域名；
-	// 不对外暴露，避免泄露订阅自带的 DNS 服务器地址。
+	// RawDNSConfig stores sanitized DNS policy fields used by Mihomo node resolution.
+	// It is intentionally hidden from API JSON responses.
 	RawDNSConfig string                  `json:"-"`
 	ProxyID      *int64                  `json:"proxy_id,omitempty"`
 	ProxyIDs     []int64                 `json:"proxy_ids,omitempty"`

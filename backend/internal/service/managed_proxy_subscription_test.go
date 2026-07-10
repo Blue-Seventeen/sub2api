@@ -88,8 +88,11 @@ func TestParseProxySubscriptionPreservesDNSNameserverPolicy(t *testing.T) {
 	parsed, err := ParseProxySubscription([]byte(`
 dns:
   enable: true
+  listen: 0.0.0.0:53
   nameserver-policy:
     "+.entry.example.qpon": tcp://dns.example:8080
+  nameserver_policy:
+    "+.unsafe.example": tcp://unsafe.example:8080
 proxies:
   - name: HK-01
     type: ss
@@ -112,6 +115,35 @@ proxies:
 	}
 	if !strings.Contains(parsed.RawDNSConfig, "entry.example.qpon") {
 		t.Fatalf("raw dns config missing policy domain: %q", parsed.RawDNSConfig)
+	}
+	for _, dropped := range []string{"listen", "nameserver_policy", "unsafe.example"} {
+		if strings.Contains(parsed.RawDNSConfig, dropped) {
+			t.Fatalf("raw dns config should drop %q: %q", dropped, parsed.RawDNSConfig)
+		}
+	}
+}
+
+func TestParseProxySubscriptionDNSPolicyOnlyAllowsMatchingDomains(t *testing.T) {
+	_, err := ParseProxySubscription([]byte(`
+dns:
+  nameserver-policy:
+    "+.entry.example.invalid": tcp://dns.example:8080
+proxies:
+  - name: policy-covered
+    type: ss
+    server: t.hk01.entry.example.invalid
+    port: 8388
+    cipher: aes-128-gcm
+    password: remote-secret
+  - name: not-covered
+    type: ss
+    server: other.example.invalid
+    port: 8389
+    cipher: aes-128-gcm
+    password: remote-secret
+`))
+	if err == nil {
+		t.Fatal("expected non-policy domain to keep DNS validation and be rejected")
 	}
 }
 

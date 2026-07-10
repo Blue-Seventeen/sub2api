@@ -690,13 +690,72 @@ func TestBuildMihomoConfigYAMLRestoresSubscriptionDNSPolicy(t *testing.T) {
 	}
 }
 
+func TestBuildMihomoConfigYAMLRejectsNonPolicyDomainWhenPolicyExists(t *testing.T) {
+	_, err := buildMihomoConfigYAML(ProxySubscription{
+		ID:                 22,
+		Name:               "subscription",
+		SubscriptionURL:    "https://example.com/clash.yaml",
+		RefreshIntervalSec: 3600,
+		TestURL:            "https://example.com/health",
+		RawDNSConfig:       "nameserver-policy:\n  \"+.entry.example.invalid\": tcp://dns.example:8080\n",
+		Nodes: []ProxySubscriptionNode{{
+			Name:         "US-01",
+			ProviderName: "node-us01",
+			Type:         "ss",
+			Username:     "mpu_us",
+			Password:     "mpp_us",
+			Status:       ProxySubscriptionNodeStatusActive,
+			RawConfig:    "name: US-01\ntype: ss\nserver: other.example.invalid\nport: 8388\ncipher: aes-128-gcm\npassword: remote-secret\n",
+		}},
+	}, managedProxyMihomoConfigOptions{
+		BindHost:         "127.0.0.1",
+		MixedPort:        39065,
+		ControllerPort:   39066,
+		ControllerSecret: "secret",
+		HealthCheckURL:   "https://example.com/health",
+	})
+	if err == nil {
+		t.Fatal("expected non-policy domain to keep DNS validation and be rejected")
+	}
+}
+
+func TestBuildMihomoConfigYAMLRejectsRawConfigServerOutsidePolicy(t *testing.T) {
+	_, err := buildMihomoConfigYAML(ProxySubscription{
+		ID:                 23,
+		Name:               "subscription",
+		SubscriptionURL:    "https://example.com/clash.yaml",
+		RefreshIntervalSec: 3600,
+		TestURL:            "https://example.com/health",
+		RawDNSConfig:       "nameserver-policy:\n  \"+.entry.example.qpon\": tcp://dns.example:8080\n",
+		Nodes: []ProxySubscriptionNode{{
+			Name:         "US-01",
+			ProviderName: "node-us01",
+			Type:         "ss",
+			Server:       "t.hk01.entry.example.qpon",
+			Username:     "mpu_us",
+			Password:     "mpp_us",
+			Status:       ProxySubscriptionNodeStatusActive,
+			RawConfig:    "name: US-01\ntype: ss\nserver: other.example.invalid\nport: 8388\ncipher: aes-128-gcm\npassword: remote-secret\n",
+		}},
+	}, managedProxyMihomoConfigOptions{
+		BindHost:         "127.0.0.1",
+		MixedPort:        39065,
+		ControllerPort:   39066,
+		ControllerSecret: "secret",
+		HealthCheckURL:   "https://example.com/health",
+	})
+	if err == nil {
+		t.Fatal("expected RawConfig server outside policy to keep DNS validation and be rejected")
+	}
+}
+
 // TestBuildManagedProxyDNSConfig 验证 DNS 段构建：强制 enable、缺省 nameserver 时补默认。
 func TestBuildManagedProxyDNSConfig(t *testing.T) {
 	if cfg, err := buildManagedProxyDNSConfig(""); err != nil || cfg != nil {
 		t.Fatalf("empty raw dns config should yield nil map, got cfg=%v err=%v", cfg, err)
 	}
 
-	cfg, err := buildManagedProxyDNSConfig("nameserver-policy:\n  \"+.entry.example.qpon\": tcp://dns.example:8080\n")
+	cfg, err := buildManagedProxyDNSConfig("listen: 0.0.0.0:53\nfake-ip-range: 198.18.0.1/16\nnameserver_policy:\n  \"+.unsafe.example\": tcp://unsafe.example:8080\nnameserver-policy:\n  \"+.entry.example.qpon\": tcp://dns.example:8080\n")
 	if err != nil {
 		t.Fatalf("build dns config: %v", err)
 	}
@@ -708,6 +767,11 @@ func TestBuildManagedProxyDNSConfig(t *testing.T) {
 	}
 	if _, ok := cfg["nameserver-policy"]; !ok {
 		t.Fatalf("expected nameserver-policy to be preserved: %#v", cfg)
+	}
+	for _, dropped := range []string{"listen", "fake-ip-range", "nameserver_policy"} {
+		if _, ok := cfg[dropped]; ok {
+			t.Fatalf("expected dns field %q to be dropped, got: %#v", dropped, cfg)
+		}
 	}
 
 	withNS, err := buildManagedProxyDNSConfig("enable: false\nnameserver:\n  - https://1.1.1.1/dns-query\n")

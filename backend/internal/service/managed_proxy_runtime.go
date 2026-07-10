@@ -786,10 +786,7 @@ func buildMihomoNodeConfigYAML(sub ProxySubscription, opts managedProxyMihomoCon
 	if err != nil {
 		return nil, err
 	}
-	allowPolicyDomains := managedProxyDNSConfigHasNameserverPolicy(dnsConfig)
-	// Only dns.nameserver-policy changes node-domain resolution semantics. Plain
-	// dns nameserver settings still keep the legacy hosts pinning behavior.
-	pinHosts := !allowPolicyDomains
+	policyMatcher := newManagedProxyDNSPolicyMatcher(dnsConfig)
 
 	users := make([]map[string]any, 0, len(sub.Nodes))
 	proxies := make([]map[string]any, 0, len(sub.Nodes))
@@ -802,11 +799,12 @@ func buildMihomoNodeConfigYAML(sub ProxySubscription, opts managedProxyMihomoCon
 		if strings.TrimSpace(node.Username) == "" || strings.TrimSpace(node.Password) == "" {
 			return nil, fmt.Errorf("managed proxy node %s is missing local auth", node.Name)
 		}
-		proxyConfig, err := managedProxyNodeRawConfig(node, allowPolicyDomains)
+		allowPolicyDomain := policyMatcher.Matches(managedProxyNodePolicyServer(node))
+		proxyConfig, err := managedProxyNodeRawConfig(node, allowPolicyDomain)
 		if err != nil {
 			return nil, err
 		}
-		if pinHosts {
+		if !allowPolicyDomain {
 			if err := addManagedProxyPinnedHost(hosts, proxyConfig); err != nil {
 				return nil, err
 			}
@@ -849,18 +847,24 @@ func buildMihomoNodeConfigYAML(sub ProxySubscription, opts managedProxyMihomoCon
 	if dnsConfig != nil {
 		cfg["dns"] = dnsConfig
 	}
-	if pinHosts && len(hosts) > 0 {
+	if len(hosts) > 0 {
 		cfg["hosts"] = hosts
 	}
 	return yaml.Marshal(cfg)
 }
 
-// buildManagedProxyDNSConfig 根据订阅顶层 dns 配置构建 Mihomo runtime 的 dns 段。
-// 返回 nil 表示订阅没有 dns 配置（此时沿用系统 DNS hosts pinning 的旧行为）。
-//
-// 完整保留订阅原始 dns map（含 nameserver-policy），并强制 enable: true —— nameserver-policy
-// 只有在 DNS 启用时才会被 Mihomo 采纳；缺省 nameserver 时补一组默认解析器，避免 Mihomo 因
-// 空 nameserver 启动失败。
+func managedProxyNodePolicyServer(node ProxySubscriptionNode) string {
+	var raw map[string]any
+	if err := yaml.Unmarshal([]byte(node.RawConfig), &raw); err == nil {
+		if server := strings.TrimSpace(proxySubscriptionConfigString(raw["server"])); server != "" {
+			return server
+		}
+	}
+	return strings.TrimSpace(node.Server)
+}
+
+// buildManagedProxyDNSConfig builds the Mihomo dns section from whitelisted
+// subscription DNS policy fields. Listener/bind fields are deliberately dropped.
 func buildManagedProxyDNSConfig(rawDNSConfig string) (map[string]any, error) {
 	raw := strings.TrimSpace(rawDNSConfig)
 	if raw == "" {
@@ -870,6 +874,7 @@ func buildManagedProxyDNSConfig(rawDNSConfig string) (map[string]any, error) {
 	if err := yaml.Unmarshal([]byte(raw), &dnsConfig); err != nil {
 		return nil, fmt.Errorf("parse subscription dns config: %w", err)
 	}
+	dnsConfig = sanitizeManagedProxySubscriptionDNSConfig(dnsConfig)
 	if len(dnsConfig) == 0 {
 		return nil, nil
 	}

@@ -55,8 +55,8 @@ var managedProxySubscriptionBlockedCIDRs = mustParseManagedProxySubscriptionCIDR
 // ParsedProxySubscription 保存从 Clash/Mihomo 订阅解析出的节点与顶层 DNS 配置。
 type ParsedProxySubscription struct {
 	Nodes []ProxySubscriptionNode
-	// RawDNSConfig 是订阅顶层 dns 配置的 YAML 文本（保留完整 map，含 nameserver-policy）。
-	// 订阅不含 dns 时为空字符串。
+	// RawDNSConfig is sanitized YAML containing only DNS fields required for node resolution.
+	// Empty when the subscription does not provide usable DNS policy fields.
 	RawDNSConfig string
 }
 
@@ -230,8 +230,7 @@ func ParseProxySubscriptionNodes(data []byte) ([]ProxySubscriptionNode, error) {
 	return parsed.Nodes, nil
 }
 
-// ParseProxySubscription 解析 Clash/Mihomo 订阅的 proxies 与顶层 dns 配置。
-// 顶层 dns 完整保留（re-marshal 为 YAML），后续用于恢复订阅自带的 nameserver-policy。
+// ParseProxySubscription parses Clash/Mihomo proxies and whitelisted DNS policy fields.
 func ParseProxySubscription(data []byte) (*ParsedProxySubscription, error) {
 	var doc struct {
 		Proxies []map[string]any `yaml:"proxies"`
@@ -246,9 +245,9 @@ func ParseProxySubscription(data []byte) (*ParsedProxySubscription, error) {
 
 	seen := make(map[string]struct{}, len(doc.Proxies))
 	nodes := make([]ProxySubscriptionNode, 0, len(doc.Proxies))
-	allowPolicyDomains := managedProxyDNSConfigHasNameserverPolicy(doc.DNS)
+	policyMatcher := newManagedProxyDNSPolicyMatcher(doc.DNS)
 	for _, raw := range doc.Proxies {
-		node, ok, err := proxySubscriptionNodeFromConfig(raw, allowPolicyDomains)
+		node, ok, err := proxySubscriptionNodeFromConfig(raw, policyMatcher)
 		if err != nil {
 			return nil, err
 		}
@@ -266,8 +265,8 @@ func ParseProxySubscription(data []byte) (*ParsedProxySubscription, error) {
 	}
 
 	parsed := &ParsedProxySubscription{Nodes: nodes}
-	if len(doc.DNS) > 0 {
-		rawDNS, err := yaml.Marshal(doc.DNS)
+	if dnsConfig := sanitizeManagedProxySubscriptionDNSConfig(doc.DNS); len(dnsConfig) > 0 {
+		rawDNS, err := yaml.Marshal(dnsConfig)
 		if err != nil {
 			return nil, fmt.Errorf("encode subscription dns config: %w", err)
 		}
@@ -276,7 +275,7 @@ func ParseProxySubscription(data []byte) (*ParsedProxySubscription, error) {
 	return parsed, nil
 }
 
-func proxySubscriptionNodeFromConfig(raw map[string]any, allowPolicyDomains bool) (ProxySubscriptionNode, bool, error) {
+func proxySubscriptionNodeFromConfig(raw map[string]any, policyMatcher managedProxyDNSPolicyMatcher) (ProxySubscriptionNode, bool, error) {
 	name := strings.TrimSpace(proxySubscriptionConfigString(raw["name"]))
 	nodeType := strings.TrimSpace(proxySubscriptionConfigString(raw["type"]))
 	if name == "" || nodeType == "" {
@@ -290,7 +289,8 @@ func proxySubscriptionNodeFromConfig(raw map[string]any, allowPolicyDomains bool
 	if port <= 0 || port > 65535 {
 		return ProxySubscriptionNode{}, false, fmt.Errorf("managed proxy node %q has invalid port", name)
 	}
-	if err := validateManagedProxyNodeServer(context.Background(), server, allowPolicyDomains); err != nil {
+	allowPolicyDomain := policyMatcher.Matches(server)
+	if err := validateManagedProxyNodeServer(context.Background(), server, allowPolicyDomain); err != nil {
 		return ProxySubscriptionNode{}, false, fmt.Errorf("managed proxy node %q: %w", name, err)
 	}
 
@@ -355,18 +355,6 @@ func validateManagedProxyNodeServer(ctx context.Context, server string, allowPol
 	return nil
 }
 
-func managedProxyDNSConfigHasNameserverPolicy(dnsConfig map[string]any) bool {
-	if len(dnsConfig) == 0 {
-		return false
-	}
-	for _, key := range []string{"nameserver-policy", "nameserver_policy"} {
-		if managedProxyDNSConfigValuePresent(dnsConfig[key]) {
-			return true
-		}
-	}
-	return false
-}
-
 func managedProxyDNSConfigValuePresent(value any) bool {
 	switch v := value.(type) {
 	case nil:
@@ -384,6 +372,131 @@ func managedProxyDNSConfigValuePresent(value any) bool {
 	default:
 		return true
 	}
+}
+
+func sanitizeManagedProxySubscriptionDNSConfig(dnsConfig map[string]any) map[string]any {
+	if len(dnsConfig) == 0 {
+		return nil
+	}
+	allowed := make(map[string]any)
+	for _, key := range []string{
+		"nameserver-policy",
+		"nameserver",
+		"default-nameserver",
+		"proxy-server-nameserver",
+	} {
+		if value, ok := dnsConfig[key]; ok && managedProxyDNSConfigValuePresent(value) {
+			allowed[key] = value
+		}
+	}
+	if len(allowed) == 0 {
+		return nil
+	}
+	return allowed
+}
+
+type managedProxyDNSPolicyMatcher struct {
+	exact    map[string]struct{}
+	suffixes []string
+}
+
+func newManagedProxyDNSPolicyMatcher(dnsConfig map[string]any) managedProxyDNSPolicyMatcher {
+	matcher := managedProxyDNSPolicyMatcher{exact: make(map[string]struct{})}
+	if len(dnsConfig) == 0 {
+		return matcher
+	}
+	policy, ok := dnsConfig["nameserver-policy"]
+	if !ok {
+		return matcher
+	}
+	for _, rule := range managedProxyDNSPolicyRules(policy) {
+		matcher.addRule(rule)
+	}
+	return matcher
+}
+
+func managedProxyDNSPolicyRules(policy any) []string {
+	switch v := policy.(type) {
+	case map[string]any:
+		rules := make([]string, 0, len(v))
+		for key := range v {
+			rules = append(rules, key)
+		}
+		return rules
+	case map[any]any:
+		rules := make([]string, 0, len(v))
+		for key := range v {
+			rules = append(rules, fmt.Sprint(key))
+		}
+		return rules
+	default:
+		return nil
+	}
+}
+
+func (m *managedProxyDNSPolicyMatcher) addRule(rule string) {
+	for _, part := range strings.Split(rule, ",") {
+		pattern := strings.TrimSpace(strings.ToLower(part))
+		if pattern == "" {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(pattern, "+."):
+			m.addSuffix(pattern[2:])
+		case strings.HasPrefix(pattern, "*."):
+			m.addSuffix(pattern[2:])
+		case strings.HasPrefix(pattern, "domain-suffix:"):
+			m.addSuffix(strings.TrimPrefix(pattern, "domain-suffix:"))
+		case strings.HasPrefix(pattern, "domain:"):
+			m.addExact(strings.TrimPrefix(pattern, "domain:"))
+		default:
+			if strings.Contains(pattern, ":") {
+				continue
+			}
+			m.addExact(pattern)
+		}
+	}
+}
+
+func (m *managedProxyDNSPolicyMatcher) addExact(host string) {
+	host = normalizeManagedProxyPolicyHost(host)
+	if host == "" {
+		return
+	}
+	m.exact[host] = struct{}{}
+}
+
+func (m *managedProxyDNSPolicyMatcher) addSuffix(host string) {
+	host = normalizeManagedProxyPolicyHost(host)
+	if host == "" {
+		return
+	}
+	m.suffixes = append(m.suffixes, host)
+}
+
+func normalizeManagedProxyPolicyHost(host string) string {
+	host = strings.Trim(strings.TrimSpace(strings.ToLower(host)), ".")
+	if host == "" || strings.Contains(host, "/") || net.ParseIP(host) != nil {
+		return ""
+	}
+	return host
+}
+
+func (m managedProxyDNSPolicyMatcher) Matches(server string) bool {
+	host := strings.Trim(strings.TrimSpace(strings.ToLower(server)), "[]")
+	host = strings.Trim(host, ".")
+	if host == "" || net.ParseIP(host) != nil {
+		return false
+	}
+	if _, ok := m.exact[host]; ok {
+		return true
+	}
+	for _, suffix := range m.suffixes {
+		if host == suffix || strings.HasSuffix(host, "."+suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 func resolveManagedProxyNodeServer(ctx context.Context, server string) ([]net.IP, error) {
