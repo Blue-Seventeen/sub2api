@@ -275,14 +275,15 @@ func (s *adminServiceImpl) CreateProxySubscription(ctx context.Context, input *C
 		RefreshIntervalSec: input.RefreshIntervalSec,
 		TestURL:            input.TestURL,
 	}
-	nodes, err := FetchProxySubscriptionNodes(ctx, input.SubscriptionURL)
+	parsed, err := FetchProxySubscription(ctx, input.SubscriptionURL)
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := prepareProxySubscriptionNodes(nodes); err != nil {
+	sub.RawDNSConfig = parsed.RawDNSConfig
+	if err := prepareProxySubscriptionNodes(parsed.Nodes); err != nil {
 		return nil, nil, err
 	}
-	created, proxies, err := s.proxySubRepo.CreateWithNodes(ctx, sub, nodes)
+	created, proxies, err := s.proxySubRepo.CreateWithNodes(ctx, sub, parsed.Nodes)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -321,10 +322,12 @@ func (s *adminServiceImpl) UpdateProxySubscription(ctx context.Context, id int64
 	shouldSyncNodes := input.SubscriptionURL != "" && input.SubscriptionURL != sub.SubscriptionURL
 	var nodes []ProxySubscriptionNode
 	if shouldSyncNodes {
-		nodes, err = FetchProxySubscriptionNodes(ctx, input.SubscriptionURL)
+		parsed, err := FetchProxySubscription(ctx, input.SubscriptionURL)
 		if err != nil {
 			return nil, err
 		}
+		nodes = parsed.Nodes
+		sub.RawDNSConfig = parsed.RawDNSConfig
 		if err := prepareProxySubscriptionNodes(nodes); err != nil {
 			return nil, err
 		}
@@ -397,15 +400,15 @@ func (s *adminServiceImpl) RefreshProxySubscription(ctx context.Context, id int6
 	if err != nil {
 		return nil, err
 	}
-	nodes, err := FetchProxySubscriptionNodes(ctx, sub.SubscriptionURL)
+	parsed, err := FetchProxySubscription(ctx, sub.SubscriptionURL)
 	if err != nil {
 		_ = s.proxySubRepo.SetLastError(ctx, id, sanitizeManagedProxyError(err))
 		return sub, err
 	}
-	if err := prepareProxySubscriptionNodes(nodes); err != nil {
+	if err := prepareProxySubscriptionNodes(parsed.Nodes); err != nil {
 		return nil, err
 	}
-	if _, err := s.proxySubRepo.SyncNodes(ctx, id, nodes); err != nil {
+	if _, err := s.proxySubRepo.SyncNodes(ctx, id, parsed.RawDNSConfig, parsed.Nodes); err != nil {
 		return nil, err
 	}
 	s.reloadManagedProxy(id)

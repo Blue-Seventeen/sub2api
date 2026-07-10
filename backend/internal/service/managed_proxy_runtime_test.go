@@ -642,6 +642,87 @@ func TestBuildMihomoConfigYAMLRequiresActiveNodes(t *testing.T) {
 	}
 }
 
+// TestBuildMihomoConfigYAMLRestoresSubscriptionDNSPolicy 覆盖验收标准 3/4：
+// 订阅带 DNS policy 时，runtime 配置需包含 dns.nameserver-policy，并且不再用系统 DNS
+// 为 policy 域名生成 hosts pin（避免钉死到错误 IP）。域名节点在此路径下不做系统 DNS 解析，
+// 因此该用例完全离线可复现。
+func TestBuildMihomoConfigYAMLRestoresSubscriptionDNSPolicy(t *testing.T) {
+	cfg, err := buildMihomoConfigYAML(ProxySubscription{
+		ID:                 21,
+		Name:               "subscription",
+		SubscriptionURL:    "https://example.com/clash.yaml",
+		RefreshIntervalSec: 3600,
+		TestURL:            "https://example.com/health",
+		RawDNSConfig:       "nameserver-policy:\n  \"+.entry.example.qpon\": tcp://dns.example:8080\n",
+		Nodes: []ProxySubscriptionNode{{
+			Name:         "HK-01",
+			ProviderName: "node-hk01",
+			Type:         "ss",
+			Username:     "mpu_hk",
+			Password:     "mpp_hk",
+			Status:       ProxySubscriptionNodeStatusActive,
+			RawConfig:    "name: HK-01\ntype: ss\nserver: t.hk01.entry.example.qpon\nport: 8388\ncipher: aes-128-gcm\npassword: remote-secret\n",
+		}},
+	}, managedProxyMihomoConfigOptions{
+		BindHost:         "127.0.0.1",
+		MixedPort:        39065,
+		ControllerPort:   39066,
+		ControllerSecret: "secret",
+		HealthCheckURL:   "https://example.com/health",
+	})
+	if err != nil {
+		t.Fatalf("build config with dns policy: %v", err)
+	}
+	text := string(cfg)
+	for _, expected := range []string{
+		"dns:",
+		"nameserver-policy",
+		"entry.example.qpon",
+		"tcp://dns.example:8080",
+		"enable: true",
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("generated config missing %q:\n%s", expected, text)
+		}
+	}
+	if strings.Contains(text, "hosts:") {
+		t.Fatalf("generated config must not pin hosts when subscription supplies dns policy:\n%s", text)
+	}
+}
+
+// TestBuildManagedProxyDNSConfig 验证 DNS 段构建：强制 enable、缺省 nameserver 时补默认。
+func TestBuildManagedProxyDNSConfig(t *testing.T) {
+	if cfg, err := buildManagedProxyDNSConfig(""); err != nil || cfg != nil {
+		t.Fatalf("empty raw dns config should yield nil map, got cfg=%v err=%v", cfg, err)
+	}
+
+	cfg, err := buildManagedProxyDNSConfig("nameserver-policy:\n  \"+.entry.example.qpon\": tcp://dns.example:8080\n")
+	if err != nil {
+		t.Fatalf("build dns config: %v", err)
+	}
+	if enable, _ := cfg["enable"].(bool); !enable {
+		t.Fatalf("expected enable=true, got: %#v", cfg["enable"])
+	}
+	if _, ok := cfg["nameserver"]; !ok {
+		t.Fatalf("expected default nameserver to be injected when missing: %#v", cfg)
+	}
+	if _, ok := cfg["nameserver-policy"]; !ok {
+		t.Fatalf("expected nameserver-policy to be preserved: %#v", cfg)
+	}
+
+	withNS, err := buildManagedProxyDNSConfig("enable: false\nnameserver:\n  - https://1.1.1.1/dns-query\n")
+	if err != nil {
+		t.Fatalf("build dns config with nameserver: %v", err)
+	}
+	if enable, _ := withNS["enable"].(bool); !enable {
+		t.Fatalf("expected enable forced to true, got: %#v", withNS["enable"])
+	}
+	ns, ok := withNS["nameserver"].([]any)
+	if !ok || len(ns) != 1 {
+		t.Fatalf("existing nameserver should be preserved as-is, got: %#v", withNS["nameserver"])
+	}
+}
+
 func TestBuildMihomoConfigYAMLBlocksStoredPrivateNode(t *testing.T) {
 	_, err := buildMihomoConfigYAML(ProxySubscription{
 		ID:                 9,
@@ -709,7 +790,7 @@ func (r *managedProxyRuntimeRepoStub) DeleteWithProxy(context.Context, int64) er
 func (r *managedProxyRuntimeRepoStub) IncrementRevision(context.Context, int64) (*ProxySubscription, error) {
 	panic("unexpected IncrementRevision")
 }
-func (r *managedProxyRuntimeRepoStub) SyncNodes(context.Context, int64, []ProxySubscriptionNode) ([]Proxy, error) {
+func (r *managedProxyRuntimeRepoStub) SyncNodes(context.Context, int64, string, []ProxySubscriptionNode) ([]Proxy, error) {
 	panic("unexpected SyncNodes")
 }
 func (r *managedProxyRuntimeRepoStub) GetNodeByProxyID(context.Context, int64) (*ProxySubscriptionNode, error) {

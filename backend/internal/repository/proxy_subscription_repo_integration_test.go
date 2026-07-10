@@ -97,7 +97,7 @@ func TestProxySubscriptionRepository_SyncNodesDoesNotRecreateDisabledNode(t *tes
 	require.Len(t, proxies, 1)
 
 	require.NoError(t, repo.SetNodeStatusByProxyID(ctx, proxies[0].ID, service.ProxySubscriptionNodeStatusInactive))
-	created, err := repo.SyncNodes(ctx, sub.ID, []service.ProxySubscriptionNode{
+	created, err := repo.SyncNodes(ctx, sub.ID, "", []service.ProxySubscriptionNode{
 		{
 			NodeKey:      "same-node",
 			Name:         "HK-01-renamed",
@@ -134,7 +134,7 @@ func TestProxySubscriptionRepository_SyncNodesDeletesUnusedLegacyManagedProxyRow
 	require.Len(t, proxies, 1)
 	legacyProxyID := proxies[0].ID
 
-	created, err := repo.SyncNodes(ctx, sub.ID, []service.ProxySubscriptionNode{
+	created, err := repo.SyncNodes(ctx, sub.ID, "", []service.ProxySubscriptionNode{
 		{
 			NodeKey:      "node-key-1",
 			Name:         "US-01",
@@ -183,7 +183,7 @@ func TestProxySubscriptionRepository_SyncNodesMigratesAccountsFromLegacyManagedP
 		&accountID,
 	))
 
-	created, err := repo.SyncNodes(ctx, sub.ID, []service.ProxySubscriptionNode{
+	created, err := repo.SyncNodes(ctx, sub.ID, "", []service.ProxySubscriptionNode{
 		{
 			NodeKey:      "node-key-1",
 			Name:         "SG-01",

@@ -62,10 +62,10 @@ func (r *proxySubscriptionRepository) CreateWithNodes(ctx context.Context, sub *
 	err := r.withTransaction(ctx, func(q sqlExecutor) error {
 		if err := scanSingleRow(ctx, q, `
 		INSERT INTO proxy_subscriptions (
-			name, subscription_url, status, refresh_interval_sec, test_url, revision, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, 1, $6, $6)
-		RETURNING id, name, subscription_url, status, refresh_interval_sec, test_url, revision, COALESCE(last_error, ''), created_at, updated_at
-	`, []any{sub.Name, sub.SubscriptionURL, service.StatusActive, sub.RefreshIntervalSec, sub.TestURL, now},
+			name, subscription_url, status, refresh_interval_sec, test_url, raw_dns_config, revision, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), 1, $7, $7)
+		RETURNING id, name, subscription_url, status, refresh_interval_sec, test_url, revision, COALESCE(last_error, ''), COALESCE(raw_dns_config, ''), created_at, updated_at
+	`, []any{sub.Name, sub.SubscriptionURL, service.StatusActive, sub.RefreshIntervalSec, sub.TestURL, sub.RawDNSConfig, now},
 			&created.ID,
 			&created.Name,
 			&created.SubscriptionURL,
@@ -74,6 +74,7 @@ func (r *proxySubscriptionRepository) CreateWithNodes(ctx context.Context, sub *
 			&created.TestURL,
 			&created.Revision,
 			&created.LastError,
+			&created.RawDNSConfig,
 			&created.CreatedAt,
 			&created.UpdatedAt,
 		); err != nil {
@@ -231,7 +232,7 @@ func (r *proxySubscriptionRepository) list(ctx context.Context, where string) ([
 	query := `
 		SELECT
 			ps.id, ps.name, ps.subscription_url, ps.status, ps.refresh_interval_sec, ps.test_url,
-			ps.revision, COALESCE(ps.last_error, ''), ps.created_at, ps.updated_at,
+			ps.revision, COALESCE(ps.last_error, ''), COALESCE(ps.raw_dns_config, ''), ps.created_at, ps.updated_at,
 			(
 				SELECT p.id
 				FROM proxies p
@@ -299,7 +300,7 @@ func (r *proxySubscriptionRepository) getWithWhere(ctx context.Context, where st
 	rows, err := r.sql.QueryContext(ctx, `
 		SELECT
 			ps.id, ps.name, ps.subscription_url, ps.status, ps.refresh_interval_sec, ps.test_url,
-			ps.revision, COALESCE(ps.last_error, ''), ps.created_at, ps.updated_at,
+			ps.revision, COALESCE(ps.last_error, ''), COALESCE(ps.raw_dns_config, ''), ps.created_at, ps.updated_at,
 			(
 				SELECT p.id
 				FROM proxies p
@@ -382,10 +383,11 @@ func (r *proxySubscriptionRepository) updateSubscription(ctx context.Context, q 
 			status = $4,
 			refresh_interval_sec = $5,
 			test_url = $6,
+			raw_dns_config = NULLIF($7, ''),
 			revision = revision + 1,
 			updated_at = NOW()
 		WHERE id = $1
-	`, sub.ID, sub.Name, sub.SubscriptionURL, sub.Status, sub.RefreshIntervalSec, sub.TestURL)
+	`, sub.ID, sub.Name, sub.SubscriptionURL, sub.Status, sub.RefreshIntervalSec, sub.TestURL, sub.RawDNSConfig)
 	if err != nil {
 		return err
 	}
@@ -443,7 +445,7 @@ func (r *proxySubscriptionRepository) IncrementRevision(ctx context.Context, id 
 	return r.Get(ctx, id)
 }
 
-func (r *proxySubscriptionRepository) SyncNodes(ctx context.Context, subscriptionID int64, nodes []service.ProxySubscriptionNode) ([]service.Proxy, error) {
+func (r *proxySubscriptionRepository) SyncNodes(ctx context.Context, subscriptionID int64, rawDNSConfig string, nodes []service.ProxySubscriptionNode) ([]service.Proxy, error) {
 	if r == nil || r.sql == nil || subscriptionID <= 0 {
 		return nil, service.ErrProxySubscriptionNotFound
 	}
@@ -459,9 +461,9 @@ func (r *proxySubscriptionRepository) SyncNodes(ctx context.Context, subscriptio
 		}
 		if _, err := q.ExecContext(ctx, `
 			UPDATE proxy_subscriptions
-			SET revision = revision + 1, last_error = NULL, updated_at = NOW()
+			SET revision = revision + 1, last_error = NULL, raw_dns_config = NULLIF($2, ''), updated_at = NOW()
 			WHERE id = $1
-		`, subscriptionID); err != nil {
+		`, subscriptionID, rawDNSConfig); err != nil {
 			return err
 		}
 		return nil
@@ -779,6 +781,7 @@ func scanProxySubscriptionRow(scanner interface {
 		&sub.TestURL,
 		&sub.Revision,
 		&sub.LastError,
+		&sub.RawDNSConfig,
 		&sub.CreatedAt,
 		&sub.UpdatedAt,
 		&proxyID,
