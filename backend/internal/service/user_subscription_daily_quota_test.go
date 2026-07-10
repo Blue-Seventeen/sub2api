@@ -15,7 +15,7 @@ type dailyResetTrackingUserSubRepo struct {
 	resetDailyCalled bool
 }
 
-func (r *dailyResetTrackingUserSubRepo) ResetDailyUsage(context.Context, int64, time.Time) error {
+func (r *dailyResetTrackingUserSubRepo) ResetDailyUsage(context.Context, int64, *time.Time, time.Time) error {
 	r.resetDailyCalled = true
 	return nil
 }
@@ -37,17 +37,17 @@ type rollingWindowResetUserSubRepo struct {
 	customExpectedAt     time.Time
 }
 
-func (r *rollingWindowResetUserSubRepo) ResetDailyUsage(_ context.Context, _ int64, windowStart time.Time) error {
+func (r *rollingWindowResetUserSubRepo) ResetDailyUsage(_ context.Context, _ int64, _ *time.Time, windowStart time.Time) error {
 	r.dailyWindowStart = &windowStart
 	return nil
 }
 
-func (r *rollingWindowResetUserSubRepo) ResetWeeklyUsage(_ context.Context, _ int64, windowStart time.Time) error {
+func (r *rollingWindowResetUserSubRepo) ResetWeeklyUsage(_ context.Context, _ int64, _ *time.Time, windowStart time.Time) error {
 	r.weeklyWindowStart = &windowStart
 	return nil
 }
 
-func (r *rollingWindowResetUserSubRepo) ResetMonthlyUsage(_ context.Context, _ int64, windowStart time.Time) error {
+func (r *rollingWindowResetUserSubRepo) ResetMonthlyUsage(_ context.Context, _ int64, _ *time.Time, windowStart time.Time) error {
 	r.monthlyWindowStart = &windowStart
 	return nil
 }

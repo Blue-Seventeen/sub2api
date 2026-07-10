@@ -1129,7 +1129,7 @@ func TestCalculateCost_LargeTokenCount(t *testing.T) {
 func TestServiceTierCostMultiplier(t *testing.T) {
 	require.InDelta(t, 2.0, serviceTierCostMultiplier("priority"), 1e-12)
 	require.InDelta(t, 2.0, serviceTierCostMultiplier(" Priority "), 1e-12)
-	require.InDelta(t, 1.0, serviceTierCostMultiplier("flex"), 1e-12)
+	require.InDelta(t, 0.5, serviceTierCostMultiplier("flex"), 1e-12)
 	require.InDelta(t, 1.0, serviceTierCostMultiplier(""), 1e-12)
 	require.InDelta(t, 1.0, serviceTierCostMultiplier("default"), 1e-12)
 }
@@ -1150,7 +1150,7 @@ func TestCalculateCostWithServiceTier_OpenAIPriorityUsesPriorityPricing(t *testi
 	require.InDelta(t, baseCost.TotalCost*2, priorityCost.TotalCost, 1e-10)
 }
 
-func TestCalculateCostWithServiceTier_FlexFallsBackToDefaultPricing(t *testing.T) {
+func TestCalculateCostWithServiceTier_FlexAppliesHalfMultiplier(t *testing.T) {
 	svc := newTestBillingService()
 	tokens := UsageTokens{InputTokens: 100, OutputTokens: 50, CacheCreationTokens: 40, CacheReadTokens: 20}
 
@@ -1160,11 +1160,11 @@ func TestCalculateCostWithServiceTier_FlexFallsBackToDefaultPricing(t *testing.T
 	flexCost, err := svc.CalculateCostWithServiceTier("gpt-5.4", tokens, 1.0, "flex")
 	require.NoError(t, err)
 
-	require.InDelta(t, baseCost.InputCost, flexCost.InputCost, 1e-10)
-	require.InDelta(t, baseCost.OutputCost, flexCost.OutputCost, 1e-10)
-	require.InDelta(t, baseCost.CacheCreationCost, flexCost.CacheCreationCost, 1e-10)
-	require.InDelta(t, baseCost.CacheReadCost, flexCost.CacheReadCost, 1e-10)
-	require.InDelta(t, baseCost.TotalCost, flexCost.TotalCost, 1e-10)
+	require.InDelta(t, baseCost.InputCost*0.5, flexCost.InputCost, 1e-10)
+	require.InDelta(t, baseCost.OutputCost*0.5, flexCost.OutputCost, 1e-10)
+	require.InDelta(t, baseCost.CacheCreationCost*0.5, flexCost.CacheCreationCost, 1e-10)
+	require.InDelta(t, baseCost.CacheReadCost*0.5, flexCost.CacheReadCost, 1e-10)
+	require.InDelta(t, baseCost.TotalCost*0.5, flexCost.TotalCost, 1e-10)
 }
 
 func TestCalculateCostWithServiceTier_Gpt54MiniPriorityFallsBackToTierMultiplier(t *testing.T) {
@@ -1184,7 +1184,7 @@ func TestCalculateCostWithServiceTier_Gpt54MiniPriorityFallsBackToTierMultiplier
 	require.InDelta(t, baseCost.TotalCost*2, priorityCost.TotalCost, 1e-10)
 }
 
-func TestCalculateCostWithServiceTier_Gpt54NanoFlexFallsBackToDefaultPricing(t *testing.T) {
+func TestCalculateCostWithServiceTier_Gpt54NanoFlexAppliesHalfMultiplier(t *testing.T) {
 	svc := newTestBillingService()
 	tokens := UsageTokens{InputTokens: 100, OutputTokens: 50, CacheCreationTokens: 40, CacheReadTokens: 20}
 
@@ -1194,11 +1194,11 @@ func TestCalculateCostWithServiceTier_Gpt54NanoFlexFallsBackToDefaultPricing(t *
 	flexCost, err := svc.CalculateCostWithServiceTier("gpt-5.4-nano", tokens, 1.0, "flex")
 	require.NoError(t, err)
 
-	require.InDelta(t, baseCost.InputCost, flexCost.InputCost, 1e-10)
-	require.InDelta(t, baseCost.OutputCost, flexCost.OutputCost, 1e-10)
-	require.InDelta(t, baseCost.CacheCreationCost, flexCost.CacheCreationCost, 1e-10)
-	require.InDelta(t, baseCost.CacheReadCost, flexCost.CacheReadCost, 1e-10)
-	require.InDelta(t, baseCost.TotalCost, flexCost.TotalCost, 1e-10)
+	require.InDelta(t, baseCost.InputCost*0.5, flexCost.InputCost, 1e-10)
+	require.InDelta(t, baseCost.OutputCost*0.5, flexCost.OutputCost, 1e-10)
+	require.InDelta(t, baseCost.CacheCreationCost*0.5, flexCost.CacheCreationCost, 1e-10)
+	require.InDelta(t, baseCost.CacheReadCost*0.5, flexCost.CacheReadCost, 1e-10)
+	require.InDelta(t, baseCost.TotalCost*0.5, flexCost.TotalCost, 1e-10)
 }
 
 func TestCalculateCostWithServiceTier_PriorityFallsBackToTierMultiplierWithoutExplicitPriorityPrice(t *testing.T) {

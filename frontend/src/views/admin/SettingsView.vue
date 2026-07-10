@@ -1172,6 +1172,52 @@
                     </div>
                   </div>
 
+                  <div class="mt-3">
+                    <label
+                      class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400"
+                    >
+                      {{ t("admin.settings.openaiFastPolicy.userIds") }}
+                    </label>
+                    <p class="mb-2 text-xs text-gray-400 dark:text-gray-500">
+                      {{ t("admin.settings.openaiFastPolicy.userIdsHint") }}
+                    </p>
+                    <div
+                      v-for="(_, userIDIndex) in rule.user_ids || []"
+                      :key="userIDIndex"
+                      class="mb-1.5 flex items-center gap-2"
+                    >
+                      <input
+                        v-model.number="rule.user_ids![userIDIndex]"
+                        type="number"
+                        min="1"
+                        step="1"
+                        class="input input-sm flex-1"
+                        :placeholder="
+                          t(
+                            'admin.settings.openaiFastPolicy.userIdPlaceholder',
+                          )
+                        "
+                      />
+                      <button
+                        type="button"
+                        @click="removeOpenAIFastPolicyUserID(rule, userIDIndex)"
+                        class="shrink-0 rounded p-1 text-red-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
+                        :title="
+                          t('admin.settings.openaiFastPolicy.removeUserId')
+                        "
+                      >
+                        <Icon name="x" size="sm" />
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      @click="addOpenAIFastPolicyUserID(rule)"
+                      class="mb-2 inline-flex items-center gap-1 text-xs text-primary-600 transition-colors hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
+                    >
+                      + {{ t("admin.settings.openaiFastPolicy.addUserId") }}
+                    </button>
+                  </div>
+
                   <div v-if="rule.action === 'block'" class="mt-3">
                     <label
                       class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400"
@@ -9086,6 +9132,7 @@ async function loadSettings() {
       openaiFastPolicyForm.rules =
         settings.openai_fast_policy_settings.rules.map((rule) => ({
           ...rule,
+          user_ids: rule.user_ids ? [...rule.user_ids] : [],
           model_whitelist: rule.model_whitelist
             ? [...rule.model_whitelist]
             : [],
@@ -9592,6 +9639,10 @@ async function saveSettings() {
             service_tier: rule.service_tier,
             action: rule.action,
             scope: rule.scope,
+            user_ids:
+              rule.user_ids && rule.user_ids.length > 0
+                ? [...rule.user_ids]
+                : undefined,
             error_message:
               rule.action === "block" ? rule.error_message : undefined,
             model_whitelist: hasWhitelist ? whitelist : undefined,
@@ -9662,6 +9713,21 @@ async function saveSettings() {
     form.oidc_connect_client_secret = "";
     form.github_oauth_client_secret = "";
     form.google_oauth_client_secret = "";
+    // Refresh OpenAI fast/flex policy from server response
+    if (
+      updated.openai_fast_policy_settings &&
+      Array.isArray(updated.openai_fast_policy_settings.rules)
+    ) {
+      openaiFastPolicyForm.rules =
+        updated.openai_fast_policy_settings.rules.map((rule) => ({
+          ...rule,
+          user_ids: rule.user_ids ? [...rule.user_ids] : [],
+          model_whitelist: rule.model_whitelist
+            ? [...rule.model_whitelist]
+            : [],
+        }));
+      openaiFastPolicyLoaded.value = true;
+    }
     // Save web search emulation config separately (errors handled internally)
     const wsOk = await saveWebSearchConfig();
     // Refresh cached settings so sidebar/header update immediately
@@ -10071,6 +10137,7 @@ function addOpenAIFastPolicyRule() {
     service_tier: "priority",
     action: "filter",
     scope: "all",
+    user_ids: [],
     error_message: "",
     model_whitelist: [],
     fallback_action: "pass",
@@ -10080,6 +10147,18 @@ function addOpenAIFastPolicyRule() {
 
 function removeOpenAIFastPolicyRule(index: number) {
   openaiFastPolicyForm.rules.splice(index, 1);
+}
+
+function addOpenAIFastPolicyUserID(rule: OpenAIFastPolicyRule) {
+  if (!rule.user_ids) rule.user_ids = [];
+  rule.user_ids.push(0);
+}
+
+function removeOpenAIFastPolicyUserID(
+  rule: OpenAIFastPolicyRule,
+  idx: number,
+) {
+  rule.user_ids?.splice(idx, 1);
 }
 
 function addOpenAIFastPolicyModelPattern(rule: OpenAIFastPolicyRule) {
@@ -10189,6 +10268,7 @@ async function loadOpenAIFastPolicySettings() {
           .filter((rule) => (rule.service_tier as string) !== "flex")
           .map((rule) => ({
             ...rule,
+            user_ids: rule.user_ids ? [...rule.user_ids] : [],
             model_whitelist: rule.model_whitelist
               ? [...rule.model_whitelist]
               : [],
@@ -10215,6 +10295,10 @@ async function saveOpenAIFastPolicySettings() {
           service_tier: rule.service_tier,
           action: rule.action,
           scope: rule.scope,
+          user_ids:
+            rule.user_ids && rule.user_ids.length > 0
+              ? [...rule.user_ids]
+              : undefined,
           error_message:
             rule.action === "block"
               ? rule.error_message || undefined
@@ -10234,6 +10318,7 @@ async function saveOpenAIFastPolicySettings() {
     });
     openaiFastPolicyForm.rules = updated.rules.map((rule) => ({
       ...rule,
+      user_ids: rule.user_ids ? [...rule.user_ids] : [],
       model_whitelist: rule.model_whitelist ? [...rule.model_whitelist] : [],
     }));
     appStore.showSuccess(t("admin.settings.openaiFastPolicy.saved"));

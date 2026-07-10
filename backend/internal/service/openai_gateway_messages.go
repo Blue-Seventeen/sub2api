@@ -285,6 +285,9 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		return nil, fmt.Errorf("get access token: %w", err)
 	}
 
+	if account.Type == AccountTypeOAuth && account.Platform != PlatformGrok {
+		setOpenAICompatMessagesBridgeContext(c, true)
+	}
 	proxyURL := ""
 	if account.Proxy != nil {
 		proxyURL = ResolveProxyURL(ctx, account.Proxy)
@@ -1284,8 +1287,9 @@ func copyOpenAIUsageFromResponsesUsage(usage *apicompat.ResponsesUsage) OpenAIUs
 		return OpenAIUsage{}
 	}
 	result := OpenAIUsage{
-		InputTokens:  usage.InputTokens,
-		OutputTokens: usage.OutputTokens,
+		InputTokens:              usage.InputTokens,
+		OutputTokens:             usage.OutputTokens,
+		CacheCreationInputTokens: usage.CacheCreationInputTokens,
 	}
 	if usage.InputTokensDetails != nil {
 		result.CacheReadInputTokens = usage.InputTokensDetails.CachedTokens

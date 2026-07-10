@@ -309,6 +309,12 @@ func TestParseUsageAndEnrichCoverage(t *testing.T) {
 	require.Equal(t, 5, state.usage.CacheCreation1hTokens)
 	require.Equal(t, 3, state.usage.ImageOutputTokens)
 
+	cacheWriteState := &relayState{}
+	parseUsageAndAccumulate(cacheWriteState, []byte(`{"type":"response.completed","response":{"usage":{"input_tokens":2,"output_tokens":1,"input_tokens_details":{"cached_tokens":1,"cache_write_tokens":4},"output_tokens_details":{"image_tokens":3}}}}`), "response.completed", nil)
+	require.Equal(t, 4, cacheWriteState.usage.CacheCreationInputTokens)
+	require.Equal(t, 0, cacheWriteState.usage.CacheCreation5mTokens)
+	require.Equal(t, 0, cacheWriteState.usage.CacheCreation1hTokens)
+
 	result := &RelayResult{}
 	enrichResult(result, state, 5*time.Millisecond)
 	require.Equal(t, state.usage.InputTokens, result.Usage.InputTokens)
@@ -340,6 +346,13 @@ func TestParseUsageAndAccumulateAcceptsChatUsageAliases(t *testing.T) {
 	require.Equal(t, 4, got.CacheCreation1hTokens)
 	require.Equal(t, 2, got.ImageOutputTokens)
 	require.Equal(t, got, state.usage)
+}
+
+func TestOpenAICacheCreationTokensFromUsageNestedZeroWins(t *testing.T) {
+	t.Parallel()
+
+	usage := gjson.Parse(`{"input_tokens_details":{"cache_write_tokens":0},"cache_creation_input_tokens":19}`)
+	require.Zero(t, openAICacheCreationTokensFromUsage(usage))
 }
 
 func TestEmitTurnCompleteCoverage(t *testing.T) {
