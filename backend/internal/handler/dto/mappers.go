@@ -712,7 +712,7 @@ func UsageLogFromServiceAdmin(l *service.UsageLog) *AdminUsageLog {
 	out.CompatibilityRoute = l.CompatibilityRoute
 	out.FallbackChain = l.FallbackChain
 	out.UpstreamTransport = l.UpstreamTransport
-	out.APIKey = APIKeyFromService(l.APIKey)
+	out.APIKey = APIKeyFromServiceForUsageUser(l.APIKey)
 	return out
 }
 

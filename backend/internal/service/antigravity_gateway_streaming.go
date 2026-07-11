@@ -235,7 +235,7 @@ func (s *AntigravityGatewayService) handleGeminiStreamingResponse(c *gin.Context
 								logger.LegacyPrintf("service.antigravity_gateway", "[Antigravity] MALFORMED_FUNCTION_CALL detected in forward stream")
 								if content, ok := cand["content"]; ok {
 									if b, err := json.Marshal(content); err == nil {
-										logger.LegacyPrintf("service.antigravity_gateway", "[Antigravity] Malformed content: %s", string(b))
+										logger.LegacyPrintf("service.antigravity_gateway", "[Antigravity] Malformed content: %s", truncateForLog(b, 512))
 									}
 								}
 							}
@@ -407,7 +407,7 @@ func (s *AntigravityGatewayService) handleGeminiStreamToNonStreaming(c *gin.Cont
 						logger.LegacyPrintf("service.antigravity_gateway", "[Antigravity] MALFORMED_FUNCTION_CALL detected in forward non-stream collect")
 						if content, ok := cand["content"]; ok {
 							if b, err := json.Marshal(content); err == nil {
-								logger.LegacyPrintf("service.antigravity_gateway", "[Antigravity] Malformed content: %s", string(b))
+								logger.LegacyPrintf("service.antigravity_gateway", "[Antigravity] Malformed content: %s", truncateForLog(b, 512))
 							}
 						}
 					}
@@ -907,7 +907,7 @@ returnResponse:
 	// 转换 Gemini 响应为 Claude 格式
 	claudeResp, agUsage, err := antigravity.TransformGeminiToClaude(geminiBody, originalModel)
 	if err != nil {
-		logger.LegacyPrintf("service.antigravity_gateway", "[antigravity-Forward] transform_error error=%v body=%s", err, string(geminiBody))
+		logger.LegacyPrintf("service.antigravity_gateway", "[antigravity-Forward] transform_error error=%v body=%s", err, truncateForLog(geminiBody, 512))
 		return nil, s.writeClaudeError(c, http.StatusBadGateway, "upstream_error", "Failed to parse upstream response")
 	}
 

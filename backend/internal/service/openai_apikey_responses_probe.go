@@ -129,7 +129,7 @@ func (s *AccountTestService) ProbeOpenAIAPIKeyResponsesSupport(ctx context.Conte
 	}
 	normalizedBaseURL, err := s.validateUpstreamBaseURL(baseURL)
 	if err != nil {
-		logger.LegacyPrintf("service.openai_probe", "probe_invalid_baseurl: account_id=%d base_url=%q err=%v", accountID, baseURL, err)
+		logger.LegacyPrintf("service.openai_probe", "probe_invalid_baseurl: account_id=%d base_url=<redacted> err=<redacted>", accountID)
 		return
 	}
 
@@ -160,7 +160,7 @@ func (s *AccountTestService) ProbeOpenAIAPIKeyResponsesSupport(ctx context.Conte
 	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 	if err != nil {
 		// 网络层失败：不写标记，保持 unknown，下次重试或由网关 fallback 处理
-		logger.LegacyPrintf("service.openai_probe", "probe_request_failed: account_id=%d url=%s err=%v", accountID, probeURL, err)
+		logger.LegacyPrintf("service.openai_probe", "probe_request_failed: account_id=%d url=<redacted> err=%v", accountID, err)
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -170,7 +170,7 @@ func (s *AccountTestService) ProbeOpenAIAPIKeyResponsesSupport(ctx context.Conte
 	if readErr != nil {
 		// 响应体读取失败(部分读取/传输错误):按网络层失败处理,保持 unknown,
 		// 不写标记——否则可能给一个 2xx 响应误写 supported=false。
-		logger.LegacyPrintf("service.openai_probe", "probe_read_body_failed: account_id=%d url=%s err=%v", accountID, probeURL, readErr)
+		logger.LegacyPrintf("service.openai_probe", "probe_read_body_failed: account_id=%d url=<redacted> err=%v", accountID, readErr)
 		return
 	}
 
@@ -184,8 +184,8 @@ func (s *AccountTestService) ProbeOpenAIAPIKeyResponsesSupport(ctx context.Conte
 	}
 
 	logger.LegacyPrintf("service.openai_probe",
-		"probe_done: account_id=%d base_url=%s probe_model=%s status=%d supported=%v",
-		accountID, normalizedBaseURL, probeModel, resp.StatusCode, supported,
+		"probe_done: account_id=%d base_url=<redacted> probe_model=%s status=%d supported=%v",
+		accountID, probeModel, resp.StatusCode, supported,
 	)
 }
 

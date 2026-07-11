@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"net/url"
 	"strings"
 	"time"
 
@@ -217,7 +218,7 @@ func appendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) {
 	ev.UpstreamResponseBody = strings.TrimSpace(ev.UpstreamResponseBody)
 	ev.UpstreamRequestBody = strings.TrimSpace(ev.UpstreamRequestBody)
 	ev.Kind = strings.TrimSpace(ev.Kind)
-	ev.UpstreamURL = strings.TrimSpace(ev.UpstreamURL)
+	ev.UpstreamURL = safeUpstreamURL(strings.TrimSpace(ev.UpstreamURL))
 	ev.Message = strings.TrimSpace(ev.Message)
 	ev.Detail = strings.TrimSpace(ev.Detail)
 	if ev.Message != "" {
@@ -302,8 +303,9 @@ func ParseOpsUpstreamErrors(raw string) ([]*OpsUpstreamErrorEvent, error) {
 	return out, nil
 }
 
-// safeUpstreamURL returns scheme + host + path from a URL, stripping query/fragment
-// to avoid leaking sensitive query parameters (e.g. OAuth tokens).
+// safeUpstreamURL returns a diagnostic URL with host/IP and query/fragment stripped.
+// It preserves only the scheme and path so ops logs can diagnose route mismatches
+// without exposing upstream domains, private IPs, or sensitive query parameters.
 func safeUpstreamURL(rawURL string) string {
 	rawURL = strings.TrimSpace(rawURL)
 	if rawURL == "" {
@@ -315,5 +317,26 @@ func safeUpstreamURL(rawURL string) string {
 	if idx := strings.IndexByte(rawURL, '#'); idx >= 0 {
 		rawURL = rawURL[:idx]
 	}
-	return rawURL
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed == nil {
+		return "<redacted>"
+	}
+	if parsed.Host == "" {
+		path := parsed.EscapedPath()
+		if strings.HasPrefix(path, "/") {
+			if path == "" {
+				return "/"
+			}
+			return path
+		}
+		return "<redacted>"
+	}
+	path := parsed.EscapedPath()
+	if path == "" {
+		path = "/"
+	}
+	if parsed.Scheme == "" {
+		return "*.*.*.*" + path
+	}
+	return parsed.Scheme + "://*.*.*.*" + path
 }

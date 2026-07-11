@@ -330,25 +330,47 @@ describe('useAppStore', () => {
 
       const first = store.fetchPublicSettings()
       const second = store.fetchPublicSettings()
-      const forced = store.fetchPublicSettings(true)
 
       expect(getPublicSettings).toHaveBeenCalledTimes(1)
 
       const settled = vi.fn()
       void first.then(settled)
       void second.then(settled)
-      void forced.then(settled)
       await Promise.resolve()
       expect(settled).not.toHaveBeenCalled()
 
       deferred.resolve(settings)
-      await expect(Promise.all([first, second, forced])).resolves.toEqual([
-        settings,
+      await expect(Promise.all([first, second])).resolves.toEqual([
         settings,
         settings,
       ])
       expect(store.publicSettingsLoaded).toBe(true)
       expect(store.cachedPublicSettings?.payment_enabled).toBe(true)
+    })
+
+    it('forced refresh supersedes an older in-flight request and prevents stale overwrite', async () => {
+      const staleDeferred = createDeferred<PublicSettings>()
+      const freshDeferred = createDeferred<PublicSettings>()
+      const stale = createPublicSettings({ site_name: 'Stale Site' })
+      const fresh = createPublicSettings({ site_name: 'Fresh Site' })
+      vi.mocked(getPublicSettings)
+        .mockReturnValueOnce(staleDeferred.promise)
+        .mockReturnValueOnce(freshDeferred.promise)
+      const store = useAppStore()
+
+      const first = store.fetchPublicSettings()
+      const forced = store.fetchPublicSettings(true)
+      const duringForce = store.fetchPublicSettings()
+
+      expect(getPublicSettings).toHaveBeenCalledTimes(2)
+
+      freshDeferred.resolve(fresh)
+      await expect(Promise.all([forced, duringForce])).resolves.toEqual([fresh, fresh])
+      expect(store.siteName).toBe('Fresh Site')
+
+      staleDeferred.resolve(stale)
+      await expect(first).resolves.toEqual(stale)
+      expect(store.siteName).toBe('Fresh Site')
     })
 
     it('force 在无活动请求时绕过缓存，刷新期间的普通调用等待刷新结果', async () => {

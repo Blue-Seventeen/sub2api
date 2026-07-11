@@ -353,7 +353,7 @@ func buildClaudeMimicDebugLine(req *http.Request, body []byte, account *Account,
 
 	return fmt.Sprintf(
 		"url=%s account=%d(%s) tokenType=%s mimic=%t meta.user_id=%q system.preview=%q headers={%s}",
-		req.URL.String(),
+		safeUpstreamURL(req.URL.String()),
 		aid,
 		aname,
 		tokenType,

@@ -199,11 +199,11 @@ func (s *adminServiceImpl) assignDefaultSubscriptions(ctx context.Context, userI
 }
 
 func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *UpdateUserInput) (*User, error) {
-	// 校验用户专属分组倍率：必须 > 0（nil 合法，表示清除专属倍率）
+	// 校验用户专属分组倍率：必须 >= 0（nil 合法，表示清除专属倍率）
 	if input.GroupRates != nil {
 		for groupID, rate := range input.GroupRates {
-			if rate != nil && *rate <= 0 {
-				return nil, fmt.Errorf("rate_multiplier must be > 0 (group_id=%d)", groupID)
+			if rate != nil && *rate < 0 {
+				return nil, fmt.Errorf("rate_multiplier must be >= 0 (group_id=%d)", groupID)
 			}
 		}
 	}
@@ -756,7 +756,7 @@ func (s *adminServiceImpl) listAffiliateBalanceHistoryForMerge(ctx context.Conte
 }
 
 func (s *adminServiceImpl) listAffiliateBalanceHistory(ctx context.Context, userID int64, params pagination.PaginationParams) ([]RedeemCode, int64, error) {
-	if s == nil || s.entClient == nil || userID <= 0 {
+	if s == nil || s.entClient == nil || userID <= 0 || !s.affiliateBalanceHistoryEnabled(ctx) {
 		return nil, 0, nil
 	}
 
@@ -805,6 +805,29 @@ LIMIT $3`, userID, params.Offset(), params.Limit())
 		return nil, 0, err
 	}
 	return codes, total, nil
+}
+
+func (s *adminServiceImpl) affiliateBalanceHistoryEnabled(ctx context.Context) bool {
+	if s == nil || s.entClient == nil || s.settingService == nil || !s.settingService.IsAffiliateEnabled(ctx) {
+		return false
+	}
+
+	rows, err := s.entClient.QueryContext(ctx, `SELECT to_regclass('public.user_affiliate_ledger') IS NOT NULL`)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = rows.Close() }()
+
+	var exists sql.NullBool
+	if rows.Next() {
+		if err := rows.Scan(&exists); err != nil {
+			return false
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false
+	}
+	return exists.Valid && exists.Bool
 }
 
 func countAffiliateBalanceHistory(ctx context.Context, client *dbent.Client, userID int64) (int64, error) {

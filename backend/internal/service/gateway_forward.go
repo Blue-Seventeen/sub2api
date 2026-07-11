@@ -411,7 +411,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 						Message:            extractUpstreamErrorMessage(respBody),
 						Detail: func() string {
 							if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
-								return truncateString(string(respBody), s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes)
+								return truncateForLog(respBody, s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes)
 							}
 							return ""
 						}(),
@@ -472,7 +472,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 									Message:            extractUpstreamErrorMessage(retryRespBody),
 									Detail: func() string {
 										if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
-											return truncateString(string(retryRespBody), s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes)
+											return truncateForLog(retryRespBody, s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes)
 										}
 										return ""
 									}(),
@@ -551,7 +551,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 						Message:            errMsg,
 						Detail: func() string {
 							if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
-								return truncateString(string(respBody), s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes)
+								return truncateForLog(respBody, s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes)
 							}
 							return ""
 						}(),
@@ -621,7 +621,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					Message:            extractUpstreamErrorMessage(respBody),
 					Detail: func() string {
 						if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
-							return truncateString(string(respBody), s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes)
+							return truncateForLog(respBody, s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes)
 						}
 						return ""
 					}(),
@@ -661,7 +661,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 
 			// 调试日志：打印重试耗尽后的错误响应
 			logger.LegacyPrintf("service.gateway", "[Forward] Upstream error (retry exhausted, failover): Account=%d(%s) Status=%d RequestID=%s Body=%s",
-				account.ID, account.Name, resp.StatusCode, resp.Header.Get("x-request-id"), truncateString(string(respBody), 1000))
+				account.ID, account.Name, resp.StatusCode, resp.Header.Get("x-request-id"), truncateForLog(respBody, 1000))
 
 			s.handleRetryExhaustedSideEffects(ctx, resp, account)
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -674,7 +674,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				Message:            extractUpstreamErrorMessage(respBody),
 				Detail: func() string {
 					if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
-						return truncateString(string(respBody), s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes)
+						return truncateForLog(respBody, s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes)
 					}
 					return ""
 				}(),
@@ -696,7 +696,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 
 		// 调试日志：打印上游错误响应
 		logger.LegacyPrintf("service.gateway", "[Forward] Upstream error (failover): Account=%d(%s) Status=%d RequestID=%s Body=%s",
-			account.ID, account.Name, resp.StatusCode, resp.Header.Get("x-request-id"), truncateString(string(respBody), 1000))
+			account.ID, account.Name, resp.StatusCode, resp.Header.Get("x-request-id"), truncateForLog(respBody, 1000))
 
 		s.handleFailoverSideEffects(ctx, resp, account, reqModel)
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -708,7 +708,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			Message:            extractUpstreamErrorMessage(respBody),
 			Detail: func() string {
 				if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
-					return truncateString(string(respBody), s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes)
+					return truncateForLog(respBody, s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes)
 				}
 				return ""
 			}(),
@@ -739,7 +739,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					if maxBytes <= 0 {
 						maxBytes = 2048
 					}
-					upstreamDetail = truncateString(string(respBody), maxBytes)
+					upstreamDetail = truncateForLog(respBody, maxBytes)
 				}
 				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 					Platform:           account.Platform,

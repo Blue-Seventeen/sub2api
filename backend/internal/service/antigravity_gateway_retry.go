@@ -92,7 +92,7 @@ type smartRetryResult struct {
 func (s *AntigravityGatewayService) handleSmartRetry(p antigravityRetryLoopParams, resp *http.Response, respBody []byte, baseURL string, urlIdx int, availableURLs []string) *smartRetryResult {
 	// "Resource has been exhausted" 是 URL 级别限流，切换 URL（仅 429）
 	if resp.StatusCode == http.StatusTooManyRequests && isURLLevelRateLimit(respBody) && urlIdx < len(availableURLs)-1 {
-		logger.LegacyPrintf("service.antigravity_gateway", "%s URL fallback (429): %s -> %s", p.prefix, baseURL, availableURLs[urlIdx+1])
+		logger.LegacyPrintf("service.antigravity_gateway", "%s URL fallback (429): <redacted> -> <redacted>", p.prefix)
 		return &smartRetryResult{action: smartRetryActionContinueURL}
 	}
 
@@ -505,7 +505,7 @@ func (s *AntigravityGatewayService) antigravityRetryLoop(p antigravityRetryLoopP
 		if !logBody {
 			return ""
 		}
-		return truncateString(string(body), maxBytes)
+		return truncateForLog(body, maxBytes)
 	}
 
 urlFallbackLoop:
@@ -541,7 +541,7 @@ urlFallbackLoop:
 					Message:            safeErr,
 				})
 				if shouldAntigravityFallbackToNextURL(err, 0) && urlIdx < len(availableURLs)-1 {
-					logger.LegacyPrintf("service.antigravity_gateway", "%s URL fallback (connection error): %s -> %s", p.prefix, baseURL, availableURLs[urlIdx+1])
+					logger.LegacyPrintf("service.antigravity_gateway", "%s URL fallback (connection error): <redacted> -> <redacted>", p.prefix)
 					continue urlFallbackLoop
 				}
 				if attempt < antigravityMaxRetries {
@@ -629,7 +629,7 @@ urlFallbackLoop:
 
 					// 重试用尽，标记账户限流
 					p.handleError(p.ctx, p.prefix, p.account, resp.StatusCode, resp.Header, respBody, p.requestedModel, p.groupID, p.sessionHash, p.isStickySession)
-					logger.LegacyPrintf("service.antigravity_gateway", "%s status=%d rate_limited base_url=%s body=%s", p.prefix, resp.StatusCode, baseURL, truncateForLog(respBody, 200))
+					logger.LegacyPrintf("service.antigravity_gateway", "%s status=%d rate_limited base_url=<redacted> body=%s", p.prefix, resp.StatusCode, truncateForLog(respBody, 200))
 					resp = &http.Response{
 						StatusCode: resp.StatusCode,
 						Header:     resp.Header.Clone(),
@@ -1210,7 +1210,7 @@ func (s *AntigravityGatewayService) handleUpstreamError(
 	// 429：尝试解析模型级限流，解析失败时兜底为账号级限流
 	if statusCode == 429 {
 		if logBody, maxBytes := s.getLogConfig(); logBody {
-			logger.LegacyPrintf("service.antigravity_gateway", "[Antigravity-Debug] 429 response body: %s", truncateString(string(body), maxBytes))
+			logger.LegacyPrintf("service.antigravity_gateway", "[Antigravity-Debug] 429 response body: %s", truncateForLog(body, maxBytes))
 		}
 
 		resetAt := ParseGeminiRateLimitResetTime(body)

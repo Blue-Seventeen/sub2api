@@ -137,8 +137,8 @@ func defaultAllowImageGenerationForPlatform(platform string) bool {
 }
 
 func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupInput) (*Group, error) {
-	if input.RateMultiplier <= 0 {
-		return nil, errors.New("rate_multiplier must be > 0")
+	if input.RateMultiplier < 0 {
+		return nil, errors.New("rate_multiplier must be >= 0")
 	}
 
 	platform := input.Platform
@@ -472,8 +472,8 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		group.Platform = input.Platform
 	}
 	if input.RateMultiplier != nil {
-		if *input.RateMultiplier <= 0 {
-			return nil, errors.New("rate_multiplier must be > 0")
+		if *input.RateMultiplier < 0 {
+			return nil, errors.New("rate_multiplier must be >= 0")
 		}
 		group.RateMultiplier = *input.RateMultiplier
 	}
@@ -825,8 +825,8 @@ func (s *adminServiceImpl) BatchSetGroupRateMultipliers(ctx context.Context, gro
 		return nil
 	}
 	for _, e := range entries {
-		if e.RateMultiplier <= 0 {
-			return fmt.Errorf("rate_multiplier must be > 0 (user_id=%d)", e.UserID)
+		if e.RateMultiplier < 0 {
+			return fmt.Errorf("rate_multiplier must be >= 0 (user_id=%d)", e.UserID)
 		}
 	}
 	return s.userGroupRateRepo.SyncGroupRateMultipliers(ctx, groupID, entries)

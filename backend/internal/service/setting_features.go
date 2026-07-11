@@ -779,6 +779,9 @@ func cloneOpenAIFastPolicySettings(in *OpenAIFastPolicySettings) *OpenAIFastPoli
 	out := &OpenAIFastPolicySettings{Rules: make([]OpenAIFastPolicyRule, len(in.Rules))}
 	for i, rule := range in.Rules {
 		out.Rules[i] = rule
+		if rule.UserIDs != nil {
+			out.Rules[i].UserIDs = append([]int64(nil), rule.UserIDs...)
+		}
 		if rule.ModelWhitelist != nil {
 			out.Rules[i].ModelWhitelist = append([]string(nil), rule.ModelWhitelist...)
 		}

@@ -9634,15 +9634,13 @@ async function saveSettings() {
           const whitelist = (rule.model_whitelist || [])
             .map((p) => p.trim())
             .filter((p) => p !== "");
+          const userIDs = cleanOpenAIFastPolicyUserIDs(rule.user_ids);
           const hasWhitelist = whitelist.length > 0;
           return {
             service_tier: rule.service_tier,
             action: rule.action,
             scope: rule.scope,
-            user_ids:
-              rule.user_ids && rule.user_ids.length > 0
-                ? [...rule.user_ids]
-                : undefined,
+            user_ids: userIDs.length > 0 ? userIDs : undefined,
             error_message:
               rule.action === "block" ? rule.error_message : undefined,
             model_whitelist: hasWhitelist ? whitelist : undefined,
@@ -10151,7 +10149,7 @@ function removeOpenAIFastPolicyRule(index: number) {
 
 function addOpenAIFastPolicyUserID(rule: OpenAIFastPolicyRule) {
   if (!rule.user_ids) rule.user_ids = [];
-  rule.user_ids.push(0);
+  (rule.user_ids as Array<number | undefined>).push(undefined);
 }
 
 function removeOpenAIFastPolicyUserID(
@@ -10159,6 +10157,20 @@ function removeOpenAIFastPolicyUserID(
   idx: number,
 ) {
   rule.user_ids?.splice(idx, 1);
+}
+
+function cleanOpenAIFastPolicyUserIDs(userIDs?: number[]): number[] {
+  const seen = new Set<number>();
+  const cleaned: number[] = [];
+  for (const rawID of userIDs || []) {
+    const userID = Number(rawID);
+    if (!Number.isInteger(userID) || userID <= 0 || seen.has(userID)) {
+      continue;
+    }
+    seen.add(userID);
+    cleaned.push(userID);
+  }
+  return cleaned;
 }
 
 function addOpenAIFastPolicyModelPattern(rule: OpenAIFastPolicyRule) {
@@ -10290,15 +10302,13 @@ async function saveOpenAIFastPolicySettings() {
         const whitelist = (rule.model_whitelist || [])
           .map((p) => p.trim())
           .filter((p) => p !== "");
+        const userIDs = cleanOpenAIFastPolicyUserIDs(rule.user_ids);
         const hasWhitelist = whitelist.length > 0;
         return {
           service_tier: rule.service_tier,
           action: rule.action,
           scope: rule.scope,
-          user_ids:
-            rule.user_ids && rule.user_ids.length > 0
-              ? [...rule.user_ids]
-              : undefined,
+          user_ids: userIDs.length > 0 ? userIDs : undefined,
           error_message:
             rule.action === "block"
               ? rule.error_message || undefined

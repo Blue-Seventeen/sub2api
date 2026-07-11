@@ -649,7 +649,7 @@ func (s *PaymentService) applyAffiliateRebateForOrder(ctx context.Context, o *db
 	if o == nil || baseAmount <= 0 {
 		return nil
 	}
-	if s.affiliateService == nil {
+	if s.affiliateService == nil || s.affiliateService.repo == nil || !s.affiliateService.IsEnabled(ctx) {
 		return nil
 	}
 

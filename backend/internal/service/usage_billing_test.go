@@ -1,11 +1,15 @@
 package service
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/config"
 )
 
 func TestUsageBillingCommandMatchesLegacyFingerprintForZeroQuantities(t *testing.T) {
@@ -121,6 +125,75 @@ func TestBuildUsageBillingCommandFingerprintsQuantitiesOnlyForQuantityModes(t *t
 			characterCmd.BillableCharacterCount,
 		)
 	}
+}
+
+func TestPostUsageBilling_FlusherModeFallsBackToDBWhenQuotaCacheNotSynced(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Database.UserPlatformQuotaFlusherEnabled = true
+	repo := &usageBillingPlatformQuotaRepo{}
+	p := &postUsageBillingParams{
+		Cost:     &CostBreakdown{ActualCost: 0.75},
+		User:     &User{ID: 11},
+		APIKey:   &APIKey{ID: 22},
+		Account:  &Account{ID: 33},
+		Platform: "openai",
+	}
+	deps := &billingDeps{
+		billingCacheService:   &BillingCacheService{cfg: cfg},
+		userPlatformQuotaRepo: repo,
+		cfg:                   cfg,
+	}
+
+	postUsageBilling(context.Background(), p, deps)
+
+	if repo.calls != 1 {
+		t.Fatalf("IncrementUsageWithReset calls = %d, want 1", repo.calls)
+	}
+	if repo.userID != 11 || repo.platform != "openai" || repo.cost != 0.75 {
+		t.Fatalf("fallback args = user:%d platform:%q cost:%f, want user:11 platform:openai cost:0.75",
+			repo.userID, repo.platform, repo.cost)
+	}
+}
+
+type usageBillingPlatformQuotaRepo struct {
+	UserPlatformQuotaRepository
+
+	calls    int
+	userID   int64
+	platform string
+	cost     float64
+}
+
+func (r *usageBillingPlatformQuotaRepo) GetByUserPlatform(context.Context, int64, string) (*UserPlatformQuotaRecord, error) {
+	return nil, nil
+}
+
+func (r *usageBillingPlatformQuotaRepo) BulkInsertInitial(context.Context, []UserPlatformQuotaRecord) error {
+	return nil
+}
+
+func (r *usageBillingPlatformQuotaRepo) IncrementUsageWithReset(_ context.Context, userID int64, platform string, cost float64, _ time.Time) error {
+	r.calls++
+	r.userID = userID
+	r.platform = platform
+	r.cost = cost
+	return nil
+}
+
+func (r *usageBillingPlatformQuotaRepo) ListByUser(context.Context, int64) ([]UserPlatformQuotaRecord, error) {
+	return nil, nil
+}
+
+func (r *usageBillingPlatformQuotaRepo) UpsertForUser(context.Context, int64, []UserPlatformQuotaRecord) error {
+	return nil
+}
+
+func (r *usageBillingPlatformQuotaRepo) ResetExpiredWindow(context.Context, int64, string, string, time.Time) error {
+	return nil
+}
+
+func (r *usageBillingPlatformQuotaRepo) BatchSnapshotUsage(context.Context, []UserPlatformQuotaSnapshot, time.Time) error {
+	return nil
 }
 
 func legacyUsageBillingFingerprintForTest(c *UsageBillingCommand) string {

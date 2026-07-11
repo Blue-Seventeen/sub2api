@@ -240,7 +240,7 @@ func TestUsageLogFromService_RedactsNestedAPIKeyForUser(t *testing.T) {
 	require.Empty(t, userDTO.APIKey.Key)
 
 	require.NotNil(t, adminDTO.APIKey)
-	require.Equal(t, "sk-sensitive-user-key", adminDTO.APIKey.Key)
+	require.Empty(t, adminDTO.APIKey.Key)
 }
 
 func TestUsageLogFromService_IncludesImageBillingMetadataForUserAndAdmin(t *testing.T) {

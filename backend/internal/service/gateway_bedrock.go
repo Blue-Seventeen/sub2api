@@ -250,7 +250,7 @@ func (s *GatewayService) executeBedrockUpstream(
 					Message:            extractUpstreamErrorMessage(respBody),
 					Detail: func() string {
 						if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
-							return truncateString(string(respBody), s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes)
+							return truncateForLog(respBody, s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes)
 						}
 						return ""
 					}(),
@@ -288,7 +288,7 @@ func (s *GatewayService) handleBedrockUpstreamErrors(
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
 
 			logger.LegacyPrintf("service.gateway", "[Bedrock] Upstream error (retry exhausted, failover): Account=%d(%s) Status=%d Body=%s",
-				account.ID, account.Name, resp.StatusCode, truncateString(string(respBody), 1000))
+				account.ID, account.Name, resp.StatusCode, truncateForLog(respBody, 1000))
 
 			s.handleRetryExhaustedSideEffects(ctx, resp, account)
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{

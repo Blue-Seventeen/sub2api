@@ -37,6 +37,7 @@ export const useAppStore = defineStore('app', () => {
   const displayCurrencySymbol = ref<string>('$')
   const cachedPublicSettings = ref<PublicSettings | null>(null)
   let publicSettingsRequest: Promise<PublicSettings | null> | null = null
+  let publicSettingsRequestSeq = 0
 
   // Version cache state
   const versionLoaded = ref<boolean>(false)
@@ -321,9 +322,9 @@ export const useAppStore = defineStore('app', () => {
    * @param force - Force refresh from API
    */
   function fetchPublicSettings(force = false): Promise<PublicSettings | null> {
-    // An active request always wins over cache/force semantics so every caller observes
-    // the same refresh result and no older request can overwrite a newer one.
-    if (publicSettingsRequest) {
+    // Non-forced callers share the active request. A forced refresh must start a
+    // newer request after settings writes so stale in-flight responses cannot win.
+    if (publicSettingsRequest && !force) {
       return publicSettingsRequest
     }
 
@@ -399,9 +400,12 @@ export const useAppStore = defineStore('app', () => {
       return Promise.resolve(null)
     }
 
+    const requestSeq = ++publicSettingsRequestSeq
     const request = apiRequest
       .then((data) => {
-        applySettings(data)
+        if (requestSeq === publicSettingsRequestSeq) {
+          applySettings(data)
+        }
         return data
       })
       .catch((error) => {
