@@ -220,7 +220,7 @@ func DeriveUpstreamEndpoint(inbound, rawRequestPath, platform string) string {
 		return EndpointChatCompletions
 	case service.PlatformZhipu:
 		return EndpointChatCompletions
-	case service.PlatformPerplexity, service.PlatformMistral, service.PlatformSiliconFlow, service.PlatformXAI, service.PlatformOpenRouter:
+	case service.PlatformPerplexity, service.PlatformMistral, service.PlatformSiliconFlow, service.PlatformOpenRouter:
 		return EndpointChatCompletions
 	}
 

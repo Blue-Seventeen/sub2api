@@ -136,6 +136,35 @@ func TestNewAPIStyleDeepSeekNewAPIChatUsesV1Path(t *testing.T) {
 	require.Equal(t, 5, result.Usage.OutputTokens)
 }
 
+func TestNewAPIStyleZhipuNewAPIChatUsesV1Path(t *testing.T) {
+	upstream := &httpUpstreamRecorder{resp: newAPIStyleAudioResponse("application/json", `{"id":"chatcmpl_test","model":"glm-5.2","choices":[],"usage":{"prompt_tokens":4,"completion_tokens":6}}`)}
+	svc := &NewAPIStyleGatewayService{httpUpstream: upstream}
+
+	result, endpoint, err := svc.Forward(context.Background(), newAPIStyleTestContext(), newAPIStyleAudioAccount(PlatformZhipu, nil), NewAPIStyleForwardOptions{
+		Route:        NewAPIStyleRouteChatCompletions,
+		Method:       http.MethodPost,
+		RequestBody:  []byte(`{"model":"glm-5.2","messages":[{"role":"user","content":"hi"}]}`),
+		InboundPath:  "/v1/chat/completions",
+		ContentType:  "application/json",
+		HeaderSource: http.Header{"Authorization": []string{"Bearer client-token"}},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "/v1/chat/completions", endpoint)
+	require.NotNil(t, upstream.lastReq)
+	require.Equal(t, "/v1/chat/completions", upstream.lastReq.URL.Path)
+	require.Equal(t, "Bearer zhipu-token", upstream.lastReq.Header.Get("Authorization"))
+	require.Equal(t, 4, result.Usage.InputTokens)
+	require.Equal(t, 6, result.Usage.OutputTokens)
+}
+
+func TestZhipuOfficialCompatibleChatKeepsPaaSPath(t *testing.T) {
+	preset := zhipuCompatibleProviderPreset()
+
+	require.Equal(t, "https://open.bigmodel.cn/api/paas/v4/chat/completions", preset.BuildChatURL("https://open.bigmodel.cn", "glm-4.5"))
+	require.Equal(t, "https://zhipu-compatible.example/v1/chat/completions", preset.BuildChatURL("https://zhipu-compatible.example/", "glm-5.2"))
+}
+
 func TestNewAPIStyleStreamParsesSSEUsage(t *testing.T) {
 	upstream := &httpUpstreamRecorder{resp: newAPIStyleAudioResponse("text/event-stream", strings.Join([]string{
 		`data: {"id":"chatcmpl_test","choices":[{"delta":{"content":"hi"}}]}`,

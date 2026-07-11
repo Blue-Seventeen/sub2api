@@ -57,10 +57,6 @@
   <svg v-else-if="platform === 'siliconflow'" :class="sizeClass" viewBox="0 0 24 24" fill="currentColor">
     <path d="M12 2l8 4.5v9L12 20l-8-4.5v-9L12 2zm0 4.2L7.5 8.7v5.1l4.5 2.5 4.5-2.5V8.7L12 6.2zM9 10h6v4H9v-4z" />
   </svg>
-  <!-- xAI -->
-  <svg v-else-if="platform === 'xai'" :class="sizeClass" viewBox="0 0 24 24" fill="currentColor">
-    <path d="M4 4h4.5l3.5 5 3.5-5H20l-5.7 8L20 20h-4.5L12 15l-3.5 5H4l5.7-8L4 4z" />
-  </svg>
   <!-- OpenRouter -->
   <svg v-else-if="platform === 'openrouter'" :class="sizeClass" viewBox="0 0 24 24" fill="currentColor">
     <path d="M4 7h10l3-3 3 3-3 3-3-3H4V7zm16 10H10l-3 3-3-3 3-3 3 3h10v0zM4 11h16v2H4v-2z" />

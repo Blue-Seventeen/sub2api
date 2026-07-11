@@ -705,6 +705,21 @@ func compatiblePreparedUpstreamTransport(prepared *compatiblePreparedRequest) Up
 	return UpstreamTransportHTTPJSON
 }
 
+func shouldUseOpenAIProfileForCompatibleRelay(prepared *compatiblePreparedRequest, targetURL string) bool {
+	if prepared == nil {
+		return false
+	}
+	switch prepared.UpstreamKind {
+	case compatibleUpstreamChat, compatibleUpstreamResponses:
+	default:
+		return false
+	}
+
+	trimmed := strings.ToLower(strings.TrimRight(strings.TrimSpace(targetURL), "/"))
+	return strings.HasSuffix(trimmed, "/v1/chat/completions") ||
+		strings.HasSuffix(trimmed, "/v1/responses")
+}
+
 func compatiblePreparedCompatibilityRoute(prepared *compatiblePreparedRequest, mode compatibleEndpointMode) CompatibilityRoute {
 	switch mode {
 	case compatibleEndpointModeRelay:
@@ -902,7 +917,11 @@ func (s *CompatibleGatewayService) executePreparedRequest(
 		for attempt := 0; ; attempt++ {
 			prepared.URL = candidate.URL
 
-			req, err := http.NewRequestWithContext(ctx, http.MethodPost, prepared.URL, bytes.NewReader(prepared.RequestBody))
+			reqCtx := ctx
+			if shouldUseOpenAIProfileForCompatibleRelay(prepared, candidate.URL) {
+				reqCtx = WithHTTPUpstreamProfile(reqCtx, HTTPUpstreamProfileOpenAI)
+			}
+			req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, prepared.URL, bytes.NewReader(prepared.RequestBody))
 			if err != nil {
 				return nil, false, err
 			}

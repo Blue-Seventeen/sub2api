@@ -124,6 +124,7 @@ var (
 		PlatformOpenAI:      {},
 		PlatformGemini:      {},
 		PlatformAntigravity: {},
+		PlatformGrok:        {},
 		PlatformZhipu:       {},
 		PlatformDeepSeek:    {},
 		PlatformVolcEngine:  {},
@@ -132,7 +133,6 @@ var (
 		PlatformPerplexity:  {},
 		PlatformMistral:     {},
 		PlatformSiliconFlow: {},
-		PlatformXAI:         {},
 		PlatformOpenRouter:  {},
 		PlatformSuno:        {},
 		PlatformKling:       {},
@@ -292,6 +292,7 @@ func DefaultAccountAutoOpsConfig() *AccountAutoOpsConfig {
 			PlatformOpenAI:      {},
 			PlatformGemini:      {},
 			PlatformAntigravity: {},
+			PlatformGrok:        {},
 			PlatformZhipu:       {},
 			PlatformDeepSeek:    {},
 			PlatformVolcEngine:  {},
@@ -300,7 +301,6 @@ func DefaultAccountAutoOpsConfig() *AccountAutoOpsConfig {
 			PlatformPerplexity:  {},
 			PlatformMistral:     {},
 			PlatformSiliconFlow: {},
-			PlatformXAI:         {},
 			PlatformOpenRouter:  {},
 			PlatformSuno:        {},
 			PlatformKling:       {},
@@ -391,7 +391,7 @@ func NormalizeAccountAutoOpsConfig(cfg *AccountAutoOpsConfig) *AccountAutoOpsCon
 	})
 
 	if cfg.TestModelsByPlatform != nil {
-		for _, platform := range append([]string{PlatformAnthropic, PlatformOpenAI, PlatformGemini, PlatformAntigravity}, CompatiblePlatforms()...) {
+		for _, platform := range append([]string{PlatformAnthropic, PlatformOpenAI, PlatformGemini, PlatformAntigravity, PlatformGrok}, CompatiblePlatforms()...) {
 			rawModels := cfg.TestModelsByPlatform[platform]
 			base.TestModelsByPlatform[platform] = normalizeAutoOpsModels(rawModels)
 		}

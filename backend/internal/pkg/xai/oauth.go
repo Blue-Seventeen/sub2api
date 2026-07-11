@@ -164,6 +164,10 @@ func ValidatedBaseURL(override string) (string, error) {
 	return ValidateBaseURL(EffectiveBaseURL(override))
 }
 
+func ValidatedAPIKeyBaseURL(override string) (string, error) {
+	return ValidateAPIKeyBaseURL(EffectiveBaseURL(override))
+}
+
 type RuntimeSanityCheck struct {
 	Value     string `json:"value"`
 	Valid     bool   `json:"valid"`
@@ -258,6 +262,24 @@ func ValidateBaseURL(raw string) (string, error) {
 	normalized, err := urlvalidator.ValidateHTTPSURL(raw, urlvalidator.ValidationOptions{
 		AllowedHosts:     baseURLAllowedHosts,
 		RequireAllowlist: true,
+		AllowPrivate:     false,
+	})
+	if err != nil {
+		return "", err
+	}
+	return normalizeKnownBaseURLPath(normalized)
+}
+
+func ValidateAPIKeyBaseURL(raw string) (string, error) {
+	if AllowUnsafeURLOverrides() {
+		normalized, err := urlvalidator.ValidateURLFormat(raw, true)
+		if err != nil {
+			return "", err
+		}
+		return normalizeKnownBaseURLPath(normalized)
+	}
+	normalized, err := urlvalidator.ValidateHTTPSURL(raw, urlvalidator.ValidationOptions{
+		RequireAllowlist: false,
 		AllowPrivate:     false,
 	})
 	if err != nil {
@@ -429,8 +451,24 @@ func BuildResponsesURL(baseURL string) (string, error) {
 	return validatedBaseURL + "/responses", nil
 }
 
+func BuildAPIKeyResponsesURL(baseURL string) (string, error) {
+	validatedBaseURL, err := ValidatedAPIKeyBaseURL(baseURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid base url: %w", err)
+	}
+	return validatedBaseURL + "/responses", nil
+}
+
 func BuildChatCompletionsURL(baseURL string) (string, error) {
 	validatedBaseURL, err := ValidatedBaseURL(baseURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid base url: %w", err)
+	}
+	return validatedBaseURL + "/chat/completions", nil
+}
+
+func BuildAPIKeyChatCompletionsURL(baseURL string) (string, error) {
+	validatedBaseURL, err := ValidatedAPIKeyBaseURL(baseURL)
 	if err != nil {
 		return "", fmt.Errorf("invalid base url: %w", err)
 	}
@@ -445,8 +483,24 @@ func BuildImagesGenerationsURL(baseURL string) (string, error) {
 	return validatedBaseURL + "/images/generations", nil
 }
 
+func BuildAPIKeyImagesGenerationsURL(baseURL string) (string, error) {
+	validatedBaseURL, err := ValidatedAPIKeyBaseURL(baseURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid base url: %w", err)
+	}
+	return validatedBaseURL + "/images/generations", nil
+}
+
 func BuildImagesEditsURL(baseURL string) (string, error) {
 	validatedBaseURL, err := ValidatedBaseURL(baseURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid base url: %w", err)
+	}
+	return validatedBaseURL + "/images/edits", nil
+}
+
+func BuildAPIKeyImagesEditsURL(baseURL string) (string, error) {
+	validatedBaseURL, err := ValidatedAPIKeyBaseURL(baseURL)
 	if err != nil {
 		return "", fmt.Errorf("invalid base url: %w", err)
 	}
@@ -461,8 +515,28 @@ func BuildVideosGenerationsURL(baseURL string) (string, error) {
 	return validatedBaseURL + "/videos/generations", nil
 }
 
+func BuildAPIKeyVideosGenerationsURL(baseURL string) (string, error) {
+	validatedBaseURL, err := ValidatedAPIKeyBaseURL(baseURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid base url: %w", err)
+	}
+	return validatedBaseURL + "/videos/generations", nil
+}
+
 func BuildVideoURL(baseURL, requestID string) (string, error) {
 	validatedBaseURL, err := ValidatedBaseURL(baseURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid base url: %w", err)
+	}
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return "", fmt.Errorf("request id is required")
+	}
+	return validatedBaseURL + "/videos/" + url.PathEscape(requestID), nil
+}
+
+func BuildAPIKeyVideoURL(baseURL, requestID string) (string, error) {
+	validatedBaseURL, err := ValidatedAPIKeyBaseURL(baseURL)
 	if err != nil {
 		return "", fmt.Errorf("invalid base url: %w", err)
 	}

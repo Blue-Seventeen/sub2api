@@ -2429,7 +2429,7 @@ const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 
-const newAPIOnlyPlatforms: AccountPlatform[] = ['perplexity', 'mistral', 'siliconflow', 'xai', 'openrouter', 'suno', 'kling', 'midjourney']
+const newAPIOnlyPlatforms: AccountPlatform[] = ['perplexity', 'mistral', 'siliconflow', 'openrouter', 'suno', 'kling', 'midjourney']
 const newAPIStyleSupportedPlatforms: AccountPlatform[] = [
   'anthropic',
   'openai',
@@ -2475,8 +2475,6 @@ const getPlatformDefaultBaseURL = (platform?: AccountPlatform | null) => {
       return 'https://api.mistral.ai'
     case 'siliconflow':
       return 'https://api.siliconflow.cn'
-    case 'xai':
-      return 'https://api.x.ai'
     case 'openrouter':
       return 'https://openrouter.ai/api'
     case 'kling':
@@ -2514,6 +2512,7 @@ const baseUrlHint = computed(() => {
   if (!props.account) return t('admin.accounts.baseUrlHint')
   if (props.account.platform === 'openai') return t('admin.accounts.openai.baseUrlHint')
   if (props.account.platform === 'gemini') return t('admin.accounts.gemini.baseUrlHint')
+  if (props.account.platform === 'grok') return t('admin.accounts.grok.baseUrlHint')
   return t('admin.accounts.baseUrlHint')
 })
 

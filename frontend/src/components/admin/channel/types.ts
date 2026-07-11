@@ -247,7 +247,6 @@ export function getPlatformTagClass(platform: string): string {
     case 'perplexity': return 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400'
     case 'mistral': return 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400'
     case 'siliconflow': return 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400'
-    case 'xai': return 'bg-neutral-100 text-neutral-700 dark:bg-neutral-900/30 dark:text-neutral-300'
     case 'openrouter': return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
     case 'suno': return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300'
     case 'kling': return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'

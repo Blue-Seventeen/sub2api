@@ -1,29 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import en from '../locales/en'
-import zh from '../locales/zh'
+import en from '../locales/en/index'
+import zh from '../locales/zh/index'
 import type { AccountPlatform, GroupPlatform } from '@/types'
+import { PLATFORMS } from '@/utils/platformColors'
 
-const groupPlatforms: GroupPlatform[] = [
-  'anthropic',
-  'openai',
-  'gemini',
-  'antigravity',
-  'grok',
-  'zhipu',
-  'deepseek',
-  'volcengine',
-  'ali',
-  'moonshot',
-  'perplexity',
-  'mistral',
-  'siliconflow',
-  'xai',
-  'openrouter',
-  'suno',
-  'kling',
-  'midjourney',
-]
+const groupPlatforms = [...PLATFORMS] as GroupPlatform[]
 
 const accountPlatforms: Array<AccountPlatform | 'claude'> = ['claude', ...groupPlatforms]
 
@@ -56,6 +38,18 @@ describe('platform locale keys', () => {
       const value = readPath(messages, key)
       expect(value, key).toEqual(expect.any(String))
       expect(value, key).not.toBe(key)
+    }
+  })
+
+  it.each([
+    ['zh', zh],
+    ['en', en],
+  ] as const)('%s locale keeps group and account platform labels aligned', (_locale, messages) => {
+    for (const platform of groupPlatforms) {
+      const groupKey = `admin.groups.platforms.${platform}`
+      const accountKey = `admin.accounts.platforms.${platform}`
+      expect(readPath(messages, accountKey), `${accountKey} should match ${groupKey}`)
+        .toBe(readPath(messages, groupKey))
     }
   })
 })

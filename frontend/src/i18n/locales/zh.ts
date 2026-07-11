@@ -3360,7 +3360,7 @@ export default {
       columns: {
         name: '名称',
         id: '账号ID',
-        platformType: '平台/类型',
+        platformType: '平台/账号类型',
         platform: '平台',
         type: '类型',
         capacity: '容量',
@@ -4056,8 +4056,9 @@ export default {
         modelRestrictionDisabledByPassthrough: '已开启自动透传：模型白名单/映射不会生效。',
       },
       grok: {
-        baseUrlHint: 'Grok OAuth 账号会转发到官方 xAI API Base URL。',
-        apiKeyHint: 'Grok 订阅支持使用 OAuth refresh token；API Key 账号不在本次范围内。'
+        baseUrlHint: 'Grok OAuth 和 API Key 账号都会转发到官方 xAI API Base URL；API Key 账号可按需覆盖 Base URL。',
+        apiKeyHint: 'Grok 支持订阅账号的 OAuth refresh token，也支持 xAI API Key + Base URL。',
+        accountTypeHint: 'OAuth 用于 Grok 订阅账号；API Key 用于 xAI 官方或兼容上游。'
       },
       anthropic: {
         apiKeyPassthrough: '自动透传（仅替换认证）',

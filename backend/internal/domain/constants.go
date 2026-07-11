@@ -30,7 +30,6 @@ const (
 	PlatformPerplexity  = "perplexity"
 	PlatformMistral     = "mistral"
 	PlatformSiliconFlow = "siliconflow"
-	PlatformXAI         = "xai"
 	PlatformOpenRouter  = "openrouter"
 	PlatformSuno        = "suno"
 	PlatformKling       = "kling"

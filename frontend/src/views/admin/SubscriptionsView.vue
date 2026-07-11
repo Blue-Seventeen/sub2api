@@ -986,6 +986,7 @@ import type { UserSubscription, Group, GroupPlatform, SubscriptionType, ExtendSu
 import type { SimpleUser } from '@/api/admin/usage'
 import type { Column } from '@/components/common/types'
 import { formatCurrencyAmount, formatDateOnly } from '@/utils/format'
+import { platformLabel } from '@/utils/platformColors'
 import { useClipboard } from '@/composables/useClipboard'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -1004,6 +1005,7 @@ import { getRemainingDurationParts, isOneTimeDailyQuota, type RemainingDurationP
 const { t } = useI18n()
 const appStore = useAppStore()
 const { copyToClipboard } = useClipboard()
+const platformDisplayName = (platform: string) => platformLabel(platform, t)
 
 interface GroupOption {
   value: number
@@ -1300,15 +1302,15 @@ const groupOptions = computed(() => [
 
 const platformFilterOptions = computed(() => [
   { value: '', label: t('admin.subscriptions.allPlatforms') },
-  { value: 'anthropic', label: 'Anthropic' },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'gemini', label: 'Gemini' },
-  { value: 'antigravity', label: 'Antigravity' },
-  { value: 'zhipu', label: 'GLM/智谱' },
-  { value: 'deepseek', label: 'DeepSeek' },
-  { value: 'volcengine', label: '火山方舟/豆包' },
-  { value: 'ali', label: 'Qwen/阿里' },
-  { value: 'moonshot', label: 'Kimi/月之暗面' }
+  { value: 'anthropic', label: platformDisplayName('anthropic') },
+  { value: 'openai', label: platformDisplayName('openai') },
+  { value: 'gemini', label: platformDisplayName('gemini') },
+  { value: 'antigravity', label: platformDisplayName('antigravity') },
+  { value: 'zhipu', label: platformDisplayName('zhipu') },
+  { value: 'deepseek', label: platformDisplayName('deepseek') },
+  { value: 'volcengine', label: platformDisplayName('volcengine') },
+  { value: 'ali', label: platformDisplayName('ali') },
+  { value: 'moonshot', label: platformDisplayName('moonshot') }
 ])
 
 // Group options for assign (only subscription type groups)

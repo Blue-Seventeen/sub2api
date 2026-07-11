@@ -55,7 +55,6 @@ var compatiblePlatformOrder = []string{
 	PlatformPerplexity,
 	PlatformMistral,
 	PlatformSiliconFlow,
-	PlatformXAI,
 	PlatformOpenRouter,
 	PlatformSuno,
 	PlatformKling,
@@ -71,7 +70,7 @@ func CompatiblePlatforms() []string {
 func IsCompatiblePlatform(platform string) bool {
 	switch strings.TrimSpace(platform) {
 	case PlatformZhipu, PlatformDeepSeek, PlatformVolcEngine, PlatformAli, PlatformMoonshot,
-		PlatformPerplexity, PlatformMistral, PlatformSiliconFlow, PlatformXAI, PlatformOpenRouter,
+		PlatformPerplexity, PlatformMistral, PlatformSiliconFlow, PlatformOpenRouter,
 		PlatformSuno, PlatformKling, PlatformMidjourney:
 		return true
 	default:
@@ -81,7 +80,7 @@ func IsCompatiblePlatform(platform string) bool {
 
 func PlatformRequiresNewAPIStyleInterface(platform string) bool {
 	switch strings.TrimSpace(platform) {
-	case PlatformPerplexity, PlatformMistral, PlatformSiliconFlow, PlatformXAI, PlatformOpenRouter,
+	case PlatformPerplexity, PlatformMistral, PlatformSiliconFlow, PlatformOpenRouter,
 		PlatformSuno, PlatformKling, PlatformMidjourney:
 		return true
 	default:
@@ -150,8 +149,6 @@ func compatiblePlatformDisplayName(platform string) string {
 		return "Mistral"
 	case PlatformSiliconFlow:
 		return "SiliconFlow"
-	case PlatformXAI:
-		return "xAI"
 	case PlatformOpenRouter:
 		return "OpenRouter"
 	case PlatformSuno:
@@ -183,8 +180,6 @@ func CompatibleProviderPresetForPlatform(platform string) (CompatibleProviderPre
 		return mistralCompatibleProviderPreset(), true
 	case PlatformSiliconFlow:
 		return siliconFlowCompatibleProviderPreset(), true
-	case PlatformXAI:
-		return xaiCompatibleProviderPreset(), true
 	case PlatformOpenRouter:
 		return openRouterCompatibleProviderPreset(), true
 	case PlatformSuno:

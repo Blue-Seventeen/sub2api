@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
@@ -37,8 +38,10 @@ func newCompactBridgeTestService() *OpenAIGatewayService {
 // parseCompactBridgeSSE 把合成的 SSE 文本拆成 (eventType, dataJSON) 序列。
 func parseCompactBridgeSSE(t *testing.T, body string) [][2]string {
 	t.Helper()
+	require.True(t, strings.HasSuffix(body, "\n\n"), "SSE stream must end with a blank line: tail=%q", body[compactBridgeTailStart(body):])
+	body = strings.TrimSuffix(body, "\n\n")
 	var events [][2]string
-	for _, block := range strings.Split(strings.TrimSpace(body), "\n\n") {
+	for _, block := range strings.Split(body, "\n\n") {
 		lines := strings.Split(block, "\n")
 		require.Len(t, lines, 2, "每个 SSE 事件应为 event+data 两行: %q", block)
 		require.True(t, strings.HasPrefix(lines[0], "event: "), "缺少 event 行: %q", block)
@@ -49,6 +52,18 @@ func parseCompactBridgeSSE(t *testing.T, body string) [][2]string {
 		})
 	}
 	return events
+}
+
+func compactBridgeTailStart(s string) int {
+	if len(s) > 64 {
+		return len(s) - 64
+	}
+	return 0
+}
+
+func largeCompactFinalResponse(fillerSize int) []byte {
+	filler := strings.Repeat("x", fillerSize)
+	return []byte(`{"id":"resp_compact_large","object":"response","model":"gpt-5.5","status":"completed","output":[{"id":"cmp_large","type":"compaction","status":"completed","encrypted_content":"` + filler + `"}],"usage":{"input_tokens":9000,"output_tokens":5101,"total_tokens":14101}}`)
 }
 
 func TestBuildOpenAICompactSSEPayload_EmitsItemsAndCompleted(t *testing.T) {
@@ -90,6 +105,19 @@ func TestBuildOpenAICompactSSEPayload_EmitsItemsAndCompleted(t *testing.T) {
 	require.Equal(t, "resp_compact_1", gjson.Get(completed, "response.id").String())
 	require.Equal(t, int64(13), gjson.Get(completed, "response.usage.total_tokens").Int())
 	require.Len(t, gjson.Get(completed, "response.output").Array(), 2)
+}
+
+func TestBuildOpenAICompactSSEPayload_LargeCompletedEventTerminatesWithBlankLine(t *testing.T) {
+	payload, ok := buildOpenAICompactSSEPayload(largeCompactFinalResponse(12 * 1024))
+	require.True(t, ok)
+	require.True(t, strings.HasSuffix(string(payload), "\n\n"))
+
+	events := parseCompactBridgeSSE(t, string(payload))
+	require.Len(t, events, 2)
+	require.Equal(t, "response.output_item.done", events[0][0])
+	require.Equal(t, "response.completed", events[1][0])
+	require.Greater(t, len(events[1][1]), 10*1024)
+	require.Equal(t, int64(14101), gjson.Get(events[1][1], "response.usage.total_tokens").Int())
 }
 
 func TestBuildOpenAICompactSSEPayload_InjectsMissingResponseID(t *testing.T) {
@@ -164,7 +192,9 @@ func TestWriteOpenAICompactSSEBridge_RequiresMarkAndSuccessStatus(t *testing.T) 
 	require.True(t, writeOpenAICompactSSEBridge(c, http.StatusOK, finalResponse))
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "text/event-stream", rec.Header().Get("Content-Type"))
-	require.Contains(t, rec.Body.String(), "event: response.completed")
+	events := parseCompactBridgeSSE(t, rec.Body.String())
+	require.Len(t, events, 2)
+	require.Equal(t, "response.completed", events[1][0])
 }
 
 // 回归 #3875：body-signal 提升后的 compact 请求，上游返回 unary JSON，
@@ -523,4 +553,60 @@ func TestHandleNonStreamingResponsePassthrough_CompactClientStreamBridgesToSSE(t
 	require.Equal(t, "resp_compact_pt", gjson.Get(events[1][1], "response.id").String())
 	require.NotNil(t, result.usage)
 	require.Equal(t, 7, result.usage.InputTokens)
+}
+
+func TestWriteOpenAICompactSSEBridge_LargeCompletedEventTerminatesWithBlankLine(t *testing.T) {
+	c, rec := newCompactBridgeTestContext(t, true)
+
+	require.True(t, writeOpenAICompactSSEBridge(c, http.StatusOK, largeCompactFinalResponse(12*1024)))
+	require.Equal(t, "text/event-stream", rec.Header().Get("Content-Type"))
+
+	events := parseCompactBridgeSSE(t, rec.Body.String())
+	require.Len(t, events, 2)
+	require.Equal(t, "response.completed", events[1][0])
+	require.Greater(t, len(events[1][1]), 10*1024)
+}
+
+func TestHandleStreamingResponse_CompactClientStreamAddsMissingFinalBlankLine(t *testing.T) {
+	svc := newCompactBridgeTestService()
+	c, rec := newCompactBridgeTestContext(t, true)
+	upstreamSSE := strings.Join([]string{
+		`event: response.completed`,
+		`data: {"type":"response.completed","response":{"id":"resp_stream_compact","object":"response","status":"completed","output":[{"id":"cmp_stream","type":"compaction","encrypted_content":"x"}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`,
+	}, "\n")
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamSSE)),
+	}
+
+	result, err := svc.handleStreamingResponse(context.Background(), resp, c, &Account{ID: 1, Type: AccountTypeOAuth, Platform: PlatformOpenAI}, time.Now(), "gpt-5.5", "gpt-5.5")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	events := parseCompactBridgeSSE(t, rec.Body.String())
+	require.Len(t, events, 1)
+	require.Equal(t, "response.completed", events[0][0])
+}
+
+func TestHandleStreamingResponsePassthrough_CompactClientStreamAddsMissingFinalBlankLine(t *testing.T) {
+	svc := newCompactBridgeTestService()
+	c, rec := newCompactBridgeTestContext(t, true)
+	upstreamSSE := strings.Join([]string{
+		`event: response.completed`,
+		`data: {"type":"response.completed","response":{"id":"resp_stream_compact_pt","object":"response","status":"completed","output":[{"id":"cmp_stream_pt","type":"compaction","encrypted_content":"x"}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`,
+	}, "\n")
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamSSE)),
+	}
+
+	result, err := svc.handleStreamingResponsePassthrough(context.Background(), resp, c, &Account{ID: 1, Type: AccountTypeOAuth, Platform: PlatformOpenAI}, time.Now(), "gpt-5.5", "")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	events := parseCompactBridgeSSE(t, rec.Body.String())
+	require.Len(t, events, 1)
+	require.Equal(t, "response.completed", events[0][0])
 }

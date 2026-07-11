@@ -415,6 +415,7 @@ import Icon from '@/components/icons/Icon.vue'
 import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
 import { formatDateTime } from '@/utils/format'
+import { platformLabel } from '@/utils/platformColors'
 import type {
   AccountAutoOpsAction,
   AccountAutoOpsConfig,
@@ -456,24 +457,25 @@ const form = reactive<AccountAutoOpsConfig>({
 })
 const selectedModelToAdd = reactive<Record<string, string | null>>({})
 const customModelToAdd = reactive<Record<string, string>>({})
+const platformDisplayName = (platform: string) => platformLabel(platform, t)
 const platforms = [
-  { value: 'anthropic', label: 'Anthropic' },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'gemini', label: 'Gemini' },
-  { value: 'antigravity', label: 'Antigravity' },
-  { value: 'zhipu', label: 'GLM/智谱' },
-  { value: 'deepseek', label: 'DeepSeek' },
-  { value: 'volcengine', label: '火山方舟/豆包' },
-  { value: 'ali', label: 'Qwen/阿里' },
-  { value: 'moonshot', label: 'Kimi/月之暗面' },
-  { value: 'perplexity', label: 'Perplexity' },
-  { value: 'mistral', label: 'Mistral' },
-  { value: 'siliconflow', label: 'SiliconFlow' },
-  { value: 'xai', label: 'xAI' },
-  { value: 'openrouter', label: 'OpenRouter' },
-  { value: 'suno', label: 'Suno' },
-  { value: 'kling', label: 'Kling' },
-  { value: 'midjourney', label: 'Midjourney' }
+  { value: 'anthropic', label: platformDisplayName('anthropic') },
+  { value: 'openai', label: platformDisplayName('openai') },
+  { value: 'gemini', label: platformDisplayName('gemini') },
+  { value: 'antigravity', label: platformDisplayName('antigravity') },
+  { value: 'grok', label: platformDisplayName('grok') },
+  { value: 'zhipu', label: platformDisplayName('zhipu') },
+  { value: 'deepseek', label: platformDisplayName('deepseek') },
+  { value: 'volcengine', label: platformDisplayName('volcengine') },
+  { value: 'ali', label: platformDisplayName('ali') },
+  { value: 'moonshot', label: platformDisplayName('moonshot') },
+  { value: 'perplexity', label: platformDisplayName('perplexity') },
+  { value: 'mistral', label: platformDisplayName('mistral') },
+  { value: 'siliconflow', label: platformDisplayName('siliconflow') },
+  { value: 'openrouter', label: platformDisplayName('openrouter') },
+  { value: 'suno', label: platformDisplayName('suno') },
+  { value: 'kling', label: platformDisplayName('kling') },
+  { value: 'midjourney', label: platformDisplayName('midjourney') }
 ]
 const subjectOptions = computed<Array<SelectOption & { value: AccountAutoOpsSubject }>>(() => [
   { value: 'account_name', label: t('admin.accounts.autoOpsDialog.subject.account_name') },
@@ -511,23 +513,23 @@ const targetBooleanOptions = computed<SelectOption[]>(() => [
   { value: 'false', label: t('admin.accounts.autoOpsDialog.targetBoolean.false') }
 ])
 const targetPlatformOptions = computed<SelectOption[]>(() => [
-  { value: 'anthropic', label: t('admin.accounts.platforms.anthropic') },
-  { value: 'openai', label: t('admin.accounts.platforms.openai') },
-  { value: 'gemini', label: t('admin.accounts.platforms.gemini') },
-  { value: 'antigravity', label: t('admin.accounts.platforms.antigravity') },
-  { value: 'zhipu', label: t('admin.accounts.platforms.zhipu') },
-  { value: 'deepseek', label: t('admin.accounts.platforms.deepseek') },
-  { value: 'volcengine', label: t('admin.accounts.platforms.volcengine') },
-  { value: 'ali', label: t('admin.accounts.platforms.ali') },
-  { value: 'moonshot', label: t('admin.accounts.platforms.moonshot') },
-  { value: 'perplexity', label: t('admin.accounts.platforms.perplexity') },
-  { value: 'mistral', label: t('admin.accounts.platforms.mistral') },
-  { value: 'siliconflow', label: t('admin.accounts.platforms.siliconflow') },
-  { value: 'xai', label: t('admin.accounts.platforms.xai') },
-  { value: 'openrouter', label: t('admin.accounts.platforms.openrouter') },
-  { value: 'suno', label: t('admin.accounts.platforms.suno') },
-  { value: 'kling', label: t('admin.accounts.platforms.kling') },
-  { value: 'midjourney', label: t('admin.accounts.platforms.midjourney') }
+  { value: 'anthropic', label: platformDisplayName('anthropic') },
+  { value: 'openai', label: platformDisplayName('openai') },
+  { value: 'gemini', label: platformDisplayName('gemini') },
+  { value: 'antigravity', label: platformDisplayName('antigravity') },
+  { value: 'grok', label: platformDisplayName('grok') },
+  { value: 'zhipu', label: platformDisplayName('zhipu') },
+  { value: 'deepseek', label: platformDisplayName('deepseek') },
+  { value: 'volcengine', label: platformDisplayName('volcengine') },
+  { value: 'ali', label: platformDisplayName('ali') },
+  { value: 'moonshot', label: platformDisplayName('moonshot') },
+  { value: 'perplexity', label: platformDisplayName('perplexity') },
+  { value: 'mistral', label: platformDisplayName('mistral') },
+  { value: 'siliconflow', label: platformDisplayName('siliconflow') },
+  { value: 'openrouter', label: platformDisplayName('openrouter') },
+  { value: 'suno', label: platformDisplayName('suno') },
+  { value: 'kling', label: platformDisplayName('kling') },
+  { value: 'midjourney', label: platformDisplayName('midjourney') }
 ])
 const targetAuthTypeOptions = computed<SelectOption[]>(() => [
   { value: 'oauth', label: t('admin.accounts.oauthType') },

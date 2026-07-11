@@ -2,6 +2,7 @@ package service
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
@@ -43,7 +44,21 @@ func zhipuCompatibleProviderPreset() CompatibleProviderPreset {
 }
 
 func zhipuBuildCompatibleChatURL(baseURL, _ string) string {
-	return strings.TrimRight(baseURL, "/") + zhipuCompatibleChatPath
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	lower := strings.ToLower(baseURL)
+
+	switch {
+	case strings.HasSuffix(lower, "/chat/completions"):
+		return baseURL
+	case strings.HasSuffix(lower, "/api/paas/v4"):
+		return baseURL + "/chat/completions"
+	case strings.HasSuffix(lower, "/api/paas"):
+		return baseURL + "/v4/chat/completions"
+	case isZhipuOfficialBaseURL(baseURL):
+		return baseURL + zhipuCompatibleChatPath
+	default:
+		return joinRelayCompatibleURL(baseURL, "/v1/chat/completions")
+	}
 }
 
 func zhipuBuildCompatibleMessagesURL(baseURL, _ string) string {
@@ -58,9 +73,30 @@ func zhipuBuildCompatibleMessagesURL(baseURL, _ string) string {
 		return baseURL + "/messages"
 	case strings.HasSuffix(lower, "/api/anthropic"):
 		return baseURL + "/v1/messages"
-	default:
+	case isZhipuOfficialBaseURL(baseURL):
 		return baseURL + zhipuCompatibleMessagesPath
+	default:
+		return joinRelayCompatibleURL(baseURL, "/v1/messages")
 	}
+}
+
+func isZhipuOfficialBaseURL(raw string) bool {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return false
+	}
+	parsed, err := url.Parse(trimmed)
+	if err == nil && parsed.Hostname() != "" {
+		return strings.EqualFold(parsed.Hostname(), "open.bigmodel.cn")
+	}
+	host := trimmed
+	if idx := strings.Index(host, "/"); idx >= 0 {
+		host = host[:idx]
+	}
+	if idx := strings.Index(host, ":"); idx >= 0 {
+		host = host[:idx]
+	}
+	return strings.EqualFold(host, "open.bigmodel.cn")
 }
 
 func zhipuPatchCompatibleHeaders(req *http.Request, account *Account, _ string) {

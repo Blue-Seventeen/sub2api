@@ -84,6 +84,7 @@ func writeOpenAICompactSSEBridge(c *gin.Context, statusCode int, finalResponse [
 		header.Set("X-Accel-Buffering", "no")
 		c.Writer.WriteHeader(statusCode)
 	}
+	payload = ensureOpenAICompactSSETerminated(payload)
 	_, _ = c.Writer.Write(payload)
 	c.Writer.Flush()
 	return true
@@ -200,7 +201,17 @@ func buildOpenAICompactSSEPayload(finalResponse []byte) ([]byte, bool) {
 		return nil, false
 	}
 	appendEvent("response.completed", completed)
-	return buf.Bytes(), true
+	return ensureOpenAICompactSSETerminated(buf.Bytes()), true
+}
+
+func ensureOpenAICompactSSETerminated(payload []byte) []byte {
+	if len(payload) == 0 || bytes.HasSuffix(payload, []byte("\n\n")) {
+		return payload
+	}
+	if bytes.HasSuffix(payload, []byte("\n")) {
+		return append(payload, '\n')
+	}
+	return append(payload, '\n', '\n')
 }
 
 func openAICompactUsageParsableByCodex(usage gjson.Result) bool {

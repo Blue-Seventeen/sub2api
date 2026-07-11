@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"net/http"
 	"runtime"
 	"runtime/debug"
 	"strconv"
@@ -499,6 +500,9 @@ func releaseOpsCaptureWriter(w *opsCaptureWriter) {
 }
 
 func (w *opsCaptureWriter) Write(b []byte) (int, error) {
+	if w == nil || w.ResponseWriter == nil {
+		return 0, http.ErrHandlerTimeout
+	}
 	if w.Status() >= 400 && w.limit > 0 && w.buf.Len() < w.limit {
 		remaining := w.limit - w.buf.Len()
 		if len(b) > remaining {
@@ -511,6 +515,9 @@ func (w *opsCaptureWriter) Write(b []byte) (int, error) {
 }
 
 func (w *opsCaptureWriter) WriteString(s string) (int, error) {
+	if w == nil || w.ResponseWriter == nil {
+		return 0, http.ErrHandlerTimeout
+	}
 	if w.Status() >= 400 && w.limit > 0 && w.buf.Len() < w.limit {
 		remaining := w.limit - w.buf.Len()
 		if len(s) > remaining {
@@ -520,6 +527,27 @@ func (w *opsCaptureWriter) WriteString(s string) (int, error) {
 		}
 	}
 	return w.ResponseWriter.WriteString(s)
+}
+
+func (w *opsCaptureWriter) Status() int {
+	if w == nil || w.ResponseWriter == nil {
+		return 0
+	}
+	return w.ResponseWriter.Status()
+}
+
+func (w *opsCaptureWriter) Size() int {
+	if w == nil || w.ResponseWriter == nil {
+		return -1
+	}
+	return w.ResponseWriter.Size()
+}
+
+func (w *opsCaptureWriter) Written() bool {
+	if w == nil || w.ResponseWriter == nil {
+		return false
+	}
+	return w.ResponseWriter.Written()
 }
 
 // OpsErrorLoggerMiddleware records error responses (status >= 400) into ops_error_logs.
@@ -536,8 +564,13 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			// don't observe a pooled wrapper that has been released.
 			if c.Writer == w {
 				c.Writer = originalWriter
+				releaseOpsCaptureWriter(w)
+				return
 			}
-			releaseOpsCaptureWriter(w)
+			// Another middleware/handler may have wrapped the capture writer
+			// (for example compact SSE keepalive). Do not release it back to the
+			// pool while outer middleware can still read status/size through that
+			// wrapper.
 		}()
 		c.Writer = w
 		c.Next()

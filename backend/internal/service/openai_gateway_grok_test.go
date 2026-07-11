@@ -734,6 +734,116 @@ func TestForwardGrokResponsesStreamingUsesXAIResponsesAndSnapshots(t *testing.T)
 	require.NotNil(t, repo.updates[52][grokQuotaSnapshotExtraKey])
 }
 
+func TestForwardGrokResponsesSupportsAPIKeyAccounts(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	body := []byte(`{"model":"grok-3","input":"hi","stream":true}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	account := &Account{
+		ID:          521,
+		Name:        "grok-apikey",
+		Platform:    PlatformGrok,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 2,
+		Credentials: map[string]any{
+			"api_key":  "xai-api-key",
+			"base_url": xai.DefaultBaseURL,
+		},
+	}
+	repo := &grokQuotaAccountRepo{
+		mockAccountRepoForPlatform: &mockAccountRepoForPlatform{
+			accountsByID: map[int64]*Account{521: account},
+		},
+	}
+	upstreamBody := strings.Join([]string{
+		`data: {"type":"response.output_text.delta","sequence_number":0,"delta":"ok"}`,
+		"",
+		`data: {"type":"response.completed","sequence_number":1,"response":{"id":"resp_grok_apikey","model":"grok-3","usage":{"input_tokens":2,"output_tokens":1}}}`,
+		"",
+	}, "\n")
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"Content-Type":   []string{"text/event-stream"},
+			"Xai-Request-Id": []string{"xai-apikey-req"},
+		},
+		Body: io.NopCloser(strings.NewReader(upstreamBody)),
+	}}
+	svc := &OpenAIGatewayService{
+		httpUpstream: upstream,
+		accountRepo:  repo,
+	}
+
+	result, err := svc.forwardGrokResponses(context.Background(), c, account, body, "grok-3", true, time.Now())
+	require.NoError(t, err)
+	require.Equal(t, xai.DefaultBaseURL+"/responses", upstream.lastReq.URL.String())
+	require.Equal(t, "Bearer xai-api-key", upstream.lastReq.Header.Get("Authorization"))
+	require.Equal(t, "grok-3", gjson.GetBytes(upstream.lastBody, "model").String())
+	require.Equal(t, "xai-apikey-req", result.RequestID)
+	require.Equal(t, "resp_grok_apikey", result.ResponseID)
+	require.Equal(t, 2, result.Usage.InputTokens)
+	require.Equal(t, 1, result.Usage.OutputTokens)
+}
+
+func TestForwardGrokResponsesSupportsAPIKeyCompatibleBaseURL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	body := []byte(`{"model":"grok-4.5","input":"hi","stream":true}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	account := &Account{
+		ID:          522,
+		Name:        "grok-compatible-apikey",
+		Platform:    PlatformGrok,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 2,
+		Credentials: map[string]any{
+			"api_key":  "xai-api-key",
+			"base_url": "https://www.ganshuchang.asia",
+		},
+	}
+	repo := &grokQuotaAccountRepo{
+		mockAccountRepoForPlatform: &mockAccountRepoForPlatform{
+			accountsByID: map[int64]*Account{522: account},
+		},
+	}
+	upstreamBody := strings.Join([]string{
+		`data: {"type":"response.output_text.delta","sequence_number":0,"delta":"ok"}`,
+		"",
+		`data: {"type":"response.completed","sequence_number":1,"response":{"id":"resp_grok_compatible","model":"grok-4.5","usage":{"input_tokens":2,"output_tokens":1}}}`,
+		"",
+	}, "\n")
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"Content-Type":   []string{"text/event-stream"},
+			"Xai-Request-Id": []string{"xai-compatible-req"},
+		},
+		Body: io.NopCloser(strings.NewReader(upstreamBody)),
+	}}
+	svc := &OpenAIGatewayService{
+		httpUpstream: upstream,
+		accountRepo:  repo,
+	}
+
+	result, err := svc.forwardGrokResponses(context.Background(), c, account, body, "grok-4.5", true, time.Now())
+	require.NoError(t, err)
+	require.Equal(t, "https://www.ganshuchang.asia/v1/responses", upstream.lastReq.URL.String())
+	require.Equal(t, "Bearer xai-api-key", upstream.lastReq.Header.Get("Authorization"))
+	require.Equal(t, "grok-4.5", gjson.GetBytes(upstream.lastBody, "model").String())
+	require.Equal(t, "xai-compatible-req", result.RequestID)
+	require.Equal(t, "resp_grok_compatible", result.ResponseID)
+	require.Equal(t, 2, result.Usage.InputTokens)
+	require.Equal(t, 1, result.Usage.OutputTokens)
+}
+
 func TestForwardAsChatCompletionsForGrokStreamingUsesRawXAIChatCompletions(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -799,6 +909,67 @@ func TestForwardAsChatCompletionsForGrokStreamingUsesRawXAIChatCompletions(t *te
 	require.Equal(t, 1, result.Usage.CacheReadInputTokens)
 	require.Contains(t, recorder.Body.String(), "data: [DONE]")
 	require.NotNil(t, repo.updates[53][grokQuotaSnapshotExtraKey])
+}
+
+func TestForwardAsChatCompletionsForGrokAPIKeyCompatibleBaseURL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	body := []byte(`{"model":"grok-4.5","messages":[{"role":"user","content":"hi"}],"stream":true}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	account := &Account{
+		ID:          54,
+		Name:        "grok-compatible-apikey",
+		Platform:    PlatformGrok,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "xai-api-key",
+			"base_url": "https://www.ganshuchang.asia",
+		},
+	}
+	repo := &grokQuotaAccountRepo{
+		mockAccountRepoForPlatform: &mockAccountRepoForPlatform{
+			accountsByID: map[int64]*Account{54: account},
+		},
+	}
+	upstreamBody := strings.Join([]string{
+		`data: {"id":"chatcmpl_grok","object":"chat.completion.chunk","model":"grok-4.5","choices":[{"index":0,"delta":{"content":"ok"}}]}`,
+		"",
+		`data: {"id":"chatcmpl_grok","object":"chat.completion.chunk","model":"grok-4.5","choices":[],"usage":{"prompt_tokens":6,"completion_tokens":4,"total_tokens":10}}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"Content-Type": []string{"text/event-stream"},
+			"X-Request-Id": []string{"chat-compatible-req"},
+		},
+		Body: io.NopCloser(strings.NewReader(upstreamBody)),
+	}}
+	svc := &OpenAIGatewayService{
+		cfg:          rawChatCompletionsTestConfig(),
+		httpUpstream: upstream,
+		accountRepo:  repo,
+	}
+
+	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "")
+	require.NoError(t, err)
+	require.Equal(t, "https://www.ganshuchang.asia/v1/chat/completions", upstream.lastReq.URL.String())
+	require.Equal(t, "Bearer xai-api-key", upstream.lastReq.Header.Get("Authorization"))
+	require.Equal(t, "text/event-stream", upstream.lastReq.Header.Get("Accept"))
+	require.Equal(t, "sub2api-grok/1.0", upstream.lastReq.Header.Get("User-Agent"))
+	require.Equal(t, "grok-4.5", gjson.GetBytes(upstream.lastBody, "model").String())
+	require.True(t, gjson.GetBytes(upstream.lastBody, "stream_options.include_usage").Bool())
+	require.True(t, result.Stream)
+	require.Equal(t, 6, result.Usage.InputTokens)
+	require.Equal(t, 4, result.Usage.OutputTokens)
+	require.Contains(t, recorder.Body.String(), "data: [DONE]")
 }
 
 func TestForwardAsChatCompletionsForGrokComposerBridgesImageInput(t *testing.T) {
@@ -922,6 +1093,7 @@ func TestForwardAsAnthropicForGrokUsesXAIResponses(t *testing.T) {
 func TestHandleGrokAccountUpstreamErrorTempUnschedulesReadinessStates(t *testing.T) {
 	tests := []struct {
 		name            string
+		accountType     string
 		status          int
 		headers         http.Header
 		wantReason      string
@@ -930,13 +1102,23 @@ func TestHandleGrokAccountUpstreamErrorTempUnschedulesReadinessStates(t *testing
 	}{
 		{
 			name:            "unauthorized reauth",
+			accountType:     AccountTypeOAuth,
 			status:          http.StatusUnauthorized,
 			wantReason:      "grok oauth token unauthorized",
 			wantMinCooldown: 10*time.Minute - time.Second,
 			wantMaxCooldown: 10*time.Minute + time.Second,
 		},
 		{
+			name:            "unauthorized api key",
+			accountType:     AccountTypeAPIKey,
+			status:          http.StatusUnauthorized,
+			wantReason:      "grok api key unauthorized",
+			wantMinCooldown: 10*time.Minute - time.Second,
+			wantMaxCooldown: 10*time.Minute + time.Second,
+		},
+		{
 			name:            "forbidden entitlement",
+			accountType:     AccountTypeOAuth,
 			status:          http.StatusForbidden,
 			wantReason:      "grok entitlement or subscription tier denied",
 			wantMinCooldown: 30*time.Minute - time.Second,
@@ -944,6 +1126,7 @@ func TestHandleGrokAccountUpstreamErrorTempUnschedulesReadinessStates(t *testing
 		},
 		{
 			name:            "rate limited retry after",
+			accountType:     AccountTypeOAuth,
 			status:          http.StatusTooManyRequests,
 			headers:         http.Header{"Retry-After": []string{"45"}},
 			wantReason:      "grok rate limited",
@@ -954,7 +1137,7 @@ func TestHandleGrokAccountUpstreamErrorTempUnschedulesReadinessStates(t *testing
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			account := &Account{ID: 61, Platform: PlatformGrok, Type: AccountTypeOAuth}
+			account := &Account{ID: 61, Platform: PlatformGrok, Type: tt.accountType}
 			repo := &grokQuotaAccountRepo{}
 			svc := &OpenAIGatewayService{accountRepo: repo}
 			before := time.Now()

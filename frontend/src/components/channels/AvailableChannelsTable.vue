@@ -67,7 +67,7 @@
               ]"
             >
               <PlatformIcon :platform="section.platform as GroupPlatform" size="xs" />
-              {{ section.platform }}
+              {{ platformDisplayName(section.platform) }}
             </span>
           </td>
 
@@ -171,7 +171,7 @@ import GroupBadge from '@/components/common/GroupBadge.vue'
 import SupportedModelChip from './SupportedModelChip.vue'
 import type { UserAvailableChannel, UserAvailableGroup, UserChannelPlatformSection } from '@/api/channels'
 import type { GroupPlatform, SubscriptionType } from '@/types'
-import { platformBadgeClass } from '@/utils/platformColors'
+import { platformBadgeClass, platformLabel } from '@/utils/platformColors'
 
 const props = defineProps<{
   columns: {
@@ -196,6 +196,7 @@ const props = defineProps<{
 void props.userGroupRates
 
 const { t } = useI18n()
+const platformDisplayName = (platform: string) => platformLabel(platform, t)
 
 function exclusiveGroups(section: UserChannelPlatformSection): UserAvailableGroup[] {
   return section.groups.filter((g) => g.is_exclusive)

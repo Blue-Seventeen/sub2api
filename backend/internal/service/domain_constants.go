@@ -37,7 +37,6 @@ const (
 	PlatformPerplexity  = domain.PlatformPerplexity
 	PlatformMistral     = domain.PlatformMistral
 	PlatformSiliconFlow = domain.PlatformSiliconFlow
-	PlatformXAI         = domain.PlatformXAI
 	PlatformOpenRouter  = domain.PlatformOpenRouter
 	PlatformSuno        = domain.PlatformSuno
 	PlatformKling       = domain.PlatformKling

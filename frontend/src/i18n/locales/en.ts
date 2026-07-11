@@ -3560,7 +3560,7 @@ export default {
       columns: {
         name: 'Name',
         id: 'Account ID',
-        platformType: 'Platform/Type',
+        platformType: 'Platform/Account Type',
         platform: 'Platform',
         type: 'Type',
         capacity: 'Capacity',
@@ -3931,8 +3931,9 @@ export default {
         modelRestrictionDisabledByPassthrough: 'Automatic passthrough is enabled: model whitelist/mapping will not take effect.',
       },
       grok: {
-        baseUrlHint: 'Grok OAuth accounts forward to the official xAI API base URL.',
-        apiKeyHint: 'Grok subscription support uses OAuth refresh tokens; API keys are out of scope for this account type.'
+        baseUrlHint: 'Grok OAuth and API Key accounts forward to the official xAI API base URL. API Key accounts may override the base URL when needed.',
+        apiKeyHint: 'Grok supports OAuth refresh tokens for subscription accounts and xAI API Key + Base URL for API accounts.',
+        accountTypeHint: 'Use OAuth for Grok subscription accounts, or API Key for xAI official and compatible upstreams.'
       },
       anthropic: {
         apiKeyPassthrough: 'Auto passthrough (auth only)',

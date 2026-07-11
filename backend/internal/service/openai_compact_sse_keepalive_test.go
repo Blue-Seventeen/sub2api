@@ -21,13 +21,19 @@ func waitForKeepaliveBeats() {
 // stripKeepaliveComments 去掉 SSE 注释块，返回真实事件文本。
 func stripKeepaliveComments(body string) string {
 	var blocks []string
-	for _, block := range strings.Split(strings.TrimSpace(body), "\n\n") {
+	for _, block := range strings.Split(body, "\n\n") {
+		if block == "" {
+			continue
+		}
 		if strings.HasPrefix(strings.TrimSpace(block), ":") {
 			continue
 		}
 		blocks = append(blocks, block)
 	}
-	return strings.Join(blocks, "\n\n")
+	if len(blocks) == 0 {
+		return ""
+	}
+	return strings.Join(blocks, "\n\n") + "\n\n"
 }
 
 func TestStartOpenAICompactSSEKeepalive_NoopWhenUnmarkedOrDisabled(t *testing.T) {

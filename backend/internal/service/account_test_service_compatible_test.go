@@ -11,13 +11,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAccountTestService_CompatibleAccountFallsBackToRelayChatEndpoint(t *testing.T) {
+func TestAccountTestService_CompatibleAccountUsesRelayChatEndpointForThirdPartyZhipu(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, recorder := newTestContext()
 
 	upstream := &queuedHTTPUpstream{
 		responses: []*http.Response{
-			newJSONResponse(http.StatusNotFound, `{"error":{"message":"route not found"}}`),
 			newJSONResponse(http.StatusOK, "data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"model\":\"glm-4.6v\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello\"},\"finish_reason\":null}]}\n\ndata: [DONE]\n\n"),
 		},
 	}
@@ -42,8 +41,7 @@ func TestAccountTestService_CompatibleAccountFallsBackToRelayChatEndpoint(t *tes
 
 	err := svc.testCompatibleAccountConnection(ctx, account, "glm-4.6v")
 	require.NoError(t, err)
-	require.Len(t, upstream.requests, 2)
-	require.Equal(t, "https://relay.example.com/api/paas/v4/chat/completions", upstream.requests[0].URL.String())
-	require.Equal(t, "https://relay.example.com/v1/chat/completions", upstream.requests[1].URL.String())
+	require.Len(t, upstream.requests, 1)
+	require.Equal(t, "https://relay.example.com/v1/chat/completions", upstream.requests[0].URL.String())
 	require.Contains(t, recorder.Body.String(), "test_complete")
 }

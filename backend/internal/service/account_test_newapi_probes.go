@@ -955,6 +955,9 @@ func (s *AccountTestService) newAPIProbeURL(account *Account, probe newAPIProbeR
 		InboundPath: probe.InboundPath,
 		Model:       probe.Model,
 	})
+	if probe.Route == NewAPIStyleRouteChatCompletions && account.Platform == PlatformZhipu {
+		path = "/v1/chat/completions"
+	}
 	if path == "" {
 		path = "/" + strings.TrimLeft(strings.TrimSpace(probe.InboundPath), "/")
 	}

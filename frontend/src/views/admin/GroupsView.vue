@@ -3877,6 +3877,7 @@ import { createStableObjectKeyResolver } from "@/utils/stableObjectKey";
 import { useKeyedDebouncedSearch } from "@/composables/useKeyedDebouncedSearch";
 import { getPersistedPageSize } from "@/composables/usePersistedPageSize";
 import { formatCurrencyAmount, getDisplayCurrencySymbol } from "@/utils/format";
+import { platformLabel } from "@/utils/platformColors";
 import {
   createDefaultMessagesDispatchFormState,
   messagesDispatchConfigToFormState,
@@ -4176,28 +4177,35 @@ const exclusiveOptions = computed(() => [
   { value: "false", label: t("admin.groups.nonExclusive") },
 ]);
 
-type PlatformSelectOption = { value: GroupPlatform; label: string };
+const platformDisplayName = (platform: string) => platformLabel(platform, t);
+type VisibleGroupPlatform = GroupPlatform;
+type PlatformSelectOption = { value: VisibleGroupPlatform; label: string };
+const groupPlatformValues: VisibleGroupPlatform[] = [
+  "anthropic",
+  "openai",
+  "gemini",
+  "antigravity",
+  "zhipu",
+  "deepseek",
+  "volcengine",
+  "ali",
+  "moonshot",
+  "perplexity",
+  "mistral",
+  "siliconflow",
+  "openrouter",
+  "suno",
+  "kling",
+  "midjourney",
+  "grok",
+];
 
-const platformOptions = computed<PlatformSelectOption[]>(() => [
-  { value: "anthropic", label: "Anthropic" },
-  { value: "openai", label: "OpenAI" },
-  { value: "gemini", label: "Gemini" },
-  { value: "antigravity", label: "Antigravity" },
-  { value: "zhipu", label: "GLM/智谱" },
-  { value: "deepseek", label: "DeepSeek" },
-  { value: "volcengine", label: "火山方舟/豆包" },
-  { value: "ali", label: "Qwen/阿里" },
-  { value: "moonshot", label: "Kimi/月之暗面" },
-  { value: "perplexity", label: "Perplexity" },
-  { value: "mistral", label: "Mistral" },
-  { value: "siliconflow", label: "SiliconFlow" },
-  { value: "xai", label: "xAI" },
-  { value: "openrouter", label: "OpenRouter" },
-  { value: "suno", label: "Suno" },
-  { value: "kling", label: "Kling" },
-  { value: "midjourney", label: "Midjourney" },
-  { value: "grok", label: "Grok" },
-]);
+const platformOptions = computed<PlatformSelectOption[]>(() =>
+  groupPlatformValues.map((value) => ({
+    value,
+    label: platformDisplayName(value),
+  })),
+);
 
 interface GroupPlatformSearchOption extends PlatformSelectOption {
   subtitle: string;
@@ -4208,7 +4216,7 @@ interface GroupPlatformSearchOption extends PlatformSelectOption {
 }
 
 const createPlatformSearchMeta: Record<
-  GroupPlatform,
+  VisibleGroupPlatform,
   Omit<GroupPlatformSearchOption, keyof PlatformSelectOption>
 > = {
   anthropic: {
@@ -4248,8 +4256,8 @@ const createPlatformSearchMeta: Record<
     textActiveClass: "text-purple-600 dark:text-purple-300",
   },
   grok: {
-    subtitle: "xAI / Grok",
-    searchTerms: ["grok", "xai", "x.ai"],
+    subtitle: "OAuth / xAI API Key",
+    searchTerms: ["grok", "xai", "x.ai", "oauth", "api key"],
     activeClass:
       "border-zinc-300 bg-white shadow-sm dark:border-zinc-700 dark:bg-dark-600",
     iconActiveClass:
@@ -4328,15 +4336,6 @@ const createPlatformSearchMeta: Record<
       "bg-teal-50 text-teal-600 dark:bg-teal-900/30 dark:text-teal-300",
     textActiveClass: "text-teal-600 dark:text-teal-300",
   },
-  xai: {
-    subtitle: "Grok / New-API",
-    searchTerms: ["xai", "x ai", "grok"],
-    activeClass:
-      "border-neutral-300 bg-white shadow-sm dark:border-neutral-700 dark:bg-dark-600",
-    iconActiveClass:
-      "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200",
-    textActiveClass: "text-neutral-700 dark:text-neutral-200",
-  },
   openrouter: {
     subtitle: "Multi-provider / New-API",
     searchTerms: ["openrouter", "router", "multi-provider"],
@@ -4377,24 +4376,7 @@ const createPlatformSearchMeta: Record<
 
 const platformFilterOptions = computed(() => [
   { value: "", label: t("admin.groups.allPlatforms") },
-  { value: "anthropic", label: "Anthropic" },
-  { value: "openai", label: "OpenAI" },
-  { value: "gemini", label: "Gemini" },
-  { value: "antigravity", label: "Antigravity" },
-  { value: "zhipu", label: "GLM/智谱" },
-  { value: "deepseek", label: "DeepSeek" },
-  { value: "volcengine", label: "火山方舟/豆包" },
-  { value: "ali", label: "Qwen/阿里" },
-  { value: "moonshot", label: "Kimi/月之暗面" },
-  { value: "perplexity", label: "Perplexity" },
-  { value: "mistral", label: "Mistral" },
-  { value: "siliconflow", label: "SiliconFlow" },
-  { value: "xai", label: "xAI" },
-  { value: "openrouter", label: "OpenRouter" },
-  { value: "suno", label: "Suno" },
-  { value: "kling", label: "Kling" },
-  { value: "midjourney", label: "Midjourney" },
-  { value: "grok", label: "Grok" },
+  ...platformOptions.value,
 ]);
 
 const editStatusOptions = computed(() => [

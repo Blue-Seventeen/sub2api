@@ -17,6 +17,7 @@ import (
 type compatibleGatewayHTTPUpstreamRecorder struct {
 	responses []*http.Response
 	urls      []string
+	profiles  []HTTPUpstreamProfile
 }
 
 func (u *compatibleGatewayHTTPUpstreamRecorder) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
@@ -25,6 +26,7 @@ func (u *compatibleGatewayHTTPUpstreamRecorder) Do(req *http.Request, _ string, 
 
 func (u *compatibleGatewayHTTPUpstreamRecorder) DoWithTLS(req *http.Request, _ string, _ int64, _ int, _ *tlsfingerprint.Profile) (*http.Response, error) {
 	u.urls = append(u.urls, req.URL.String())
+	u.profiles = append(u.profiles, HTTPUpstreamProfileFromContext(req.Context()))
 	if len(u.responses) == 0 {
 		return nil, nil
 	}
@@ -101,14 +103,13 @@ func newCompatibleGatewayServiceForTest(upstream HTTPUpstream) *CompatibleGatewa
 	}
 }
 
-func TestCompatibleGatewayServiceForward_FallsBackToRelayChatEndpointForZhipu(t *testing.T) {
+func TestCompatibleGatewayServiceForward_UsesRelayChatEndpointDirectlyForThirdPartyZhipu(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 
 	upstream := &compatibleGatewayHTTPUpstreamRecorder{
 		responses: []*http.Response{
-			newCompatibleGatewayHTTPResponse(http.StatusNotFound, `{"error":{"message":"route not found"}}`),
 			newCompatibleGatewayHTTPResponse(http.StatusOK, `{"id":"chatcmpl-1","object":"chat.completion","model":"glm-4.6v","choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}],"usage":{"input_tokens":1,"output_tokens":2}}`),
 		},
 	}
@@ -140,14 +141,14 @@ func TestCompatibleGatewayServiceForward_FallsBackToRelayChatEndpointForZhipu(t 
 	if result == nil {
 		t.Fatal("Forward() result is nil")
 	}
-	if len(upstream.urls) != 2 {
-		t.Fatalf("len(upstream.urls) = %d, want 2", len(upstream.urls))
+	if len(upstream.urls) != 1 {
+		t.Fatalf("len(upstream.urls) = %d, want 1", len(upstream.urls))
 	}
-	if upstream.urls[0] != "https://relay.example.com/api/paas/v4/chat/completions" {
-		t.Fatalf("first URL = %q", upstream.urls[0])
+	if upstream.urls[0] != "https://relay.example.com/v1/chat/completions" {
+		t.Fatalf("URL = %q, want relay-compatible endpoint", upstream.urls[0])
 	}
-	if upstream.urls[1] != "https://relay.example.com/v1/chat/completions" {
-		t.Fatalf("fallback URL = %q", upstream.urls[1])
+	if upstream.profiles[0] != HTTPUpstreamProfileOpenAI {
+		t.Fatalf("profile = %q, want %q", upstream.profiles[0], HTTPUpstreamProfileOpenAI)
 	}
 	if rec.Code != http.StatusOK {
 		t.Fatalf("HTTP status = %d, want %d", rec.Code, http.StatusOK)
@@ -171,16 +172,18 @@ func TestCompatibleGatewayServiceForward_FallsBackToRelayChatEndpointForZhipu(t 
 	if err != nil {
 		t.Fatalf("second Forward() error = %v", err)
 	}
-	if len(upstream.urls) != 3 {
-		t.Fatalf("len(upstream.urls) after cached request = %d, want 3", len(upstream.urls))
+	if len(upstream.urls) != 2 {
+		t.Fatalf("len(upstream.urls) after second request = %d, want 2", len(upstream.urls))
 	}
-	if upstream.urls[2] != "https://relay.example.com/v1/chat/completions" {
-		t.Fatalf("cached URL = %q, want relay-compatible endpoint", upstream.urls[2])
+	if upstream.urls[1] != "https://relay.example.com/v1/chat/completions" {
+		t.Fatalf("second URL = %q, want relay-compatible endpoint", upstream.urls[1])
+	}
+	if upstream.profiles[1] != HTTPUpstreamProfileOpenAI {
+		t.Fatalf("second profile = %q, want %q", upstream.profiles[1], HTTPUpstreamProfileOpenAI)
 	}
 
 	svc.InvalidateEndpointModeCacheForAccount(account.ID)
 	upstream.responses = []*http.Response{
-		newCompatibleGatewayHTTPResponse(http.StatusNotFound, `{"error":{"message":"route not found"}}`),
 		newCompatibleGatewayHTTPResponse(http.StatusOK, `{"id":"chatcmpl-3","object":"chat.completion","model":"glm-4.6v","choices":[{"index":0,"message":{"role":"assistant","content":"reprobe"},"finish_reason":"stop"}],"usage":{"input_tokens":1,"output_tokens":2}}`),
 	}
 	thirdRec := httptest.NewRecorder()
@@ -195,18 +198,18 @@ func TestCompatibleGatewayServiceForward_FallsBackToRelayChatEndpointForZhipu(t 
 	if err != nil {
 		t.Fatalf("third Forward() error = %v", err)
 	}
-	if len(upstream.urls) != 5 {
-		t.Fatalf("len(upstream.urls) after invalidation = %d, want 5", len(upstream.urls))
+	if len(upstream.urls) != 3 {
+		t.Fatalf("len(upstream.urls) after invalidation = %d, want 3", len(upstream.urls))
 	}
-	if upstream.urls[3] != "https://relay.example.com/api/paas/v4/chat/completions" {
-		t.Fatalf("reprobe first URL = %q, want native endpoint", upstream.urls[3])
+	if upstream.urls[2] != "https://relay.example.com/v1/chat/completions" {
+		t.Fatalf("third URL = %q, want relay endpoint", upstream.urls[2])
 	}
-	if upstream.urls[4] != "https://relay.example.com/v1/chat/completions" {
-		t.Fatalf("reprobe fallback URL = %q, want relay endpoint", upstream.urls[4])
+	if upstream.profiles[2] != HTTPUpstreamProfileOpenAI {
+		t.Fatalf("third profile = %q, want %q", upstream.profiles[2], HTTPUpstreamProfileOpenAI)
 	}
 }
 
-func TestCompatibleGatewayServiceForward_FallsBackToRelayChatEndpointForZhipuWhenPrimaryReturnsHTMLSuccessPage(t *testing.T) {
+func TestCompatibleGatewayServiceForward_FallsBackToRelayChatEndpointForOfficialZhipuWhenPrimaryReturnsHTMLSuccessPage(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -224,7 +227,7 @@ func TestCompatibleGatewayServiceForward_FallsBackToRelayChatEndpointForZhipuWhe
 		Type:        AccountTypeAPIKey,
 		Concurrency: 1,
 		Credentials: map[string]any{
-			"base_url": "https://relay.example.com",
+			"base_url": "https://open.bigmodel.cn",
 			"api_key":  "test-key",
 		},
 	}
@@ -248,11 +251,17 @@ func TestCompatibleGatewayServiceForward_FallsBackToRelayChatEndpointForZhipuWhe
 	if len(upstream.urls) != 2 {
 		t.Fatalf("len(upstream.urls) = %d, want 2", len(upstream.urls))
 	}
-	if upstream.urls[0] != "https://relay.example.com/api/paas/v4/chat/completions" {
+	if upstream.urls[0] != "https://open.bigmodel.cn/api/paas/v4/chat/completions" {
 		t.Fatalf("first URL = %q", upstream.urls[0])
 	}
-	if upstream.urls[1] != "https://relay.example.com/v1/chat/completions" {
+	if upstream.urls[1] != "https://open.bigmodel.cn/v1/chat/completions" {
 		t.Fatalf("fallback URL = %q", upstream.urls[1])
+	}
+	if upstream.profiles[0] != HTTPUpstreamProfileDefault {
+		t.Fatalf("first profile = %q, want default", upstream.profiles[0])
+	}
+	if upstream.profiles[1] != HTTPUpstreamProfileOpenAI {
+		t.Fatalf("fallback profile = %q, want %q", upstream.profiles[1], HTTPUpstreamProfileOpenAI)
 	}
 	if rec.Code != http.StatusOK {
 		t.Fatalf("HTTP status = %d, want %d", rec.Code, http.StatusOK)
@@ -980,14 +989,13 @@ func TestCompatibleGatewayServiceForward_KeepsStreamingChatUsageAfterFinishChunk
 	}
 }
 
-func TestCompatibleGatewayServiceForward_FallsBackToRelayMessagesEndpointForZhipu(t *testing.T) {
+func TestCompatibleGatewayServiceForward_UsesRelayMessagesEndpointDirectlyForThirdPartyZhipu(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 
 	upstream := &compatibleGatewayHTTPUpstreamRecorder{
 		responses: []*http.Response{
-			newCompatibleGatewayHTTPResponse(http.StatusNotFound, `{"error":{"message":"endpoint not found"}}`),
 			newCompatibleGatewayHTTPResponse(http.StatusOK, `{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"hello"}],"model":"glm-4.6v","stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":5}}`),
 		},
 	}
@@ -1019,14 +1027,11 @@ func TestCompatibleGatewayServiceForward_FallsBackToRelayMessagesEndpointForZhip
 	if result == nil {
 		t.Fatal("Forward() result is nil")
 	}
-	if len(upstream.urls) != 2 {
-		t.Fatalf("len(upstream.urls) = %d, want 2", len(upstream.urls))
+	if len(upstream.urls) != 1 {
+		t.Fatalf("len(upstream.urls) = %d, want 1", len(upstream.urls))
 	}
-	if upstream.urls[0] != "https://relay.example.com/api/anthropic/v1/messages" {
-		t.Fatalf("first URL = %q", upstream.urls[0])
-	}
-	if upstream.urls[1] != "https://relay.example.com/v1/messages" {
-		t.Fatalf("fallback URL = %q", upstream.urls[1])
+	if upstream.urls[0] != "https://relay.example.com/v1/messages" {
+		t.Fatalf("URL = %q, want relay-compatible messages endpoint", upstream.urls[0])
 	}
 	if rec.Code != http.StatusOK {
 		t.Fatalf("HTTP status = %d, want %d", rec.Code, http.StatusOK)

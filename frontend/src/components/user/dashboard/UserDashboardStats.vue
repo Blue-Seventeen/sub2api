@@ -153,7 +153,7 @@
       >
         <div class="flex items-center justify-between">
           <span class="text-sm font-semibold text-gray-900 dark:text-white">
-            {{ item.isOther ? t('dashboard.platformOther') : platformLabel(item.platform) }}
+            {{ item.isOther ? t('dashboard.platformOther') : platformDisplayName(item.platform) }}
           </span>
           <span class="font-mono text-sm text-purple-600 dark:text-purple-400" :title="t('dashboard.actual')">
             {{ formatCost(item.total_actual_cost) }}
@@ -229,6 +229,7 @@ import Icon from '@/components/icons/Icon.vue'
 import type { PlatformDashboardStats, UserDashboardStats as UserStatsType } from '@/api/usage'
 import type { PlatformQuotaItem } from '@/types'
 import { formatCostAmount, formatCurrencyAmount } from '@/utils/format'
+import { platformLabel } from '@/utils/platformColors'
 
 const props = defineProps<{
   stats: UserStatsType
@@ -305,16 +306,7 @@ const platformCards = computed<PlatformCard[]>(() => {
   return rows
 })
 
-const PLATFORM_LABELS: Record<string, string> = {
-  anthropic: 'Claude',
-  openai: 'OpenAI',
-  gemini: 'Gemini',
-  antigravity: 'Antigravity'
-}
-
-function platformLabel(platform: string): string {
-  return PLATFORM_LABELS[platform] ?? platform
-}
+const platformDisplayName = (platform: string) => platformLabel(platform, t)
 
 type QuotaWindow = 'daily' | 'weekly' | 'monthly'
 type QuotaField =

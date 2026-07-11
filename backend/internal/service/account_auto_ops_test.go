@@ -54,6 +54,7 @@ func TestNormalizeAccountAutoOpsConfig(t *testing.T) {
 	require.Equal(t, 10, cfg.Rules[0].Priority)
 	require.Equal(t, []string{"gpt-4o", "gpt-4.1"}, cfg.TestModelsByPlatform[PlatformOpenAI])
 	require.Contains(t, cfg.TestModelsByPlatform, PlatformAnthropic)
+	require.Contains(t, cfg.TestModelsByPlatform, PlatformGrok)
 }
 
 func TestValidateAccountAutoOpsConfig(t *testing.T) {
@@ -82,6 +83,11 @@ func TestValidateAccountAutoOpsConfig(t *testing.T) {
 				Action:    AccountAutoOpsActionRecoverState,
 			},
 		},
+	}
+	require.NoError(t, ValidateAccountAutoOpsConfig(valid))
+
+	valid.TargetRules[0].Conditions = []AccountAutoOpsTargetCondition{
+		{Field: AccountAutoOpsTargetFieldPlatform, Operator: AccountAutoOpsTargetOperatorEQ, Value: PlatformGrok},
 	}
 	require.NoError(t, ValidateAccountAutoOpsConfig(valid))
 

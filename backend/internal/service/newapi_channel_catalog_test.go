@@ -4,8 +4,8 @@ import "testing"
 
 func TestNewAPIReferenceChannelCatalogCoversReferenceDirectories(t *testing.T) {
 	catalog := NewAPIReferenceChannelCatalog()
-	if len(catalog) != 37 {
-		t.Fatalf("catalog length = %d, want 37", len(catalog))
+	if len(catalog) != 36 {
+		t.Fatalf("catalog length = %d, want 36", len(catalog))
 	}
 
 	seen := make(map[string]struct{}, len(catalog))
@@ -28,7 +28,7 @@ func TestNewAPIReferenceChannelCatalogCoversReferenceDirectories(t *testing.T) {
 		"jina", "lingyiwanwu", "minimax", "mistral", "mokaai", "moonshot",
 		"ollama", "openai", "openrouter", "palm", "perplexity", "replicate",
 		"siliconflow", "submodel", "task", "tencent", "vertex", "volcengine",
-		"xai", "xinference", "xunfei", "zhipu", "zhipu_4v",
+		"xinference", "xunfei", "zhipu", "zhipu_4v",
 	} {
 		if _, ok := seen[name]; !ok {
 			t.Fatalf("missing channel: %s", name)

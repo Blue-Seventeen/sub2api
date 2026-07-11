@@ -59,6 +59,9 @@ func TestZhipuCompatibleProviderPreset_Routes(t *testing.T) {
 	if got := preset.BuildResponsesURL(baseURL, "glm-4.5"); got != wantChat {
 		t.Fatalf("BuildResponsesURL() = %q, want %q", got, wantChat)
 	}
+	if got := preset.BuildChatURL("https://open.bigmodel.cn/api/paas/v4", "glm-4.5"); got != wantChat {
+		t.Fatalf("BuildChatURL(paas base) = %q, want %q", got, wantChat)
+	}
 	if got := preset.BuildMessagesURL(baseURL, "glm-4.5"); got != wantMessages {
 		t.Fatalf("BuildMessagesURL() = %q, want %q", got, wantMessages)
 	}
@@ -67,6 +70,15 @@ func TestZhipuCompatibleProviderPreset_Routes(t *testing.T) {
 	}
 	if got := preset.BuildMessagesURL("https://open.bigmodel.cn/api/anthropic/v1", "glm-4.5"); got != wantMessages {
 		t.Fatalf("BuildMessagesURL(anthropic v1 base) = %q, want %q", got, wantMessages)
+	}
+	if got := preset.BuildChatURL("https://relay.example.com", "glm-4.5"); got != "https://relay.example.com/v1/chat/completions" {
+		t.Fatalf("BuildChatURL(relay base) = %q, want relay-compatible chat endpoint", got)
+	}
+	if got := preset.BuildChatURL("https://relay.example.com/v1", "glm-4.5"); got != "https://relay.example.com/v1/chat/completions" {
+		t.Fatalf("BuildChatURL(relay v1 base) = %q, want relay-compatible chat endpoint", got)
+	}
+	if got := preset.BuildMessagesURL("https://relay.example.com", "glm-4.5"); got != "https://relay.example.com/v1/messages" {
+		t.Fatalf("BuildMessagesURL(relay base) = %q, want relay-compatible messages endpoint", got)
 	}
 }
 

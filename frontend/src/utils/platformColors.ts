@@ -19,7 +19,6 @@ export const PLATFORMS = [
   'perplexity',
   'mistral',
   'siliconflow',
-  'xai',
   'openrouter',
   'suno',
   'kling',
@@ -42,7 +41,6 @@ const BADGE: Record<Platform, string> = {
   perplexity: 'bg-sky-500/10 text-sky-600 border-sky-500/30 dark:text-sky-400',
   mistral: 'bg-violet-500/10 text-violet-600 border-violet-500/30 dark:text-violet-400',
   siliconflow: 'bg-teal-500/10 text-teal-600 border-teal-500/30 dark:text-teal-400',
-  xai: 'bg-neutral-500/10 text-neutral-700 border-neutral-500/30 dark:text-neutral-300',
   openrouter: 'bg-indigo-500/10 text-indigo-600 border-indigo-500/30 dark:text-indigo-400',
   suno: 'bg-yellow-500/10 text-yellow-700 border-yellow-500/30 dark:text-yellow-300',
   kling: 'bg-red-500/10 text-red-600 border-red-500/30 dark:text-red-400',
@@ -64,7 +62,6 @@ const BADGE_LIGHT: Record<Platform, string> = {
   perplexity: 'bg-sky-500/10 text-sky-600 dark:bg-sky-500/10 dark:text-sky-300',
   mistral: 'bg-violet-500/10 text-violet-600 dark:bg-violet-500/10 dark:text-violet-300',
   siliconflow: 'bg-teal-500/10 text-teal-600 dark:bg-teal-500/10 dark:text-teal-300',
-  xai: 'bg-neutral-500/10 text-neutral-700 dark:bg-neutral-500/10 dark:text-neutral-300',
   openrouter: 'bg-indigo-500/10 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-300',
   suno: 'bg-yellow-500/10 text-yellow-700 dark:bg-yellow-500/10 dark:text-yellow-300',
   kling: 'bg-red-500/10 text-red-600 dark:bg-red-500/10 dark:text-red-300',
@@ -85,7 +82,6 @@ const BORDER: Record<Platform, string> = {
   perplexity: 'border-sky-500/20 dark:border-sky-500/20',
   mistral: 'border-violet-500/20 dark:border-violet-500/20',
   siliconflow: 'border-teal-500/20 dark:border-teal-500/20',
-  xai: 'border-neutral-500/20 dark:border-neutral-500/20',
   openrouter: 'border-indigo-500/20 dark:border-indigo-500/20',
   suno: 'border-yellow-500/20 dark:border-yellow-500/20',
   kling: 'border-red-500/20 dark:border-red-500/20',
@@ -107,7 +103,6 @@ const ACCENT_BAR: Record<Platform, string> = {
   perplexity: 'bg-gradient-to-r from-sky-400 to-sky-500',
   mistral: 'bg-gradient-to-r from-violet-400 to-violet-500',
   siliconflow: 'bg-gradient-to-r from-teal-400 to-teal-500',
-  xai: 'bg-gradient-to-r from-neutral-400 to-neutral-600',
   openrouter: 'bg-gradient-to-r from-indigo-400 to-indigo-500',
   suno: 'bg-gradient-to-r from-yellow-400 to-amber-500',
   kling: 'bg-gradient-to-r from-red-400 to-rose-500',
@@ -129,7 +124,6 @@ const TEXT: Record<Platform, string> = {
   perplexity: 'text-sky-600 dark:text-sky-400',
   mistral: 'text-violet-600 dark:text-violet-400',
   siliconflow: 'text-teal-600 dark:text-teal-400',
-  xai: 'text-neutral-700 dark:text-neutral-300',
   openrouter: 'text-indigo-600 dark:text-indigo-400',
   suno: 'text-yellow-700 dark:text-yellow-300',
   kling: 'text-red-600 dark:text-red-400',
@@ -151,7 +145,6 @@ const ICON: Record<Platform, string> = {
   perplexity: 'text-sky-500 dark:text-sky-400',
   mistral: 'text-violet-500 dark:text-violet-400',
   siliconflow: 'text-teal-500 dark:text-teal-400',
-  xai: 'text-neutral-600 dark:text-neutral-300',
   openrouter: 'text-indigo-500 dark:text-indigo-400',
   suno: 'text-yellow-500 dark:text-yellow-300',
   kling: 'text-red-500 dark:text-red-400',
@@ -173,7 +166,6 @@ const DOT: Record<Platform, string> = {
   perplexity: 'bg-sky-500',
   mistral: 'bg-violet-500',
   siliconflow: 'bg-teal-500',
-  xai: 'bg-neutral-500',
   openrouter: 'bg-indigo-500',
   suno: 'bg-yellow-500',
   kling: 'bg-red-500',
@@ -195,7 +187,6 @@ const BUTTON: Record<Platform, string> = {
   perplexity: 'bg-sky-500 text-white hover:bg-sky-600 active:bg-sky-700 dark:bg-sky-500/80 dark:hover:bg-sky-500',
   mistral: 'bg-violet-500 text-white hover:bg-violet-600 active:bg-violet-700 dark:bg-violet-500/80 dark:hover:bg-violet-500',
   siliconflow: 'bg-teal-500 text-white hover:bg-teal-600 active:bg-teal-700 dark:bg-teal-500/80 dark:hover:bg-teal-500',
-  xai: 'bg-neutral-700 text-white hover:bg-neutral-800 active:bg-neutral-900 dark:bg-neutral-600/80 dark:hover:bg-neutral-600',
   openrouter: 'bg-indigo-500 text-white hover:bg-indigo-600 active:bg-indigo-700 dark:bg-indigo-500/80 dark:hover:bg-indigo-500',
   suno: 'bg-yellow-500 text-white hover:bg-yellow-600 active:bg-yellow-700 dark:bg-yellow-500/80 dark:hover:bg-yellow-500',
   kling: 'bg-red-500 text-white hover:bg-red-600 active:bg-red-700 dark:bg-red-500/80 dark:hover:bg-red-500',
@@ -217,7 +208,6 @@ const DISCOUNT: Record<Platform, string> = {
   perplexity: 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300',
   mistral: 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300',
   siliconflow: 'bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300',
-  xai: 'bg-neutral-100 text-neutral-700 dark:bg-neutral-900/40 dark:text-neutral-300',
   openrouter: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300',
   suno: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300',
   kling: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
@@ -239,7 +229,6 @@ const GRADIENT: Record<Platform, string> = {
   perplexity: 'from-sky-500 to-sky-600',
   mistral: 'from-violet-500 to-violet-600',
   siliconflow: 'from-teal-500 to-teal-600',
-  xai: 'from-neutral-500 to-neutral-700',
   openrouter: 'from-indigo-500 to-indigo-600',
   suno: 'from-yellow-500 to-amber-600',
   kling: 'from-red-500 to-rose-600',
@@ -261,7 +250,6 @@ const GRADIENT_TEXT: Record<Platform, string> = {
   perplexity: 'text-sky-100',
   mistral: 'text-violet-100',
   siliconflow: 'text-teal-100',
-  xai: 'text-neutral-100',
   openrouter: 'text-indigo-100',
   suno: 'text-yellow-100',
   kling: 'text-red-100',
@@ -283,7 +271,6 @@ const GRADIENT_SUBTEXT: Record<Platform, string> = {
   perplexity: 'text-sky-200',
   mistral: 'text-violet-200',
   siliconflow: 'text-teal-200',
-  xai: 'text-neutral-200',
   openrouter: 'text-indigo-200',
   suno: 'text-yellow-200',
   kling: 'text-red-200',
@@ -343,7 +330,17 @@ export function platformGradientSubtextClass(p: string): string {
   return isPlatform(p) ? GRADIENT_SUBTEXT[p] : GRADIENT_SUBTEXT_DEFAULT
 }
 
-export function platformLabel(p: string): string {
+type PlatformTranslate = (key: string, fallback: string) => string
+
+export function platformLabel(p: string, t?: PlatformTranslate): string {
+  const fallback = platformLabelFallback(p)
+  if (!t || !p) {
+    return fallback
+  }
+  return t(`admin.accounts.platforms.${p}`, fallback)
+}
+
+function platformLabelFallback(p: string): string {
   switch (p) {
     case 'anthropic': return 'Anthropic'
     case 'openai': return 'OpenAI'
@@ -358,7 +355,6 @@ export function platformLabel(p: string): string {
     case 'perplexity': return 'Perplexity'
     case 'mistral': return 'Mistral'
     case 'siliconflow': return 'SiliconFlow'
-    case 'xai': return 'xAI'
     case 'openrouter': return 'OpenRouter'
     case 'suno': return 'Suno'
     case 'kling': return 'Kling'

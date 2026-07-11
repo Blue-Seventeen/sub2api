@@ -877,6 +877,11 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	failedMessage := ""
 	clientOutputStarted := false
 	upstreamRequestID := strings.TrimSpace(resp.Header.Get("x-request-id"))
+	compactClientStream := openAICompactClientWantsStream(c)
+	lastForwardedLineBlank := true
+	markForwardedLine := func(line string) {
+		lastForwardedLineBlank = strings.TrimSpace(line) == ""
+	}
 	pendingLines := make([]string, 0, 8)
 	writePendingLines := func() bool {
 		for _, pending := range pendingLines {
@@ -885,6 +890,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				logger.LegacyPrintf("service.openai_gateway", "[OpenAI passthrough] Client disconnected during streaming, continue draining upstream for usage: account=%d", account.ID)
 				return false
 			}
+			markForwardedLine(pending)
 		}
 		pendingLines = pendingLines[:0]
 		return true
@@ -908,6 +914,18 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			imageCount:       imageCounter.Count(),
 			imageOutputSizes: imageCounter.Sizes(),
 		}
+	}
+	ensureCompactSSETerminator := func() {
+		if !compactClientStream || clientDisconnected || !sawTerminalEvent || lastForwardedLineBlank {
+			return
+		}
+		if _, err := fmt.Fprintln(w); err != nil {
+			clientDisconnected = true
+			logger.LegacyPrintf("service.openai_gateway", "[OpenAI passthrough] Client disconnected during compact SSE terminator flush, continue draining upstream for usage: account=%d", account.ID)
+			return
+		}
+		lastForwardedLineBlank = true
+		flusher.Flush()
 	}
 
 	for scanner.Scan() {
@@ -1010,6 +1028,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				clientDisconnected = true
 				logger.LegacyPrintf("service.openai_gateway", "[OpenAI passthrough] Client disconnected during streaming, continue draining upstream for usage: account=%d", account.ID)
 			} else {
+				markForwardedLine(line)
 				clientOutputStarted = true
 				flusher.Flush()
 			}
@@ -1017,9 +1036,11 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	}
 	if err := scanner.Err(); err != nil {
 		if sawTerminalEvent && !sawFailedEvent {
+			ensureCompactSSETerminator()
 			return resultWithUsage(), nil
 		}
 		if sawFailedEvent {
+			ensureCompactSSETerminator()
 			return resultWithUsage(), fmt.Errorf("upstream response failed: %s", failedMessage)
 		}
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -1049,6 +1070,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 		return resultWithUsage(), fmt.Errorf("stream read error: %w", err)
 	}
 	if sawFailedEvent {
+		ensureCompactSSETerminator()
 		return resultWithUsage(), fmt.Errorf("upstream response failed: %s", failedMessage)
 	}
 	if !clientDisconnected && !sawDone && !sawTerminalEvent && ctx.Err() == nil {
@@ -1064,6 +1086,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 		return resultWithUsage(), errors.New("stream usage incomplete: missing terminal event")
 	}
 
+	ensureCompactSSETerminator()
 	return resultWithUsage(), nil
 }
 

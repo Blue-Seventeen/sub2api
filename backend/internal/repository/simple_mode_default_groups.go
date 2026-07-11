@@ -27,7 +27,6 @@ func ensureSimpleModeDefaultGroups(ctx context.Context, client *dbent.Client) er
 		service.PlatformPerplexity:  1,
 		service.PlatformMistral:     1,
 		service.PlatformSiliconFlow: 1,
-		service.PlatformXAI:         1,
 		service.PlatformOpenRouter:  1,
 		service.PlatformSuno:        1,
 		service.PlatformKling:       1,

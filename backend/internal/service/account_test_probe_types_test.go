@@ -11,15 +11,19 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/gin-gonic/gin"
 )
 
 type accountProbeHTTPUpstream struct {
-	requests []*http.Request
-	bodies   [][]byte
-	resp     *http.Response
-	err      error
+	requests  []*http.Request
+	bodies    [][]byte
+	profiles  []HTTPUpstreamProfile
+	responses []*http.Response
+	errs      []error
+	resp      *http.Response
+	err       error
 }
 
 func (u *accountProbeHTTPUpstream) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
@@ -28,10 +32,23 @@ func (u *accountProbeHTTPUpstream) Do(req *http.Request, proxyURL string, accoun
 
 func (u *accountProbeHTTPUpstream) DoWithTLS(req *http.Request, _ string, _ int64, _ int, _ *tlsfingerprint.Profile) (*http.Response, error) {
 	u.requests = append(u.requests, req)
+	u.profiles = append(u.profiles, HTTPUpstreamProfileFromContext(req.Context()))
 	if req.Body != nil {
 		body, _ := io.ReadAll(req.Body)
 		u.bodies = append(u.bodies, body)
 		req.Body = io.NopCloser(bytes.NewReader(body))
+	}
+	if len(u.errs) > 0 {
+		err := u.errs[0]
+		u.errs = u.errs[1:]
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(u.responses) > 0 {
+		resp := u.responses[0]
+		u.responses = u.responses[1:]
+		return resp, nil
 	}
 	if u.err != nil {
 		return nil, u.err
@@ -48,6 +65,65 @@ func accountProbeTestContext() (*gin.Context, *httptest.ResponseRecorder) {
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/1/test", nil)
 	return c, rec
+}
+
+func accountProbeTestConfig() *config.Config {
+	return &config.Config{
+		Security: config.SecurityConfig{
+			URLAllowlist: config.URLAllowlistConfig{},
+		},
+	}
+}
+
+func newAccountTestChatSSEResponse(status int) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(
+			"data: {\"id\":\"chatcmpl-test\",\"object\":\"chat.completion.chunk\",\"model\":\"glm-5.2\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"OK\"},\"finish_reason\":null}]}\n\n" +
+				"data: [DONE]\n\n",
+		)),
+	}
+}
+
+func newAccountTestChatJSONResponse(status int) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body: io.NopCloser(strings.NewReader(
+			`{"id":"chatcmpl-test","object":"chat.completion","model":"glm-5.2","choices":[{"index":0,"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}]}`,
+		)),
+	}
+}
+
+func newAccountTestOpenAISSE(status int) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(
+			"data: {\"type\":\"response.output_text.delta\",\"delta\":\"OK\"}\n\n" +
+				"data: {\"type\":\"response.completed\"}\n\n",
+		)),
+	}
+}
+
+func newAccountTestClaudeSSE(status int) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(
+			"data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"OK\"}}\n\n" +
+				"data: {\"type\":\"message_stop\"}\n\n",
+		)),
+	}
+}
+
+func newAccountTestJSONError(status int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
 }
 
 func decodeAudioDataURL(t *testing.T, audioURL string) []byte {
@@ -204,6 +280,190 @@ func TestAccountTestExplicitTypeRequiresModel(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "model_id is required for asr account tests") {
 		t.Fatalf("expected missing model SSE error, got %s", rec.Body.String())
+	}
+}
+
+func TestAccountTestCompatibleRelayChatUsesOpenAIProfile(t *testing.T) {
+	c, rec := accountProbeTestContext()
+	upstream := &accountProbeHTTPUpstream{
+		resp: newAccountTestChatSSEResponse(http.StatusOK),
+	}
+	svc := &AccountTestService{httpUpstream: upstream, cfg: accountProbeTestConfig()}
+	account := &Account{
+		ID:          19,
+		Platform:    PlatformZhipu,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "sk-test",
+			"base_url": "https://relay.example.com",
+		},
+	}
+
+	if err := svc.testCompatibleAccountConnection(c, account, "glm-5.2"); err != nil {
+		t.Fatalf("compatible account test failed: %v", err)
+	}
+	if len(upstream.requests) != 1 {
+		t.Fatalf("upstream requests = %d, want 1", len(upstream.requests))
+	}
+	if got := upstream.requests[0].URL.String(); got != "https://relay.example.com/v1/chat/completions" {
+		t.Fatalf("request URL = %q", got)
+	}
+	if got := upstream.profiles[0]; got != HTTPUpstreamProfileOpenAI {
+		t.Fatalf("upstream profile = %q, want %q", got, HTTPUpstreamProfileOpenAI)
+	}
+	if !strings.Contains(rec.Body.String(), "test_complete") {
+		t.Fatalf("expected successful SSE completion, got %s", rec.Body.String())
+	}
+}
+
+func TestAccountTestCompatibleRelayChatRetriesTransientTransportError(t *testing.T) {
+	c, rec := accountProbeTestContext()
+	upstream := &accountProbeHTTPUpstream{
+		errs:      []error{io.EOF},
+		responses: []*http.Response{newAccountTestChatSSEResponse(http.StatusOK)},
+	}
+	svc := &AccountTestService{httpUpstream: upstream, cfg: accountProbeTestConfig()}
+	account := &Account{
+		ID:          19,
+		Platform:    PlatformZhipu,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "sk-test",
+			"base_url": "https://relay.example.com",
+		},
+	}
+
+	if err := svc.testCompatibleAccountConnection(c, account, "glm-5.2"); err != nil {
+		t.Fatalf("compatible account test failed after retry: %v", err)
+	}
+	if len(upstream.requests) != 2 {
+		t.Fatalf("upstream requests = %d, want 2", len(upstream.requests))
+	}
+	for i, req := range upstream.requests {
+		if got := req.URL.String(); got != "https://relay.example.com/v1/chat/completions" {
+			t.Fatalf("request[%d] URL = %q", i, got)
+		}
+		if got := upstream.profiles[i]; got != HTTPUpstreamProfileOpenAI {
+			t.Fatalf("request[%d] profile = %q, want %q", i, got, HTTPUpstreamProfileOpenAI)
+		}
+	}
+	if !strings.Contains(rec.Body.String(), "test_complete") {
+		t.Fatalf("expected successful SSE completion, got %s", rec.Body.String())
+	}
+}
+
+func TestAccountTestCompatibleRelayChatFallsBackToNonStreamAfterStreamingEOF(t *testing.T) {
+	c, rec := accountProbeTestContext()
+	upstream := &accountProbeHTTPUpstream{
+		errs:      []error{io.EOF, io.EOF},
+		responses: []*http.Response{newAccountTestChatJSONResponse(http.StatusOK)},
+	}
+	svc := &AccountTestService{httpUpstream: upstream, cfg: accountProbeTestConfig()}
+	account := &Account{
+		ID:          19,
+		Platform:    PlatformZhipu,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "sk-test",
+			"base_url": "https://relay.example.com",
+		},
+	}
+
+	if err := svc.testCompatibleAccountConnection(c, account, "glm-5.2"); err != nil {
+		t.Fatalf("compatible account test failed after non-stream fallback: %v", err)
+	}
+	if len(upstream.requests) != 3 {
+		t.Fatalf("upstream requests = %d, want 3", len(upstream.requests))
+	}
+	for i, req := range upstream.requests {
+		if got := req.URL.String(); got != "https://relay.example.com/v1/chat/completions" {
+			t.Fatalf("request[%d] URL = %q", i, got)
+		}
+	}
+	if !strings.Contains(string(upstream.bodies[0]), `"stream":true`) || !strings.Contains(string(upstream.bodies[1]), `"stream":true`) {
+		t.Fatalf("first two requests should be streaming probes: %s / %s", string(upstream.bodies[0]), string(upstream.bodies[1]))
+	}
+	if !strings.Contains(string(upstream.bodies[2]), `"stream":false`) {
+		t.Fatalf("fallback request should be non-streaming: %s", string(upstream.bodies[2]))
+	}
+	if !strings.Contains(rec.Body.String(), `"text":"OK"`) || !strings.Contains(rec.Body.String(), "test_complete") {
+		t.Fatalf("expected fallback content and successful SSE completion, got %s", rec.Body.String())
+	}
+}
+
+func TestAccountTestGrokRetriesTransientTransportErrorAndUsesOpenAIProfile(t *testing.T) {
+	c, rec := accountProbeTestContext()
+	upstream := &accountProbeHTTPUpstream{
+		errs:      []error{io.EOF},
+		responses: []*http.Response{newAccountTestOpenAISSE(http.StatusOK)},
+	}
+	svc := &AccountTestService{httpUpstream: upstream}
+	account := &Account{
+		ID:          18,
+		Platform:    PlatformGrok,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "xai-test",
+			"base_url": "https://relay.example.com",
+		},
+	}
+
+	if err := svc.testGrokAccountConnection(c, account, "grok-4.5"); err != nil {
+		t.Fatalf("grok account test failed after retry: %v", err)
+	}
+	if len(upstream.requests) != 2 {
+		t.Fatalf("upstream requests = %d, want 2", len(upstream.requests))
+	}
+	for i, req := range upstream.requests {
+		if got := req.URL.String(); got != "https://relay.example.com/v1/responses" {
+			t.Fatalf("request[%d] URL = %q", i, got)
+		}
+		if got := upstream.profiles[i]; got != HTTPUpstreamProfileOpenAI {
+			t.Fatalf("request[%d] profile = %q, want %q", i, got, HTTPUpstreamProfileOpenAI)
+		}
+	}
+	if !strings.Contains(rec.Body.String(), "test_complete") {
+		t.Fatalf("expected successful SSE completion, got %s", rec.Body.String())
+	}
+}
+
+func TestAccountTestClaudeRetriesTransientStatus(t *testing.T) {
+	c, rec := accountProbeTestContext()
+	upstream := &accountProbeHTTPUpstream{
+		responses: []*http.Response{
+			newAccountTestJSONError(http.StatusBadGateway, `{"error":{"message":"temporary"}}`),
+			newAccountTestClaudeSSE(http.StatusOK),
+		},
+	}
+	svc := &AccountTestService{httpUpstream: upstream, cfg: accountProbeTestConfig()}
+	account := &Account{
+		ID:          22,
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "sk-ant-test",
+			"base_url": "https://relay.example.com",
+		},
+	}
+
+	if err := svc.testClaudeAccountConnection(c, account, "claude-sonnet-4-5"); err != nil {
+		t.Fatalf("claude account test failed after retry: %v", err)
+	}
+	if len(upstream.requests) != 2 {
+		t.Fatalf("upstream requests = %d, want 2", len(upstream.requests))
+	}
+	for i, req := range upstream.requests {
+		if got := req.URL.String(); got != "https://relay.example.com/v1/messages?beta=true" {
+			t.Fatalf("request[%d] URL = %q", i, got)
+		}
+	}
+	if !strings.Contains(rec.Body.String(), "test_complete") {
+		t.Fatalf("expected successful SSE completion, got %s", rec.Body.String())
 	}
 }
 
@@ -664,8 +924,8 @@ func TestAccountTestVideoUnderstandingProbeBuildsChatRequest(t *testing.T) {
 		t.Fatalf("upstream calls = %d, want 1", len(upstream.requests))
 	}
 	req := upstream.requests[0]
-	if req.URL.Path != "/api/paas/v4/chat/completions" {
-		t.Fatalf("path = %s, want /api/paas/v4/chat/completions", req.URL.Path)
+	if req.URL.Path != "/v1/chat/completions" {
+		t.Fatalf("path = %s, want /v1/chat/completions", req.URL.Path)
 	}
 	bodyBytes := upstream.bodies[0]
 	for _, want := range [][]byte{

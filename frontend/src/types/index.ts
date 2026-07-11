@@ -473,7 +473,7 @@ export interface PaginationConfig {
 
 // ==================== API Key & Group Types ====================
 
-export type GroupPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok' | 'zhipu' | 'deepseek' | 'volcengine' | 'ali' | 'moonshot' | 'perplexity' | 'mistral' | 'siliconflow' | 'xai' | 'openrouter' | 'suno' | 'kling' | 'midjourney'
+export type GroupPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok' | 'zhipu' | 'deepseek' | 'volcengine' | 'ali' | 'moonshot' | 'perplexity' | 'mistral' | 'siliconflow' | 'openrouter' | 'suno' | 'kling' | 'midjourney'
 
 export type SubscriptionType = 'standard' | 'subscription'
 
@@ -731,7 +731,7 @@ export interface UpdateGroupRequest {
 
 // ==================== Account & Proxy Types ====================
 
-export type AccountPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok' | 'zhipu' | 'deepseek' | 'volcengine' | 'ali' | 'moonshot' | 'perplexity' | 'mistral' | 'siliconflow' | 'xai' | 'openrouter' | 'suno' | 'kling' | 'midjourney'
+export type AccountPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok' | 'zhipu' | 'deepseek' | 'volcengine' | 'ali' | 'moonshot' | 'perplexity' | 'mistral' | 'siliconflow' | 'openrouter' | 'suno' | 'kling' | 'midjourney'
 export type AccountType = 'oauth' | 'setup-token' | 'apikey' | 'upstream' | 'bedrock' | 'service_account'
 export type OAuthAddMethod = 'oauth' | 'setup-token'
 export type ProxyProtocol = 'http' | 'https' | 'socks5' | 'socks5h'

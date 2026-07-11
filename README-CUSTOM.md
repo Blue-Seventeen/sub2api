@@ -564,7 +564,7 @@ npm run test:run -- accountsLocale providerConfig
 
 - 账号行为开关统一存放在 `extra.newapi_style_interface_enabled`，不进入 `credentials`，避免被当作密钥或敏感配置处理。
 - `/admin/accounts` 创建和编辑账号均展示“启动 New-API 风格接口”开关；Anthropic、OpenAI、Gemini、Antigravity 以及 GLM、DeepSeek、Ali、Moonshot、VolcEngine 默认关闭，继续走已验证的 sub2api 原链路。
-- 新增 New-API-only 平台 `perplexity`、`mistral`、`siliconflow`、`xai`、`openrouter`、`suno`、`kling`、`midjourney` 默认并强制启用该开关，因为它们没有旧链路。
+- 新增 New-API-only 平台 `perplexity`、`mistral`、`siliconflow`、`openrouter`、`suno`、`kling`、`midjourney` 默认并强制启用该开关，因为它们没有旧链路；xAI API Key 统一并入 `grok` 平台，不再作为独立可配置平台。
 - 后端已统一落地 `UseNewAPIStyleInterface(account, group)` 作为行为开关入口；OpenAI、Anthropic/Gemini/Antigravity 原生 handler、compatible gateway 和 New-API-only endpoint 均在选中账号后按有效开关分流。
 - Anthropic、OpenAI、Gemini、Antigravity 默认仍保持原生链路；只有账号级或分组级有效开关开启后，`messages`、`responses`、`chat/completions`、`images` 等已接入端点才进入 New-API 风格转发。
 - compatible usage fallback 已扩展到所有 compatible 平台；成功请求若上游缺失 usage，会按请求/响应做本地 token 估算，避免新接入平台再次出现 0 token / 0 cost 静默计费问题。
@@ -604,7 +604,7 @@ npm run test:run -- accountsLocale providerConfig
 - Create/update account writes normalize `extra.newapi_style_interface_enabled`: New-API-only platforms are persisted as enabled, unsupported platforms drop stale keys, and existing native/custom platforms keep only explicit true. Bulk account updates that touch this key normalize per account instead of blindly merging one JSON value across mixed platforms.
 - New-API style upstream request errors and HTTP error responses must append `OpsUpstreamErrorEvent` entries as well as setting the summary ops error, so failover and ops detail views do not lose per-attempt context.
 - Group-level New-API style enablement must be included in zero-cost compatible billing warnings; account-level checks alone are insufficient after `/admin/groups` gained the switch.
-- Current catalog statuses: enabled preset = `ali`, `deepseek`, `mistral`, `moonshot`, `openrouter`, `perplexity`, `siliconflow`, `volcengine`, `xai`, `zhipu`; existing custom = `aws`, `claude`, `codex`, `gemini`, `openai`, `vertex`; task worker required = `jimeng`, `minimax`, `replicate`, `suno`, `kling`, `midjourney`, `task`; dedicated required = `baidu`, `baidu_v2`, `cloudflare`, `coze`, `dify`, `palm`, `tencent`, `xunfei`, `zhipu_4v`; candidate unverified = `ai360`, `cohere`, `jina`, `lingyiwanwu`, `mokaai`, `ollama`, `submodel`, `xinference`.
+- Current catalog statuses: enabled preset = `ali`, `deepseek`, `mistral`, `moonshot`, `openrouter`, `perplexity`, `siliconflow`, `volcengine`, `zhipu`; Grok platform handles both Grok OAuth and xAI API Key + Base URL; existing custom = `aws`, `claude`, `codex`, `gemini`, `openai`, `vertex`; task worker required = `jimeng`, `minimax`, `replicate`, `suno`, `kling`, `midjourney`, `task`; dedicated required = `baidu`, `baidu_v2`, `cloudflare`, `coze`, `dify`, `palm`, `tencent`, `xunfei`, `zhipu_4v`; candidate unverified = `ai360`, `cohere`, `jina`, `lingyiwanwu`, `mokaai`, `ollama`, `submodel`, `xinference`.
 Protect files:
 - `backend/internal/service/newapi_channel_catalog.go`
 - `backend/internal/service/newapi_channel_catalog_test.go`

@@ -21,6 +21,7 @@ import { useI18n } from 'vue-i18n'
 import Select from '@/components/common/Select.vue'
 import SearchInput from '@/components/common/SearchInput.vue'
 import type { AdminGroup } from '@/types'
+import { platformLabel } from '@/utils/platformColors'
 
 const props = defineProps<{ searchQuery: string; filters: Record<string, any>; groups?: AdminGroup[] }>()
 const emit = defineEmits(['update:searchQuery', 'update:filters', 'change'])
@@ -31,27 +32,27 @@ const updateType = (value: string | number | boolean | null) => { emit('update:f
 const updateStatus = (value: string | number | boolean | null) => { emit('update:filters', { ...props.filters, status: value }) }
 const updatePrivacyMode = (value: string | number | boolean | null) => { emit('update:filters', { ...props.filters, privacy_mode: value }) }
 const updateGroup = (value: string | number | boolean | null) => { emit('update:filters', { ...props.filters, group: value }) }
+const platformDisplayName = (platform: string) => platformLabel(platform, t)
 
 const pOpts = computed(() => [
   { value: '', label: t('admin.accounts.allPlatforms') },
-  { value: 'anthropic', label: 'Anthropic' },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'gemini', label: 'Gemini' },
-  { value: 'antigravity', label: 'Antigravity' },
-  { value: 'grok', label: 'Grok' },
-  { value: 'zhipu', label: 'GLM/智谱' },
-  { value: 'deepseek', label: 'DeepSeek' },
-  { value: 'volcengine', label: '火山方舟/豆包' },
-  { value: 'ali', label: 'Qwen/阿里' },
-  { value: 'moonshot', label: 'Kimi/月之暗面' },
-  { value: 'perplexity', label: 'Perplexity' },
-  { value: 'mistral', label: 'Mistral' },
-  { value: 'siliconflow', label: 'SiliconFlow' },
-  { value: 'xai', label: 'xAI' },
-  { value: 'openrouter', label: 'OpenRouter' },
-  { value: 'suno', label: 'Suno' },
-  { value: 'kling', label: 'Kling' },
-  { value: 'midjourney', label: 'Midjourney' },
+  { value: 'anthropic', label: platformDisplayName('anthropic') },
+  { value: 'openai', label: platformDisplayName('openai') },
+  { value: 'gemini', label: platformDisplayName('gemini') },
+  { value: 'antigravity', label: platformDisplayName('antigravity') },
+  { value: 'grok', label: platformDisplayName('grok') },
+  { value: 'zhipu', label: platformDisplayName('zhipu') },
+  { value: 'deepseek', label: platformDisplayName('deepseek') },
+  { value: 'volcengine', label: platformDisplayName('volcengine') },
+  { value: 'ali', label: platformDisplayName('ali') },
+  { value: 'moonshot', label: platformDisplayName('moonshot') },
+  { value: 'perplexity', label: platformDisplayName('perplexity') },
+  { value: 'mistral', label: platformDisplayName('mistral') },
+  { value: 'siliconflow', label: platformDisplayName('siliconflow') },
+  { value: 'openrouter', label: platformDisplayName('openrouter') },
+  { value: 'suno', label: platformDisplayName('suno') },
+  { value: 'kling', label: platformDisplayName('kling') },
+  { value: 'midjourney', label: platformDisplayName('midjourney') },
 ])
 const tOpts = computed(() => [
   { value: '', label: t('admin.accounts.allTypes') },

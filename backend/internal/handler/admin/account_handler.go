@@ -105,7 +105,7 @@ func NewAccountHandler(
 type CreateAccountRequest struct {
 	Name                    string         `json:"name" binding:"required"`
 	Notes                   *string        `json:"notes"`
-	Platform                string         `json:"platform" binding:"required,oneof=anthropic openai gemini antigravity zhipu deepseek volcengine ali moonshot perplexity mistral siliconflow xai openrouter suno kling midjourney"`
+	Platform                string         `json:"platform" binding:"required,oneof=anthropic openai gemini antigravity grok zhipu deepseek volcengine ali moonshot perplexity mistral siliconflow openrouter suno kling midjourney"`
 	Type                    string         `json:"type" binding:"required,oneof=oauth setup-token apikey upstream bedrock service_account"`
 	Credentials             map[string]any `json:"credentials" binding:"required"`
 	Extra                   map[string]any `json:"extra"`

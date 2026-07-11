@@ -327,13 +327,38 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 
 	// 账号级请求头覆写：测试请求与真实转发保持一致的最终头
 	account.ApplyHeaderOverrides(req.Header)
+	req.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(payloadBytes)), nil
+	}
 
 	// Get proxy URL
 	proxyURL := resolveAccountProxyURL(ctx, account, nil)
 
-	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
-	if err != nil {
-		return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
+	var resp *http.Response
+	for attempt := 0; ; attempt++ {
+		attemptReq := req
+		if attempt > 0 {
+			body, bodyErr := req.GetBody()
+			if bodyErr != nil {
+				return s.sendErrorAndEnd(c, "Failed to recreate request body")
+			}
+			attemptReq = req.Clone(ctx)
+			attemptReq.Body = body
+			attemptReq.ContentLength = int64(len(payloadBytes))
+		}
+		resp, err = s.httpUpstream.DoWithTLS(attemptReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+		if err != nil {
+			if attempt == 0 && isRetryableAccountTestTransportError(err) {
+				continue
+			}
+			return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
+		}
+		if resp.StatusCode == http.StatusOK || attempt > 0 || !shouldRetryCompatibleTransientStatus(resp.StatusCode) {
+			break
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+		resp = nil
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -673,14 +698,14 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	return s.processOpenAIStream(c, resp.Body)
 }
 
-// testGrokAccountConnection tests a Grok OAuth account through xAI's Responses API.
+// testGrokAccountConnection tests a Grok OAuth or API key account through xAI's Responses API.
 func (s *AccountTestService) testGrokAccountConnection(c *gin.Context, account *Account, modelID string) error {
 	ctx := c.Request.Context()
 
-	if account.Type != AccountTypeOAuth {
+	if account.Type != AccountTypeOAuth && account.Type != AccountTypeAPIKey {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Unsupported Grok account type: %s", account.Type))
 	}
-	if s.grokTokenProvider == nil {
+	if account.Type == AccountTypeOAuth && s.grokTokenProvider == nil {
 		return s.sendErrorAndEnd(c, "Grok token provider not configured")
 	}
 	if s.httpUpstream == nil {
@@ -695,12 +720,21 @@ func (s *AccountTestService) testGrokAccountConnection(c *gin.Context, account *
 		testModelID = mapped
 	}
 
-	authToken, err := s.grokTokenProvider.GetAccessToken(ctx, account)
-	if err != nil {
-		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to get Grok access token: %s", err.Error()))
+	authToken := ""
+	if account.Type == AccountTypeAPIKey {
+		authToken = strings.TrimSpace(account.GetCredential("api_key"))
+		if authToken == "" {
+			return s.sendErrorAndEnd(c, "Grok API key not configured")
+		}
+	} else {
+		var err error
+		authToken, err = s.grokTokenProvider.GetAccessToken(ctx, account)
+		if err != nil {
+			return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to get Grok access token: %s", err.Error()))
+		}
 	}
 
-	apiURL, err := xai.BuildResponsesURL(account.GetGrokBaseURL())
+	apiURL, err := buildGrokResponsesURLForAccount(account)
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid Grok base URL: %s", err.Error()))
 	}
@@ -722,23 +756,36 @@ func (s *AccountTestService) testGrokAccountConnection(c *gin.Context, account *
 
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
-	if err != nil {
-		return s.sendErrorAndEnd(c, "Failed to create Grok request")
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json, text/event-stream")
-	req.Header.Set("Authorization", "Bearer "+authToken)
-	req.Header.Set("User-Agent", "sub2api-grok/1.0")
-
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
 
-	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
-	if err != nil {
-		return s.sendErrorAndEnd(c, fmt.Sprintf("Grok Responses API request failed: %s", err.Error()))
+	var resp *http.Response
+	for attempt := 0; ; attempt++ {
+		reqCtx := WithHTTPUpstreamProfile(ctx, HTTPUpstreamProfileOpenAI)
+		req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
+		if err != nil {
+			return s.sendErrorAndEnd(c, "Failed to create Grok request")
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		req.Header.Set("Authorization", "Bearer "+authToken)
+		req.Header.Set("User-Agent", "sub2api-grok/1.0")
+
+		resp, err = s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+		if err != nil {
+			if attempt == 0 && isRetryableAccountTestTransportError(err) {
+				continue
+			}
+			return s.sendErrorAndEnd(c, fmt.Sprintf("Grok Responses API request failed: %s", err.Error()))
+		}
+		if resp.StatusCode == http.StatusOK || attempt > 0 || !shouldRetryCompatibleTransientStatus(resp.StatusCode) {
+			break
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+		resp = nil
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -1670,41 +1717,71 @@ func (s *AccountTestService) testCompatibleAccountConnection(c *gin.Context, acc
 		urlCandidates = append(urlCandidates, fallbackURL)
 	}
 
+	prepared := &compatiblePreparedRequest{UpstreamKind: upstreamKind}
 	var resp *http.Response
 	for idx, candidateURL := range urlCandidates {
-		req, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, candidateURL, bytes.NewReader(payloadBytes))
-		if reqErr != nil {
-			return s.sendErrorAndEnd(c, "Failed to create request")
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+token)
-		req.ContentLength = int64(len(payloadBytes))
-		if useResponsesProbe {
-			if preset.PatchResponsesHeaders != nil {
-				preset.PatchResponsesHeaders(req, account, testModelID)
+		for attempt := 0; ; attempt++ {
+			reqCtx := ctx
+			if shouldUseOpenAIProfileForCompatibleRelay(prepared, candidateURL) {
+				reqCtx = WithHTTPUpstreamProfile(reqCtx, HTTPUpstreamProfileOpenAI)
 			}
-		} else {
-			if preset.PatchChatHeaders != nil {
-				preset.PatchChatHeaders(req, account, testModelID)
+			req, reqErr := http.NewRequestWithContext(reqCtx, http.MethodPost, candidateURL, bytes.NewReader(payloadBytes))
+			if reqErr != nil {
+				return s.sendErrorAndEnd(c, "Failed to create request")
 			}
-		}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+token)
+			req.ContentLength = int64(len(payloadBytes))
+			if useResponsesProbe {
+				if preset.PatchResponsesHeaders != nil {
+					preset.PatchResponsesHeaders(req, account, testModelID)
+				}
+			} else {
+				if preset.PatchChatHeaders != nil {
+					preset.PatchChatHeaders(req, account, testModelID)
+				}
+			}
 
-		resp, err = s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
-		if err != nil {
-			return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
+			resp, err = s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+			if err != nil {
+				if attempt == 0 && isRetryableAccountTestTransportError(err) {
+					continue
+				}
+				if !useResponsesProbe {
+					if ok, fallbackMessage := s.tryCompatibleChatNonStreamFallback(c, account, preset, token, candidateURL, proxyURL, testModelID); ok {
+						return nil
+					} else if fallbackMessage != "" {
+						return s.sendErrorAndEnd(c, fallbackMessage)
+					}
+				}
+				return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
+			}
+			if resp.StatusCode < 400 {
+				break
+			}
+
+			statusCode := resp.StatusCode
+			body, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			resp = nil
+			if attempt == 0 && shouldRetryCompatibleTransientStatus(statusCode) {
+				continue
+			}
+			if !useResponsesProbe && shouldRetryCompatibleTransientStatus(statusCode) {
+				if ok, fallbackMessage := s.tryCompatibleChatNonStreamFallback(c, account, preset, token, candidateURL, proxyURL, testModelID); ok {
+					return nil
+				} else if fallbackMessage != "" {
+					return s.sendErrorAndEnd(c, fallbackMessage)
+				}
+			}
+			if idx == 0 && shouldRetryViaRelayCompatibleEndpoint(prepared, statusCode, body) {
+				break
+			}
+			return s.sendErrorAndEnd(c, strings.TrimSpace(extractUpstreamErrorMessage(body)))
 		}
-		if resp.StatusCode < 400 {
+		if resp != nil {
 			break
 		}
-
-		statusCode := resp.StatusCode
-		body, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		resp = nil
-		if idx == 0 && shouldRetryViaRelayCompatibleEndpoint(&compatiblePreparedRequest{UpstreamKind: upstreamKind}, statusCode, body) {
-			continue
-		}
-		return s.sendErrorAndEnd(c, strings.TrimSpace(extractUpstreamErrorMessage(body)))
 	}
 	if resp == nil {
 		return s.sendErrorAndEnd(c, "No upstream response")
@@ -1727,6 +1804,107 @@ func shouldUseCompatibleResponsesAccountProbe(preset CompatibleProviderPreset) b
 		return false
 	}
 	return true
+}
+
+func isRetryableAccountTestTransportError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "eof") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "server closed idle connection") ||
+		strings.Contains(msg, "use of closed network connection")
+}
+
+func (s *AccountTestService) tryCompatibleChatNonStreamFallback(
+	c *gin.Context,
+	account *Account,
+	preset CompatibleProviderPreset,
+	token string,
+	apiURL string,
+	proxyURL string,
+	testModelID string,
+) (bool, string) {
+	payload := createCompatibleChatTestPayload(testModelID)
+	payload["stream"] = false
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return false, "Failed to create fallback request body"
+	}
+	if preset.PatchChatBody != nil {
+		payloadBytes, err = preset.PatchChatBody(payloadBytes, account, testModelID)
+		if err != nil {
+			return false, fmt.Sprintf("Failed to patch fallback request body: %s", err.Error())
+		}
+	}
+
+	prepared := &compatiblePreparedRequest{UpstreamKind: compatibleUpstreamChat}
+	var resp *http.Response
+	for attempt := 0; ; attempt++ {
+		reqCtx := c.Request.Context()
+		if shouldUseOpenAIProfileForCompatibleRelay(prepared, apiURL) {
+			reqCtx = WithHTTPUpstreamProfile(reqCtx, HTTPUpstreamProfileOpenAI)
+		}
+		req, reqErr := http.NewRequestWithContext(reqCtx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
+		if reqErr != nil {
+			return false, "Failed to create fallback request"
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.ContentLength = int64(len(payloadBytes))
+		if preset.PatchChatHeaders != nil {
+			preset.PatchChatHeaders(req, account, testModelID)
+		}
+
+		resp, err = s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+		if err != nil {
+			if attempt == 0 && isRetryableAccountTestTransportError(err) {
+				continue
+			}
+			return false, fmt.Sprintf("Streaming probe failed, and non-stream fallback request failed: %s", err.Error())
+		}
+		if resp.StatusCode < 400 || attempt > 0 || !shouldRetryCompatibleTransientStatus(resp.StatusCode) {
+			break
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+		resp = nil
+	}
+	if resp == nil {
+		return false, "Streaming probe failed, and non-stream fallback returned no response"
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if resp.StatusCode >= 400 {
+		msg := strings.TrimSpace(extractUpstreamErrorMessage(body))
+		if msg == "" {
+			msg = fmt.Sprintf("upstream returned %d", resp.StatusCode)
+		}
+		return false, "Streaming probe failed, and non-stream fallback failed: " + msg
+	}
+	if !gjson.ValidBytes(body) {
+		return false, "Streaming probe failed, and non-stream fallback returned invalid JSON"
+	}
+	text := strings.TrimSpace(gjson.GetBytes(body, "choices.0.message.content").String())
+	if text == "" {
+		text = strings.TrimSpace(gjson.GetBytes(body, "choices.0.text").String())
+	}
+	if text != "" {
+		s.sendEvent(c, TestEvent{Type: "content", Text: text})
+	}
+	if !gjson.GetBytes(body, "choices").Exists() {
+		return false, "Streaming probe failed, and non-stream fallback returned an unexpected response"
+	}
+	s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+	return true, ""
 }
 
 func accountTestStreamErrorMessage(data map[string]any) string {

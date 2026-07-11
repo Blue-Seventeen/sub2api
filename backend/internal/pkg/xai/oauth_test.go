@@ -151,6 +151,35 @@ func TestValidateXAIURLsRejectArbitraryHostsByDefault(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestValidateXAIAPIKeyBaseURLAllowsPublicCompatibleHosts(t *testing.T) {
+	baseURL, err := ValidateAPIKeyBaseURL("https://relay.example.com")
+	require.NoError(t, err)
+	require.Equal(t, "https://relay.example.com/v1", baseURL)
+
+	baseURL, err = ValidateAPIKeyBaseURL("https://relay.example.com/v1/")
+	require.NoError(t, err)
+	require.Equal(t, "https://relay.example.com/v1", baseURL)
+
+	responsesURL, err := BuildAPIKeyResponsesURL("https://relay.example.com")
+	require.NoError(t, err)
+	require.Equal(t, "https://relay.example.com/v1/responses", responsesURL)
+
+	chatURL, err := BuildAPIKeyChatCompletionsURL("https://relay.example.com")
+	require.NoError(t, err)
+	require.Equal(t, "https://relay.example.com/v1/chat/completions", chatURL)
+}
+
+func TestValidateXAIAPIKeyBaseURLStillRejectsUnsafeTargets(t *testing.T) {
+	_, err := ValidateAPIKeyBaseURL("http://relay.example.com/v1")
+	require.Error(t, err)
+
+	_, err = ValidateAPIKeyBaseURL("https://127.0.0.1:8080/v1")
+	require.Error(t, err)
+
+	_, err = ValidateAPIKeyBaseURL("https://relay.example.com/custom")
+	require.Error(t, err)
+}
+
 func TestValidateXAIURLsAllowUnsafeDevOverride(t *testing.T) {
 	t.Setenv(EnvAllowUnsafeURLOverrides, "true")
 

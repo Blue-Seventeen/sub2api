@@ -51,7 +51,6 @@ var newAPIReferenceChannelCatalog = []NewAPIReferenceChannel{
 	{Name: "tencent", Status: NewAPIReferenceChannelDedicatedRequired, Reason: "Tencent Hunyuan needs signed request support."},
 	{Name: "vertex", Status: NewAPIReferenceChannelExistingCustom, Reason: "Covered by existing Vertex service account paths."},
 	{Name: "volcengine", Status: NewAPIReferenceChannelEnabledPreset, Reason: "Covered by the existing VolcEngine compatible preset and patches."},
-	{Name: "xai", Status: NewAPIReferenceChannelEnabledPreset, Reason: "Covered by the existing xAI New-API style preset."},
 	{Name: "xinference", Status: NewAPIReferenceChannelCandidateUnverified, Reason: "Self-hosted compatibility and base URL behavior need verification."},
 	{Name: "xunfei", Status: NewAPIReferenceChannelDedicatedRequired, Reason: "Xunfei Spark needs dedicated signed/WebSocket handling."},
 	{Name: "zhipu", Status: NewAPIReferenceChannelEnabledPreset, Reason: "Covered by the existing GLM/Zhipu compatible preset and auth mode."},

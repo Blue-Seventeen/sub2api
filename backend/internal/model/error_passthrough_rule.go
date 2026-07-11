@@ -45,7 +45,6 @@ const (
 	PlatformPerplexity  = "perplexity"
 	PlatformMistral     = "mistral"
 	PlatformSiliconFlow = "siliconflow"
-	PlatformXAI         = "xai"
 	PlatformOpenRouter  = "openrouter"
 	PlatformSuno        = "suno"
 	PlatformKling       = "kling"
@@ -68,7 +67,6 @@ func AllPlatforms() []string {
 		PlatformPerplexity,
 		PlatformMistral,
 		PlatformSiliconFlow,
-		PlatformXAI,
 		PlatformOpenRouter,
 		PlatformSuno,
 		PlatformKling,

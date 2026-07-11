@@ -24,8 +24,6 @@ func newAPIStyleCompatibleProviderPresetForPlatform(platform string) (Compatible
 		return mistralCompatibleProviderPreset(), true
 	case PlatformSiliconFlow:
 		return siliconFlowCompatibleProviderPreset(), true
-	case PlatformXAI:
-		return xaiCompatibleProviderPreset(), true
 	case PlatformOpenRouter:
 		return openRouterCompatibleProviderPreset(), true
 	case PlatformSuno:
@@ -77,20 +75,6 @@ func siliconFlowCompatibleProviderPreset() CompatibleProviderPreset {
 			{ID: "THUDM/glm-4-9b-chat", Type: "model", DisplayName: "GLM-4 9B Chat"},
 		}),
 		DefaultTestModel: "deepseek-ai/DeepSeek-V2-Chat",
-		ChatPath:         "/v1/chat/completions",
-	})
-}
-
-func xaiCompatibleProviderPreset() CompatibleProviderPreset {
-	return newAPIStyleCompatibleProviderPreset(newAPIStyleCompatibleDefinition{
-		Platform:       PlatformXAI,
-		DefaultBaseURL: "https://api.x.ai",
-		DefaultModels: NormalizeCompatibleModelList([]claude.Model{
-			{ID: "grok-4-1-fast-reasoning", Type: "model", DisplayName: "Grok 4.1 Fast Reasoning"},
-			{ID: "grok-code-fast-1", Type: "model", DisplayName: "Grok Code Fast 1"},
-			{ID: "grok-3", Type: "model", DisplayName: "Grok 3"},
-		}),
-		DefaultTestModel: "grok-3",
 		ChatPath:         "/v1/chat/completions",
 	})
 }

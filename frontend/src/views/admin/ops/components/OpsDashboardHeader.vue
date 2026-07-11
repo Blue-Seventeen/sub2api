@@ -10,6 +10,7 @@ import { opsAPI, type OpsDashboardOverview, type OpsMetricThresholds, type OpsRe
 import type { OpsRequestDetailsPreset } from './OpsRequestDetailsModal.vue'
 import { useAdminSettingsStore } from '@/stores'
 import { formatNumber } from '@/utils/format'
+import { platformLabel } from '@/utils/platformColors'
 
 type RealtimeWindow = '1min' | '5min' | '30min' | '1h'
 
@@ -105,27 +106,27 @@ function formatCustomTimeRangeLabel(startTime: string, endTime: string): string 
 }
 
 const groups = ref<Array<{ id: number; name: string; platform: string }>>([])
+const platformDisplayName = (platform: string) => platformLabel(platform, t)
 
 const platformOptions = computed(() => [
   { value: '', label: t('common.all') },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'anthropic', label: 'Anthropic' },
-  { value: 'gemini', label: 'Gemini' },
-  { value: 'antigravity', label: 'Antigravity' },
-  { value: 'zhipu', label: 'GLM/智谱' },
-  { value: 'deepseek', label: 'DeepSeek' },
-  { value: 'volcengine', label: '火山方舟/豆包' },
-  { value: 'ali', label: 'Qwen/阿里' },
-  { value: 'moonshot', label: 'Kimi/月之暗面' },
-  { value: 'perplexity', label: 'Perplexity' },
-  { value: 'mistral', label: 'Mistral' },
-  { value: 'siliconflow', label: 'SiliconFlow' },
-  { value: 'xai', label: 'xAI' },
-  { value: 'openrouter', label: 'OpenRouter' },
-  { value: 'suno', label: 'Suno' },
-  { value: 'kling', label: 'Kling' },
-  { value: 'midjourney', label: 'Midjourney' },
-  { value: 'grok', label: 'Grok' }
+  { value: 'openai', label: platformDisplayName('openai') },
+  { value: 'anthropic', label: platformDisplayName('anthropic') },
+  { value: 'gemini', label: platformDisplayName('gemini') },
+  { value: 'antigravity', label: platformDisplayName('antigravity') },
+  { value: 'zhipu', label: platformDisplayName('zhipu') },
+  { value: 'deepseek', label: platformDisplayName('deepseek') },
+  { value: 'volcengine', label: platformDisplayName('volcengine') },
+  { value: 'ali', label: platformDisplayName('ali') },
+  { value: 'moonshot', label: platformDisplayName('moonshot') },
+  { value: 'perplexity', label: platformDisplayName('perplexity') },
+  { value: 'mistral', label: platformDisplayName('mistral') },
+  { value: 'siliconflow', label: platformDisplayName('siliconflow') },
+  { value: 'openrouter', label: platformDisplayName('openrouter') },
+  { value: 'suno', label: platformDisplayName('suno') },
+  { value: 'kling', label: platformDisplayName('kling') },
+  { value: 'midjourney', label: platformDisplayName('midjourney') },
+  { value: 'grok', label: platformDisplayName('grok') }
 ])
 
 const timeRangeOptions = computed(() => [

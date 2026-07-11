@@ -67,7 +67,7 @@ interface Props {
 
 const props = defineProps<Props>()
 
-const platformName = computed(() => platformLabel(props.platform))
+const platformName = computed(() => platformLabel(props.platform, t))
 
 const typeLabel = computed(() => {
   switch (props.type) {
@@ -76,7 +76,7 @@ const typeLabel = computed(() => {
     case 'setup-token':
       return 'Token'
     case 'apikey':
-      return 'Key'
+      return 'API Key'
     case 'bedrock':
       return 'AWS'
     case 'service_account':

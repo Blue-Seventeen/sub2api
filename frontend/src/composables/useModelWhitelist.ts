@@ -436,7 +436,6 @@ export function getModelsByPlatform(platform: string): string[] {
     case 'volcengine': return doubaoModels
     case 'mistral': return mistralModels
     case 'meta': return metaModels
-    case 'xai':
     case 'grok': return xaiModels
     case 'cohere': return cohereModels
     case 'yi': return yiModels
@@ -457,7 +456,7 @@ export function getModelsByPlatform(platform: string): string[] {
 export function getPresetMappingsByPlatform(platform: string) {
   if (platform === 'openai') return openaiPresetMappings
   if (platform === 'gemini') return geminiPresetMappings
-  if (platform === 'grok' || platform === 'xai') return grokPresetMappings
+  if (platform === 'grok') return grokPresetMappings
   if (platform === 'antigravity') return antigravityPresetMappings
   if (platform === 'bedrock') return bedrockPresetMappings
   return anthropicPresetMappings

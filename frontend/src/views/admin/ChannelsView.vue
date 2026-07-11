@@ -761,7 +761,7 @@ const form = reactive({
 let abortController: AbortController | null = null
 
 // ── Platform config ──
-const platformOrder: GroupPlatform[] = ['anthropic', 'openai', 'gemini', 'antigravity', 'grok', 'zhipu', 'deepseek', 'volcengine', 'ali', 'moonshot', 'perplexity', 'mistral', 'siliconflow', 'xai', 'openrouter', 'suno', 'kling', 'midjourney']
+const platformOrder: GroupPlatform[] = ['anthropic', 'openai', 'gemini', 'antigravity', 'grok', 'zhipu', 'deepseek', 'volcengine', 'ali', 'moonshot', 'perplexity', 'mistral', 'siliconflow', 'openrouter', 'suno', 'kling', 'midjourney']
 
 // ── Helpers ──
 function formatDate(value: string): string {

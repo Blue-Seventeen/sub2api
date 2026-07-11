@@ -117,7 +117,7 @@
                     :key="platform"
                     class="badge badge-primary text-xs"
                   >
-                    {{ platform }}
+                    {{ platformDisplayName(platform) }}
                   </span>
                   <span v-if="rule.platforms.length > 2" class="text-xs text-gray-500">
                     +{{ rule.platforms.length - 2 }}
@@ -438,6 +438,7 @@ import type { ErrorPassthroughRule } from '@/api/admin/errorPassthrough'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { platformLabel } from '@/utils/platformColors'
 
 const props = defineProps<{
   show: boolean
@@ -485,26 +486,27 @@ const matchModeOptions = computed(() => [
   { value: 'all', label: t('admin.errorPassthrough.matchMode.all'), description: t('admin.errorPassthrough.matchMode.allHint') }
 ])
 
-const platformOptions = [
-  { value: 'anthropic', label: 'Anthropic' },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'gemini', label: 'Gemini' },
-  { value: 'antigravity', label: 'Antigravity' },
-  { value: 'zhipu', label: 'GLM/智谱' },
-  { value: 'deepseek', label: 'DeepSeek' },
-  { value: 'volcengine', label: '火山方舟/豆包' },
-  { value: 'ali', label: 'Qwen/阿里' },
-  { value: 'moonshot', label: 'Kimi/月之暗面' },
-  { value: 'perplexity', label: 'Perplexity' },
-  { value: 'mistral', label: 'Mistral' },
-  { value: 'siliconflow', label: 'SiliconFlow' },
-  { value: 'xai', label: 'xAI' },
-  { value: 'openrouter', label: 'OpenRouter' },
-  { value: 'suno', label: 'Suno' },
-  { value: 'kling', label: 'Kling' },
-  { value: 'midjourney', label: 'Midjourney' },
-  { value: 'grok', label: 'Grok' }
-]
+const platformDisplayName = (platform: string) => platformLabel(platform, t)
+
+const platformOptions = computed(() => [
+  { value: 'anthropic', label: platformDisplayName('anthropic') },
+  { value: 'openai', label: platformDisplayName('openai') },
+  { value: 'gemini', label: platformDisplayName('gemini') },
+  { value: 'antigravity', label: platformDisplayName('antigravity') },
+  { value: 'zhipu', label: platformDisplayName('zhipu') },
+  { value: 'deepseek', label: platformDisplayName('deepseek') },
+  { value: 'volcengine', label: platformDisplayName('volcengine') },
+  { value: 'ali', label: platformDisplayName('ali') },
+  { value: 'moonshot', label: platformDisplayName('moonshot') },
+  { value: 'perplexity', label: platformDisplayName('perplexity') },
+  { value: 'mistral', label: platformDisplayName('mistral') },
+  { value: 'siliconflow', label: platformDisplayName('siliconflow') },
+  { value: 'openrouter', label: platformDisplayName('openrouter') },
+  { value: 'suno', label: platformDisplayName('suno') },
+  { value: 'kling', label: platformDisplayName('kling') },
+  { value: 'midjourney', label: platformDisplayName('midjourney') },
+  { value: 'grok', label: platformDisplayName('grok') }
+])
 
 // Load rules when dialog opens
 watch(() => props.show, (newVal) => {

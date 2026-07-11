@@ -125,7 +125,7 @@ func (s *NewAPIStyleGatewayService) SupportsForGroup(account *Account, group *Gr
 	case NewAPIStyleRouteMessages:
 		return account.Platform == PlatformAnthropic
 	case NewAPIStyleRouteResponses:
-		return account.Platform == PlatformOpenAI || account.Platform == PlatformXAI
+		return account.Platform == PlatformOpenAI
 	case NewAPIStyleRouteImages:
 		return account.Platform == PlatformOpenAI || account.Platform == PlatformAli
 	case NewAPIStyleRouteVideo:
@@ -152,7 +152,7 @@ func (s *NewAPIStyleGatewayService) SupportsForGroup(account *Account, group *Gr
 func platformSupportsNewAPIStyleEmbeddings(platform string) bool {
 	switch strings.TrimSpace(platform) {
 	case PlatformOpenAI, PlatformZhipu, PlatformDeepSeek, PlatformVolcEngine, PlatformAli, PlatformMoonshot,
-		PlatformPerplexity, PlatformMistral, PlatformSiliconFlow, PlatformXAI, PlatformOpenRouter:
+		PlatformPerplexity, PlatformMistral, PlatformSiliconFlow, PlatformOpenRouter:
 		return true
 	default:
 		return false
@@ -439,6 +439,11 @@ func (s *NewAPIStyleGatewayService) buildTargetURL(account *Account, opts NewAPI
 	baseURL = strings.TrimRight(baseURL, "/")
 
 	path := newAPIStyleRoutePath(account.Platform, opts)
+	if opts.Route == NewAPIStyleRouteChatCompletions && account.Platform == PlatformZhipu {
+		// NewAPI-style zhipu accounts are OpenAI-compatible relay accounts.
+		// Keep the official /api/paas/v4 path for non-NewAPI compatible probes.
+		path = "/v1/chat/completions"
+	}
 	if path == "" {
 		if opts.Route == NewAPIStyleRouteAudio || opts.Route == NewAPIStyleRouteQwenTTS || opts.Route == NewAPIStyleRouteQwenImage {
 			return "", "", fmt.Errorf("%w: platform=%s route=%s path=%s", ErrNewAPIStyleUnsupportedCapability, account.Platform, opts.Route, opts.InboundPath)

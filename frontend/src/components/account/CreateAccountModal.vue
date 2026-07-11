@@ -332,7 +332,7 @@
         </div>
       </div>
 
-      <!-- Account Type Selection (Grok - OAuth only) -->
+      <!-- Account Type Selection (Grok - OAuth or API Key) -->
       <div v-if="form.platform === 'grok'">
         <label class="input-label">{{ t('admin.accounts.accountType') }}</label>
         <div class="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2" data-tour="account-form-type">
@@ -361,9 +361,35 @@
               <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.types.grokOauth') }}</span>
             </div>
           </button>
+
+          <button
+            type="button"
+            @click="accountCategory = 'apikey'"
+            :class="[
+              'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
+              accountCategory === 'apikey'
+                ? 'border-purple-500 bg-purple-50 dark:bg-purple-900/20'
+                : 'border-gray-200 hover:border-purple-300 dark:border-dark-600 dark:hover:border-purple-700'
+            ]"
+          >
+            <div
+              :class="[
+                'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
+                accountCategory === 'apikey'
+                  ? 'bg-purple-500 text-white'
+                  : 'bg-gray-100 text-gray-500 dark:bg-dark-600 dark:text-gray-400'
+              ]"
+            >
+              <Icon name="key" size="sm" />
+            </div>
+            <div>
+              <span class="block text-sm font-medium text-gray-900 dark:text-white">API Key</span>
+              <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.types.responsesApi') }}</span>
+            </div>
+          </button>
         </div>
         <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
-          {{ t('admin.accounts.oauth.grok.oauthOnlyHint') }}
+          {{ t('admin.accounts.grok.accountTypeHint') }}
         </p>
       </div>
 
@@ -3474,6 +3500,7 @@ import {
   type HeaderOverrideRow
 } from '@/components/account/credentialsBuilder'
 import { formatDateTimeLocalInput, getDisplayCurrencySymbol, parseDateTimeLocalInput } from '@/utils/format'
+import { platformLabel } from '@/utils/platformColors'
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
 import {
   OPENAI_WS_MODE_CTX_POOL,
@@ -3538,13 +3565,12 @@ const compatiblePlatforms: AccountPlatform[] = [
   'perplexity',
   'mistral',
   'siliconflow',
-  'xai',
   'openrouter',
   'suno',
   'kling',
   'midjourney'
 ]
-const newAPIOnlyPlatforms: AccountPlatform[] = ['perplexity', 'mistral', 'siliconflow', 'xai', 'openrouter', 'suno', 'kling', 'midjourney']
+const newAPIOnlyPlatforms: AccountPlatform[] = ['perplexity', 'mistral', 'siliconflow', 'openrouter', 'suno', 'kling', 'midjourney']
 const newAPIStyleSupportedPlatforms: AccountPlatform[] = [
   'anthropic',
   'openai',
@@ -3581,8 +3607,6 @@ const getPlatformDefaultBaseURL = (platform: AccountPlatform) => {
       return 'https://api.mistral.ai'
     case 'siliconflow':
       return 'https://api.siliconflow.cn'
-    case 'xai':
-      return 'https://api.x.ai'
     case 'openrouter':
       return 'https://openrouter.ai/api'
     case 'kling':
@@ -3624,11 +3648,12 @@ interface PlatformSearchOption {
 
 const platformSearchPlaceholder = computed(() => '搜索平台，如 Anthropic / GLM / DeepSeek / Qwen')
 const platformSearchEmptyText = computed(() => '没有匹配的平台，请换个关键词试试')
+const platformDisplayName = (platform: string) => platformLabel(platform, t)
 
 const platformOptions = computed<PlatformSearchOption[]>(() => [
   {
     value: 'anthropic',
-    label: 'Anthropic',
+    label: platformDisplayName('anthropic'),
     subtitle: 'Claude / Messages',
     searchTerms: ['anthropic', 'claude', 'messages'],
     activeClass: 'border-orange-200 bg-white shadow-sm dark:border-orange-900/50 dark:bg-dark-600',
@@ -3637,7 +3662,7 @@ const platformOptions = computed<PlatformSearchOption[]>(() => [
   },
   {
     value: 'openai',
-    label: 'OpenAI',
+    label: platformDisplayName('openai'),
     subtitle: 'GPT / Responses',
     searchTerms: ['openai', 'gpt', 'responses', 'chatgpt'],
     activeClass: 'border-emerald-200 bg-white shadow-sm dark:border-emerald-900/50 dark:bg-dark-600',
@@ -3646,7 +3671,7 @@ const platformOptions = computed<PlatformSearchOption[]>(() => [
   },
   {
     value: 'gemini',
-    label: 'Gemini',
+    label: platformDisplayName('gemini'),
     subtitle: 'Google / v1beta',
     searchTerms: ['gemini', 'google', 'v1beta'],
     activeClass: 'border-blue-200 bg-white shadow-sm dark:border-blue-900/50 dark:bg-dark-600',
@@ -3655,7 +3680,7 @@ const platformOptions = computed<PlatformSearchOption[]>(() => [
   },
   {
     value: 'antigravity',
-    label: 'Antigravity',
+    label: platformDisplayName('antigravity'),
     subtitle: 'Mixed scheduling',
     searchTerms: ['antigravity', 'mixed', 'cloud'],
     activeClass: 'border-purple-200 bg-white shadow-sm dark:border-purple-900/50 dark:bg-dark-600',
@@ -3664,16 +3689,16 @@ const platformOptions = computed<PlatformSearchOption[]>(() => [
   },
   {
     value: 'grok',
-    label: 'Grok',
-    subtitle: 'xAI OAuth / Grok',
-    searchTerms: ['grok', 'xai oauth', 'x.ai'],
+    label: platformDisplayName('grok'),
+    subtitle: 'OAuth / xAI API Key',
+    searchTerms: ['grok', 'xai', 'x.ai', 'oauth', 'api key'],
     activeClass: 'border-zinc-300 bg-white shadow-sm dark:border-zinc-700 dark:bg-dark-600',
     iconActiveClass: 'bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100',
     textActiveClass: 'text-zinc-900 dark:text-zinc-100'
   },
   {
     value: 'zhipu',
-    label: 'GLM/智谱',
+    label: platformDisplayName('zhipu'),
     subtitle: 'Zhipu / GLM 系列',
     searchTerms: ['zhipu', 'glm', '智谱', 'bigmodel'],
     activeClass: 'border-emerald-200 bg-white shadow-sm dark:border-emerald-900/50 dark:bg-dark-600',
@@ -3682,7 +3707,7 @@ const platformOptions = computed<PlatformSearchOption[]>(() => [
   },
   {
     value: 'deepseek',
-    label: 'DeepSeek',
+    label: platformDisplayName('deepseek'),
     subtitle: 'DeepSeek 系列',
     searchTerms: ['deepseek', 'ds', '深度求索'],
     activeClass: 'border-cyan-200 bg-white shadow-sm dark:border-cyan-900/50 dark:bg-dark-600',
@@ -3691,7 +3716,7 @@ const platformOptions = computed<PlatformSearchOption[]>(() => [
   },
   {
     value: 'volcengine',
-    label: '火山方舟/豆包',
+    label: platformDisplayName('volcengine'),
     subtitle: 'VolcEngine / Doubao',
     searchTerms: ['volcengine', 'doubao', 'ark', '火山', '豆包'],
     activeClass: 'border-rose-200 bg-white shadow-sm dark:border-rose-900/50 dark:bg-dark-600',
@@ -3700,7 +3725,7 @@ const platformOptions = computed<PlatformSearchOption[]>(() => [
   },
   {
     value: 'ali',
-    label: 'Qwen/阿里',
+    label: platformDisplayName('ali'),
     subtitle: 'DashScope / Qwen',
     searchTerms: ['ali', 'alibaba', 'qwen', 'dashscope', '阿里', '通义'],
     activeClass: 'border-amber-200 bg-white shadow-sm dark:border-amber-900/50 dark:bg-dark-600',
@@ -3709,7 +3734,7 @@ const platformOptions = computed<PlatformSearchOption[]>(() => [
   },
   {
     value: 'moonshot',
-    label: 'Kimi/月之暗面',
+    label: platformDisplayName('moonshot'),
     subtitle: 'Moonshot / Kimi',
     searchTerms: ['moonshot', 'kimi', '月之暗面'],
     activeClass: 'border-fuchsia-200 bg-white shadow-sm dark:border-fuchsia-900/50 dark:bg-dark-600',
@@ -3718,7 +3743,7 @@ const platformOptions = computed<PlatformSearchOption[]>(() => [
   },
   {
     value: 'perplexity',
-    label: 'Perplexity',
+    label: platformDisplayName('perplexity'),
     subtitle: 'Sonar / New-API',
     searchTerms: ['perplexity', 'sonar', 'pplx'],
     activeClass: 'border-sky-200 bg-white shadow-sm dark:border-sky-900/50 dark:bg-dark-600',
@@ -3727,7 +3752,7 @@ const platformOptions = computed<PlatformSearchOption[]>(() => [
   },
   {
     value: 'mistral',
-    label: 'Mistral',
+    label: platformDisplayName('mistral'),
     subtitle: 'Mistral AI / New-API',
     searchTerms: ['mistral', 'mixtral', 'codestral'],
     activeClass: 'border-violet-200 bg-white shadow-sm dark:border-violet-900/50 dark:bg-dark-600',
@@ -3736,7 +3761,7 @@ const platformOptions = computed<PlatformSearchOption[]>(() => [
   },
   {
     value: 'siliconflow',
-    label: 'SiliconFlow',
+    label: platformDisplayName('siliconflow'),
     subtitle: 'SiliconCloud / New-API',
     searchTerms: ['siliconflow', 'silicon', '硅基流动'],
     activeClass: 'border-teal-200 bg-white shadow-sm dark:border-teal-900/50 dark:bg-dark-600',
@@ -3744,17 +3769,8 @@ const platformOptions = computed<PlatformSearchOption[]>(() => [
     textActiveClass: 'text-teal-600 dark:text-teal-300'
   },
   {
-    value: 'xai',
-    label: 'xAI',
-    subtitle: 'Grok / New-API',
-    searchTerms: ['xai', 'grok'],
-    activeClass: 'border-neutral-300 bg-white shadow-sm dark:border-neutral-700 dark:bg-dark-600',
-    iconActiveClass: 'bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200',
-    textActiveClass: 'text-neutral-700 dark:text-neutral-200'
-  },
-  {
     value: 'openrouter',
-    label: 'OpenRouter',
+    label: platformDisplayName('openrouter'),
     subtitle: 'Multi-provider / New-API',
     searchTerms: ['openrouter', 'router'],
     activeClass: 'border-indigo-200 bg-white shadow-sm dark:border-indigo-900/50 dark:bg-dark-600',
@@ -3763,7 +3779,7 @@ const platformOptions = computed<PlatformSearchOption[]>(() => [
   },
   {
     value: 'suno',
-    label: 'Suno',
+    label: platformDisplayName('suno'),
     subtitle: 'Music task / New-API',
     searchTerms: ['suno', 'music', 'song'],
     activeClass: 'border-yellow-200 bg-white shadow-sm dark:border-yellow-900/50 dark:bg-dark-600',
@@ -3772,7 +3788,7 @@ const platformOptions = computed<PlatformSearchOption[]>(() => [
   },
   {
     value: 'kling',
-    label: 'Kling',
+    label: platformDisplayName('kling'),
     subtitle: 'Video task / New-API',
     searchTerms: ['kling', 'video', 'kuaishou'],
     activeClass: 'border-red-200 bg-white shadow-sm dark:border-red-900/50 dark:bg-dark-600',
@@ -3781,7 +3797,7 @@ const platformOptions = computed<PlatformSearchOption[]>(() => [
   },
   {
     value: 'midjourney',
-    label: 'Midjourney',
+    label: platformDisplayName('midjourney'),
     subtitle: 'Image task / New-API',
     searchTerms: ['midjourney', 'mj', 'image'],
     activeClass: 'border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-dark-600',
