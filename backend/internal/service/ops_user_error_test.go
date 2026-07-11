@@ -149,7 +149,7 @@ func TestToUserErrorRequest_LeavesSourceOpsLogUnchangedForAdminPath(t *testing.T
 	if out == nil {
 		t.Fatal("expected non-nil user view")
 	}
-	if out.Message == src.Message {
+	if out != nil && out.Message == src.Message {
 		t.Fatalf("user message should be redacted, got %q", out.Message)
 	}
 	if src.Message != message {
@@ -187,6 +187,7 @@ func TestToUserErrorRequestDetail_WhitelistAndRedacts(t *testing.T) {
 	out := ToUserErrorRequestDetail(src)
 	if out == nil {
 		t.Fatal("expected non-nil detail")
+		return
 	}
 
 	// 基础字段正确映射

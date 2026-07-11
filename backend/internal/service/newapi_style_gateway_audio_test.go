@@ -723,6 +723,7 @@ func TestNewAPIStyleAudioTokenChannelPricingWinsOverRequestGuardrail(t *testing.
 
 	if cost == nil {
 		t.Fatalf("cost is nil")
+		return
 	}
 	if cost != nil && cost.BillingMode != string(BillingModeToken) {
 		t.Fatalf("billing mode = %q, want token", cost.BillingMode)
@@ -755,10 +756,10 @@ func TestNewAPIStyleAudioNoChannelPricingFallsBackToTokenUsage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected cost: %v", err)
 	}
-	if cost.TotalCost <= 0 {
+	if cost != nil && cost.TotalCost <= 0 {
 		t.Fatalf("total cost = %.12f, want positive token fallback", cost.TotalCost)
 	}
-	if math.Abs(cost.TotalCost-expected.TotalCost) > 1e-12 {
+	if cost != nil && math.Abs(cost.TotalCost-expected.TotalCost) > 1e-12 {
 		t.Fatalf("total cost = %.12f, want %.12f", cost.TotalCost, expected.TotalCost)
 	}
 }

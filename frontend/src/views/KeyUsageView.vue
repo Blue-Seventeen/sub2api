@@ -558,7 +558,7 @@ function clearRingAnimation() {
   ringAnimationTimer = null
 }
 
-function scheduleRingFrame(callback: FrameRequestCallback): number | null {
+function scheduleRingFrame(callback: (time: number) => void): number | null {
   if (typeof requestAnimationFrame !== 'function') {
     callback(performance.now())
     return null

@@ -655,16 +655,6 @@ type PaymentOrderResult struct {
 	CanRequestRefund    bool       `json:"can_request_refund"`
 }
 
-func sanitizePaymentOrdersForResponse(orders []*dbent.PaymentOrder) []PaymentOrderResult {
-	out := make([]PaymentOrderResult, 0, len(orders))
-	for _, order := range orders {
-		if item := sanitizePaymentOrderForResponse(order); item != nil {
-			out = append(out, *item)
-		}
-	}
-	return out
-}
-
 func sanitizePaymentOrdersForUserResponse(ctx context.Context, paymentService *service.PaymentService, orders []*dbent.PaymentOrder) []PaymentOrderResult {
 	out := make([]PaymentOrderResult, 0, len(orders))
 	for _, order := range orders {

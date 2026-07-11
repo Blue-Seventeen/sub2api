@@ -1062,8 +1062,7 @@ func (s *SubscriptionService) HardDeleteSubscription(ctx context.Context, subscr
 		return err
 	}
 
-	s.invalidateSubscriptionCaches(sub.UserID, sub.GroupID)
-	return nil
+	return s.invalidateSubscriptionCaches(sub.UserID, sub.GroupID)
 }
 
 func (s *SubscriptionService) AdjustSubscription(ctx context.Context, subscriptionID int64, input AdjustSubscriptionInput) (*UserSubscription, error) {

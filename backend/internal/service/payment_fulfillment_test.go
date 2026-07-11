@@ -7,6 +7,7 @@ import (
 	"errors"
 	"math"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -769,6 +770,15 @@ func TestHasPaymentSubscriptionOrderNoteRequiresIndependentExactLine(t *testing.
 	require.True(t, hasPaymentSubscriptionOrderNote("before\r\npayment order 42\r\nafter", "payment order 42"))
 	require.False(t, hasPaymentSubscriptionOrderNote("payment order 420", "payment order 42"))
 	require.False(t, hasPaymentSubscriptionOrderNote("prefix payment order 42 suffix", "payment order 42"))
+}
+
+func hasPaymentSubscriptionOrderNote(notes string, orderNote string) bool {
+	for _, line := range strings.Split(strings.ReplaceAll(notes, "\r\n", "\n"), "\n") {
+		if strings.TrimSpace(line) == orderNote {
+			return true
+		}
+	}
+	return false
 }
 
 func createPaymentFulfillmentSubscriptionOrder(

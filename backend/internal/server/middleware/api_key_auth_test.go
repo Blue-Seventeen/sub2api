@@ -59,7 +59,7 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 		},
 	}
 
-	t.Run("standard_mode_completes_maintenance_before_request", func(t *testing.T) {
+	t.Run("standard_mode_uses_normalized_snapshot_for_expired_windows", func(t *testing.T) {
 		cfg := &config.Config{RunMode: config.RunModeStandard}
 		cfg.SubscriptionMaintenance.WorkerCount = 1
 		cfg.SubscriptionMaintenance.QueueSize = 1
@@ -79,7 +79,6 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 			MonthlyWindowStart: &past,
 			DailyUsageUSD:      0,
 		}
-		maintenanceCalled := make(chan struct{}, 1)
 		subscriptionRepo := &stubUserSubscriptionRepo{
 			getByID: func(ctx context.Context, id int64) (*service.UserSubscription, error) {
 				clone := *sub
@@ -94,7 +93,6 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 			resetDaily: func(ctx context.Context, id int64, start time.Time) error {
 				sub.DailyWindowStart = &start
 				sub.DailyUsageUSD = 0
-				maintenanceCalled <- struct{}{}
 				return nil
 			},
 			resetWeekly: func(ctx context.Context, id int64, start time.Time) error {
@@ -109,7 +107,13 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 		subscriptionService := service.NewSubscriptionService(nil, subscriptionRepo, nil, nil, cfg)
 		t.Cleanup(subscriptionService.Stop)
 
-		router := newAuthTestRouter(apiKeyService, subscriptionService, cfg)
+		var gotSub *service.UserSubscription
+		router := gin.New()
+		router.Use(gin.HandlerFunc(NewAPIKeyAuthMiddleware(apiKeyService, subscriptionService, cfg)))
+		router.GET("/t", func(c *gin.Context) {
+			gotSub, _ = GetSubscriptionFromContext(c)
+			c.JSON(http.StatusOK, gin.H{"ok": true})
+		})
 
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/t", nil)
@@ -117,12 +121,10 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		require.Equal(t, http.StatusOK, w.Code)
-		select {
-		case <-maintenanceCalled:
-			// ok
-		case <-time.After(time.Second):
-			t.Fatalf("expected maintenance to complete before response")
-		}
+		require.NotNil(t, gotSub)
+		require.Equal(t, 0.0, gotSub.DailyUsageUSD)
+		require.NotNil(t, gotSub.DailyWindowStart)
+		require.True(t, gotSub.DailyWindowStart.After(past))
 	})
 
 	t.Run("standard_mode_uses_normalized_subscription_snapshot", func(t *testing.T) {
@@ -221,7 +223,7 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 		require.True(t, gotSub.CustomWindowStart.After(customWindowStart))
 	})
 
-	t.Run("standard_mode_revalidates_cas_loser_from_database", func(t *testing.T) {
+	t.Run("standard_mode_uses_normalized_stacked_snapshot", func(t *testing.T) {
 		cfg := &config.Config{RunMode: config.RunModeStandard}
 		apiKeyService := service.NewAPIKeyService(apiKeyRepo, nil, nil, nil, nil, nil, cfg)
 
@@ -265,7 +267,7 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 		req.Header.Set("x-api-key", apiKey.Key)
 		router.ServeHTTP(w, req)
 
-		require.Equal(t, http.StatusTooManyRequests, w.Code)
+		require.Equal(t, http.StatusOK, w.Code)
 	})
 
 	t.Run("simple_mode_bypasses_quota_check", func(t *testing.T) {

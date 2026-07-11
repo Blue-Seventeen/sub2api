@@ -592,15 +592,6 @@ func paymentSubscriptionOrderNote(orderID int64) string {
 	return fmt.Sprintf("payment order %d", orderID)
 }
 
-func hasPaymentSubscriptionOrderNote(notes string, orderNote string) bool {
-	for _, line := range strings.Split(strings.ReplaceAll(notes, "\r\n", "\n"), "\n") {
-		if strings.TrimSpace(line) == orderNote {
-			return true
-		}
-	}
-	return false
-}
-
 type userSubscriptionByUserGroupLister interface {
 	ListByUserIDAndGroupID(ctx context.Context, userID, groupID int64) ([]UserSubscription, error)
 }

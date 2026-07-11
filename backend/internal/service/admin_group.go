@@ -688,6 +688,7 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	if s.authCacheInvalidator != nil {
 		s.authCacheInvalidator.InvalidateAuthCacheByGroupID(ctx, id)
 	}
+	s.invalidateActiveSubscriptionCachesForGroup(ctx, id)
 
 	// 如果指定了复制账号的源分组，同步绑定（替换当前分组的账号）
 	if len(input.CopyAccountsFromGroupIDs) > 0 {
@@ -758,6 +759,30 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	}
 
 	return group, nil
+}
+
+type activeSubscriptionUsersByGroupLister interface {
+	ListActiveUserIDsByGroupID(ctx context.Context, groupID int64) ([]int64, error)
+}
+
+func (s *adminServiceImpl) invalidateActiveSubscriptionCachesForGroup(ctx context.Context, groupID int64) {
+	if s == nil || s.billingCacheService == nil || s.userSubRepo == nil {
+		return
+	}
+	lister, ok := s.userSubRepo.(activeSubscriptionUsersByGroupLister)
+	if !ok {
+		return
+	}
+	userIDs, err := lister.ListActiveUserIDsByGroupID(ctx, groupID)
+	if err != nil {
+		logger.LegacyPrintf("service.admin", "list active subscription users failed: group_id=%d err=%v", groupID, err)
+		return
+	}
+	for _, userID := range userIDs {
+		if err := s.billingCacheService.InvalidateSubscription(ctx, userID, groupID); err != nil {
+			logger.LegacyPrintf("service.admin", "invalidate subscription cache failed: user_id=%d group_id=%d err=%v", userID, groupID, err)
+		}
+	}
 }
 
 func (s *adminServiceImpl) DeleteGroup(ctx context.Context, id int64) error {

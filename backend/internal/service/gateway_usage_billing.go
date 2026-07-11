@@ -827,6 +827,11 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		quotaPlatform = PlatformFromAPIKey(apiKey)
 	}
 	requestID := usageLog.RequestID
+	proxyDurationMs := int64(0)
+	if result.Duration > 0 {
+		proxyDurationMs = result.Duration.Milliseconds()
+	}
+	s.RecordProxyRequestStat(ctx, account, apiKey, true, proxyDurationMs, requestID, "service.gateway")
 	_, billingErr := applyUsageBilling(ctx, requestID, usageLog, &postUsageBillingParams{
 		Cost:                  cost,
 		User:                  user,

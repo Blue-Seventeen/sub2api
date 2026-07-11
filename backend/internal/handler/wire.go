@@ -142,7 +142,7 @@ func ProvideHandlers(
 		PaymentWebhook:     paymentWebhookHandler,
 		AvailableChannel:   availableChannelHandler,
 		Promotion:          promotionHandler,
-		BatchImage:       batchImageHandler,
+		BatchImage:         batchImageHandler,
 	}
 }
 

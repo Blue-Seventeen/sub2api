@@ -62,6 +62,7 @@ func TestCompatibleGatewayService_StreamReadErrorSkipsUsageBilling(t *testing.T)
 
 	if result == nil {
 		t.Fatal("result is nil")
+		return
 	}
 	if !result.SkipUsageBilling {
 		t.Fatalf("SkipUsageBilling = %v, want true", result.SkipUsageBilling)
@@ -105,6 +106,7 @@ func TestNewAPIStyleGatewayService_StreamCopyErrorSkipsUsageBilling(t *testing.T
 	}
 	if result == nil {
 		t.Fatal("result is nil")
+		return
 	}
 	if !result.SkipUsageBilling {
 		t.Fatalf("SkipUsageBilling = %v, want true", result.SkipUsageBilling)

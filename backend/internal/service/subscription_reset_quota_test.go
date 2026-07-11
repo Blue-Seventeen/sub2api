@@ -57,14 +57,17 @@ func (r *resetQuotaUserSubRepoStub) ResetUsageWindows(_ context.Context, _ int64
 		return nil
 	}
 	if resetDaily {
+		r.dailyWindowStart = &windowStart
 		r.sub.DailyUsageUSD = 0
 		r.sub.DailyWindowStart = &windowStart
 	}
 	if resetWeekly {
+		r.weeklyWindowStart = &windowStart
 		r.sub.WeeklyUsageUSD = 0
 		r.sub.WeeklyWindowStart = &windowStart
 	}
 	if resetMonthly {
+		r.monthlyWindowStart = &windowStart
 		r.sub.MonthlyUsageUSD = 0
 		r.sub.MonthlyWindowStart = &windowStart
 	}

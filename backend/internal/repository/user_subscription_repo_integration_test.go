@@ -208,7 +208,9 @@ func (s *UserSubscriptionRepoSuite) TestRestoreClearsSoftDeleteAndSetsActive() {
 	s.Require().NoError(err)
 	s.Require().NotNil(deleted.DeletedAt)
 
-	s.Require().NoError(s.repo.Restore(s.ctx, sub.ID))
+	restoredResult, err := s.repo.Restore(s.ctx, sub.ID, service.SubscriptionStatusActive)
+	s.Require().NoError(err)
+	s.Require().Equal(service.SubscriptionStatusActive, restoredResult.Status)
 
 	restored, err := s.repo.GetByID(s.ctx, sub.ID)
 	s.Require().NoError(err)

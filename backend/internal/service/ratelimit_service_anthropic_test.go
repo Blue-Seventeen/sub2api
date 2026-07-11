@@ -195,11 +195,12 @@ func TestSelectAnthropicFableWindowLimit_RejectedStatus(t *testing.T) {
 	limit := selectAnthropicFableWindowLimit(headers, now)
 	if limit == nil {
 		t.Fatal("expected non-nil limit")
+		return
 	}
-	if !limit.resetAt.Equal(reset) {
+	if limit != nil && !limit.resetAt.Equal(reset) {
 		t.Errorf("expected resetAt=%v, got %v", reset, limit.resetAt)
 	}
-	if limit.reason != anthropicFableWindowReason {
+	if limit != nil && limit.reason != anthropicFableWindowReason {
 		t.Errorf("expected reason=%q, got %q", anthropicFableWindowReason, limit.reason)
 	}
 }
@@ -216,6 +217,7 @@ func TestSelectAnthropicFableWindowLimit_UtilizationOnly(t *testing.T) {
 	limit := selectAnthropicFableWindowLimit(headers, now)
 	if limit == nil {
 		t.Fatal("expected non-nil limit")
+		return
 	}
 	if !limit.resetAt.Equal(reset) {
 		t.Errorf("expected resetAt=%v, got %v", reset, limit.resetAt)
@@ -252,6 +254,7 @@ func TestSelectAnthropicFableWindowLimit_FallsBackToAggregateReset(t *testing.T)
 	limit := selectAnthropicFableWindowLimit(headers, now)
 	if limit == nil {
 		t.Fatal("expected non-nil limit via aggregate reset fallback")
+		return
 	}
 	if !limit.resetAt.Equal(reset) {
 		t.Errorf("expected resetAt=%v, got %v", reset, limit.resetAt)
