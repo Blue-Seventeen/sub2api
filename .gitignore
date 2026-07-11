@@ -140,6 +140,9 @@ docs/*
 !docs/PAYMENT.md
 !docs/PAYMENT_CN.md
 !docs/ADMIN_PAYMENT_INTEGRATION_API.md
+!docs/升级部署-核心数据库节点.md
+!docs/升级部署-国外远程数据库节点.md
+!docs/升级部署-国内代理远程数据库节点.md
 !docs/升级部署 -子节点-镜像导入.md
 !docs/legal/
 !docs/legal/*.md
