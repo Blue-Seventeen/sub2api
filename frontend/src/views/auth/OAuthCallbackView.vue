@@ -136,6 +136,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useClipboard } from '@/composables/useClipboard'
 import { useAppStore, useAuthStore } from '@/stores'
 import { apiClient } from '@/api/client'
+import { buildApiUrl } from '@/api/url'
 import {
   exchangePendingOAuthCompletion,
   getOAuthCompletionKind,
@@ -243,8 +244,6 @@ function readPendingEmailOAuthProvider(): EmailOAuthProvider | null {
 
 function redirectProviderCallbackToBackend(provider: EmailOAuthProvider): void {
   if (typeof window === 'undefined') return
-  const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined) || '/api/v1'
-  const normalized = apiBase.replace(/\/$/, '')
   const params = new URLSearchParams()
   for (const [key, value] of Object.entries(route.query)) {
     if (Array.isArray(value)) {
@@ -256,7 +255,7 @@ function redirectProviderCallbackToBackend(provider: EmailOAuthProvider): void {
     }
   }
   const suffix = params.toString() ? `?${params.toString()}` : ''
-  window.location.href = `${normalized}/auth/oauth/${provider}/callback${suffix}`
+  window.location.href = buildApiUrl(`/auth/oauth/${provider}/callback${suffix}`)
 }
 
 async function finalizeTokenResponse(tokenResponse: OAuthTokenResponse, redirect: string) {

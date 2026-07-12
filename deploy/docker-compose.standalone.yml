@@ -12,7 +12,7 @@
 
 services:
   sub2api:
-    image: ${SUB2API_IMAGE:-sub2api-custom:0.1.134}
+    image: ${SUB2API_IMAGE:-sub2api-custom:0.1.151}
     container_name: sub2api
     restart: unless-stopped
     ulimits:
@@ -37,6 +37,7 @@ services:
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8080
       - SERVER_MODE=${SERVER_MODE:-release}
+      - SERVER_TRUSTED_PROXIES=${SERVER_TRUSTED_PROXIES:-}
       - RUN_MODE=${RUN_MODE:-standard}
 
       # =======================================================================
@@ -66,6 +67,7 @@ services:
       - REDIS_POOL_SIZE=${REDIS_POOL_SIZE:-1024}
       - REDIS_MIN_IDLE_CONNS=${REDIS_MIN_IDLE_CONNS:-10}
       - REDIS_ENABLE_TLS=${REDIS_ENABLE_TLS:-false}
+      - RATE_LIMIT_AUTH_REDIS_FAILURE_MODE=${RATE_LIMIT_AUTH_REDIS_FAILURE_MODE:-fail-close}
 
       # =======================================================================
       # Admin Account (auto-created on first run)
@@ -78,6 +80,11 @@ services:
       # =======================================================================
       - JWT_SECRET=${JWT_SECRET:-}
       - JWT_EXPIRE_HOUR=${JWT_EXPIRE_HOUR:-24}
+
+      # =======================================================================
+      # Setup Configuration
+      # =======================================================================
+      - SETUP_MIGRATION_TIMEOUT_SECONDS=${SETUP_MIGRATION_TIMEOUT_SECONDS:-0}
 
       # =======================================================================
       # Timezone Configuration

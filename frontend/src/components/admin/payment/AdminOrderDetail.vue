@@ -19,15 +19,15 @@
         </div>
         <div>
           <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.baseAmount') }}</p>
-          <p class="text-sm font-medium text-gray-900 dark:text-white">{{ formatCurrencyAmount(baseAmount) }}</p>
+          <p class="text-sm font-medium text-gray-900 dark:text-white">{{ formatGatewayAmount(baseAmount, order.currency) }}</p>
         </div>
         <div v-if="order.fee_rate > 0">
           <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.fee') }} ({{ order.fee_rate }}%)</p>
-          <p class="text-sm font-medium text-gray-900 dark:text-white">{{ formatCurrencyAmount(feeAmount) }}</p>
+          <p class="text-sm font-medium text-gray-900 dark:text-white">{{ formatGatewayAmount(feeAmount, order.currency) }}</p>
         </div>
         <div>
           <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.payAmount') }}</p>
-          <p class="text-sm font-medium text-gray-900 dark:text-white">{{ formatCurrencyAmount(order.pay_amount) }}</p>
+          <p class="text-sm font-medium text-gray-900 dark:text-white">{{ formatGatewayAmount(order.pay_amount, order.currency) }}</p>
         </div>
         <div v-if="order.amount !== order.pay_amount">
           <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.creditedAmount') }}</p>
@@ -120,6 +120,7 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import type { PaymentOrder } from '@/types/payment'
 import { statusBadgeClass, canRefund as canRefundStatus, formatOrderDateTime } from '@/components/payment/orderUtils'
 import { formatCurrencyAmount } from '@/utils/format'
+import { formatPaymentAmount } from '@/components/payment/currency'
 
 const { t } = useI18n()
 
@@ -157,5 +158,9 @@ function canRefund(order: PaymentOrder): boolean {
 
 function formatDateTime(dateStr: string): string {
   return formatOrderDateTime(dateStr)
+}
+
+function formatGatewayAmount(value: number, currency?: string | null): string {
+  return formatPaymentAmount(value, currency)
 }
 </script>

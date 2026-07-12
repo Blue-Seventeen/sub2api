@@ -36,6 +36,7 @@ const (
 	PlatformOpenAI      = "openai"
 	PlatformGemini      = "gemini"
 	PlatformAntigravity = "antigravity"
+	PlatformGrok        = "grok"
 	PlatformZhipu       = "zhipu"
 	PlatformDeepSeek    = "deepseek"
 	PlatformVolcEngine  = "volcengine"
@@ -58,6 +59,7 @@ func AllPlatforms() []string {
 		PlatformOpenAI,
 		PlatformGemini,
 		PlatformAntigravity,
+		PlatformGrok,
 		PlatformZhipu,
 		PlatformDeepSeek,
 		PlatformVolcEngine,

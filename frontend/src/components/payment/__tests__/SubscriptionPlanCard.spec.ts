@@ -1,30 +1,29 @@
 import { mount } from "@vue/test-utils";
-import { describe, expect, it } from "vitest";
-import { createI18n } from "vue-i18n";
+import { describe, expect, it, vi } from "vitest";
+import { createPinia } from "pinia";
 import SubscriptionPlanCard from "../SubscriptionPlanCard.vue";
 
-const i18n = createI18n({
-  legacy: false,
-  locale: "en",
-  fallbackWarn: false,
-  missingWarn: false,
-  messages: {
-    en: {
-      payment: {
-        days: "days",
-        models: "Models",
-        planCard: {
-          quota: "Quota",
-          rate: "Rate",
-          unlimited: "Unlimited",
-        },
-        subscribeNow: "Subscribe now",
+vi.mock("vue-i18n", async () => {
+  const actual = await vi.importActual<typeof import("vue-i18n")>("vue-i18n");
+  return {
+    ...actual,
+    useI18n: () => ({
+      t: (key: string, params?: Record<string, unknown>) => {
+        if (key === "payment.days") return "days";
+        if (key === "payment.planCard.peakRate") return "Peak rate";
+        if (key === "payment.planCard.quota") return "Quota";
+        if (key === "payment.planCard.rate") return "Rate";
+        if (key === "payment.planCard.unlimited") return "Unlimited";
+        if (key === "payment.subscribeNow") return "Subscribe now";
+        if (key === "common.peakRateCompactSingle") return `Peak x${params?.multiplier}`;
+        if (key === "common.peakRateCompactMultiple") return `Peak ${params?.count} windows`;
+        return key;
       },
-    },
-  },
+    }),
+  };
 });
 
-const mountPlanCard = (groupPlatform: string) =>
+const mountPlanCard = (groupPlatform: string, planOverrides: Record<string, unknown> = {}) =>
   mount(SubscriptionPlanCard, {
     props: {
       plan: {
@@ -40,9 +39,10 @@ const mountPlanCard = (groupPlatform: string) =>
         validity_unit: "day",
         supported_model_scopes: ["claude", "gemini_text", "gemini_image"],
         is_active: true,
+        ...planOverrides,
       },
     },
-    global: { plugins: [i18n] },
+    global: { plugins: [createPinia()] },
   });
 
 describe("SubscriptionPlanCard", () => {
@@ -60,5 +60,20 @@ describe("SubscriptionPlanCard", () => {
     expect(text).toContain("Claude");
     expect(text).toContain("Gemini");
     expect(text).toContain("Imagen");
+  });
+
+  it("shows a compact peak-rate summary for multiple windows", () => {
+    const wrapper = mountPlanCard("openai", {
+      peak_rate_enabled: true,
+      peak_rate_windows: [
+        { start: "09:00", end: "12:00", multiplier: 1.5 },
+        { start: "18:00", end: "22:00", multiplier: 2 },
+      ],
+    });
+
+    expect(wrapper.text()).toContain("Peak 2 windows");
+    expect(wrapper.text()).not.toContain("09:00-12:00");
+    expect(wrapper.find("[title*='09:00-12:00']").exists()).toBe(true);
+    expect(wrapper.find("[title*='18:00-22:00']").exists()).toBe(true);
   });
 });

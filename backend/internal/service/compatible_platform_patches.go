@@ -45,10 +45,10 @@ func patchMoonshotCompatibleChatBodyForAnthropicFallback(body []byte, _ *Account
 	return body, nil
 }
 
-func patchMoonshotCompatibleMessagesBody(body []byte, account *Account, _ string) ([]byte, error) {
+func patchMoonshotCompatibleMessagesBody(body []byte, account *Account, model string) ([]byte, error) {
 	if !moonshotAccountFeatureEnabled(account, "kimi_official_fast_path_enabled", true) ||
 		!moonshotAccountFeatureEnabled(account, "kimi_native_messages_enabled", true) {
-		body = relaxMoonshotThinkingForToolUse(body)
+		body = relaxMoonshotThinkingForToolUse(body, model)
 	}
 	return body, nil
 }
@@ -464,7 +464,7 @@ func ensureMoonshotReasoningContentForToolCalls(body []byte) []byte {
 	return updated
 }
 
-func relaxMoonshotThinkingForToolUse(body []byte) []byte {
+func relaxMoonshotThinkingForToolUse(body []byte, model string) []byte {
 	if len(body) == 0 {
 		return body
 	}
@@ -477,7 +477,7 @@ func relaxMoonshotThinkingForToolUse(body []byte) []byte {
 		!bytes.Contains(body, []byte(`"type": "tool_result"`)) {
 		return body
 	}
-	updated := FilterThinkingBlocksForRetry(body)
+	updated := FilterThinkingBlocksForRetry(body, model)
 	if gjson.GetBytes(updated, "output_config.effort").Exists() {
 		if next, err := sjson.DeleteBytes(updated, "output_config"); err == nil {
 			updated = next

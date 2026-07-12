@@ -3,10 +3,9 @@ package service
 import (
 	"context"
 	"errors"
+	"math"
 	"time"
 )
-
-const SettingKeyAffiliateEnabled = "affiliate_enabled"
 
 var ErrAffiliateProfileNotFound = errors.New("affiliate profile not found")
 
@@ -100,4 +99,92 @@ func (s *AffiliateService) IsEnabled(ctx context.Context) bool {
 		return false
 	}
 	return s.settingService.IsAffiliateEnabled(ctx)
+}
+
+func (s *AffiliateService) AccrueInviteRebate(ctx context.Context, inviteeUserID int64, baseRechargeAmount float64) (float64, error) {
+	return s.AccrueInviteRebateForOrder(ctx, inviteeUserID, baseRechargeAmount, nil)
+}
+
+func (s *AffiliateService) AccrueInviteRebateForOrder(ctx context.Context, inviteeUserID int64, baseRechargeAmount float64, sourceOrderID *int64) (float64, error) {
+	if s == nil || s.repo == nil {
+		return 0, nil
+	}
+	if inviteeUserID <= 0 || baseRechargeAmount <= 0 || math.IsNaN(baseRechargeAmount) || math.IsInf(baseRechargeAmount, 0) {
+		return 0, nil
+	}
+	if !s.IsEnabled(ctx) {
+		return 0, nil
+	}
+
+	inviteeSummary, err := s.repo.EnsureUserAffiliate(ctx, inviteeUserID)
+	if err != nil {
+		return 0, err
+	}
+	if inviteeSummary == nil || inviteeSummary.InviterID == nil || *inviteeSummary.InviterID <= 0 {
+		return 0, nil
+	}
+
+	inviterSummary, err := s.repo.EnsureUserAffiliate(ctx, *inviteeSummary.InviterID)
+	if err != nil {
+		return 0, err
+	}
+	if s.settingService != nil {
+		if durationDays := s.settingService.GetAffiliateRebateDurationDays(ctx); durationDays > 0 {
+			if time.Now().After(inviteeSummary.CreatedAt.AddDate(0, 0, durationDays)) {
+				return 0, nil
+			}
+		}
+	}
+
+	rebateRatePercent := s.resolveRebateRatePercent(ctx, inviterSummary)
+	rebate := affiliateRoundTo(baseRechargeAmount*(rebateRatePercent/100), 8)
+	if rebate <= 0 {
+		return 0, nil
+	}
+
+	if s.settingService != nil {
+		if perInviteeCap := s.settingService.GetAffiliateRebatePerInviteeCap(ctx); perInviteeCap > 0 {
+			existing, err := s.repo.GetAccruedRebateFromInvitee(ctx, *inviteeSummary.InviterID, inviteeUserID)
+			if err != nil {
+				return 0, err
+			}
+			if existing >= perInviteeCap {
+				return 0, nil
+			}
+			if remaining := perInviteeCap - existing; rebate > remaining {
+				rebate = affiliateRoundTo(remaining, 8)
+			}
+		}
+	}
+
+	freezeHours := 0
+	if s.settingService != nil {
+		freezeHours = s.settingService.GetAffiliateRebateFreezeHours(ctx)
+	}
+	applied, err := s.repo.AccrueQuota(ctx, *inviteeSummary.InviterID, inviteeUserID, rebate, freezeHours, sourceOrderID)
+	if err != nil {
+		return 0, err
+	}
+	if !applied {
+		return 0, nil
+	}
+	return rebate, nil
+}
+
+func (s *AffiliateService) resolveRebateRatePercent(ctx context.Context, inviter *AffiliateSummary) float64 {
+	if inviter != nil && inviter.AffRebateRatePercent != nil {
+		v := *inviter.AffRebateRatePercent
+		if !math.IsNaN(v) && !math.IsInf(v, 0) {
+			return clampAffiliateRebateRate(v)
+		}
+	}
+	if s == nil || s.settingService == nil {
+		return 0
+	}
+	return clampAffiliateRebateRate(s.settingService.GetAffiliateRebateRatePercent(ctx))
+}
+
+func affiliateRoundTo(v float64, scale int) float64 {
+	factor := math.Pow10(scale)
+	return math.Round(v*factor) / factor
 }

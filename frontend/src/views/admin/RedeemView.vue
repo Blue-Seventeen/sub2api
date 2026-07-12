@@ -327,6 +327,11 @@
                       :platform="(option as unknown as GroupOption).platform"
                       :subscription-type="(option as unknown as GroupOption).subscriptionType"
                       :rate-multiplier="(option as unknown as GroupOption).rate"
+                      :peak-rate-enabled="(option as unknown as GroupOption).peakRateEnabled"
+                      :peak-start="(option as unknown as GroupOption).peakStart"
+                      :peak-end="(option as unknown as GroupOption).peakEnd"
+                      :peak-rate-multiplier="(option as unknown as GroupOption).peakRateMultiplier"
+                      :peak-rate-windows="(option as unknown as GroupOption).peakRateWindows"
                     />
                     <span v-else class="text-gray-400">{{
                       t('admin.redeem.selectGroupPlaceholder')
@@ -338,6 +343,11 @@
                       :platform="(option as unknown as GroupOption).platform"
                       :subscription-type="(option as unknown as GroupOption).subscriptionType"
                       :rate-multiplier="(option as unknown as GroupOption).rate"
+                      :peak-rate-enabled="(option as unknown as GroupOption).peakRateEnabled"
+                      :peak-start="(option as unknown as GroupOption).peakStart"
+                      :peak-end="(option as unknown as GroupOption).peakEnd"
+                      :peak-rate-multiplier="(option as unknown as GroupOption).peakRateMultiplier"
+                      :peak-rate-windows="(option as unknown as GroupOption).peakRateWindows"
                       :description="(option as unknown as GroupOption).description"
                       :selected="selected"
                     />
@@ -639,6 +649,11 @@ interface GroupOption {
   platform: GroupPlatform
   subscriptionType: SubscriptionType
   rate: number
+  peakRateEnabled: boolean
+  peakStart?: string
+  peakEnd?: string
+  peakRateMultiplier?: number
+  peakRateWindows?: Group['peak_rate_windows']
 }
 
 const showGenerateDialog = ref(false)
@@ -656,7 +671,12 @@ const subscriptionGroupOptions = computed(() => {
       description: g.description,
       platform: g.platform,
       subscriptionType: g.subscription_type,
-      rate: g.rate_multiplier
+      rate: g.rate_multiplier,
+      peakRateEnabled: g.peak_rate_enabled,
+      peakStart: g.peak_start,
+      peakEnd: g.peak_end,
+      peakRateMultiplier: g.peak_rate_multiplier,
+      peakRateWindows: g.peak_rate_windows
     }))
 })
 

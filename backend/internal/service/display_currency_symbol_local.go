@@ -8,17 +8,44 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"unicode"
 
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/google/uuid"
 )
 
 const displayCurrencySymbolLocalConfigFile = "display_currency_symbol.local.json"
+const defaultDisplayCurrencySymbol = "$"
 
 var displayCurrencySymbolLocalConfigMu sync.RWMutex
 
 type displayCurrencySymbolLocalConfig struct {
 	LocalOnly bool   `json:"local_only"`
 	Symbol    string `json:"symbol"`
+}
+
+func normalizeDisplayCurrencySymbol(value string) (string, error) {
+	symbol := strings.TrimSpace(value)
+	if symbol == "" {
+		return defaultDisplayCurrencySymbol, nil
+	}
+	if len([]rune(symbol)) > 8 {
+		return "", infraerrors.BadRequest("INVALID_DISPLAY_CURRENCY_SYMBOL", "display currency symbol must be at most 8 characters")
+	}
+	for _, r := range symbol {
+		if unicode.IsControl(r) {
+			return "", infraerrors.BadRequest("INVALID_DISPLAY_CURRENCY_SYMBOL", "display currency symbol cannot contain control characters")
+		}
+	}
+	return symbol, nil
+}
+
+func safeDisplayCurrencySymbol(value string) string {
+	symbol, err := normalizeDisplayCurrencySymbol(value)
+	if err != nil {
+		return defaultDisplayCurrencySymbol
+	}
+	return symbol
 }
 
 func defaultDisplayCurrencySymbolLocalConfigPath() string {

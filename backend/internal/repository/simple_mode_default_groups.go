@@ -32,6 +32,7 @@ func ensureSimpleModeDefaultGroups(ctx context.Context, client *dbent.Client) er
 		service.PlatformSuno:        1,
 		service.PlatformKling:       1,
 		service.PlatformMidjourney:  1,
+		service.PlatformGrok:        1,
 	}
 
 	for platform, minCount := range requiredByPlatform {

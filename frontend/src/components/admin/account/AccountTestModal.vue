@@ -298,6 +298,7 @@ import Select from '@/components/common/Select.vue'
 import TextArea from '@/components/common/TextArea.vue'
 import { Icon } from '@/components/icons'
 import { useClipboard } from '@/composables/useClipboard'
+import { buildApiUrl } from '@/api/client'
 import { adminAPI } from '@/api/admin'
 import type { Account, ClaudeModel } from '@/types'
 
@@ -457,24 +458,6 @@ const normalizeModelOptions = (models: RawModelOption[]): ClaudeModel[] => {
       created_at: model.created_at || model.createdAt || ''
     }))
 }
-
-// Load available models when modal opens
-watch(
-  () => props.show,
-  async (newVal) => {
-    if (newVal && props.account) {
-      testPrompt.value = ''
-      testMode.value = 'default'
-      testType.value = defaultTestTypeForAccount()
-      loadSavedTTSVoices()
-      resetState()
-      await loadAvailableModels()
-    } else {
-      abortStream()
-    }
-  }
-)
-
 
 const defaultTestTypeForAccount = (): AccountTestType => {
   if (isTaskOnlyPlatform.value) {
@@ -659,8 +642,26 @@ const startTest = async () => {
   abortController = new AbortController()
 
   try {
-    // Create EventSource for SSE
-    const url = `/api/v1/admin/accounts/${props.account.id}/test`
+    const requestBody: {
+      model_id: string
+      prompt: string
+      mode?: 'default' | 'compact'
+      test_type?: AccountTestType
+      test_options?: { voice: string }
+    } = {
+      model_id: requestModelId(),
+      prompt: showsPromptInput.value ? testPrompt.value.trim() : ''
+    }
+    if (props.account.platform !== 'grok') {
+      requestBody.mode = showOpenAITestMode.value ? testMode.value : 'default'
+      requestBody.test_type = testType.value
+      if (testType.value === 'tts') {
+        requestBody.test_options = { voice: ttsVoice.value.trim() }
+      }
+    }
+
+    // Use the configured API base; EventSource does not support POST.
+    const url = buildApiUrl(`/admin/accounts/${props.account.id}/test`)
 
     // Use fetch with streaming for SSE since EventSource doesn't support POST
     const response = await fetch(url, {
@@ -669,13 +670,7 @@ const startTest = async () => {
         Authorization: `Bearer ${localStorage.getItem('auth_token')}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        model_id: requestModelId(),
-        prompt: showsPromptInput.value ? testPrompt.value.trim() : '',
-        mode: showOpenAITestMode.value ? testMode.value : 'default',
-        test_type: testType.value,
-        test_options: testType.value === 'tts' ? { voice: ttsVoice.value.trim() } : undefined
-      }),
+      body: JSON.stringify(requestBody),
       signal: abortController.signal
     })
 
@@ -796,6 +791,12 @@ const handleEvent = (event: {
           objectUrl: preview.objectUrl
         })
         addLine(t('admin.accounts.audioReceived', { count: generatedAudios.value.length }), 'text-purple-300')
+      }
+      break
+
+    case 'status':
+      if (event.text) {
+        addLine(event.text, 'text-cyan-300')
       }
       break
 

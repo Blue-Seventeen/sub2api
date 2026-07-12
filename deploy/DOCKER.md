@@ -14,7 +14,7 @@ docker build -t sub2api-custom:dev .
 或者使用你自己的版本号：
 
 ```bash
-docker build -t sub2api-custom:0.1.118-custom .
+docker build -t sub2api-custom:0.1.151 .
 ```
 
 ## Docker Compose 示例
@@ -110,6 +110,13 @@ location / {
 - 数据端口如需公网监听，必须配置防火墙白名单。
 - 定时备份由每台应用节点自己的 `DATA_DIR/backup_schedule.local.json` 控制，默认不启用；只在需要执行备份的节点上打开。
 - DNS 切换期间可以让新旧应用同时连接同一套数据层，避免数据分叉。
+
+## 版本升级注意事项
+
+- 常规升级只替换 `sub2api` 应用容器，不重建 PostgreSQL/Redis 容器，也不要动数据卷。
+- 新版本如包含应用内 migration，必须确认新应用容器启动后 migration 执行成功，再切流或继续滚动升级。
+- v0.1.145 自定义多时段高峰倍率包含 `159_add_group_peak_rate_windows.sql`；旧容器回退只识别 `peak_start` / `peak_end` / `peak_rate_multiplier`，多窗口会退化为第一段。
+- 多时段高峰倍率同时覆盖标准余额分组和订阅分组，token、per_request、image、duration、character 计费都会叠加命中的高峰倍率。回退期间如果编辑高峰配置，再升级时新容器读路径会优先使用 legacy 第一段以保持兼容；只有在新版本再次保存分组后，`peak_rate_windows` 才会被持久同步。
 
 ## 禁止提交的内容
 

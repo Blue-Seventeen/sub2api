@@ -54,6 +54,8 @@ const nonTransactionalMigrationSuffix = "_notx.sql"
 const paymentOrdersOutTradeNoUniqueMigration = "120_enforce_payment_orders_out_trade_no_unique_notx.sql"
 const paymentOrdersOutTradeNoUniqueIndex = "paymentorder_out_trade_no_unique"
 const accountGroupSchedulerIndexesMigration = "150_account_group_scheduler_indexes_notx.sql"
+const schedulerOutboxPendingDedupKeyMigration = "153_scheduler_outbox_pending_dedup_key_index_notx.sql"
+const schedulerOutboxPendingDedupKeyIndex = "idx_scheduler_outbox_pending_dedup_key"
 
 var accountGroupSchedulerIndexes = []string{
 	"idx_account_groups_group_priority_account",
@@ -85,10 +87,14 @@ var migrationChecksumCompatibilityRules = map[string]migrationChecksumCompatibil
 	"119_enforce_payment_orders_out_trade_no_unique.sql":      newMigrationChecksumCompatibilityRule("0bbe809ae48a9d811dabda1ba1c74955bd71c4a9cc610f9128816818dfa6c11e", "ebd2c67cce0116393fb4f1b5d5116a67c6aceb73820dfb5133d1ff6f36d72d34"),
 	"120_enforce_payment_orders_out_trade_no_unique_notx.sql": newMigrationChecksumCompatibilityRule("34aadc0db59a4e390f92a12b73bd74642d9724f33124f73638ae00089ea5e074", "e77921f79d539bc24575cb9c16cbe566d2b23ce816190343d0a7568f6a3fcf61", "707431450603e70a43ce9fbd61e0c12fa67da4875158ccefabacea069587ab22", "04b082b5a239c525154fe9185d324ee2b05ff90da9297e10dba19f9be79aa59a"),
 	"123_fix_legacy_auth_source_grant_on_signup_defaults.sql": newMigrationChecksumCompatibilityRule("2ce43c2cd89e9f9e1febd34a407ed9e84d177386c5544b6f02c1f58a21129f57", "6cd33422f215dcd1f486ab6f35c0ea5805d9ca69bb25906d94bc649156657145"),
+	"133_allow_email_oauth_provider_types.sql":                newMigrationChecksumCompatibilityRule("21e0bfe39530adea594e7d161d202f2dd201cc8caffeeb8b563ada15ab7f8fc5", "1d5948a0de5fae4fff368e4ae648edb794ce4e7b2704b6e7020c3b881c0f51f3"),
+	"135_allow_email_oauth_provider_types.sql":                newMigrationChecksumCompatibilityRule("72b6005ff64cddd845615e249d95858010dd6d3bd7a1d24b3e9a32eb03b76eb8", "e5e3512fd7ff6e9225414bf79425fd8ddbf6d78a66998142bfb2441f8e7e4708"),
 	"127_drop_channel_monitor_deleted_at.sql":                 newMigrationChecksumCompatibilityRule("0d7336a4e12ee8b01b93d2ceb3c9f44a5523f01dbcd215efe47f897448472e4d", "ac7decb355555a711a372e1ed0d7f1559af41cd796e4be1736f4f978f5f88735", "fd82989ad15a3b450ebb6a0aac3b501a2c211240ff7f5dc5423dad554d46ad0d"),
 	"145_subscription_windows_anchor_to_starts_at.sql":        newMigrationChecksumCompatibilityRule("24f0754ad2355d839ddd2d3f01d15bde97f1b89d28ba60f520cd4855041b2f78", "bd2e1d7cf7dea901bba96b030fb41168db129abc84f705d081afec937d52bfd6"),
 	"142_remove_ops_retry_replay_compat.sql":                  newMigrationChecksumCompatibilityRule("e8f288ca3a703457c47cce4d697f36a35da230914efc3d57ecb25d4b4842e643", "88d139daf730c511ffcd9e8ce99769a6dbc781d63a8b1b954f272254c9468c6f", "2683a204e8aed45c0cae0747d38c9db0dfcba4243d944fcfbc18432c2c3bcd70"),
 	"146_subscription_custom_hour_limit.sql":                  newMigrationChecksumCompatibilityRule("2da1855df7d0295b69219d8fe4da55bac18c6dc1998a1ff1963932fa2f722b0f", "e37b17f291d50b1ac96404f3dd56e23e2e8a6e7dba0fd9c4d148b943709c806c"),
+	"159_batch_image_foundation.sql":                          newMigrationChecksumCompatibilityRule("d902b70982025ec519749faf058aab7631e82c3f48167b9a4ae4db718eb72cce", "82da85b5d98e67a0507647b873a40373e84538e4adafdeed6767c0ac8b6570b2"),
+	"161_batch_image_pricing_snapshot.sql":                    newMigrationChecksumCompatibilityRule("4012af3e43636cb6af22e0176d59d1fcc70615c0f310194329461ae462c4fbd6", "96d915c9b7a6941ae99039e0ff3f1a61481eb9bddd933d11c6fadb2274554e87"),
 }
 
 // ApplyMigrations 将嵌入的 SQL 迁移文件应用到指定的数据库。
@@ -278,6 +284,8 @@ func prepareNonTransactionalMigration(ctx context.Context, db *sql.DB, name stri
 		return preparePaymentOrdersOutTradeNoUniqueMigration(ctx, db)
 	case accountGroupSchedulerIndexesMigration:
 		return dropInvalidIndexes(ctx, db, accountGroupSchedulerIndexes...)
+	case schedulerOutboxPendingDedupKeyMigration:
+		return dropInvalidIndexes(ctx, db, schedulerOutboxPendingDedupKeyIndex)
 	default:
 		return nil
 	}

@@ -31,6 +31,48 @@ func RegisterGatewayRoutes(
 	requireGroupAnthropic := middleware.RequireGroupAssignment(settingService, middleware.AnthropicErrorWriter)
 	requireGroupGoogle := middleware.RequireGroupAssignment(settingService, middleware.GoogleErrorWriter)
 
+	isOpenAIResponsesCompatibleGatewayPlatform := func(c *gin.Context) bool {
+		switch getGroupPlatform(c) {
+		case service.PlatformOpenAI, service.PlatformGrok:
+			return true
+		default:
+			return false
+		}
+	}
+	isOpenAIGatewayPlatform := func(c *gin.Context) bool {
+		return getGroupPlatform(c) == service.PlatformOpenAI
+	}
+	imagesHandler := func(c *gin.Context) {
+		switch getGroupPlatform(c) {
+		case service.PlatformOpenAI:
+			h.OpenAIGateway.Images(c)
+		case service.PlatformGrok:
+			h.OpenAIGateway.GrokImages(c)
+		default:
+			if c.FullPath() == "/v1/images/generations" || c.FullPath() == "/images/generations" {
+				h.NewAPIStyleGateway.Images(c)
+				return
+			}
+			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
+			writeImagesUnsupported(c)
+		}
+	}
+	videoGenerationHandler := func(c *gin.Context) {
+		if getGroupPlatform(c) == service.PlatformGrok {
+			h.OpenAIGateway.GrokVideoGeneration(c)
+			return
+		}
+		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
+		writeVideosUnsupported(c)
+	}
+	videoStatusHandler := func(c *gin.Context) {
+		if getGroupPlatform(c) == service.PlatformGrok {
+			h.OpenAIGateway.GrokVideoStatus(c)
+			return
+		}
+		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
+		writeVideosUnsupported(c)
+	}
 	// API网关（Claude API兼容）
 	gateway := r.Group("/v1")
 	gateway.Use(bodyLimit)
@@ -42,21 +84,24 @@ func RegisterGatewayRoutes(
 	{
 		// /v1/messages: auto-route based on group platform
 		gateway.POST("/messages", func(c *gin.Context) {
-			switch getGroupPlatform(c) {
-			case service.PlatformOpenAI:
+			if isOpenAIResponsesCompatibleGatewayPlatform(c) {
 				h.OpenAIGateway.Messages(c)
-			default:
-				if service.IsCompatiblePlatform(getGroupPlatform(c)) {
-					h.CompatibleGateway.Messages(c)
-					return
-				}
-				h.Gateway.Messages(c)
+				return
 			}
+			if service.IsCompatiblePlatform(getGroupPlatform(c)) {
+				h.CompatibleGateway.Messages(c)
+				return
+			}
+			h.Gateway.Messages(c)
 		})
-		// /v1/messages/count_tokens: OpenAI groups get 404
+		// /v1/messages/count_tokens: OpenAI uses Anthropic-compat bridge; other
+		// OpenAI-compatible platforms keep the prior unsupported response.
 		gateway.POST("/messages/count_tokens", func(c *gin.Context) {
-			switch getGroupPlatform(c) {
-			case service.PlatformOpenAI:
+			if isOpenAIGatewayPlatform(c) {
+				h.OpenAIGateway.CountTokens(c)
+				return
+			}
+			if isOpenAIResponsesCompatibleGatewayPlatform(c) {
 				service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 				c.JSON(http.StatusNotFound, gin.H{
 					"type": "error",
@@ -66,16 +111,21 @@ func RegisterGatewayRoutes(
 					},
 				})
 				return
-			default:
-				if !service.IsCompatiblePlatform(getGroupPlatform(c)) {
-					break
-				}
+			}
+			if service.IsCompatiblePlatform(getGroupPlatform(c)) {
 				h.CompatibleGateway.CountTokens(c)
 				return
 			}
 			h.Gateway.CountTokens(c)
 		})
 		gateway.GET("/models", func(c *gin.Context) {
+			// Codex CLI / Codex app refresh their model picker from the provider's
+			// /models endpoint with a client_version query and expect the ChatGPT
+			// Codex manifest format; other clients keep the OpenAI-style list.
+			if isOpenAIGatewayPlatform(c) && c.Query("client_version") != "" {
+				h.OpenAIGateway.CodexModels(c)
+				return
+			}
 			if service.IsCompatiblePlatform(getGroupPlatform(c)) {
 				h.CompatibleGateway.Models(c)
 				return
@@ -85,42 +135,41 @@ func RegisterGatewayRoutes(
 		gateway.GET("/usage", h.Gateway.Usage)
 		// OpenAI Responses API: auto-route based on group platform
 		gateway.POST("/responses", func(c *gin.Context) {
-			switch getGroupPlatform(c) {
-			case service.PlatformOpenAI:
+			if isOpenAIResponsesCompatibleGatewayPlatform(c) {
 				h.OpenAIGateway.Responses(c)
-			default:
-				if service.IsCompatiblePlatform(getGroupPlatform(c)) {
-					h.CompatibleGateway.Responses(c)
-					return
-				}
-				h.Gateway.Responses(c)
+				return
 			}
+			if service.IsCompatiblePlatform(getGroupPlatform(c)) {
+				h.CompatibleGateway.Responses(c)
+				return
+			}
+			h.Gateway.Responses(c)
 		})
 		gateway.POST("/responses/*subpath", func(c *gin.Context) {
-			switch getGroupPlatform(c) {
-			case service.PlatformOpenAI:
+			if isOpenAIResponsesCompatibleGatewayPlatform(c) {
 				h.OpenAIGateway.Responses(c)
-			default:
-				if service.IsCompatiblePlatform(getGroupPlatform(c)) {
-					h.CompatibleGateway.Responses(c)
-					return
-				}
-				h.Gateway.Responses(c)
+				return
 			}
+			if service.IsCompatiblePlatform(getGroupPlatform(c)) {
+				h.CompatibleGateway.Responses(c)
+				return
+			}
+			h.Gateway.Responses(c)
 		})
-		gateway.GET("/responses", h.OpenAIGateway.ResponsesWebSocket)
+		gateway.GET("/responses", func(c *gin.Context) {
+			h.OpenAIGateway.ResponsesWebSocket(c)
+		})
 		// OpenAI Chat Completions API: auto-route based on group platform
 		gateway.POST("/chat/completions", func(c *gin.Context) {
-			switch getGroupPlatform(c) {
-			case service.PlatformOpenAI:
+			if isOpenAIResponsesCompatibleGatewayPlatform(c) {
 				h.OpenAIGateway.ChatCompletions(c)
-			default:
-				if service.IsCompatiblePlatform(getGroupPlatform(c)) {
-					h.CompatibleGateway.ChatCompletions(c)
-					return
-				}
-				h.Gateway.ChatCompletions(c)
+				return
 			}
+			if service.IsCompatiblePlatform(getGroupPlatform(c)) {
+				h.CompatibleGateway.ChatCompletions(c)
+				return
+			}
+			h.Gateway.ChatCompletions(c)
 		})
 		gateway.POST("/embeddings", func(c *gin.Context) {
 			if getGroupPlatform(c) == service.PlatformOpenAI {
@@ -129,27 +178,25 @@ func RegisterGatewayRoutes(
 			}
 			h.NewAPIStyleGateway.Embeddings(c)
 		})
-		gateway.POST("/images/generations", func(c *gin.Context) {
-			if getGroupPlatform(c) == service.PlatformOpenAI {
-				h.OpenAIGateway.Images(c)
-				return
-			}
-			h.NewAPIStyleGateway.Images(c)
-		})
-		gateway.POST("/images/edits", func(c *gin.Context) {
-			if getGroupPlatform(c) == service.PlatformOpenAI {
-				h.OpenAIGateway.Images(c)
-				return
-			}
-			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
-			writeImagesUnsupported(c)
-		})
+		gateway.POST("/images/generations", imagesHandler)
+		gateway.POST("/images/edits", imagesHandler)
+		gateway.POST("/images/batches", h.BatchImage.Submit)
+		gateway.GET("/images/batches", h.BatchImage.List)
+		gateway.GET("/images/batches/models", h.BatchImage.Models)
+		gateway.GET("/images/batches/:id", h.BatchImage.Get)
+		gateway.GET("/images/batches/:id/items", h.BatchImage.Items)
+		gateway.GET("/images/batches/:id/items/:custom_id/content", h.BatchImage.ItemContent)
+		gateway.GET("/images/batches/:id/download", h.BatchImage.Download)
+		gateway.POST("/images/batches/:id/cancel", h.BatchImage.Cancel)
+		gateway.DELETE("/images/batches/:id", h.BatchImage.DeleteRecord)
+		gateway.DELETE("/images/batches/:id/outputs", h.BatchImage.DeleteOutputs)
 		gateway.POST("/audio/*subpath", h.NewAPIStyleGateway.Audio)
 		gateway.POST("/rerank", h.NewAPIStyleGateway.Rerank)
 		gateway.GET("/videos", h.NewAPIStyleGateway.Videos)
 		gateway.POST("/videos", h.NewAPIStyleGateway.Videos)
-		gateway.GET("/videos/*subpath", h.NewAPIStyleGateway.Videos)
-		gateway.POST("/videos/*subpath", h.NewAPIStyleGateway.Videos)
+		gateway.POST("/videos/generations", videoGenerationHandler)
+		gateway.GET("/videos/:id", videoStatusHandler)
+		gateway.POST("/videos/:id", h.NewAPIStyleGateway.Videos)
 		gateway.GET("/video/generations", h.NewAPIStyleGateway.VideoGenerations)
 		gateway.POST("/video/generations", h.NewAPIStyleGateway.VideoGenerations)
 		gateway.GET("/video/generations/*subpath", h.NewAPIStyleGateway.VideoGenerations)
@@ -173,39 +220,42 @@ func RegisterGatewayRoutes(
 
 	// OpenAI Responses API（不带v1前缀的别名）— auto-route based on group platform
 	responsesHandler := func(c *gin.Context) {
-		switch getGroupPlatform(c) {
-		case service.PlatformOpenAI:
+		if isOpenAIResponsesCompatibleGatewayPlatform(c) {
 			h.OpenAIGateway.Responses(c)
-		default:
-			if service.IsCompatiblePlatform(getGroupPlatform(c)) {
-				h.CompatibleGateway.Responses(c)
-				return
-			}
-			h.Gateway.Responses(c)
+			return
 		}
+		if service.IsCompatiblePlatform(getGroupPlatform(c)) {
+			h.CompatibleGateway.Responses(c)
+			return
+		}
+		h.Gateway.Responses(c)
 	}
 	r.POST("/responses", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, responsesHandler)
 	r.POST("/responses/*subpath", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, responsesHandler)
-	r.GET("/responses", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, h.OpenAIGateway.ResponsesWebSocket)
+	r.GET("/responses", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, func(c *gin.Context) {
+		h.OpenAIGateway.ResponsesWebSocket(c)
+	})
 	codexDirect := r.Group("/backend-api/codex")
 	codexDirect.Use(bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic)
 	{
 		codexDirect.POST("/responses", responsesHandler)
 		codexDirect.POST("/responses/*subpath", responsesHandler)
-		codexDirect.GET("/responses", h.OpenAIGateway.ResponsesWebSocket)
+		codexDirect.GET("/responses", func(c *gin.Context) {
+			h.OpenAIGateway.ResponsesWebSocket(c)
+		})
+		codexDirect.GET("/models", h.OpenAIGateway.CodexModels)
 	}
 	// OpenAI Chat Completions API（不带v1前缀的别名）— auto-route based on group platform
 	r.POST("/chat/completions", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, func(c *gin.Context) {
-		switch getGroupPlatform(c) {
-		case service.PlatformOpenAI:
+		if isOpenAIResponsesCompatibleGatewayPlatform(c) {
 			h.OpenAIGateway.ChatCompletions(c)
-		default:
-			if service.IsCompatiblePlatform(getGroupPlatform(c)) {
-				h.CompatibleGateway.ChatCompletions(c)
-				return
-			}
-			h.Gateway.ChatCompletions(c)
+			return
 		}
+		if service.IsCompatiblePlatform(getGroupPlatform(c)) {
+			h.CompatibleGateway.ChatCompletions(c)
+			return
+		}
+		h.Gateway.ChatCompletions(c)
 	})
 	r.POST("/embeddings", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, func(c *gin.Context) {
 		if getGroupPlatform(c) == service.PlatformOpenAI {
@@ -215,21 +265,8 @@ func RegisterGatewayRoutes(
 		h.NewAPIStyleGateway.Embeddings(c)
 	})
 	r.POST("/compatible-mode/v1/chat/completions", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, h.CompatibleGateway.QwenCompatibleModeChatCompletions)
-	r.POST("/images/generations", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, func(c *gin.Context) {
-		if getGroupPlatform(c) == service.PlatformOpenAI {
-			h.OpenAIGateway.Images(c)
-			return
-		}
-		h.NewAPIStyleGateway.Images(c)
-	})
-	r.POST("/images/edits", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, func(c *gin.Context) {
-		if getGroupPlatform(c) == service.PlatformOpenAI {
-			h.OpenAIGateway.Images(c)
-			return
-		}
-		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
-		writeImagesUnsupported(c)
-	})
+	r.POST("/images/generations", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, imagesHandler)
+	r.POST("/images/edits", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, imagesHandler)
 	newAPIOnly := []gin.HandlerFunc{bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic}
 	r.POST("/audio/*subpath", append(newAPIOnly, h.NewAPIStyleGateway.Audio)...)
 	r.POST("/api/paas/v4/audio/*subpath", append(newAPIOnly, h.NewAPIStyleGateway.Audio)...)
@@ -237,8 +274,9 @@ func RegisterGatewayRoutes(
 	r.POST("/rerank", append(newAPIOnly, h.NewAPIStyleGateway.Rerank)...)
 	r.GET("/videos", append(newAPIOnly, h.NewAPIStyleGateway.Videos)...)
 	r.POST("/videos", append(newAPIOnly, h.NewAPIStyleGateway.Videos)...)
-	r.GET("/videos/*subpath", append(newAPIOnly, h.NewAPIStyleGateway.Videos)...)
-	r.POST("/videos/*subpath", append(newAPIOnly, h.NewAPIStyleGateway.Videos)...)
+	r.POST("/videos/generations", append(newAPIOnly, videoGenerationHandler)...)
+	r.GET("/videos/:id", append(newAPIOnly, videoStatusHandler)...)
+	r.POST("/videos/:id", append(newAPIOnly, h.NewAPIStyleGateway.Videos)...)
 	r.GET("/video/generations", append(newAPIOnly, h.NewAPIStyleGateway.VideoGenerations)...)
 	r.POST("/video/generations", append(newAPIOnly, h.NewAPIStyleGateway.VideoGenerations)...)
 	r.GET("/video/generations/*subpath", append(newAPIOnly, h.NewAPIStyleGateway.VideoGenerations)...)
@@ -296,6 +334,15 @@ func writeImagesUnsupported(c *gin.Context) {
 		"error": gin.H{
 			"type":    "not_found_error",
 			"message": "Images API is not supported for this platform",
+		},
+	})
+}
+
+func writeVideosUnsupported(c *gin.Context) {
+	c.JSON(http.StatusNotFound, gin.H{
+		"error": gin.H{
+			"type":    "not_found_error",
+			"message": "Videos API is not supported for this platform",
 		},
 	})
 }

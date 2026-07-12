@@ -18,6 +18,7 @@ func UserFromServiceShallow(u *service.User) *User {
 		Username:                   u.Username,
 		Role:                       u.Role,
 		Balance:                    u.DisplayBalance,
+		FrozenBalance:              u.FrozenBalance,
 		Concurrency:                u.Concurrency,
 		Status:                     u.Status,
 		AllowedGroups:              u.AllowedGroups,
@@ -83,31 +84,33 @@ func APIKeyFromService(k *service.APIKey) *APIKey {
 		return nil
 	}
 	out := &APIKey{
-		ID:            k.ID,
-		UserID:        k.UserID,
-		Key:           k.Key,
-		Name:          k.Name,
-		GroupID:       k.GroupID,
-		Status:        k.Status,
-		IPWhitelist:   k.IPWhitelist,
-		IPBlacklist:   k.IPBlacklist,
-		LastUsedAt:    k.LastUsedAt,
-		Quota:         k.Quota,
-		QuotaUsed:     k.QuotaUsed,
-		ExpiresAt:     k.ExpiresAt,
-		CreatedAt:     k.CreatedAt,
-		UpdatedAt:     k.UpdatedAt,
-		RateLimit5h:   k.RateLimit5h,
-		RateLimit1d:   k.RateLimit1d,
-		RateLimit7d:   k.RateLimit7d,
-		Usage5h:       k.EffectiveUsage5h(),
-		Usage1d:       k.EffectiveUsage1d(),
-		Usage7d:       k.EffectiveUsage7d(),
-		Window5hStart: k.Window5hStart,
-		Window1dStart: k.Window1dStart,
-		Window7dStart: k.Window7dStart,
-		User:          UserFromServiceShallow(k.User),
-		Group:         GroupFromServiceShallow(k.Group),
+		ID:                 k.ID,
+		UserID:             k.UserID,
+		Key:                k.Key,
+		Name:               k.Name,
+		GroupID:            k.GroupID,
+		Status:             k.Status,
+		IPWhitelist:        k.IPWhitelist,
+		IPBlacklist:        k.IPBlacklist,
+		LastUsedAt:         k.LastUsedAt,
+		LastUsedIP:         k.LastUsedIP,
+		Quota:              k.Quota,
+		QuotaUsed:          k.QuotaUsed,
+		ExpiresAt:          k.ExpiresAt,
+		CreatedAt:          k.CreatedAt,
+		UpdatedAt:          k.UpdatedAt,
+		CurrentConcurrency: k.CurrentConcurrency,
+		RateLimit5h:        k.RateLimit5h,
+		RateLimit1d:        k.RateLimit1d,
+		RateLimit7d:        k.RateLimit7d,
+		Usage5h:            k.EffectiveUsage5h(),
+		Usage1d:            k.EffectiveUsage1d(),
+		Usage7d:            k.EffectiveUsage7d(),
+		Window5hStart:      k.Window5hStart,
+		Window1dStart:      k.Window1dStart,
+		Window7dStart:      k.Window7dStart,
+		User:               UserFromServiceShallow(k.User),
+		Group:              GroupFromServiceShallow(k.Group),
 	}
 	if k.Window5hStart != nil && !service.IsWindowExpired(k.Window5hStart, service.RateLimitWindow5h) {
 		t := k.Window5hStart.Add(service.RateLimitWindow5h)
@@ -120,6 +123,14 @@ func APIKeyFromService(k *service.APIKey) *APIKey {
 	if k.Window7dStart != nil && !service.IsWindowExpired(k.Window7dStart, service.RateLimitWindow7d) {
 		t := k.Window7dStart.Add(service.RateLimitWindow7d)
 		out.Reset7dAt = &t
+	}
+	return out
+}
+
+func APIKeyFromServiceForUsageUser(k *service.APIKey) *APIKey {
+	out := APIKeyFromService(k)
+	if out != nil {
+		out.Key = ""
 	}
 	return out
 }
@@ -185,11 +196,24 @@ func groupFromServiceBase(g *service.Group) Group {
 		CustomLimitHours:                g.CustomLimitHours,
 		CustomLimitUSD:                  g.CustomLimitUSD,
 		AllowImageGeneration:            g.AllowImageGeneration,
+		AllowBatchImageGeneration:       g.AllowBatchImageGeneration,
 		ImageRateIndependent:            g.ImageRateIndependent,
 		ImageRateMultiplier:             g.ImageRateMultiplier,
+		BatchImageDiscountMultiplier:    g.BatchImageDiscountMultiplier,
+		BatchImageHoldMultiplier:        g.BatchImageHoldMultiplier,
+		VideoRateIndependent:            g.VideoRateIndependent,
+		VideoRateMultiplier:             g.VideoRateMultiplier,
+		PeakRateEnabled:                 g.PeakRateEnabled,
+		PeakStart:                       g.PeakStart,
+		PeakEnd:                         g.PeakEnd,
+		PeakRateMultiplier:              g.PeakRateMultiplier,
+		PeakRateWindows:                 service.PeakRateWindowsForRead(g.PeakRateWindows, g.PeakStart, g.PeakEnd, g.PeakRateMultiplier),
 		ImagePrice1K:                    g.ImagePrice1K,
 		ImagePrice2K:                    g.ImagePrice2K,
 		ImagePrice4K:                    g.ImagePrice4K,
+		VideoPrice480P:                  g.VideoPrice480P,
+		VideoPrice720P:                  g.VideoPrice720P,
+		VideoPrice1080P:                 g.VideoPrice1080P,
 		ClaudeCodeOnly:                  g.ClaudeCodeOnly,
 		FallbackGroupID:                 g.FallbackGroupID,
 		FallbackGroupIDOnInvalidRequest: g.FallbackGroupIDOnInvalidRequest,
@@ -242,6 +266,8 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		SessionWindowEnd:        a.SessionWindowEnd,
 		SessionWindowStatus:     a.SessionWindowStatus,
 		GroupIDs:                a.GroupIDs,
+		ParentAccountID:         a.ParentAccountID,
+		QuotaDimension:          a.QuotaDimension,
 	}
 
 	// 提取 5h 窗口费用控制和会话数量控制配置（仅 Anthropic OAuth/SetupToken 账号有效）
@@ -585,7 +611,7 @@ func AccountSummaryFromService(a *service.Account) *AccountSummary {
 }
 
 func usageLogFromServiceUser(l *service.UsageLog) UsageLog {
-	// 普通用户 DTO：严禁包含管理员字段（例如 account_rate_multiplier、ip_address、account）。
+	// 普通用户 DTO：严禁包含管理员字段（例如 account_rate_multiplier、account、upstream_model）。
 	requestType := l.EffectiveRequestType()
 	stream, openAIWSMode := service.ApplyLegacyRequestFields(requestType, l.Stream, l.OpenAIWSMode)
 	requestedModel := l.RequestedModel
@@ -596,17 +622,12 @@ func usageLogFromServiceUser(l *service.UsageLog) UsageLog {
 		ID:                      l.ID,
 		UserID:                  l.UserID,
 		APIKeyID:                l.APIKeyID,
-		AccountID:               l.AccountID,
 		RequestID:               l.RequestID,
 		Model:                   requestedModel,
 		ServiceTier:             l.ServiceTier,
 		ReasoningEffort:         l.ReasoningEffort,
 		InboundEndpoint:         l.InboundEndpoint,
-		UpstreamEndpoint:        l.UpstreamEndpoint,
 		ClientProfile:           l.ClientProfile,
-		CompatibilityRoute:      l.CompatibilityRoute,
-		FallbackChain:           l.FallbackChain,
-		UpstreamTransport:       l.UpstreamTransport,
 		GroupID:                 l.GroupID,
 		SubscriptionID:          l.SubscriptionID,
 		InputTokens:             l.InputTokens,
@@ -644,18 +665,19 @@ func usageLogFromServiceUser(l *service.UsageLog) UsageLog {
 		UsageEstimated:          l.UsageEstimated,
 		BillableUnitType:        l.BillableUnitType,
 		UserAgent:               l.UserAgent,
+		IPAddress:               l.IPAddress,
 		CacheTTLOverridden:      l.CacheTTLOverridden,
 		BillingMode:             l.BillingMode,
 		CreatedAt:               l.CreatedAt,
 		User:                    UserFromServiceShallow(l.User),
-		APIKey:                  APIKeyFromService(l.APIKey),
+		APIKey:                  APIKeyFromServiceForUsageUser(l.APIKey),
 		Group:                   GroupFromServiceShallow(l.Group),
 		Subscription:            UserSubscriptionFromService(l.Subscription),
 	}
 }
 
 // UsageLogFromService converts a service UsageLog to DTO for regular users.
-// It excludes Account details and IP address - users should not see these.
+// It excludes admin-only account/upstream internals while keeping user billing and request metadata.
 func UsageLogFromService(l *service.UsageLog) *UsageLog {
 	if l == nil {
 		return nil
@@ -670,8 +692,10 @@ func UsageLogFromServiceAdmin(l *service.UsageLog) *AdminUsageLog {
 	if l == nil {
 		return nil
 	}
-	return &AdminUsageLog{
-		UsageLog:              usageLogFromServiceUser(l),
+	accountID := l.AccountID
+	usageLog := usageLogFromServiceUser(l)
+	out := &AdminUsageLog{
+		UsageLog:              usageLog,
 		UpstreamModel:         l.UpstreamModel,
 		ChannelID:             l.ChannelID,
 		ModelMappingChain:     l.ModelMappingChain,
@@ -683,6 +707,13 @@ func UsageLogFromServiceAdmin(l *service.UsageLog) *AdminUsageLog {
 		IPAddress:             l.IPAddress,
 		Account:               AccountSummaryFromService(l.Account),
 	}
+	out.AccountID = &accountID
+	out.UpstreamEndpoint = l.UpstreamEndpoint
+	out.CompatibilityRoute = l.CompatibilityRoute
+	out.FallbackChain = l.FallbackChain
+	out.UpstreamTransport = l.UpstreamTransport
+	out.APIKey = APIKeyFromServiceForUsageUser(l.APIKey)
+	return out
 }
 
 func UsageCleanupTaskFromService(task *service.UsageCleanupTask) *UsageCleanupTask {
@@ -810,6 +841,7 @@ func userSubscriptionFromServiceBase(sub *service.UserSubscription) UserSubscrip
 		CustomUsageUSD:           sub.CustomUsageUSD,
 		CreatedAt:                sub.CreatedAt,
 		UpdatedAt:                sub.UpdatedAt,
+		RevokedAt:                sub.DeletedAt,
 		User:                     UserFromServiceShallow(sub.User),
 		Group:                    subscriptionGroupFromService(sub),
 	}

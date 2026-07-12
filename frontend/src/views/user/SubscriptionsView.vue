@@ -49,6 +49,12 @@
                 <p v-if="subscription.group?.description" class="mt-0.5 text-xs text-gray-500 dark:text-dark-400">
                   {{ subscription.group.description }}
                 </p>
+                <div class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-gray-400 dark:text-gray-500">
+                  <span>{{ t('payment.planCard.rate') }}: ×{{ subscription.group?.rate_multiplier ?? 1 }}</span>
+                  <span v-if="subscriptionHasPeakRate(subscription)" class="text-amber-700 dark:text-amber-300">
+                    {{ t('payment.planCard.peakRate') }}: {{ subscriptionPeakRateLabel(subscription) }}
+                  </span>
+                </div>
               </div>
             </div>
             <div class="flex items-center gap-2">
@@ -296,6 +302,7 @@ import type { UserSubscription } from '@/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { formatCurrencyAmount } from '@/utils/format'
+import { hasPeakRate, formatPeakRateWindow, serverTimezoneLabel } from '@/utils/peak-rate'
 import { platformBorderClass, platformBadgeClass, platformButtonClass, platformDotClass, platformLabel } from '@/utils/platformColors'
 import {
   getRemainingDurationParts,
@@ -321,6 +328,14 @@ function subscriptionKey(subscription: UserSubscription, index: number): string 
     subscription.expires_at ?? '',
     index
   ].join(':')
+}
+
+function subscriptionHasPeakRate(subscription: UserSubscription): boolean {
+  return hasPeakRate(subscription.group)
+}
+
+function subscriptionPeakRateLabel(subscription: UserSubscription): string {
+  return formatPeakRateWindow(subscription.group, serverTimezoneLabel(appStore.cachedPublicSettings?.server_utc_offset))
 }
 
 async function loadSubscriptions() {

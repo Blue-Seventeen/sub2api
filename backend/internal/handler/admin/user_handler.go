@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math"
 	"strconv"
@@ -59,6 +60,7 @@ type CreateUserRequest struct {
 	Password              string   `json:"password" binding:"required,min=6"`
 	Username              string   `json:"username"`
 	Notes                 string   `json:"notes"`
+	Role                  string   `json:"role" binding:"omitempty,oneof=admin user"`
 	Balance               *float64 `json:"balance"`
 	UnifiedRateEnabled    bool     `json:"unified_rate_enabled"`
 	UnifiedRateMultiplier *float64 `json:"unified_rate_multiplier"`
@@ -74,6 +76,7 @@ type UpdateUserRequest struct {
 	Password              string   `json:"password" binding:"omitempty,min=6"`
 	Username              *string  `json:"username"`
 	Notes                 *string  `json:"notes"`
+	Role                  string   `json:"role" binding:"omitempty,oneof=admin user"`
 	Balance               *float64 `json:"balance"`
 	UnifiedRateEnabled    *bool    `json:"unified_rate_enabled"`
 	UnifiedRateMultiplier *float64 `json:"unified_rate_multiplier"`
@@ -279,6 +282,7 @@ func (h *UserHandler) Create(c *gin.Context) {
 		Password:           req.Password,
 		Username:           req.Username,
 		Notes:              req.Notes,
+		Role:               req.Role,
 		Balance:            req.Balance,
 		UnifiedRateEnabled: req.UnifiedRateEnabled,
 		UnifiedRateMultiplier: func() float64 {
@@ -290,6 +294,7 @@ func (h *UserHandler) Create(c *gin.Context) {
 		Concurrency:   req.Concurrency,
 		RPMLimit:      req.RPMLimit,
 		AllowedGroups: req.AllowedGroups,
+		ActorAdminID:  getAdminIDFromContext(c),
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -314,12 +319,20 @@ func (h *UserHandler) Update(c *gin.Context) {
 		return
 	}
 
+	// 防锁死保护：管理员不能把自己降级为普通用户(单管理员场景下会失去后台访问权)。
+	// 与既有"不能禁用/删除 admin"保护一致。降级其他管理员仍然允许。
+	if req.Role == service.RoleUser && userID == getAdminIDFromContext(c) {
+		response.BadRequest(c, "cannot demote yourself from admin")
+		return
+	}
+
 	// 使用指针类型直接传递，nil 表示未提供该字段
 	user, err := h.adminService.UpdateUser(c.Request.Context(), userID, &service.UpdateUserInput{
 		Email:                 req.Email,
 		Password:              req.Password,
 		Username:              req.Username,
 		Notes:                 req.Notes,
+		Role:                  req.Role,
 		Balance:               req.Balance,
 		UnifiedRateEnabled:    req.UnifiedRateEnabled,
 		UnifiedRateMultiplier: req.UnifiedRateMultiplier,
@@ -328,6 +341,7 @@ func (h *UserHandler) Update(c *gin.Context) {
 		Status:                req.Status,
 		AllowedGroups:         req.AllowedGroups,
 		GroupRates:            req.GroupRates,
+		ActorAdminID:          getAdminIDFromContext(c),
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -649,8 +663,8 @@ func (h *UserHandler) UpdateUserPlatformQuotas(c *gin.Context) {
 		return
 	}
 
-	if len(req.Quotas) > 4 {
-		response.BadRequest(c, "quotas length must be <= 4")
+	if len(req.Quotas) > len(service.AllowedQuotaPlatforms) {
+		response.BadRequest(c, fmt.Sprintf("quotas length must be <= %d", len(service.AllowedQuotaPlatforms)))
 		return
 	}
 	seen := make(map[string]struct{}, len(req.Quotas))

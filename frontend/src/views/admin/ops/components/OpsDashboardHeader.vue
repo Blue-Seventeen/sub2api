@@ -124,7 +124,8 @@ const platformOptions = computed(() => [
   { value: 'openrouter', label: 'OpenRouter' },
   { value: 'suno', label: 'Suno' },
   { value: 'kling', label: 'Kling' },
-  { value: 'midjourney', label: 'Midjourney' }
+  { value: 'midjourney', label: 'Midjourney' },
+  { value: 'grok', label: 'Grok' }
 ])
 
 const timeRangeOptions = computed(() => [
@@ -901,7 +902,7 @@ function handleToolbarRefresh() {
 
           <template v-if="props.autoRefreshEnabled && props.autoRefreshCountdown !== undefined">
             <span>·</span>
-            <span>剩余 {{ props.autoRefreshCountdown }}s</span>
+            <span>{{ t('admin.ops.autoRefreshRemaining', { seconds: props.autoRefreshCountdown }) }}</span>
           </template>
         </div>
       </div>

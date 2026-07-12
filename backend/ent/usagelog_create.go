@@ -407,6 +407,20 @@ func (_c *UsageLogCreate) SetNillableBillingType(v *int8) *UsageLogCreate {
 	return _c
 }
 
+// SetRequestType sets the "request_type" field.
+func (_c *UsageLogCreate) SetRequestType(v int16) *UsageLogCreate {
+	_c.mutation.SetRequestType(v)
+	return _c
+}
+
+// SetNillableRequestType sets the "request_type" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableRequestType(v *int16) *UsageLogCreate {
+	if v != nil {
+		_c.SetRequestType(*v)
+	}
+	return _c
+}
+
 // SetStream sets the "stream" field.
 func (_c *UsageLogCreate) SetStream(v bool) *UsageLogCreate {
 	_c.mutation.SetStream(v)
@@ -581,6 +595,216 @@ func (_c *UsageLogCreate) SetImageSizeBreakdown(v map[string]int) *UsageLogCreat
 	return _c
 }
 
+// SetRequestCount sets the "request_count" field.
+func (_c *UsageLogCreate) SetRequestCount(v int) *UsageLogCreate {
+	_c.mutation.SetRequestCount(v)
+	return _c
+}
+
+// SetNillableRequestCount sets the "request_count" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableRequestCount(v *int) *UsageLogCreate {
+	if v != nil {
+		_c.SetRequestCount(*v)
+	}
+	return _c
+}
+
+// SetTaskCount sets the "task_count" field.
+func (_c *UsageLogCreate) SetTaskCount(v int) *UsageLogCreate {
+	_c.mutation.SetTaskCount(v)
+	return _c
+}
+
+// SetNillableTaskCount sets the "task_count" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableTaskCount(v *int) *UsageLogCreate {
+	if v != nil {
+		_c.SetTaskCount(*v)
+	}
+	return _c
+}
+
+// SetUsageEstimated sets the "usage_estimated" field.
+func (_c *UsageLogCreate) SetUsageEstimated(v bool) *UsageLogCreate {
+	_c.mutation.SetUsageEstimated(v)
+	return _c
+}
+
+// SetNillableUsageEstimated sets the "usage_estimated" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableUsageEstimated(v *bool) *UsageLogCreate {
+	if v != nil {
+		_c.SetUsageEstimated(*v)
+	}
+	return _c
+}
+
+// SetBillableUnitType sets the "billable_unit_type" field.
+func (_c *UsageLogCreate) SetBillableUnitType(v string) *UsageLogCreate {
+	_c.mutation.SetBillableUnitType(v)
+	return _c
+}
+
+// SetNillableBillableUnitType sets the "billable_unit_type" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableBillableUnitType(v *string) *UsageLogCreate {
+	if v != nil {
+		_c.SetBillableUnitType(*v)
+	}
+	return _c
+}
+
+// SetVideoCount sets the "video_count" field.
+func (_c *UsageLogCreate) SetVideoCount(v int) *UsageLogCreate {
+	_c.mutation.SetVideoCount(v)
+	return _c
+}
+
+// SetNillableVideoCount sets the "video_count" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableVideoCount(v *int) *UsageLogCreate {
+	if v != nil {
+		_c.SetVideoCount(*v)
+	}
+	return _c
+}
+
+// SetVideoResolution sets the "video_resolution" field.
+func (_c *UsageLogCreate) SetVideoResolution(v string) *UsageLogCreate {
+	_c.mutation.SetVideoResolution(v)
+	return _c
+}
+
+// SetNillableVideoResolution sets the "video_resolution" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableVideoResolution(v *string) *UsageLogCreate {
+	if v != nil {
+		_c.SetVideoResolution(*v)
+	}
+	return _c
+}
+
+// SetVideoDurationSeconds sets the "video_duration_seconds" field.
+func (_c *UsageLogCreate) SetVideoDurationSeconds(v int) *UsageLogCreate {
+	_c.mutation.SetVideoDurationSeconds(v)
+	return _c
+}
+
+// SetNillableVideoDurationSeconds sets the "video_duration_seconds" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableVideoDurationSeconds(v *int) *UsageLogCreate {
+	if v != nil {
+		_c.SetVideoDurationSeconds(*v)
+	}
+	return _c
+}
+
+// SetServiceTier sets the "service_tier" field.
+func (_c *UsageLogCreate) SetServiceTier(v string) *UsageLogCreate {
+	_c.mutation.SetServiceTier(v)
+	return _c
+}
+
+// SetNillableServiceTier sets the "service_tier" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableServiceTier(v *string) *UsageLogCreate {
+	if v != nil {
+		_c.SetServiceTier(*v)
+	}
+	return _c
+}
+
+// SetReasoningEffort sets the "reasoning_effort" field.
+func (_c *UsageLogCreate) SetReasoningEffort(v string) *UsageLogCreate {
+	_c.mutation.SetReasoningEffort(v)
+	return _c
+}
+
+// SetNillableReasoningEffort sets the "reasoning_effort" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableReasoningEffort(v *string) *UsageLogCreate {
+	if v != nil {
+		_c.SetReasoningEffort(*v)
+	}
+	return _c
+}
+
+// SetInboundEndpoint sets the "inbound_endpoint" field.
+func (_c *UsageLogCreate) SetInboundEndpoint(v string) *UsageLogCreate {
+	_c.mutation.SetInboundEndpoint(v)
+	return _c
+}
+
+// SetNillableInboundEndpoint sets the "inbound_endpoint" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableInboundEndpoint(v *string) *UsageLogCreate {
+	if v != nil {
+		_c.SetInboundEndpoint(*v)
+	}
+	return _c
+}
+
+// SetUpstreamEndpoint sets the "upstream_endpoint" field.
+func (_c *UsageLogCreate) SetUpstreamEndpoint(v string) *UsageLogCreate {
+	_c.mutation.SetUpstreamEndpoint(v)
+	return _c
+}
+
+// SetNillableUpstreamEndpoint sets the "upstream_endpoint" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableUpstreamEndpoint(v *string) *UsageLogCreate {
+	if v != nil {
+		_c.SetUpstreamEndpoint(*v)
+	}
+	return _c
+}
+
+// SetClientProfile sets the "client_profile" field.
+func (_c *UsageLogCreate) SetClientProfile(v string) *UsageLogCreate {
+	_c.mutation.SetClientProfile(v)
+	return _c
+}
+
+// SetNillableClientProfile sets the "client_profile" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableClientProfile(v *string) *UsageLogCreate {
+	if v != nil {
+		_c.SetClientProfile(*v)
+	}
+	return _c
+}
+
+// SetCompatibilityRoute sets the "compatibility_route" field.
+func (_c *UsageLogCreate) SetCompatibilityRoute(v string) *UsageLogCreate {
+	_c.mutation.SetCompatibilityRoute(v)
+	return _c
+}
+
+// SetNillableCompatibilityRoute sets the "compatibility_route" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableCompatibilityRoute(v *string) *UsageLogCreate {
+	if v != nil {
+		_c.SetCompatibilityRoute(*v)
+	}
+	return _c
+}
+
+// SetFallbackChain sets the "fallback_chain" field.
+func (_c *UsageLogCreate) SetFallbackChain(v string) *UsageLogCreate {
+	_c.mutation.SetFallbackChain(v)
+	return _c
+}
+
+// SetNillableFallbackChain sets the "fallback_chain" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableFallbackChain(v *string) *UsageLogCreate {
+	if v != nil {
+		_c.SetFallbackChain(*v)
+	}
+	return _c
+}
+
+// SetUpstreamTransport sets the "upstream_transport" field.
+func (_c *UsageLogCreate) SetUpstreamTransport(v string) *UsageLogCreate {
+	_c.mutation.SetUpstreamTransport(v)
+	return _c
+}
+
+// SetNillableUpstreamTransport sets the "upstream_transport" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableUpstreamTransport(v *string) *UsageLogCreate {
+	if v != nil {
+		_c.SetUpstreamTransport(*v)
+	}
+	return _c
+}
+
 // SetCacheTTLOverridden sets the "cache_ttl_overridden" field.
 func (_c *UsageLogCreate) SetCacheTTLOverridden(v bool) *UsageLogCreate {
 	_c.mutation.SetCacheTTLOverridden(v)
@@ -733,6 +957,10 @@ func (_c *UsageLogCreate) defaults() {
 		v := usagelog.DefaultBillingType
 		_c.mutation.SetBillingType(v)
 	}
+	if _, ok := _c.mutation.RequestType(); !ok {
+		v := usagelog.DefaultRequestType
+		_c.mutation.SetRequestType(v)
+	}
 	if _, ok := _c.mutation.Stream(); !ok {
 		v := usagelog.DefaultStream
 		_c.mutation.SetStream(v)
@@ -748,6 +976,22 @@ func (_c *UsageLogCreate) defaults() {
 	if _, ok := _c.mutation.BillableCharacterCount(); !ok {
 		v := usagelog.DefaultBillableCharacterCount
 		_c.mutation.SetBillableCharacterCount(v)
+	}
+	if _, ok := _c.mutation.RequestCount(); !ok {
+		v := usagelog.DefaultRequestCount
+		_c.mutation.SetRequestCount(v)
+	}
+	if _, ok := _c.mutation.TaskCount(); !ok {
+		v := usagelog.DefaultTaskCount
+		_c.mutation.SetTaskCount(v)
+	}
+	if _, ok := _c.mutation.UsageEstimated(); !ok {
+		v := usagelog.DefaultUsageEstimated
+		_c.mutation.SetUsageEstimated(v)
+	}
+	if _, ok := _c.mutation.VideoCount(); !ok {
+		v := usagelog.DefaultVideoCount
+		_c.mutation.SetVideoCount(v)
 	}
 	if _, ok := _c.mutation.CacheTTLOverridden(); !ok {
 		v := usagelog.DefaultCacheTTLOverridden
@@ -859,6 +1103,9 @@ func (_c *UsageLogCreate) check() error {
 	if _, ok := _c.mutation.BillingType(); !ok {
 		return &ValidationError{Name: "billing_type", err: errors.New(`ent: missing required field "UsageLog.billing_type"`)}
 	}
+	if _, ok := _c.mutation.RequestType(); !ok {
+		return &ValidationError{Name: "request_type", err: errors.New(`ent: missing required field "UsageLog.request_type"`)}
+	}
 	if _, ok := _c.mutation.Stream(); !ok {
 		return &ValidationError{Name: "stream", err: errors.New(`ent: missing required field "UsageLog.stream"`)}
 	}
@@ -899,6 +1146,63 @@ func (_c *UsageLogCreate) check() error {
 	if v, ok := _c.mutation.ImageSizeSource(); ok {
 		if err := usagelog.ImageSizeSourceValidator(v); err != nil {
 			return &ValidationError{Name: "image_size_source", err: fmt.Errorf(`ent: validator failed for field "UsageLog.image_size_source": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.RequestCount(); !ok {
+		return &ValidationError{Name: "request_count", err: errors.New(`ent: missing required field "UsageLog.request_count"`)}
+	}
+	if _, ok := _c.mutation.TaskCount(); !ok {
+		return &ValidationError{Name: "task_count", err: errors.New(`ent: missing required field "UsageLog.task_count"`)}
+	}
+	if _, ok := _c.mutation.UsageEstimated(); !ok {
+		return &ValidationError{Name: "usage_estimated", err: errors.New(`ent: missing required field "UsageLog.usage_estimated"`)}
+	}
+	if v, ok := _c.mutation.BillableUnitType(); ok {
+		if err := usagelog.BillableUnitTypeValidator(v); err != nil {
+			return &ValidationError{Name: "billable_unit_type", err: fmt.Errorf(`ent: validator failed for field "UsageLog.billable_unit_type": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.VideoCount(); !ok {
+		return &ValidationError{Name: "video_count", err: errors.New(`ent: missing required field "UsageLog.video_count"`)}
+	}
+	if v, ok := _c.mutation.VideoResolution(); ok {
+		if err := usagelog.VideoResolutionValidator(v); err != nil {
+			return &ValidationError{Name: "video_resolution", err: fmt.Errorf(`ent: validator failed for field "UsageLog.video_resolution": %w`, err)}
+		}
+	}
+	if v, ok := _c.mutation.ServiceTier(); ok {
+		if err := usagelog.ServiceTierValidator(v); err != nil {
+			return &ValidationError{Name: "service_tier", err: fmt.Errorf(`ent: validator failed for field "UsageLog.service_tier": %w`, err)}
+		}
+	}
+	if v, ok := _c.mutation.ReasoningEffort(); ok {
+		if err := usagelog.ReasoningEffortValidator(v); err != nil {
+			return &ValidationError{Name: "reasoning_effort", err: fmt.Errorf(`ent: validator failed for field "UsageLog.reasoning_effort": %w`, err)}
+		}
+	}
+	if v, ok := _c.mutation.InboundEndpoint(); ok {
+		if err := usagelog.InboundEndpointValidator(v); err != nil {
+			return &ValidationError{Name: "inbound_endpoint", err: fmt.Errorf(`ent: validator failed for field "UsageLog.inbound_endpoint": %w`, err)}
+		}
+	}
+	if v, ok := _c.mutation.UpstreamEndpoint(); ok {
+		if err := usagelog.UpstreamEndpointValidator(v); err != nil {
+			return &ValidationError{Name: "upstream_endpoint", err: fmt.Errorf(`ent: validator failed for field "UsageLog.upstream_endpoint": %w`, err)}
+		}
+	}
+	if v, ok := _c.mutation.ClientProfile(); ok {
+		if err := usagelog.ClientProfileValidator(v); err != nil {
+			return &ValidationError{Name: "client_profile", err: fmt.Errorf(`ent: validator failed for field "UsageLog.client_profile": %w`, err)}
+		}
+	}
+	if v, ok := _c.mutation.CompatibilityRoute(); ok {
+		if err := usagelog.CompatibilityRouteValidator(v); err != nil {
+			return &ValidationError{Name: "compatibility_route", err: fmt.Errorf(`ent: validator failed for field "UsageLog.compatibility_route": %w`, err)}
+		}
+	}
+	if v, ok := _c.mutation.UpstreamTransport(); ok {
+		if err := usagelog.UpstreamTransportValidator(v); err != nil {
+			return &ValidationError{Name: "upstream_transport", err: fmt.Errorf(`ent: validator failed for field "UsageLog.upstream_transport": %w`, err)}
 		}
 	}
 	if _, ok := _c.mutation.CacheTTLOverridden(); !ok {
@@ -1043,6 +1347,10 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 		_spec.SetField(usagelog.FieldBillingType, field.TypeInt8, value)
 		_node.BillingType = value
 	}
+	if value, ok := _c.mutation.RequestType(); ok {
+		_spec.SetField(usagelog.FieldRequestType, field.TypeInt16, value)
+		_node.RequestType = value
+	}
 	if value, ok := _c.mutation.Stream(); ok {
 		_spec.SetField(usagelog.FieldStream, field.TypeBool, value)
 		_node.Stream = value
@@ -1094,6 +1402,66 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.ImageSizeBreakdown(); ok {
 		_spec.SetField(usagelog.FieldImageSizeBreakdown, field.TypeJSON, value)
 		_node.ImageSizeBreakdown = value
+	}
+	if value, ok := _c.mutation.RequestCount(); ok {
+		_spec.SetField(usagelog.FieldRequestCount, field.TypeInt, value)
+		_node.RequestCount = value
+	}
+	if value, ok := _c.mutation.TaskCount(); ok {
+		_spec.SetField(usagelog.FieldTaskCount, field.TypeInt, value)
+		_node.TaskCount = value
+	}
+	if value, ok := _c.mutation.UsageEstimated(); ok {
+		_spec.SetField(usagelog.FieldUsageEstimated, field.TypeBool, value)
+		_node.UsageEstimated = value
+	}
+	if value, ok := _c.mutation.BillableUnitType(); ok {
+		_spec.SetField(usagelog.FieldBillableUnitType, field.TypeString, value)
+		_node.BillableUnitType = &value
+	}
+	if value, ok := _c.mutation.VideoCount(); ok {
+		_spec.SetField(usagelog.FieldVideoCount, field.TypeInt, value)
+		_node.VideoCount = value
+	}
+	if value, ok := _c.mutation.VideoResolution(); ok {
+		_spec.SetField(usagelog.FieldVideoResolution, field.TypeString, value)
+		_node.VideoResolution = &value
+	}
+	if value, ok := _c.mutation.VideoDurationSeconds(); ok {
+		_spec.SetField(usagelog.FieldVideoDurationSeconds, field.TypeInt, value)
+		_node.VideoDurationSeconds = &value
+	}
+	if value, ok := _c.mutation.ServiceTier(); ok {
+		_spec.SetField(usagelog.FieldServiceTier, field.TypeString, value)
+		_node.ServiceTier = &value
+	}
+	if value, ok := _c.mutation.ReasoningEffort(); ok {
+		_spec.SetField(usagelog.FieldReasoningEffort, field.TypeString, value)
+		_node.ReasoningEffort = &value
+	}
+	if value, ok := _c.mutation.InboundEndpoint(); ok {
+		_spec.SetField(usagelog.FieldInboundEndpoint, field.TypeString, value)
+		_node.InboundEndpoint = &value
+	}
+	if value, ok := _c.mutation.UpstreamEndpoint(); ok {
+		_spec.SetField(usagelog.FieldUpstreamEndpoint, field.TypeString, value)
+		_node.UpstreamEndpoint = &value
+	}
+	if value, ok := _c.mutation.ClientProfile(); ok {
+		_spec.SetField(usagelog.FieldClientProfile, field.TypeString, value)
+		_node.ClientProfile = &value
+	}
+	if value, ok := _c.mutation.CompatibilityRoute(); ok {
+		_spec.SetField(usagelog.FieldCompatibilityRoute, field.TypeString, value)
+		_node.CompatibilityRoute = &value
+	}
+	if value, ok := _c.mutation.FallbackChain(); ok {
+		_spec.SetField(usagelog.FieldFallbackChain, field.TypeString, value)
+		_node.FallbackChain = &value
+	}
+	if value, ok := _c.mutation.UpstreamTransport(); ok {
+		_spec.SetField(usagelog.FieldUpstreamTransport, field.TypeString, value)
+		_node.UpstreamTransport = &value
 	}
 	if value, ok := _c.mutation.CacheTTLOverridden(); ok {
 		_spec.SetField(usagelog.FieldCacheTTLOverridden, field.TypeBool, value)
@@ -1762,6 +2130,24 @@ func (u *UsageLogUpsert) AddBillingType(v int8) *UsageLogUpsert {
 	return u
 }
 
+// SetRequestType sets the "request_type" field.
+func (u *UsageLogUpsert) SetRequestType(v int16) *UsageLogUpsert {
+	u.Set(usagelog.FieldRequestType, v)
+	return u
+}
+
+// UpdateRequestType sets the "request_type" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateRequestType() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldRequestType)
+	return u
+}
+
+// AddRequestType adds v to the "request_type" field.
+func (u *UsageLogUpsert) AddRequestType(v int16) *UsageLogUpsert {
+	u.Add(usagelog.FieldRequestType, v)
+	return u
+}
+
 // SetStream sets the "stream" field.
 func (u *UsageLogUpsert) SetStream(v bool) *UsageLogUpsert {
 	u.Set(usagelog.FieldStream, v)
@@ -1999,6 +2385,276 @@ func (u *UsageLogUpsert) UpdateImageSizeBreakdown() *UsageLogUpsert {
 // ClearImageSizeBreakdown clears the value of the "image_size_breakdown" field.
 func (u *UsageLogUpsert) ClearImageSizeBreakdown() *UsageLogUpsert {
 	u.SetNull(usagelog.FieldImageSizeBreakdown)
+	return u
+}
+
+// SetRequestCount sets the "request_count" field.
+func (u *UsageLogUpsert) SetRequestCount(v int) *UsageLogUpsert {
+	u.Set(usagelog.FieldRequestCount, v)
+	return u
+}
+
+// UpdateRequestCount sets the "request_count" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateRequestCount() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldRequestCount)
+	return u
+}
+
+// AddRequestCount adds v to the "request_count" field.
+func (u *UsageLogUpsert) AddRequestCount(v int) *UsageLogUpsert {
+	u.Add(usagelog.FieldRequestCount, v)
+	return u
+}
+
+// SetTaskCount sets the "task_count" field.
+func (u *UsageLogUpsert) SetTaskCount(v int) *UsageLogUpsert {
+	u.Set(usagelog.FieldTaskCount, v)
+	return u
+}
+
+// UpdateTaskCount sets the "task_count" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateTaskCount() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldTaskCount)
+	return u
+}
+
+// AddTaskCount adds v to the "task_count" field.
+func (u *UsageLogUpsert) AddTaskCount(v int) *UsageLogUpsert {
+	u.Add(usagelog.FieldTaskCount, v)
+	return u
+}
+
+// SetUsageEstimated sets the "usage_estimated" field.
+func (u *UsageLogUpsert) SetUsageEstimated(v bool) *UsageLogUpsert {
+	u.Set(usagelog.FieldUsageEstimated, v)
+	return u
+}
+
+// UpdateUsageEstimated sets the "usage_estimated" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateUsageEstimated() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldUsageEstimated)
+	return u
+}
+
+// SetBillableUnitType sets the "billable_unit_type" field.
+func (u *UsageLogUpsert) SetBillableUnitType(v string) *UsageLogUpsert {
+	u.Set(usagelog.FieldBillableUnitType, v)
+	return u
+}
+
+// UpdateBillableUnitType sets the "billable_unit_type" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateBillableUnitType() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldBillableUnitType)
+	return u
+}
+
+// ClearBillableUnitType clears the value of the "billable_unit_type" field.
+func (u *UsageLogUpsert) ClearBillableUnitType() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldBillableUnitType)
+	return u
+}
+
+// SetVideoCount sets the "video_count" field.
+func (u *UsageLogUpsert) SetVideoCount(v int) *UsageLogUpsert {
+	u.Set(usagelog.FieldVideoCount, v)
+	return u
+}
+
+// UpdateVideoCount sets the "video_count" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateVideoCount() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldVideoCount)
+	return u
+}
+
+// AddVideoCount adds v to the "video_count" field.
+func (u *UsageLogUpsert) AddVideoCount(v int) *UsageLogUpsert {
+	u.Add(usagelog.FieldVideoCount, v)
+	return u
+}
+
+// SetVideoResolution sets the "video_resolution" field.
+func (u *UsageLogUpsert) SetVideoResolution(v string) *UsageLogUpsert {
+	u.Set(usagelog.FieldVideoResolution, v)
+	return u
+}
+
+// UpdateVideoResolution sets the "video_resolution" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateVideoResolution() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldVideoResolution)
+	return u
+}
+
+// ClearVideoResolution clears the value of the "video_resolution" field.
+func (u *UsageLogUpsert) ClearVideoResolution() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldVideoResolution)
+	return u
+}
+
+// SetVideoDurationSeconds sets the "video_duration_seconds" field.
+func (u *UsageLogUpsert) SetVideoDurationSeconds(v int) *UsageLogUpsert {
+	u.Set(usagelog.FieldVideoDurationSeconds, v)
+	return u
+}
+
+// UpdateVideoDurationSeconds sets the "video_duration_seconds" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateVideoDurationSeconds() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldVideoDurationSeconds)
+	return u
+}
+
+// AddVideoDurationSeconds adds v to the "video_duration_seconds" field.
+func (u *UsageLogUpsert) AddVideoDurationSeconds(v int) *UsageLogUpsert {
+	u.Add(usagelog.FieldVideoDurationSeconds, v)
+	return u
+}
+
+// ClearVideoDurationSeconds clears the value of the "video_duration_seconds" field.
+func (u *UsageLogUpsert) ClearVideoDurationSeconds() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldVideoDurationSeconds)
+	return u
+}
+
+// SetServiceTier sets the "service_tier" field.
+func (u *UsageLogUpsert) SetServiceTier(v string) *UsageLogUpsert {
+	u.Set(usagelog.FieldServiceTier, v)
+	return u
+}
+
+// UpdateServiceTier sets the "service_tier" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateServiceTier() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldServiceTier)
+	return u
+}
+
+// ClearServiceTier clears the value of the "service_tier" field.
+func (u *UsageLogUpsert) ClearServiceTier() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldServiceTier)
+	return u
+}
+
+// SetReasoningEffort sets the "reasoning_effort" field.
+func (u *UsageLogUpsert) SetReasoningEffort(v string) *UsageLogUpsert {
+	u.Set(usagelog.FieldReasoningEffort, v)
+	return u
+}
+
+// UpdateReasoningEffort sets the "reasoning_effort" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateReasoningEffort() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldReasoningEffort)
+	return u
+}
+
+// ClearReasoningEffort clears the value of the "reasoning_effort" field.
+func (u *UsageLogUpsert) ClearReasoningEffort() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldReasoningEffort)
+	return u
+}
+
+// SetInboundEndpoint sets the "inbound_endpoint" field.
+func (u *UsageLogUpsert) SetInboundEndpoint(v string) *UsageLogUpsert {
+	u.Set(usagelog.FieldInboundEndpoint, v)
+	return u
+}
+
+// UpdateInboundEndpoint sets the "inbound_endpoint" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateInboundEndpoint() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldInboundEndpoint)
+	return u
+}
+
+// ClearInboundEndpoint clears the value of the "inbound_endpoint" field.
+func (u *UsageLogUpsert) ClearInboundEndpoint() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldInboundEndpoint)
+	return u
+}
+
+// SetUpstreamEndpoint sets the "upstream_endpoint" field.
+func (u *UsageLogUpsert) SetUpstreamEndpoint(v string) *UsageLogUpsert {
+	u.Set(usagelog.FieldUpstreamEndpoint, v)
+	return u
+}
+
+// UpdateUpstreamEndpoint sets the "upstream_endpoint" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateUpstreamEndpoint() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldUpstreamEndpoint)
+	return u
+}
+
+// ClearUpstreamEndpoint clears the value of the "upstream_endpoint" field.
+func (u *UsageLogUpsert) ClearUpstreamEndpoint() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldUpstreamEndpoint)
+	return u
+}
+
+// SetClientProfile sets the "client_profile" field.
+func (u *UsageLogUpsert) SetClientProfile(v string) *UsageLogUpsert {
+	u.Set(usagelog.FieldClientProfile, v)
+	return u
+}
+
+// UpdateClientProfile sets the "client_profile" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateClientProfile() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldClientProfile)
+	return u
+}
+
+// ClearClientProfile clears the value of the "client_profile" field.
+func (u *UsageLogUpsert) ClearClientProfile() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldClientProfile)
+	return u
+}
+
+// SetCompatibilityRoute sets the "compatibility_route" field.
+func (u *UsageLogUpsert) SetCompatibilityRoute(v string) *UsageLogUpsert {
+	u.Set(usagelog.FieldCompatibilityRoute, v)
+	return u
+}
+
+// UpdateCompatibilityRoute sets the "compatibility_route" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateCompatibilityRoute() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldCompatibilityRoute)
+	return u
+}
+
+// ClearCompatibilityRoute clears the value of the "compatibility_route" field.
+func (u *UsageLogUpsert) ClearCompatibilityRoute() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldCompatibilityRoute)
+	return u
+}
+
+// SetFallbackChain sets the "fallback_chain" field.
+func (u *UsageLogUpsert) SetFallbackChain(v string) *UsageLogUpsert {
+	u.Set(usagelog.FieldFallbackChain, v)
+	return u
+}
+
+// UpdateFallbackChain sets the "fallback_chain" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateFallbackChain() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldFallbackChain)
+	return u
+}
+
+// ClearFallbackChain clears the value of the "fallback_chain" field.
+func (u *UsageLogUpsert) ClearFallbackChain() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldFallbackChain)
+	return u
+}
+
+// SetUpstreamTransport sets the "upstream_transport" field.
+func (u *UsageLogUpsert) SetUpstreamTransport(v string) *UsageLogUpsert {
+	u.Set(usagelog.FieldUpstreamTransport, v)
+	return u
+}
+
+// UpdateUpstreamTransport sets the "upstream_transport" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateUpstreamTransport() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldUpstreamTransport)
+	return u
+}
+
+// ClearUpstreamTransport clears the value of the "upstream_transport" field.
+func (u *UsageLogUpsert) ClearUpstreamTransport() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldUpstreamTransport)
 	return u
 }
 
@@ -2668,6 +3324,27 @@ func (u *UsageLogUpsertOne) UpdateBillingType() *UsageLogUpsertOne {
 	})
 }
 
+// SetRequestType sets the "request_type" field.
+func (u *UsageLogUpsertOne) SetRequestType(v int16) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetRequestType(v)
+	})
+}
+
+// AddRequestType adds v to the "request_type" field.
+func (u *UsageLogUpsertOne) AddRequestType(v int16) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddRequestType(v)
+	})
+}
+
+// UpdateRequestType sets the "request_type" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateRequestType() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateRequestType()
+	})
+}
+
 // SetStream sets the "stream" field.
 func (u *UsageLogUpsertOne) SetStream(v bool) *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
@@ -2945,6 +3622,321 @@ func (u *UsageLogUpsertOne) UpdateImageSizeBreakdown() *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) ClearImageSizeBreakdown() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearImageSizeBreakdown()
+	})
+}
+
+// SetRequestCount sets the "request_count" field.
+func (u *UsageLogUpsertOne) SetRequestCount(v int) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetRequestCount(v)
+	})
+}
+
+// AddRequestCount adds v to the "request_count" field.
+func (u *UsageLogUpsertOne) AddRequestCount(v int) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddRequestCount(v)
+	})
+}
+
+// UpdateRequestCount sets the "request_count" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateRequestCount() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateRequestCount()
+	})
+}
+
+// SetTaskCount sets the "task_count" field.
+func (u *UsageLogUpsertOne) SetTaskCount(v int) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetTaskCount(v)
+	})
+}
+
+// AddTaskCount adds v to the "task_count" field.
+func (u *UsageLogUpsertOne) AddTaskCount(v int) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddTaskCount(v)
+	})
+}
+
+// UpdateTaskCount sets the "task_count" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateTaskCount() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateTaskCount()
+	})
+}
+
+// SetUsageEstimated sets the "usage_estimated" field.
+func (u *UsageLogUpsertOne) SetUsageEstimated(v bool) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetUsageEstimated(v)
+	})
+}
+
+// UpdateUsageEstimated sets the "usage_estimated" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateUsageEstimated() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateUsageEstimated()
+	})
+}
+
+// SetBillableUnitType sets the "billable_unit_type" field.
+func (u *UsageLogUpsertOne) SetBillableUnitType(v string) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetBillableUnitType(v)
+	})
+}
+
+// UpdateBillableUnitType sets the "billable_unit_type" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateBillableUnitType() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateBillableUnitType()
+	})
+}
+
+// ClearBillableUnitType clears the value of the "billable_unit_type" field.
+func (u *UsageLogUpsertOne) ClearBillableUnitType() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearBillableUnitType()
+	})
+}
+
+// SetVideoCount sets the "video_count" field.
+func (u *UsageLogUpsertOne) SetVideoCount(v int) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetVideoCount(v)
+	})
+}
+
+// AddVideoCount adds v to the "video_count" field.
+func (u *UsageLogUpsertOne) AddVideoCount(v int) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddVideoCount(v)
+	})
+}
+
+// UpdateVideoCount sets the "video_count" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateVideoCount() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateVideoCount()
+	})
+}
+
+// SetVideoResolution sets the "video_resolution" field.
+func (u *UsageLogUpsertOne) SetVideoResolution(v string) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetVideoResolution(v)
+	})
+}
+
+// UpdateVideoResolution sets the "video_resolution" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateVideoResolution() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateVideoResolution()
+	})
+}
+
+// ClearVideoResolution clears the value of the "video_resolution" field.
+func (u *UsageLogUpsertOne) ClearVideoResolution() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearVideoResolution()
+	})
+}
+
+// SetVideoDurationSeconds sets the "video_duration_seconds" field.
+func (u *UsageLogUpsertOne) SetVideoDurationSeconds(v int) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetVideoDurationSeconds(v)
+	})
+}
+
+// AddVideoDurationSeconds adds v to the "video_duration_seconds" field.
+func (u *UsageLogUpsertOne) AddVideoDurationSeconds(v int) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddVideoDurationSeconds(v)
+	})
+}
+
+// UpdateVideoDurationSeconds sets the "video_duration_seconds" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateVideoDurationSeconds() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateVideoDurationSeconds()
+	})
+}
+
+// ClearVideoDurationSeconds clears the value of the "video_duration_seconds" field.
+func (u *UsageLogUpsertOne) ClearVideoDurationSeconds() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearVideoDurationSeconds()
+	})
+}
+
+// SetServiceTier sets the "service_tier" field.
+func (u *UsageLogUpsertOne) SetServiceTier(v string) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetServiceTier(v)
+	})
+}
+
+// UpdateServiceTier sets the "service_tier" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateServiceTier() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateServiceTier()
+	})
+}
+
+// ClearServiceTier clears the value of the "service_tier" field.
+func (u *UsageLogUpsertOne) ClearServiceTier() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearServiceTier()
+	})
+}
+
+// SetReasoningEffort sets the "reasoning_effort" field.
+func (u *UsageLogUpsertOne) SetReasoningEffort(v string) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetReasoningEffort(v)
+	})
+}
+
+// UpdateReasoningEffort sets the "reasoning_effort" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateReasoningEffort() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateReasoningEffort()
+	})
+}
+
+// ClearReasoningEffort clears the value of the "reasoning_effort" field.
+func (u *UsageLogUpsertOne) ClearReasoningEffort() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearReasoningEffort()
+	})
+}
+
+// SetInboundEndpoint sets the "inbound_endpoint" field.
+func (u *UsageLogUpsertOne) SetInboundEndpoint(v string) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetInboundEndpoint(v)
+	})
+}
+
+// UpdateInboundEndpoint sets the "inbound_endpoint" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateInboundEndpoint() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateInboundEndpoint()
+	})
+}
+
+// ClearInboundEndpoint clears the value of the "inbound_endpoint" field.
+func (u *UsageLogUpsertOne) ClearInboundEndpoint() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearInboundEndpoint()
+	})
+}
+
+// SetUpstreamEndpoint sets the "upstream_endpoint" field.
+func (u *UsageLogUpsertOne) SetUpstreamEndpoint(v string) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetUpstreamEndpoint(v)
+	})
+}
+
+// UpdateUpstreamEndpoint sets the "upstream_endpoint" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateUpstreamEndpoint() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateUpstreamEndpoint()
+	})
+}
+
+// ClearUpstreamEndpoint clears the value of the "upstream_endpoint" field.
+func (u *UsageLogUpsertOne) ClearUpstreamEndpoint() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearUpstreamEndpoint()
+	})
+}
+
+// SetClientProfile sets the "client_profile" field.
+func (u *UsageLogUpsertOne) SetClientProfile(v string) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetClientProfile(v)
+	})
+}
+
+// UpdateClientProfile sets the "client_profile" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateClientProfile() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateClientProfile()
+	})
+}
+
+// ClearClientProfile clears the value of the "client_profile" field.
+func (u *UsageLogUpsertOne) ClearClientProfile() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearClientProfile()
+	})
+}
+
+// SetCompatibilityRoute sets the "compatibility_route" field.
+func (u *UsageLogUpsertOne) SetCompatibilityRoute(v string) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetCompatibilityRoute(v)
+	})
+}
+
+// UpdateCompatibilityRoute sets the "compatibility_route" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateCompatibilityRoute() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateCompatibilityRoute()
+	})
+}
+
+// ClearCompatibilityRoute clears the value of the "compatibility_route" field.
+func (u *UsageLogUpsertOne) ClearCompatibilityRoute() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearCompatibilityRoute()
+	})
+}
+
+// SetFallbackChain sets the "fallback_chain" field.
+func (u *UsageLogUpsertOne) SetFallbackChain(v string) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetFallbackChain(v)
+	})
+}
+
+// UpdateFallbackChain sets the "fallback_chain" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateFallbackChain() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateFallbackChain()
+	})
+}
+
+// ClearFallbackChain clears the value of the "fallback_chain" field.
+func (u *UsageLogUpsertOne) ClearFallbackChain() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearFallbackChain()
+	})
+}
+
+// SetUpstreamTransport sets the "upstream_transport" field.
+func (u *UsageLogUpsertOne) SetUpstreamTransport(v string) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetUpstreamTransport(v)
+	})
+}
+
+// UpdateUpstreamTransport sets the "upstream_transport" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateUpstreamTransport() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateUpstreamTransport()
+	})
+}
+
+// ClearUpstreamTransport clears the value of the "upstream_transport" field.
+func (u *UsageLogUpsertOne) ClearUpstreamTransport() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearUpstreamTransport()
 	})
 }
 
@@ -3782,6 +4774,27 @@ func (u *UsageLogUpsertBulk) UpdateBillingType() *UsageLogUpsertBulk {
 	})
 }
 
+// SetRequestType sets the "request_type" field.
+func (u *UsageLogUpsertBulk) SetRequestType(v int16) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetRequestType(v)
+	})
+}
+
+// AddRequestType adds v to the "request_type" field.
+func (u *UsageLogUpsertBulk) AddRequestType(v int16) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddRequestType(v)
+	})
+}
+
+// UpdateRequestType sets the "request_type" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateRequestType() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateRequestType()
+	})
+}
+
 // SetStream sets the "stream" field.
 func (u *UsageLogUpsertBulk) SetStream(v bool) *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
@@ -4059,6 +5072,321 @@ func (u *UsageLogUpsertBulk) UpdateImageSizeBreakdown() *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) ClearImageSizeBreakdown() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearImageSizeBreakdown()
+	})
+}
+
+// SetRequestCount sets the "request_count" field.
+func (u *UsageLogUpsertBulk) SetRequestCount(v int) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetRequestCount(v)
+	})
+}
+
+// AddRequestCount adds v to the "request_count" field.
+func (u *UsageLogUpsertBulk) AddRequestCount(v int) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddRequestCount(v)
+	})
+}
+
+// UpdateRequestCount sets the "request_count" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateRequestCount() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateRequestCount()
+	})
+}
+
+// SetTaskCount sets the "task_count" field.
+func (u *UsageLogUpsertBulk) SetTaskCount(v int) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetTaskCount(v)
+	})
+}
+
+// AddTaskCount adds v to the "task_count" field.
+func (u *UsageLogUpsertBulk) AddTaskCount(v int) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddTaskCount(v)
+	})
+}
+
+// UpdateTaskCount sets the "task_count" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateTaskCount() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateTaskCount()
+	})
+}
+
+// SetUsageEstimated sets the "usage_estimated" field.
+func (u *UsageLogUpsertBulk) SetUsageEstimated(v bool) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetUsageEstimated(v)
+	})
+}
+
+// UpdateUsageEstimated sets the "usage_estimated" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateUsageEstimated() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateUsageEstimated()
+	})
+}
+
+// SetBillableUnitType sets the "billable_unit_type" field.
+func (u *UsageLogUpsertBulk) SetBillableUnitType(v string) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetBillableUnitType(v)
+	})
+}
+
+// UpdateBillableUnitType sets the "billable_unit_type" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateBillableUnitType() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateBillableUnitType()
+	})
+}
+
+// ClearBillableUnitType clears the value of the "billable_unit_type" field.
+func (u *UsageLogUpsertBulk) ClearBillableUnitType() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearBillableUnitType()
+	})
+}
+
+// SetVideoCount sets the "video_count" field.
+func (u *UsageLogUpsertBulk) SetVideoCount(v int) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetVideoCount(v)
+	})
+}
+
+// AddVideoCount adds v to the "video_count" field.
+func (u *UsageLogUpsertBulk) AddVideoCount(v int) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddVideoCount(v)
+	})
+}
+
+// UpdateVideoCount sets the "video_count" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateVideoCount() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateVideoCount()
+	})
+}
+
+// SetVideoResolution sets the "video_resolution" field.
+func (u *UsageLogUpsertBulk) SetVideoResolution(v string) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetVideoResolution(v)
+	})
+}
+
+// UpdateVideoResolution sets the "video_resolution" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateVideoResolution() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateVideoResolution()
+	})
+}
+
+// ClearVideoResolution clears the value of the "video_resolution" field.
+func (u *UsageLogUpsertBulk) ClearVideoResolution() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearVideoResolution()
+	})
+}
+
+// SetVideoDurationSeconds sets the "video_duration_seconds" field.
+func (u *UsageLogUpsertBulk) SetVideoDurationSeconds(v int) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetVideoDurationSeconds(v)
+	})
+}
+
+// AddVideoDurationSeconds adds v to the "video_duration_seconds" field.
+func (u *UsageLogUpsertBulk) AddVideoDurationSeconds(v int) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddVideoDurationSeconds(v)
+	})
+}
+
+// UpdateVideoDurationSeconds sets the "video_duration_seconds" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateVideoDurationSeconds() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateVideoDurationSeconds()
+	})
+}
+
+// ClearVideoDurationSeconds clears the value of the "video_duration_seconds" field.
+func (u *UsageLogUpsertBulk) ClearVideoDurationSeconds() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearVideoDurationSeconds()
+	})
+}
+
+// SetServiceTier sets the "service_tier" field.
+func (u *UsageLogUpsertBulk) SetServiceTier(v string) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetServiceTier(v)
+	})
+}
+
+// UpdateServiceTier sets the "service_tier" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateServiceTier() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateServiceTier()
+	})
+}
+
+// ClearServiceTier clears the value of the "service_tier" field.
+func (u *UsageLogUpsertBulk) ClearServiceTier() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearServiceTier()
+	})
+}
+
+// SetReasoningEffort sets the "reasoning_effort" field.
+func (u *UsageLogUpsertBulk) SetReasoningEffort(v string) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetReasoningEffort(v)
+	})
+}
+
+// UpdateReasoningEffort sets the "reasoning_effort" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateReasoningEffort() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateReasoningEffort()
+	})
+}
+
+// ClearReasoningEffort clears the value of the "reasoning_effort" field.
+func (u *UsageLogUpsertBulk) ClearReasoningEffort() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearReasoningEffort()
+	})
+}
+
+// SetInboundEndpoint sets the "inbound_endpoint" field.
+func (u *UsageLogUpsertBulk) SetInboundEndpoint(v string) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetInboundEndpoint(v)
+	})
+}
+
+// UpdateInboundEndpoint sets the "inbound_endpoint" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateInboundEndpoint() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateInboundEndpoint()
+	})
+}
+
+// ClearInboundEndpoint clears the value of the "inbound_endpoint" field.
+func (u *UsageLogUpsertBulk) ClearInboundEndpoint() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearInboundEndpoint()
+	})
+}
+
+// SetUpstreamEndpoint sets the "upstream_endpoint" field.
+func (u *UsageLogUpsertBulk) SetUpstreamEndpoint(v string) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetUpstreamEndpoint(v)
+	})
+}
+
+// UpdateUpstreamEndpoint sets the "upstream_endpoint" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateUpstreamEndpoint() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateUpstreamEndpoint()
+	})
+}
+
+// ClearUpstreamEndpoint clears the value of the "upstream_endpoint" field.
+func (u *UsageLogUpsertBulk) ClearUpstreamEndpoint() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearUpstreamEndpoint()
+	})
+}
+
+// SetClientProfile sets the "client_profile" field.
+func (u *UsageLogUpsertBulk) SetClientProfile(v string) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetClientProfile(v)
+	})
+}
+
+// UpdateClientProfile sets the "client_profile" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateClientProfile() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateClientProfile()
+	})
+}
+
+// ClearClientProfile clears the value of the "client_profile" field.
+func (u *UsageLogUpsertBulk) ClearClientProfile() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearClientProfile()
+	})
+}
+
+// SetCompatibilityRoute sets the "compatibility_route" field.
+func (u *UsageLogUpsertBulk) SetCompatibilityRoute(v string) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetCompatibilityRoute(v)
+	})
+}
+
+// UpdateCompatibilityRoute sets the "compatibility_route" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateCompatibilityRoute() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateCompatibilityRoute()
+	})
+}
+
+// ClearCompatibilityRoute clears the value of the "compatibility_route" field.
+func (u *UsageLogUpsertBulk) ClearCompatibilityRoute() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearCompatibilityRoute()
+	})
+}
+
+// SetFallbackChain sets the "fallback_chain" field.
+func (u *UsageLogUpsertBulk) SetFallbackChain(v string) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetFallbackChain(v)
+	})
+}
+
+// UpdateFallbackChain sets the "fallback_chain" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateFallbackChain() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateFallbackChain()
+	})
+}
+
+// ClearFallbackChain clears the value of the "fallback_chain" field.
+func (u *UsageLogUpsertBulk) ClearFallbackChain() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearFallbackChain()
+	})
+}
+
+// SetUpstreamTransport sets the "upstream_transport" field.
+func (u *UsageLogUpsertBulk) SetUpstreamTransport(v string) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetUpstreamTransport(v)
+	})
+}
+
+// UpdateUpstreamTransport sets the "upstream_transport" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateUpstreamTransport() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateUpstreamTransport()
+	})
+}
+
+// ClearUpstreamTransport clears the value of the "upstream_transport" field.
+func (u *UsageLogUpsertBulk) ClearUpstreamTransport() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearUpstreamTransport()
 	})
 }
 

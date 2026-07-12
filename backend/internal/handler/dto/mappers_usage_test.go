@@ -73,18 +73,25 @@ func TestRequestTypeStringPtrNil(t *testing.T) {
 	require.Nil(t, requestTypeStringPtr(nil))
 }
 
-func TestUsageLogFromService_IncludesServiceTierForUserAndAdmin(t *testing.T) {
+func TestUsageLogFromService_ExposesOnlyUserSafeRoutingFields(t *testing.T) {
 	t.Parallel()
 
 	serviceTier := "priority"
 	inboundEndpoint := "/v1/chat/completions"
 	upstreamEndpoint := "/v1/responses"
+	fallbackChain := "responses -> chat_fallback"
+	compatibilityRoute := "openai_responses_bridge"
+	upstreamTransport := "sse"
 	log := &service.UsageLog{
 		RequestID:             "req_3",
+		AccountID:             200,
 		Model:                 "gpt-5.4",
 		ServiceTier:           &serviceTier,
 		InboundEndpoint:       &inboundEndpoint,
 		UpstreamEndpoint:      &upstreamEndpoint,
+		FallbackChain:         &fallbackChain,
+		CompatibilityRoute:    &compatibilityRoute,
+		UpstreamTransport:     &upstreamTransport,
 		AccountRateMultiplier: f64Ptr(1.5),
 	}
 
@@ -95,14 +102,37 @@ func TestUsageLogFromService_IncludesServiceTierForUserAndAdmin(t *testing.T) {
 	require.Equal(t, serviceTier, *userDTO.ServiceTier)
 	require.NotNil(t, userDTO.InboundEndpoint)
 	require.Equal(t, inboundEndpoint, *userDTO.InboundEndpoint)
-	require.NotNil(t, userDTO.UpstreamEndpoint)
-	require.Equal(t, upstreamEndpoint, *userDTO.UpstreamEndpoint)
+
+	userJSON, err := json.Marshal(userDTO)
+	require.NoError(t, err)
+	for _, forbidden := range []string{
+		"account_id",
+		"upstream_endpoint",
+		"fallback_chain",
+		"compatibility_route",
+		"upstream_transport",
+		upstreamEndpoint,
+		fallbackChain,
+		compatibilityRoute,
+		upstreamTransport,
+	} {
+		require.NotContains(t, string(userJSON), forbidden)
+	}
+
 	require.NotNil(t, adminDTO.ServiceTier)
 	require.Equal(t, serviceTier, *adminDTO.ServiceTier)
 	require.NotNil(t, adminDTO.InboundEndpoint)
 	require.Equal(t, inboundEndpoint, *adminDTO.InboundEndpoint)
+	require.NotNil(t, adminDTO.AccountID)
+	require.Equal(t, int64(200), *adminDTO.AccountID)
 	require.NotNil(t, adminDTO.UpstreamEndpoint)
 	require.Equal(t, upstreamEndpoint, *adminDTO.UpstreamEndpoint)
+	require.NotNil(t, adminDTO.FallbackChain)
+	require.Equal(t, fallbackChain, *adminDTO.FallbackChain)
+	require.NotNil(t, adminDTO.CompatibilityRoute)
+	require.Equal(t, compatibilityRoute, *adminDTO.CompatibilityRoute)
+	require.NotNil(t, adminDTO.UpstreamTransport)
+	require.Equal(t, upstreamTransport, *adminDTO.UpstreamTransport)
 	require.NotNil(t, adminDTO.AccountRateMultiplier)
 	require.InDelta(t, 1.5, *adminDTO.AccountRateMultiplier, 1e-12)
 }
@@ -133,6 +163,45 @@ func TestUsageLogFromService_UsesRequestedModelAndKeepsUpstreamAdminOnly(t *test
 	require.Contains(t, string(adminJSON), `"upstream_model":"claude-sonnet-4-20250514"`)
 }
 
+func TestUsageLogFromService_KeepsUserBillingAndIPWithoutAdminCostFields(t *testing.T) {
+	t.Parallel()
+
+	ipAddress := "203.0.113.10"
+	accountRateMultiplier := 1.5
+	accountStatsCost := 0.21
+	log := &service.UsageLog{
+		RequestID:             "req_user_visible_billing",
+		Model:                 "gpt-5.4",
+		InputCost:             0.01,
+		OutputCost:            0.02,
+		CacheCreationCost:     0.03,
+		CacheReadCost:         0.04,
+		TotalCost:             0.10,
+		ActualCost:            0.08,
+		RateMultiplier:        0.8,
+		IPAddress:             &ipAddress,
+		AccountRateMultiplier: &accountRateMultiplier,
+		AccountStatsCost:      &accountStatsCost,
+	}
+
+	userDTO := UsageLogFromService(log)
+	require.Equal(t, 0.01, userDTO.InputCost)
+	require.Equal(t, 0.02, userDTO.OutputCost)
+	require.Equal(t, 0.03, userDTO.CacheCreationCost)
+	require.Equal(t, 0.04, userDTO.CacheReadCost)
+	require.Equal(t, 0.10, userDTO.TotalCost)
+	require.Equal(t, 0.08, userDTO.ActualCost)
+	require.Equal(t, 0.8, userDTO.RateMultiplier)
+	require.NotNil(t, userDTO.IPAddress)
+	require.Equal(t, ipAddress, *userDTO.IPAddress)
+
+	userJSON, err := json.Marshal(userDTO)
+	require.NoError(t, err)
+	require.NotContains(t, string(userJSON), "account_rate_multiplier")
+	require.NotContains(t, string(userJSON), "account_stats_cost")
+	require.NotContains(t, string(userJSON), "account_cost")
+}
+
 func TestUsageLogFromService_FallsBackToLegacyModelWhenRequestedModelMissing(t *testing.T) {
 	t.Parallel()
 
@@ -146,6 +215,32 @@ func TestUsageLogFromService_FallsBackToLegacyModelWhenRequestedModelMissing(t *
 
 	require.Equal(t, "claude-3", userDTO.Model)
 	require.Equal(t, "claude-3", adminDTO.Model)
+}
+
+func TestUsageLogFromService_RedactsNestedAPIKeyForUser(t *testing.T) {
+	t.Parallel()
+
+	log := &service.UsageLog{
+		RequestID: "req_key_redact",
+		APIKey: &service.APIKey{
+			ID:     42,
+			UserID: 7,
+			Key:    "sk-sensitive-user-key",
+			Name:   "primary",
+			Status: "active",
+		},
+	}
+
+	userDTO := UsageLogFromService(log)
+	adminDTO := UsageLogFromServiceAdmin(log)
+
+	require.NotNil(t, userDTO.APIKey)
+	require.Equal(t, int64(42), userDTO.APIKey.ID)
+	require.Equal(t, "primary", userDTO.APIKey.Name)
+	require.Empty(t, userDTO.APIKey.Key)
+
+	require.NotNil(t, adminDTO.APIKey)
+	require.Empty(t, adminDTO.APIKey.Key)
 }
 
 func TestUsageLogFromService_IncludesImageBillingMetadataForUserAndAdmin(t *testing.T) {

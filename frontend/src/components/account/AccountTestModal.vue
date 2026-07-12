@@ -298,6 +298,7 @@ import Select from '@/components/common/Select.vue'
 import TextArea from '@/components/common/TextArea.vue'
 import { Icon } from '@/components/icons'
 import { useClipboard } from '@/composables/useClipboard'
+import { buildApiUrl } from '@/api/client'
 import { adminAPI } from '@/api/admin'
 import type { Account, ClaudeModel } from '@/types'
 
@@ -659,8 +660,8 @@ const startTest = async () => {
   abortController = new AbortController()
 
   try {
-    // Create EventSource for SSE
-    const url = `/api/v1/admin/accounts/${props.account.id}/test`
+    // Use the configured API base; EventSource does not support POST.
+    const url = buildApiUrl(`/admin/accounts/${props.account.id}/test`)
 
     // Use fetch with streaming for SSE since EventSource doesn't support POST
     const response = await fetch(url, {
@@ -672,9 +673,13 @@ const startTest = async () => {
       body: JSON.stringify({
         model_id: requestModelId(),
         prompt: showsPromptInput.value ? testPrompt.value.trim() : '',
-        mode: showOpenAITestMode.value ? testMode.value : 'default',
-        test_type: testType.value,
-        test_options: testType.value === 'tts' ? { voice: ttsVoice.value.trim() } : undefined
+        ...(props.account.platform === 'grok'
+          ? {}
+          : {
+              mode: showOpenAITestMode.value ? testMode.value : 'default',
+              test_type: testType.value,
+              test_options: testType.value === 'tts' ? { voice: ttsVoice.value.trim() } : undefined
+            })
       }),
       signal: abortController.signal
     })

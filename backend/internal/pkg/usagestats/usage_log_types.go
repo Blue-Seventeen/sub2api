@@ -185,6 +185,9 @@ type UserBreakdownItem struct {
 	UserID         int64   `json:"user_id"`
 	Email          string  `json:"email"`
 	Requests       int64   `json:"requests"`
+	InputTokens    int64   `json:"input_tokens"`  // 输入 token 累计
+	OutputTokens   int64   `json:"output_tokens"` // 输出 token 累计
+	CacheTokens    int64   `json:"cache_tokens"`  // 缓存创建 + 读取 token 累计
 	TotalTokens    int64   `json:"total_tokens"`
 	Cost           float64 `json:"cost"`
 	ActualCost     float64 `json:"actual_cost"`
@@ -206,6 +209,8 @@ type UserBreakdownDimension struct {
 	RequestType *int16 // filter by request_type (non-nil to enable)
 	Stream      *bool  // filter by stream flag (non-nil to enable)
 	BillingType *int8  // filter by billing_type (non-nil to enable)
+	// SortBy 指定排序列(空 = 默认按 actual_cost)。合法值由 repo 层 allowlist 校验。
+	SortBy string
 }
 
 // APIKeyUsageTrendPoint represents API key usage trend data point
@@ -280,17 +285,19 @@ type PlatformDashboardStats struct {
 
 // UsageLogFilters represents filters for usage log queries
 type UsageLogFilters struct {
-	UserID      int64
-	APIKeyID    int64
-	AccountID   int64
-	GroupID     int64
-	Model       string
-	RequestType *int16
-	Stream      *bool
-	BillingType *int8
-	BillingMode string
-	StartTime   *time.Time
-	EndTime     *time.Time
+	UserID    int64
+	APIKeyID  int64
+	AccountID int64
+	GroupID   int64
+	Model     string
+	// ModelFilterSource controls how Model is matched. Empty preserves raw usage_logs.model semantics.
+	ModelFilterSource string
+	RequestType       *int16
+	Stream            *bool
+	BillingType       *int8
+	BillingMode       string
+	StartTime         *time.Time
+	EndTime           *time.Time
 	// ExactTotal requests exact COUNT(*) for pagination. Default false for fast large-table paging.
 	ExactTotal bool
 }

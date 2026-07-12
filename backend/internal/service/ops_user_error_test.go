@@ -149,7 +149,7 @@ func TestToUserErrorRequest_LeavesSourceOpsLogUnchangedForAdminPath(t *testing.T
 	if out == nil {
 		t.Fatal("expected non-nil user view")
 	}
-	if out.Message == src.Message {
+	if out != nil && out.Message == src.Message {
 		t.Fatalf("user message should be redacted, got %q", out.Message)
 	}
 	if src.Message != message {
@@ -176,15 +176,18 @@ func TestToUserErrorRequestDetail_WhitelistAndRedacts(t *testing.T) {
 			UserEmail:        "secret@example.com",
 			ClientIP:         func() *string { s := "1.2.3.4"; return &s }(),
 			UpstreamEndpoint: "https://api.openai.com/v1/chat/completions",
+			UserAgent:        "codex_cli_rs/0.125.0",
+			GroupName:        "grp-a",
+			Stream:           true,
 		},
 		ErrorBody:          `{"error":{"message":"upstream failed","type":"server_error"}}`,
-		UserAgent:          "Mozilla/5.0 secret-agent",
 		UpstreamStatusCode: &upstreamStatus,
 	}
 
 	out := ToUserErrorRequestDetail(src)
 	if out == nil {
 		t.Fatal("expected non-nil detail")
+		return
 	}
 
 	// 基础字段正确映射
@@ -201,13 +204,27 @@ func TestToUserErrorRequestDetail_WhitelistAndRedacts(t *testing.T) {
 		t.Errorf("UpstreamStatusCode mismatch")
 	}
 
+	// client_ip / user_agent / group_name / stream 经产品决策开放（与用量明细口径对齐）
+	if out.ClientIP != "1.2.3.4" {
+		t.Errorf("want client_ip=1.2.3.4, got %q", out.ClientIP)
+	}
+	if out.UserAgent != "codex_cli_rs/0.125.0" {
+		t.Errorf("want user_agent=codex_cli_rs/0.125.0, got %q", out.UserAgent)
+	}
+	if out.GroupName != "grp-a" {
+		t.Errorf("want group_name=grp-a, got %q", out.GroupName)
+	}
+	if !out.Stream {
+		t.Errorf("want stream=true")
+	}
+
 	// 序列化后不含敏感字段
 	b, err := json.Marshal(out)
 	if err != nil {
 		t.Fatalf("json.Marshal failed: %v", err)
 	}
 	raw := string(b)
-	for _, forbidden := range []string{"user_email", "client_ip", "upstream_endpoint", "user_agent"} {
+	for _, forbidden := range []string{"user_email", "upstream_endpoint"} {
 		if strings.Contains(raw, forbidden) {
 			t.Errorf("sensitive field %q leaked in JSON output: %s", forbidden, raw)
 		}
@@ -245,8 +262,59 @@ func TestToUserErrorRequestDetail_RedactsNetworkIdentifiersInErrorBody(t *testin
 			t.Fatalf("expected redacted fragment %q in message/body, got message=%q body=%q", want, out.Message, out.ErrorBody)
 		}
 	}
+	if !strings.Contains(out.Message, "/v1") {
+		t.Fatalf("upstream URL path should be preserved in user message: %q", out.Message)
+	}
 	if src.ErrorBody != body {
 		t.Fatalf("source error body mutated: %q", src.ErrorBody)
+	}
+}
+
+func TestToUserErrorRequestDetail_RedactsGenericAPIKeys(t *testing.T) {
+	message := `GET https://generativelanguage.googleapis.com/v1beta/models?api_key=AIzaSyUserVisibleSecret123456&model=gpt-5.4 x-goog-api-key=goog-secret-1234567890 x-api-key=anthropic-secret-1234567890`
+	body := `{"api_key":"gemini-key-secret-1234567890","authorization":"Bearer bare-token-secret-1234567890"}`
+	src := &OpsErrorLogDetail{
+		OpsErrorLog: OpsErrorLog{
+			ID:              1001,
+			CreatedAt:       time.Unix(1000, 0).UTC(),
+			Model:           "gpt-5.4",
+			InboundEndpoint: "/v1/responses",
+			StatusCode:      502,
+			Platform:        "gemini",
+			Phase:           "network",
+			Type:            "api_error",
+			Message:         message,
+		},
+		ErrorBody: body,
+	}
+
+	out := ToUserErrorRequestDetail(src)
+	if out == nil {
+		t.Fatal("expected non-nil detail")
+	}
+	for _, leaked := range []string{
+		"generativelanguage.googleapis.com",
+		"AIzaSyUserVisibleSecret123456",
+		"goog-secret-1234567890",
+		"anthropic-secret-1234567890",
+		"gemini-key-secret-1234567890",
+		"bare-token-secret-1234567890",
+	} {
+		if strings.Contains(out.Message, leaked) || strings.Contains(out.ErrorBody, leaked) {
+			t.Fatalf("sensitive value %q leaked: message=%q body=%q", leaked, out.Message, out.ErrorBody)
+		}
+	}
+	if !strings.Contains(out.Message, "https://*.*.*.*/v1beta/models?api_key=AIzaSy...3456&model=gpt-5.4") {
+		t.Fatalf("path/query structure should be preserved with masked api_key, got %q", out.Message)
+	}
+	if !strings.Contains(out.Message, "model=gpt-5.4") {
+		t.Fatalf("non-secret query value should be preserved, got %q", out.Message)
+	}
+	if !strings.Contains(out.ErrorBody, `"api_key":"gemini...7890"`) {
+		t.Fatalf("JSON api_key should be partially masked, got %q", out.ErrorBody)
+	}
+	if !strings.Contains(out.ErrorBody, `"authorization":"Bearer bare-t...7890"`) {
+		t.Fatalf("Bearer token should be partially masked, got %q", out.ErrorBody)
 	}
 }
 

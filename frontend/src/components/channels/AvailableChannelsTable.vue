@@ -85,16 +85,25 @@
                   <Icon name="shield" size="xs" class="h-3 w-3" />
                   {{ t('availableChannels.exclusive') }}
                 </span>
-                <GroupBadge
+                <div
                   v-for="g in exclusiveGroups(section)"
                   :key="`ex-${g.id}`"
-                  :name="g.name"
-                  :platform="g.platform as GroupPlatform"
-                  :subscription-type="(g.subscription_type || 'standard') as SubscriptionType"
-                  :rate-multiplier="g.rate_multiplier"
-                  :user-rate-multiplier="userGroupRates[g.id] ?? null"
-                  always-show-rate
-                />
+                  class="inline-flex flex-wrap items-center gap-1"
+                >
+                  <GroupBadge
+                    :name="g.name"
+                    :platform="g.platform as GroupPlatform"
+                    :subscription-type="(g.subscription_type || 'standard') as SubscriptionType"
+                    :rate-multiplier="g.rate_multiplier"
+                    :user-rate-multiplier="userGroupRates[g.id] ?? null"
+                    :peak-rate-enabled="g.peak_rate_enabled"
+                    :peak-start="g.peak_start"
+                    :peak-end="g.peak_end"
+                    :peak-rate-multiplier="g.peak_rate_multiplier"
+                    :peak-rate-windows="g.peak_rate_windows"
+                    always-show-rate
+                  />
+                </div>
               </div>
               <div
                 v-if="publicGroups(section).length > 0"
@@ -107,16 +116,25 @@
                   <Icon name="globe" size="xs" class="h-3 w-3" />
                   {{ t('availableChannels.public') }}
                 </span>
-                <GroupBadge
+                <div
                   v-for="g in publicGroups(section)"
                   :key="`pub-${g.id}`"
-                  :name="g.name"
-                  :platform="g.platform as GroupPlatform"
-                  :subscription-type="(g.subscription_type || 'standard') as SubscriptionType"
-                  :rate-multiplier="g.rate_multiplier"
-                  :user-rate-multiplier="userGroupRates[g.id] ?? null"
-                  always-show-rate
-                />
+                  class="inline-flex flex-wrap items-center gap-1"
+                >
+                  <GroupBadge
+                    :name="g.name"
+                    :platform="g.platform as GroupPlatform"
+                    :subscription-type="(g.subscription_type || 'standard') as SubscriptionType"
+                    :rate-multiplier="g.rate_multiplier"
+                    :user-rate-multiplier="userGroupRates[g.id] ?? null"
+                    :peak-rate-enabled="g.peak_rate_enabled"
+                    :peak-start="g.peak_start"
+                    :peak-end="g.peak_end"
+                    :peak-rate-multiplier="g.peak_rate_multiplier"
+                    :peak-rate-windows="g.peak_rate_windows"
+                    always-show-rate
+                  />
+                </div>
               </div>
               <span v-if="section.groups.length === 0" class="text-xs text-gray-400">-</span>
             </div>

@@ -632,6 +632,27 @@ func (_u *UsageLogUpdate) AddBillingType(v int8) *UsageLogUpdate {
 	return _u
 }
 
+// SetRequestType sets the "request_type" field.
+func (_u *UsageLogUpdate) SetRequestType(v int16) *UsageLogUpdate {
+	_u.mutation.ResetRequestType()
+	_u.mutation.SetRequestType(v)
+	return _u
+}
+
+// SetNillableRequestType sets the "request_type" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableRequestType(v *int16) *UsageLogUpdate {
+	if v != nil {
+		_u.SetRequestType(*v)
+	}
+	return _u
+}
+
+// AddRequestType adds value to the "request_type" field.
+func (_u *UsageLogUpdate) AddRequestType(v int16) *UsageLogUpdate {
+	_u.mutation.AddRequestType(v)
+	return _u
+}
+
 // SetStream sets the "stream" field.
 func (_u *UsageLogUpdate) SetStream(v bool) *UsageLogUpdate {
 	_u.mutation.SetStream(v)
@@ -895,6 +916,310 @@ func (_u *UsageLogUpdate) ClearImageSizeBreakdown() *UsageLogUpdate {
 	return _u
 }
 
+// SetRequestCount sets the "request_count" field.
+func (_u *UsageLogUpdate) SetRequestCount(v int) *UsageLogUpdate {
+	_u.mutation.ResetRequestCount()
+	_u.mutation.SetRequestCount(v)
+	return _u
+}
+
+// SetNillableRequestCount sets the "request_count" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableRequestCount(v *int) *UsageLogUpdate {
+	if v != nil {
+		_u.SetRequestCount(*v)
+	}
+	return _u
+}
+
+// AddRequestCount adds value to the "request_count" field.
+func (_u *UsageLogUpdate) AddRequestCount(v int) *UsageLogUpdate {
+	_u.mutation.AddRequestCount(v)
+	return _u
+}
+
+// SetTaskCount sets the "task_count" field.
+func (_u *UsageLogUpdate) SetTaskCount(v int) *UsageLogUpdate {
+	_u.mutation.ResetTaskCount()
+	_u.mutation.SetTaskCount(v)
+	return _u
+}
+
+// SetNillableTaskCount sets the "task_count" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableTaskCount(v *int) *UsageLogUpdate {
+	if v != nil {
+		_u.SetTaskCount(*v)
+	}
+	return _u
+}
+
+// AddTaskCount adds value to the "task_count" field.
+func (_u *UsageLogUpdate) AddTaskCount(v int) *UsageLogUpdate {
+	_u.mutation.AddTaskCount(v)
+	return _u
+}
+
+// SetUsageEstimated sets the "usage_estimated" field.
+func (_u *UsageLogUpdate) SetUsageEstimated(v bool) *UsageLogUpdate {
+	_u.mutation.SetUsageEstimated(v)
+	return _u
+}
+
+// SetNillableUsageEstimated sets the "usage_estimated" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableUsageEstimated(v *bool) *UsageLogUpdate {
+	if v != nil {
+		_u.SetUsageEstimated(*v)
+	}
+	return _u
+}
+
+// SetBillableUnitType sets the "billable_unit_type" field.
+func (_u *UsageLogUpdate) SetBillableUnitType(v string) *UsageLogUpdate {
+	_u.mutation.SetBillableUnitType(v)
+	return _u
+}
+
+// SetNillableBillableUnitType sets the "billable_unit_type" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableBillableUnitType(v *string) *UsageLogUpdate {
+	if v != nil {
+		_u.SetBillableUnitType(*v)
+	}
+	return _u
+}
+
+// ClearBillableUnitType clears the value of the "billable_unit_type" field.
+func (_u *UsageLogUpdate) ClearBillableUnitType() *UsageLogUpdate {
+	_u.mutation.ClearBillableUnitType()
+	return _u
+}
+
+// SetVideoCount sets the "video_count" field.
+func (_u *UsageLogUpdate) SetVideoCount(v int) *UsageLogUpdate {
+	_u.mutation.ResetVideoCount()
+	_u.mutation.SetVideoCount(v)
+	return _u
+}
+
+// SetNillableVideoCount sets the "video_count" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableVideoCount(v *int) *UsageLogUpdate {
+	if v != nil {
+		_u.SetVideoCount(*v)
+	}
+	return _u
+}
+
+// AddVideoCount adds value to the "video_count" field.
+func (_u *UsageLogUpdate) AddVideoCount(v int) *UsageLogUpdate {
+	_u.mutation.AddVideoCount(v)
+	return _u
+}
+
+// SetVideoResolution sets the "video_resolution" field.
+func (_u *UsageLogUpdate) SetVideoResolution(v string) *UsageLogUpdate {
+	_u.mutation.SetVideoResolution(v)
+	return _u
+}
+
+// SetNillableVideoResolution sets the "video_resolution" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableVideoResolution(v *string) *UsageLogUpdate {
+	if v != nil {
+		_u.SetVideoResolution(*v)
+	}
+	return _u
+}
+
+// ClearVideoResolution clears the value of the "video_resolution" field.
+func (_u *UsageLogUpdate) ClearVideoResolution() *UsageLogUpdate {
+	_u.mutation.ClearVideoResolution()
+	return _u
+}
+
+// SetVideoDurationSeconds sets the "video_duration_seconds" field.
+func (_u *UsageLogUpdate) SetVideoDurationSeconds(v int) *UsageLogUpdate {
+	_u.mutation.ResetVideoDurationSeconds()
+	_u.mutation.SetVideoDurationSeconds(v)
+	return _u
+}
+
+// SetNillableVideoDurationSeconds sets the "video_duration_seconds" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableVideoDurationSeconds(v *int) *UsageLogUpdate {
+	if v != nil {
+		_u.SetVideoDurationSeconds(*v)
+	}
+	return _u
+}
+
+// AddVideoDurationSeconds adds value to the "video_duration_seconds" field.
+func (_u *UsageLogUpdate) AddVideoDurationSeconds(v int) *UsageLogUpdate {
+	_u.mutation.AddVideoDurationSeconds(v)
+	return _u
+}
+
+// ClearVideoDurationSeconds clears the value of the "video_duration_seconds" field.
+func (_u *UsageLogUpdate) ClearVideoDurationSeconds() *UsageLogUpdate {
+	_u.mutation.ClearVideoDurationSeconds()
+	return _u
+}
+
+// SetServiceTier sets the "service_tier" field.
+func (_u *UsageLogUpdate) SetServiceTier(v string) *UsageLogUpdate {
+	_u.mutation.SetServiceTier(v)
+	return _u
+}
+
+// SetNillableServiceTier sets the "service_tier" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableServiceTier(v *string) *UsageLogUpdate {
+	if v != nil {
+		_u.SetServiceTier(*v)
+	}
+	return _u
+}
+
+// ClearServiceTier clears the value of the "service_tier" field.
+func (_u *UsageLogUpdate) ClearServiceTier() *UsageLogUpdate {
+	_u.mutation.ClearServiceTier()
+	return _u
+}
+
+// SetReasoningEffort sets the "reasoning_effort" field.
+func (_u *UsageLogUpdate) SetReasoningEffort(v string) *UsageLogUpdate {
+	_u.mutation.SetReasoningEffort(v)
+	return _u
+}
+
+// SetNillableReasoningEffort sets the "reasoning_effort" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableReasoningEffort(v *string) *UsageLogUpdate {
+	if v != nil {
+		_u.SetReasoningEffort(*v)
+	}
+	return _u
+}
+
+// ClearReasoningEffort clears the value of the "reasoning_effort" field.
+func (_u *UsageLogUpdate) ClearReasoningEffort() *UsageLogUpdate {
+	_u.mutation.ClearReasoningEffort()
+	return _u
+}
+
+// SetInboundEndpoint sets the "inbound_endpoint" field.
+func (_u *UsageLogUpdate) SetInboundEndpoint(v string) *UsageLogUpdate {
+	_u.mutation.SetInboundEndpoint(v)
+	return _u
+}
+
+// SetNillableInboundEndpoint sets the "inbound_endpoint" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableInboundEndpoint(v *string) *UsageLogUpdate {
+	if v != nil {
+		_u.SetInboundEndpoint(*v)
+	}
+	return _u
+}
+
+// ClearInboundEndpoint clears the value of the "inbound_endpoint" field.
+func (_u *UsageLogUpdate) ClearInboundEndpoint() *UsageLogUpdate {
+	_u.mutation.ClearInboundEndpoint()
+	return _u
+}
+
+// SetUpstreamEndpoint sets the "upstream_endpoint" field.
+func (_u *UsageLogUpdate) SetUpstreamEndpoint(v string) *UsageLogUpdate {
+	_u.mutation.SetUpstreamEndpoint(v)
+	return _u
+}
+
+// SetNillableUpstreamEndpoint sets the "upstream_endpoint" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableUpstreamEndpoint(v *string) *UsageLogUpdate {
+	if v != nil {
+		_u.SetUpstreamEndpoint(*v)
+	}
+	return _u
+}
+
+// ClearUpstreamEndpoint clears the value of the "upstream_endpoint" field.
+func (_u *UsageLogUpdate) ClearUpstreamEndpoint() *UsageLogUpdate {
+	_u.mutation.ClearUpstreamEndpoint()
+	return _u
+}
+
+// SetClientProfile sets the "client_profile" field.
+func (_u *UsageLogUpdate) SetClientProfile(v string) *UsageLogUpdate {
+	_u.mutation.SetClientProfile(v)
+	return _u
+}
+
+// SetNillableClientProfile sets the "client_profile" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableClientProfile(v *string) *UsageLogUpdate {
+	if v != nil {
+		_u.SetClientProfile(*v)
+	}
+	return _u
+}
+
+// ClearClientProfile clears the value of the "client_profile" field.
+func (_u *UsageLogUpdate) ClearClientProfile() *UsageLogUpdate {
+	_u.mutation.ClearClientProfile()
+	return _u
+}
+
+// SetCompatibilityRoute sets the "compatibility_route" field.
+func (_u *UsageLogUpdate) SetCompatibilityRoute(v string) *UsageLogUpdate {
+	_u.mutation.SetCompatibilityRoute(v)
+	return _u
+}
+
+// SetNillableCompatibilityRoute sets the "compatibility_route" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableCompatibilityRoute(v *string) *UsageLogUpdate {
+	if v != nil {
+		_u.SetCompatibilityRoute(*v)
+	}
+	return _u
+}
+
+// ClearCompatibilityRoute clears the value of the "compatibility_route" field.
+func (_u *UsageLogUpdate) ClearCompatibilityRoute() *UsageLogUpdate {
+	_u.mutation.ClearCompatibilityRoute()
+	return _u
+}
+
+// SetFallbackChain sets the "fallback_chain" field.
+func (_u *UsageLogUpdate) SetFallbackChain(v string) *UsageLogUpdate {
+	_u.mutation.SetFallbackChain(v)
+	return _u
+}
+
+// SetNillableFallbackChain sets the "fallback_chain" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableFallbackChain(v *string) *UsageLogUpdate {
+	if v != nil {
+		_u.SetFallbackChain(*v)
+	}
+	return _u
+}
+
+// ClearFallbackChain clears the value of the "fallback_chain" field.
+func (_u *UsageLogUpdate) ClearFallbackChain() *UsageLogUpdate {
+	_u.mutation.ClearFallbackChain()
+	return _u
+}
+
+// SetUpstreamTransport sets the "upstream_transport" field.
+func (_u *UsageLogUpdate) SetUpstreamTransport(v string) *UsageLogUpdate {
+	_u.mutation.SetUpstreamTransport(v)
+	return _u
+}
+
+// SetNillableUpstreamTransport sets the "upstream_transport" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableUpstreamTransport(v *string) *UsageLogUpdate {
+	if v != nil {
+		_u.SetUpstreamTransport(*v)
+	}
+	return _u
+}
+
+// ClearUpstreamTransport clears the value of the "upstream_transport" field.
+func (_u *UsageLogUpdate) ClearUpstreamTransport() *UsageLogUpdate {
+	_u.mutation.ClearUpstreamTransport()
+	return _u
+}
+
 // SetCacheTTLOverridden sets the "cache_ttl_overridden" field.
 func (_u *UsageLogUpdate) SetCacheTTLOverridden(v bool) *UsageLogUpdate {
 	_u.mutation.SetCacheTTLOverridden(v)
@@ -1061,6 +1386,51 @@ func (_u *UsageLogUpdate) check() error {
 	if v, ok := _u.mutation.ImageSizeSource(); ok {
 		if err := usagelog.ImageSizeSourceValidator(v); err != nil {
 			return &ValidationError{Name: "image_size_source", err: fmt.Errorf(`ent: validator failed for field "UsageLog.image_size_source": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.BillableUnitType(); ok {
+		if err := usagelog.BillableUnitTypeValidator(v); err != nil {
+			return &ValidationError{Name: "billable_unit_type", err: fmt.Errorf(`ent: validator failed for field "UsageLog.billable_unit_type": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.VideoResolution(); ok {
+		if err := usagelog.VideoResolutionValidator(v); err != nil {
+			return &ValidationError{Name: "video_resolution", err: fmt.Errorf(`ent: validator failed for field "UsageLog.video_resolution": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.ServiceTier(); ok {
+		if err := usagelog.ServiceTierValidator(v); err != nil {
+			return &ValidationError{Name: "service_tier", err: fmt.Errorf(`ent: validator failed for field "UsageLog.service_tier": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.ReasoningEffort(); ok {
+		if err := usagelog.ReasoningEffortValidator(v); err != nil {
+			return &ValidationError{Name: "reasoning_effort", err: fmt.Errorf(`ent: validator failed for field "UsageLog.reasoning_effort": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.InboundEndpoint(); ok {
+		if err := usagelog.InboundEndpointValidator(v); err != nil {
+			return &ValidationError{Name: "inbound_endpoint", err: fmt.Errorf(`ent: validator failed for field "UsageLog.inbound_endpoint": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.UpstreamEndpoint(); ok {
+		if err := usagelog.UpstreamEndpointValidator(v); err != nil {
+			return &ValidationError{Name: "upstream_endpoint", err: fmt.Errorf(`ent: validator failed for field "UsageLog.upstream_endpoint": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.ClientProfile(); ok {
+		if err := usagelog.ClientProfileValidator(v); err != nil {
+			return &ValidationError{Name: "client_profile", err: fmt.Errorf(`ent: validator failed for field "UsageLog.client_profile": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.CompatibilityRoute(); ok {
+		if err := usagelog.CompatibilityRouteValidator(v); err != nil {
+			return &ValidationError{Name: "compatibility_route", err: fmt.Errorf(`ent: validator failed for field "UsageLog.compatibility_route": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.UpstreamTransport(); ok {
+		if err := usagelog.UpstreamTransportValidator(v); err != nil {
+			return &ValidationError{Name: "upstream_transport", err: fmt.Errorf(`ent: validator failed for field "UsageLog.upstream_transport": %w`, err)}
 		}
 	}
 	if _u.mutation.UserCleared() && len(_u.mutation.UserIDs()) > 0 {
@@ -1237,6 +1607,12 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.AddedBillingType(); ok {
 		_spec.AddField(usagelog.FieldBillingType, field.TypeInt8, value)
 	}
+	if value, ok := _u.mutation.RequestType(); ok {
+		_spec.SetField(usagelog.FieldRequestType, field.TypeInt16, value)
+	}
+	if value, ok := _u.mutation.AddedRequestType(); ok {
+		_spec.AddField(usagelog.FieldRequestType, field.TypeInt16, value)
+	}
 	if value, ok := _u.mutation.Stream(); ok {
 		_spec.SetField(usagelog.FieldStream, field.TypeBool, value)
 	}
@@ -1317,6 +1693,96 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.ImageSizeBreakdownCleared() {
 		_spec.ClearField(usagelog.FieldImageSizeBreakdown, field.TypeJSON)
+	}
+	if value, ok := _u.mutation.RequestCount(); ok {
+		_spec.SetField(usagelog.FieldRequestCount, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedRequestCount(); ok {
+		_spec.AddField(usagelog.FieldRequestCount, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.TaskCount(); ok {
+		_spec.SetField(usagelog.FieldTaskCount, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedTaskCount(); ok {
+		_spec.AddField(usagelog.FieldTaskCount, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.UsageEstimated(); ok {
+		_spec.SetField(usagelog.FieldUsageEstimated, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.BillableUnitType(); ok {
+		_spec.SetField(usagelog.FieldBillableUnitType, field.TypeString, value)
+	}
+	if _u.mutation.BillableUnitTypeCleared() {
+		_spec.ClearField(usagelog.FieldBillableUnitType, field.TypeString)
+	}
+	if value, ok := _u.mutation.VideoCount(); ok {
+		_spec.SetField(usagelog.FieldVideoCount, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedVideoCount(); ok {
+		_spec.AddField(usagelog.FieldVideoCount, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.VideoResolution(); ok {
+		_spec.SetField(usagelog.FieldVideoResolution, field.TypeString, value)
+	}
+	if _u.mutation.VideoResolutionCleared() {
+		_spec.ClearField(usagelog.FieldVideoResolution, field.TypeString)
+	}
+	if value, ok := _u.mutation.VideoDurationSeconds(); ok {
+		_spec.SetField(usagelog.FieldVideoDurationSeconds, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedVideoDurationSeconds(); ok {
+		_spec.AddField(usagelog.FieldVideoDurationSeconds, field.TypeInt, value)
+	}
+	if _u.mutation.VideoDurationSecondsCleared() {
+		_spec.ClearField(usagelog.FieldVideoDurationSeconds, field.TypeInt)
+	}
+	if value, ok := _u.mutation.ServiceTier(); ok {
+		_spec.SetField(usagelog.FieldServiceTier, field.TypeString, value)
+	}
+	if _u.mutation.ServiceTierCleared() {
+		_spec.ClearField(usagelog.FieldServiceTier, field.TypeString)
+	}
+	if value, ok := _u.mutation.ReasoningEffort(); ok {
+		_spec.SetField(usagelog.FieldReasoningEffort, field.TypeString, value)
+	}
+	if _u.mutation.ReasoningEffortCleared() {
+		_spec.ClearField(usagelog.FieldReasoningEffort, field.TypeString)
+	}
+	if value, ok := _u.mutation.InboundEndpoint(); ok {
+		_spec.SetField(usagelog.FieldInboundEndpoint, field.TypeString, value)
+	}
+	if _u.mutation.InboundEndpointCleared() {
+		_spec.ClearField(usagelog.FieldInboundEndpoint, field.TypeString)
+	}
+	if value, ok := _u.mutation.UpstreamEndpoint(); ok {
+		_spec.SetField(usagelog.FieldUpstreamEndpoint, field.TypeString, value)
+	}
+	if _u.mutation.UpstreamEndpointCleared() {
+		_spec.ClearField(usagelog.FieldUpstreamEndpoint, field.TypeString)
+	}
+	if value, ok := _u.mutation.ClientProfile(); ok {
+		_spec.SetField(usagelog.FieldClientProfile, field.TypeString, value)
+	}
+	if _u.mutation.ClientProfileCleared() {
+		_spec.ClearField(usagelog.FieldClientProfile, field.TypeString)
+	}
+	if value, ok := _u.mutation.CompatibilityRoute(); ok {
+		_spec.SetField(usagelog.FieldCompatibilityRoute, field.TypeString, value)
+	}
+	if _u.mutation.CompatibilityRouteCleared() {
+		_spec.ClearField(usagelog.FieldCompatibilityRoute, field.TypeString)
+	}
+	if value, ok := _u.mutation.FallbackChain(); ok {
+		_spec.SetField(usagelog.FieldFallbackChain, field.TypeString, value)
+	}
+	if _u.mutation.FallbackChainCleared() {
+		_spec.ClearField(usagelog.FieldFallbackChain, field.TypeString)
+	}
+	if value, ok := _u.mutation.UpstreamTransport(); ok {
+		_spec.SetField(usagelog.FieldUpstreamTransport, field.TypeString, value)
+	}
+	if _u.mutation.UpstreamTransportCleared() {
+		_spec.ClearField(usagelog.FieldUpstreamTransport, field.TypeString)
 	}
 	if value, ok := _u.mutation.CacheTTLOverridden(); ok {
 		_spec.SetField(usagelog.FieldCacheTTLOverridden, field.TypeBool, value)
@@ -2086,6 +2552,27 @@ func (_u *UsageLogUpdateOne) AddBillingType(v int8) *UsageLogUpdateOne {
 	return _u
 }
 
+// SetRequestType sets the "request_type" field.
+func (_u *UsageLogUpdateOne) SetRequestType(v int16) *UsageLogUpdateOne {
+	_u.mutation.ResetRequestType()
+	_u.mutation.SetRequestType(v)
+	return _u
+}
+
+// SetNillableRequestType sets the "request_type" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableRequestType(v *int16) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetRequestType(*v)
+	}
+	return _u
+}
+
+// AddRequestType adds value to the "request_type" field.
+func (_u *UsageLogUpdateOne) AddRequestType(v int16) *UsageLogUpdateOne {
+	_u.mutation.AddRequestType(v)
+	return _u
+}
+
 // SetStream sets the "stream" field.
 func (_u *UsageLogUpdateOne) SetStream(v bool) *UsageLogUpdateOne {
 	_u.mutation.SetStream(v)
@@ -2349,6 +2836,310 @@ func (_u *UsageLogUpdateOne) ClearImageSizeBreakdown() *UsageLogUpdateOne {
 	return _u
 }
 
+// SetRequestCount sets the "request_count" field.
+func (_u *UsageLogUpdateOne) SetRequestCount(v int) *UsageLogUpdateOne {
+	_u.mutation.ResetRequestCount()
+	_u.mutation.SetRequestCount(v)
+	return _u
+}
+
+// SetNillableRequestCount sets the "request_count" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableRequestCount(v *int) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetRequestCount(*v)
+	}
+	return _u
+}
+
+// AddRequestCount adds value to the "request_count" field.
+func (_u *UsageLogUpdateOne) AddRequestCount(v int) *UsageLogUpdateOne {
+	_u.mutation.AddRequestCount(v)
+	return _u
+}
+
+// SetTaskCount sets the "task_count" field.
+func (_u *UsageLogUpdateOne) SetTaskCount(v int) *UsageLogUpdateOne {
+	_u.mutation.ResetTaskCount()
+	_u.mutation.SetTaskCount(v)
+	return _u
+}
+
+// SetNillableTaskCount sets the "task_count" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableTaskCount(v *int) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetTaskCount(*v)
+	}
+	return _u
+}
+
+// AddTaskCount adds value to the "task_count" field.
+func (_u *UsageLogUpdateOne) AddTaskCount(v int) *UsageLogUpdateOne {
+	_u.mutation.AddTaskCount(v)
+	return _u
+}
+
+// SetUsageEstimated sets the "usage_estimated" field.
+func (_u *UsageLogUpdateOne) SetUsageEstimated(v bool) *UsageLogUpdateOne {
+	_u.mutation.SetUsageEstimated(v)
+	return _u
+}
+
+// SetNillableUsageEstimated sets the "usage_estimated" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableUsageEstimated(v *bool) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetUsageEstimated(*v)
+	}
+	return _u
+}
+
+// SetBillableUnitType sets the "billable_unit_type" field.
+func (_u *UsageLogUpdateOne) SetBillableUnitType(v string) *UsageLogUpdateOne {
+	_u.mutation.SetBillableUnitType(v)
+	return _u
+}
+
+// SetNillableBillableUnitType sets the "billable_unit_type" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableBillableUnitType(v *string) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetBillableUnitType(*v)
+	}
+	return _u
+}
+
+// ClearBillableUnitType clears the value of the "billable_unit_type" field.
+func (_u *UsageLogUpdateOne) ClearBillableUnitType() *UsageLogUpdateOne {
+	_u.mutation.ClearBillableUnitType()
+	return _u
+}
+
+// SetVideoCount sets the "video_count" field.
+func (_u *UsageLogUpdateOne) SetVideoCount(v int) *UsageLogUpdateOne {
+	_u.mutation.ResetVideoCount()
+	_u.mutation.SetVideoCount(v)
+	return _u
+}
+
+// SetNillableVideoCount sets the "video_count" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableVideoCount(v *int) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetVideoCount(*v)
+	}
+	return _u
+}
+
+// AddVideoCount adds value to the "video_count" field.
+func (_u *UsageLogUpdateOne) AddVideoCount(v int) *UsageLogUpdateOne {
+	_u.mutation.AddVideoCount(v)
+	return _u
+}
+
+// SetVideoResolution sets the "video_resolution" field.
+func (_u *UsageLogUpdateOne) SetVideoResolution(v string) *UsageLogUpdateOne {
+	_u.mutation.SetVideoResolution(v)
+	return _u
+}
+
+// SetNillableVideoResolution sets the "video_resolution" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableVideoResolution(v *string) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetVideoResolution(*v)
+	}
+	return _u
+}
+
+// ClearVideoResolution clears the value of the "video_resolution" field.
+func (_u *UsageLogUpdateOne) ClearVideoResolution() *UsageLogUpdateOne {
+	_u.mutation.ClearVideoResolution()
+	return _u
+}
+
+// SetVideoDurationSeconds sets the "video_duration_seconds" field.
+func (_u *UsageLogUpdateOne) SetVideoDurationSeconds(v int) *UsageLogUpdateOne {
+	_u.mutation.ResetVideoDurationSeconds()
+	_u.mutation.SetVideoDurationSeconds(v)
+	return _u
+}
+
+// SetNillableVideoDurationSeconds sets the "video_duration_seconds" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableVideoDurationSeconds(v *int) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetVideoDurationSeconds(*v)
+	}
+	return _u
+}
+
+// AddVideoDurationSeconds adds value to the "video_duration_seconds" field.
+func (_u *UsageLogUpdateOne) AddVideoDurationSeconds(v int) *UsageLogUpdateOne {
+	_u.mutation.AddVideoDurationSeconds(v)
+	return _u
+}
+
+// ClearVideoDurationSeconds clears the value of the "video_duration_seconds" field.
+func (_u *UsageLogUpdateOne) ClearVideoDurationSeconds() *UsageLogUpdateOne {
+	_u.mutation.ClearVideoDurationSeconds()
+	return _u
+}
+
+// SetServiceTier sets the "service_tier" field.
+func (_u *UsageLogUpdateOne) SetServiceTier(v string) *UsageLogUpdateOne {
+	_u.mutation.SetServiceTier(v)
+	return _u
+}
+
+// SetNillableServiceTier sets the "service_tier" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableServiceTier(v *string) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetServiceTier(*v)
+	}
+	return _u
+}
+
+// ClearServiceTier clears the value of the "service_tier" field.
+func (_u *UsageLogUpdateOne) ClearServiceTier() *UsageLogUpdateOne {
+	_u.mutation.ClearServiceTier()
+	return _u
+}
+
+// SetReasoningEffort sets the "reasoning_effort" field.
+func (_u *UsageLogUpdateOne) SetReasoningEffort(v string) *UsageLogUpdateOne {
+	_u.mutation.SetReasoningEffort(v)
+	return _u
+}
+
+// SetNillableReasoningEffort sets the "reasoning_effort" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableReasoningEffort(v *string) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetReasoningEffort(*v)
+	}
+	return _u
+}
+
+// ClearReasoningEffort clears the value of the "reasoning_effort" field.
+func (_u *UsageLogUpdateOne) ClearReasoningEffort() *UsageLogUpdateOne {
+	_u.mutation.ClearReasoningEffort()
+	return _u
+}
+
+// SetInboundEndpoint sets the "inbound_endpoint" field.
+func (_u *UsageLogUpdateOne) SetInboundEndpoint(v string) *UsageLogUpdateOne {
+	_u.mutation.SetInboundEndpoint(v)
+	return _u
+}
+
+// SetNillableInboundEndpoint sets the "inbound_endpoint" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableInboundEndpoint(v *string) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetInboundEndpoint(*v)
+	}
+	return _u
+}
+
+// ClearInboundEndpoint clears the value of the "inbound_endpoint" field.
+func (_u *UsageLogUpdateOne) ClearInboundEndpoint() *UsageLogUpdateOne {
+	_u.mutation.ClearInboundEndpoint()
+	return _u
+}
+
+// SetUpstreamEndpoint sets the "upstream_endpoint" field.
+func (_u *UsageLogUpdateOne) SetUpstreamEndpoint(v string) *UsageLogUpdateOne {
+	_u.mutation.SetUpstreamEndpoint(v)
+	return _u
+}
+
+// SetNillableUpstreamEndpoint sets the "upstream_endpoint" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableUpstreamEndpoint(v *string) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetUpstreamEndpoint(*v)
+	}
+	return _u
+}
+
+// ClearUpstreamEndpoint clears the value of the "upstream_endpoint" field.
+func (_u *UsageLogUpdateOne) ClearUpstreamEndpoint() *UsageLogUpdateOne {
+	_u.mutation.ClearUpstreamEndpoint()
+	return _u
+}
+
+// SetClientProfile sets the "client_profile" field.
+func (_u *UsageLogUpdateOne) SetClientProfile(v string) *UsageLogUpdateOne {
+	_u.mutation.SetClientProfile(v)
+	return _u
+}
+
+// SetNillableClientProfile sets the "client_profile" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableClientProfile(v *string) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetClientProfile(*v)
+	}
+	return _u
+}
+
+// ClearClientProfile clears the value of the "client_profile" field.
+func (_u *UsageLogUpdateOne) ClearClientProfile() *UsageLogUpdateOne {
+	_u.mutation.ClearClientProfile()
+	return _u
+}
+
+// SetCompatibilityRoute sets the "compatibility_route" field.
+func (_u *UsageLogUpdateOne) SetCompatibilityRoute(v string) *UsageLogUpdateOne {
+	_u.mutation.SetCompatibilityRoute(v)
+	return _u
+}
+
+// SetNillableCompatibilityRoute sets the "compatibility_route" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableCompatibilityRoute(v *string) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetCompatibilityRoute(*v)
+	}
+	return _u
+}
+
+// ClearCompatibilityRoute clears the value of the "compatibility_route" field.
+func (_u *UsageLogUpdateOne) ClearCompatibilityRoute() *UsageLogUpdateOne {
+	_u.mutation.ClearCompatibilityRoute()
+	return _u
+}
+
+// SetFallbackChain sets the "fallback_chain" field.
+func (_u *UsageLogUpdateOne) SetFallbackChain(v string) *UsageLogUpdateOne {
+	_u.mutation.SetFallbackChain(v)
+	return _u
+}
+
+// SetNillableFallbackChain sets the "fallback_chain" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableFallbackChain(v *string) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetFallbackChain(*v)
+	}
+	return _u
+}
+
+// ClearFallbackChain clears the value of the "fallback_chain" field.
+func (_u *UsageLogUpdateOne) ClearFallbackChain() *UsageLogUpdateOne {
+	_u.mutation.ClearFallbackChain()
+	return _u
+}
+
+// SetUpstreamTransport sets the "upstream_transport" field.
+func (_u *UsageLogUpdateOne) SetUpstreamTransport(v string) *UsageLogUpdateOne {
+	_u.mutation.SetUpstreamTransport(v)
+	return _u
+}
+
+// SetNillableUpstreamTransport sets the "upstream_transport" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableUpstreamTransport(v *string) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetUpstreamTransport(*v)
+	}
+	return _u
+}
+
+// ClearUpstreamTransport clears the value of the "upstream_transport" field.
+func (_u *UsageLogUpdateOne) ClearUpstreamTransport() *UsageLogUpdateOne {
+	_u.mutation.ClearUpstreamTransport()
+	return _u
+}
+
 // SetCacheTTLOverridden sets the "cache_ttl_overridden" field.
 func (_u *UsageLogUpdateOne) SetCacheTTLOverridden(v bool) *UsageLogUpdateOne {
 	_u.mutation.SetCacheTTLOverridden(v)
@@ -2528,6 +3319,51 @@ func (_u *UsageLogUpdateOne) check() error {
 	if v, ok := _u.mutation.ImageSizeSource(); ok {
 		if err := usagelog.ImageSizeSourceValidator(v); err != nil {
 			return &ValidationError{Name: "image_size_source", err: fmt.Errorf(`ent: validator failed for field "UsageLog.image_size_source": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.BillableUnitType(); ok {
+		if err := usagelog.BillableUnitTypeValidator(v); err != nil {
+			return &ValidationError{Name: "billable_unit_type", err: fmt.Errorf(`ent: validator failed for field "UsageLog.billable_unit_type": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.VideoResolution(); ok {
+		if err := usagelog.VideoResolutionValidator(v); err != nil {
+			return &ValidationError{Name: "video_resolution", err: fmt.Errorf(`ent: validator failed for field "UsageLog.video_resolution": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.ServiceTier(); ok {
+		if err := usagelog.ServiceTierValidator(v); err != nil {
+			return &ValidationError{Name: "service_tier", err: fmt.Errorf(`ent: validator failed for field "UsageLog.service_tier": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.ReasoningEffort(); ok {
+		if err := usagelog.ReasoningEffortValidator(v); err != nil {
+			return &ValidationError{Name: "reasoning_effort", err: fmt.Errorf(`ent: validator failed for field "UsageLog.reasoning_effort": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.InboundEndpoint(); ok {
+		if err := usagelog.InboundEndpointValidator(v); err != nil {
+			return &ValidationError{Name: "inbound_endpoint", err: fmt.Errorf(`ent: validator failed for field "UsageLog.inbound_endpoint": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.UpstreamEndpoint(); ok {
+		if err := usagelog.UpstreamEndpointValidator(v); err != nil {
+			return &ValidationError{Name: "upstream_endpoint", err: fmt.Errorf(`ent: validator failed for field "UsageLog.upstream_endpoint": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.ClientProfile(); ok {
+		if err := usagelog.ClientProfileValidator(v); err != nil {
+			return &ValidationError{Name: "client_profile", err: fmt.Errorf(`ent: validator failed for field "UsageLog.client_profile": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.CompatibilityRoute(); ok {
+		if err := usagelog.CompatibilityRouteValidator(v); err != nil {
+			return &ValidationError{Name: "compatibility_route", err: fmt.Errorf(`ent: validator failed for field "UsageLog.compatibility_route": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.UpstreamTransport(); ok {
+		if err := usagelog.UpstreamTransportValidator(v); err != nil {
+			return &ValidationError{Name: "upstream_transport", err: fmt.Errorf(`ent: validator failed for field "UsageLog.upstream_transport": %w`, err)}
 		}
 	}
 	if _u.mutation.UserCleared() && len(_u.mutation.UserIDs()) > 0 {
@@ -2721,6 +3557,12 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	if value, ok := _u.mutation.AddedBillingType(); ok {
 		_spec.AddField(usagelog.FieldBillingType, field.TypeInt8, value)
 	}
+	if value, ok := _u.mutation.RequestType(); ok {
+		_spec.SetField(usagelog.FieldRequestType, field.TypeInt16, value)
+	}
+	if value, ok := _u.mutation.AddedRequestType(); ok {
+		_spec.AddField(usagelog.FieldRequestType, field.TypeInt16, value)
+	}
 	if value, ok := _u.mutation.Stream(); ok {
 		_spec.SetField(usagelog.FieldStream, field.TypeBool, value)
 	}
@@ -2801,6 +3643,96 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if _u.mutation.ImageSizeBreakdownCleared() {
 		_spec.ClearField(usagelog.FieldImageSizeBreakdown, field.TypeJSON)
+	}
+	if value, ok := _u.mutation.RequestCount(); ok {
+		_spec.SetField(usagelog.FieldRequestCount, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedRequestCount(); ok {
+		_spec.AddField(usagelog.FieldRequestCount, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.TaskCount(); ok {
+		_spec.SetField(usagelog.FieldTaskCount, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedTaskCount(); ok {
+		_spec.AddField(usagelog.FieldTaskCount, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.UsageEstimated(); ok {
+		_spec.SetField(usagelog.FieldUsageEstimated, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.BillableUnitType(); ok {
+		_spec.SetField(usagelog.FieldBillableUnitType, field.TypeString, value)
+	}
+	if _u.mutation.BillableUnitTypeCleared() {
+		_spec.ClearField(usagelog.FieldBillableUnitType, field.TypeString)
+	}
+	if value, ok := _u.mutation.VideoCount(); ok {
+		_spec.SetField(usagelog.FieldVideoCount, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedVideoCount(); ok {
+		_spec.AddField(usagelog.FieldVideoCount, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.VideoResolution(); ok {
+		_spec.SetField(usagelog.FieldVideoResolution, field.TypeString, value)
+	}
+	if _u.mutation.VideoResolutionCleared() {
+		_spec.ClearField(usagelog.FieldVideoResolution, field.TypeString)
+	}
+	if value, ok := _u.mutation.VideoDurationSeconds(); ok {
+		_spec.SetField(usagelog.FieldVideoDurationSeconds, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedVideoDurationSeconds(); ok {
+		_spec.AddField(usagelog.FieldVideoDurationSeconds, field.TypeInt, value)
+	}
+	if _u.mutation.VideoDurationSecondsCleared() {
+		_spec.ClearField(usagelog.FieldVideoDurationSeconds, field.TypeInt)
+	}
+	if value, ok := _u.mutation.ServiceTier(); ok {
+		_spec.SetField(usagelog.FieldServiceTier, field.TypeString, value)
+	}
+	if _u.mutation.ServiceTierCleared() {
+		_spec.ClearField(usagelog.FieldServiceTier, field.TypeString)
+	}
+	if value, ok := _u.mutation.ReasoningEffort(); ok {
+		_spec.SetField(usagelog.FieldReasoningEffort, field.TypeString, value)
+	}
+	if _u.mutation.ReasoningEffortCleared() {
+		_spec.ClearField(usagelog.FieldReasoningEffort, field.TypeString)
+	}
+	if value, ok := _u.mutation.InboundEndpoint(); ok {
+		_spec.SetField(usagelog.FieldInboundEndpoint, field.TypeString, value)
+	}
+	if _u.mutation.InboundEndpointCleared() {
+		_spec.ClearField(usagelog.FieldInboundEndpoint, field.TypeString)
+	}
+	if value, ok := _u.mutation.UpstreamEndpoint(); ok {
+		_spec.SetField(usagelog.FieldUpstreamEndpoint, field.TypeString, value)
+	}
+	if _u.mutation.UpstreamEndpointCleared() {
+		_spec.ClearField(usagelog.FieldUpstreamEndpoint, field.TypeString)
+	}
+	if value, ok := _u.mutation.ClientProfile(); ok {
+		_spec.SetField(usagelog.FieldClientProfile, field.TypeString, value)
+	}
+	if _u.mutation.ClientProfileCleared() {
+		_spec.ClearField(usagelog.FieldClientProfile, field.TypeString)
+	}
+	if value, ok := _u.mutation.CompatibilityRoute(); ok {
+		_spec.SetField(usagelog.FieldCompatibilityRoute, field.TypeString, value)
+	}
+	if _u.mutation.CompatibilityRouteCleared() {
+		_spec.ClearField(usagelog.FieldCompatibilityRoute, field.TypeString)
+	}
+	if value, ok := _u.mutation.FallbackChain(); ok {
+		_spec.SetField(usagelog.FieldFallbackChain, field.TypeString, value)
+	}
+	if _u.mutation.FallbackChainCleared() {
+		_spec.ClearField(usagelog.FieldFallbackChain, field.TypeString)
+	}
+	if value, ok := _u.mutation.UpstreamTransport(); ok {
+		_spec.SetField(usagelog.FieldUpstreamTransport, field.TypeString, value)
+	}
+	if _u.mutation.UpstreamTransportCleared() {
+		_spec.ClearField(usagelog.FieldUpstreamTransport, field.TypeString)
 	}
 	if value, ok := _u.mutation.CacheTTLOverridden(); ok {
 		_spec.SetField(usagelog.FieldCacheTTLOverridden, field.TypeBool, value)

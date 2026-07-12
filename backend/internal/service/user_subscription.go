@@ -6,6 +6,7 @@ const (
 	subscriptionDailyWindow   = 24 * time.Hour
 	subscriptionWeeklyWindow  = 7 * 24 * time.Hour
 	subscriptionMonthlyWindow = 30 * 24 * time.Hour
+	maxCustomLimitHours       = 24 * 365 * 10
 )
 
 type UserSubscription struct {

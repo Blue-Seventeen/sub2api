@@ -77,10 +77,12 @@ func TestParseProxyURIListSubscription_PlaintextList(t *testing.T) {
 }
 
 // 端到端：base64 v2ray 订阅可被 ParseProxySubscription 直接解析为节点（Phase 2 回退）。
+// URI 订阅无 dns policy，节点 server 沿用上游 legacy 校验（域名走系统 DNS），
+// 故测试节点使用公网 IP，与上游测试风格一致。
 func TestParseProxySubscription_FallsBackToBase64V2Ray(t *testing.T) {
 	list := strings.Join([]string{
-		vmessURI("vm-node-1", "vm1.example.com", "443"),
-		vmessURI("vm-node-2", "vm2.example.com", "8443"),
+		vmessURI("vm-node-1", "8.8.8.8", "443"),
+		vmessURI("vm-node-2", "1.1.1.1", "8443"),
 	}, "\n")
 	body := base64.StdEncoding.EncodeToString([]byte(list))
 
@@ -91,7 +93,7 @@ func TestParseProxySubscription_FallsBackToBase64V2Ray(t *testing.T) {
 	if len(parsed.Nodes) != 2 {
 		t.Fatalf("node count = %d, want 2", len(parsed.Nodes))
 	}
-	if parsed.Nodes[0].Type != "vmess" || parsed.Nodes[0].Server != "vm1.example.com" {
+	if parsed.Nodes[0].Type != "vmess" || parsed.Nodes[0].Server != "8.8.8.8" {
 		t.Fatalf("unexpected first node: type=%s server=%s", parsed.Nodes[0].Type, parsed.Nodes[0].Server)
 	}
 	if parsed.RawDNSConfig != "" {

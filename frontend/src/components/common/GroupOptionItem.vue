@@ -1,5 +1,5 @@
 <template>
-  <div class="flex min-w-0 flex-1 items-start justify-between gap-3">
+  <div :class="optionRootClass">
     <!-- Left: name + description -->
     <div
       class="flex min-w-0 flex-1 flex-col items-start"
@@ -24,16 +24,31 @@
 
     <!-- Right: rate pill + checkmark (vertically centered to first row) -->
     <div class="flex shrink-0 items-center gap-2 pt-0.5">
-      <!-- Rate pill (platform color) -->
-      <span v-if="rateMultiplier !== undefined" :class="['inline-flex items-center whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold', ratePillClass]">
-        <template v-if="hasEffectiveRate">
-          <span class="mr-1 line-through opacity-50">{{ rateMultiplier }}x</span>
-          <span class="font-bold">{{ effectiveRateMultiplier }}x</span>
-        </template>
-        <template v-else>
-          {{ rateMultiplier }}x 倍率
-        </template>
-      </span>
+      <div :class="ratePillGroupClass">
+        <!-- Rate pill (platform color) -->
+        <span v-if="rateMultiplier !== undefined" :class="['inline-flex items-center whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold', ratePillClass]">
+          <template v-if="hasEffectiveRate">
+            <span class="mr-1 line-through opacity-50">{{ rateMultiplier }}x</span>
+            <span class="font-bold">{{ displayRateMultiplier }}x</span>
+          </template>
+          <template v-else>
+            {{ rateMultiplier }}x {{ t('admin.groups.rateLabel') }}
+          </template>
+        </span>
+        <PeakRatePill
+          v-if="hasPeakRate"
+          :peak-rate-enabled="props.peakRateEnabled"
+          :peak-start="props.peakStart"
+          :peak-end="props.peakEnd"
+          :peak-rate-multiplier="props.peakRateMultiplier"
+          :peak-rate-windows="props.peakRateWindows"
+          :display-mode="props.peakDisplayMode"
+          :base-multiplier="peakBaseMultiplier"
+          :pill-class="peakRatePillClass"
+          include-billing-note
+          data-test="group-option-peak-rate"
+        />
+      </div>
       <!-- Checkmark -->
       <svg
         v-if="showCheckmark && selected"
@@ -51,9 +66,18 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import GroupBadge from './GroupBadge.vue'
+import PeakRatePill from './PeakRatePill.vue'
 import type { SubscriptionType, GroupPlatform } from '@/types'
 import { platformBadgeLightClass } from '@/utils/platformColors'
+import {
+  hasPeakRate as hasPeakRateFields,
+  type PeakRateDisplayMode,
+  type PeakRateWindow,
+} from '@/utils/peak-rate'
+
+const { t } = useI18n()
 
 interface Props {
   name: string
@@ -61,6 +85,13 @@ interface Props {
   subscriptionType?: SubscriptionType
   rateMultiplier?: number
   effectiveRateMultiplier?: number | null
+  userRateMultiplier?: number | null
+  peakRateEnabled?: boolean
+  peakStart?: string
+  peakEnd?: string
+  peakRateMultiplier?: number
+  peakRateWindows?: PeakRateWindow[]
+  peakDisplayMode?: PeakRateDisplayMode
   description?: string | null
   selected?: boolean
   showCheckmark?: boolean
@@ -70,17 +101,60 @@ const props = withDefaults(defineProps<Props>(), {
   subscriptionType: 'standard',
   selected: false,
   showCheckmark: true,
-  effectiveRateMultiplier: null
+  effectiveRateMultiplier: null,
+  userRateMultiplier: null,
+  peakRateEnabled: false,
+  peakDisplayMode: 'compact'
 })
 
 // Whether effective/final rate differs from the default group rate.
+const displayRateMultiplier = computed(() => props.effectiveRateMultiplier ?? props.userRateMultiplier)
+
 const hasEffectiveRate = computed(() => {
   return (
-    props.effectiveRateMultiplier !== null &&
-    props.effectiveRateMultiplier !== undefined &&
+    displayRateMultiplier.value !== null &&
+    displayRateMultiplier.value !== undefined &&
     props.rateMultiplier !== undefined &&
-    props.effectiveRateMultiplier !== props.rateMultiplier
+    displayRateMultiplier.value !== props.rateMultiplier
   )
+})
+
+const peakRateFields = computed(() => ({
+  peak_rate_enabled: props.peakRateEnabled,
+  peak_start: props.peakStart,
+  peak_end: props.peakEnd,
+  peak_rate_multiplier: props.peakRateMultiplier,
+  peak_rate_windows: props.peakRateWindows
+}))
+
+const hasPeakRate = computed(() => {
+  return hasPeakRateFields(peakRateFields.value)
+})
+
+const peakBaseMultiplier = computed(() => displayRateMultiplier.value ?? props.rateMultiplier ?? 1)
+
+const peakRatePillClass = computed(() => {
+  const base = 'inline-flex items-center rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 dark:bg-amber-900/20 dark:text-amber-300'
+  if (props.peakDisplayMode === 'full') {
+    return `${base} max-w-64 whitespace-normal break-words text-right leading-4`
+  }
+  return `${base} whitespace-nowrap`
+})
+
+const ratePillGroupClass = computed(() => {
+  const base = 'flex shrink-0'
+  if (props.peakDisplayMode === 'full') {
+    return `${base} flex-col items-end gap-1`
+  }
+  return `${base} flex-row flex-wrap items-center justify-end gap-2`
+})
+
+const optionRootClass = computed(() => {
+  const base = 'flex min-w-0 flex-1 gap-3'
+  if (props.peakDisplayMode === 'full') {
+    return `${base} flex-col items-stretch sm:flex-row sm:items-start sm:justify-between`
+  }
+  return `${base} items-start justify-between`
 })
 
 // Rate pill color matches platform badge color

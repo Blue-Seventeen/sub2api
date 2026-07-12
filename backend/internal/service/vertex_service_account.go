@@ -9,12 +9,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyutil"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -23,6 +26,7 @@ const (
 	vertexDefaultTokenURL         = "https://oauth2.googleapis.com/token"
 	vertexCloudPlatformScope      = "https://www.googleapis.com/auth/cloud-platform"
 	vertexServiceAccountCacheSkew = 5 * time.Minute
+	vertexLockWaitTime            = 200 * time.Millisecond
 	vertexAnthropicVersion        = "vertex-2023-10-16"
 )
 
@@ -123,9 +127,8 @@ func parseVertexServiceAccountJSON(raw []byte) (*vertexServiceAccountKey, error)
 	if strings.TrimSpace(key.ProjectID) == "" {
 		return nil, errors.New("service account json missing project_id")
 	}
-	if strings.TrimSpace(key.TokenURI) == "" {
-		key.TokenURI = vertexDefaultTokenURL
-	}
+	// Always use the well-known Google token endpoint to prevent SSRF via crafted token_uri.
+	key.TokenURI = vertexDefaultTokenURL
 	return &key, nil
 }
 
@@ -139,6 +142,58 @@ func vertexServiceAccountCacheKey(account *Account, key *vertexServiceAccountKey
 		fingerprint = fmt.Sprintf("account:%d", account.ID)
 	}
 	return "vertex:service_account:" + fingerprint
+}
+
+// getVertexServiceAccountAccessToken obtains an access token for a Vertex service account,
+// using the shared cache and distributed lock to avoid redundant exchanges.
+func getVertexServiceAccountAccessToken(ctx context.Context, cache GeminiTokenCache, account *Account) (string, error) {
+	key, err := parseVertexServiceAccountKey(account)
+	if err != nil {
+		return "", err
+	}
+	cacheKey := vertexServiceAccountCacheKey(account, key)
+
+	if cache != nil {
+		if token, err := cache.GetAccessToken(ctx, cacheKey); err == nil && strings.TrimSpace(token) != "" {
+			return token, nil
+		}
+	}
+
+	locked := false
+	if cache != nil {
+		var lockErr error
+		locked, lockErr = cache.AcquireRefreshLock(ctx, cacheKey, 30*time.Second)
+		if lockErr == nil && locked {
+			defer func() { _ = cache.ReleaseRefreshLock(ctx, cacheKey) }()
+		} else if lockErr != nil {
+			accountID := int64(0)
+			if account != nil {
+				accountID = account.ID
+			}
+			slog.Warn("vertex_service_account_token_lock_failed", "account_id", accountID, "error", lockErr)
+		} else {
+			time.Sleep(vertexLockWaitTime)
+			if token, err := cache.GetAccessToken(ctx, cacheKey); err == nil && strings.TrimSpace(token) != "" {
+				return token, nil
+			}
+		}
+	}
+
+	accessToken, ttl, err := exchangeVertexServiceAccountToken(ctx, key, vertexServiceAccountProxyURL(account))
+	if err != nil {
+		return "", err
+	}
+	if cache != nil {
+		_ = cache.SetAccessToken(ctx, cacheKey, accessToken, ttl)
+	}
+	return accessToken, nil
+}
+
+func vertexServiceAccountProxyURL(account *Account) string {
+	if account == nil || account.ProxyID == nil || account.Proxy == nil {
+		return ""
+	}
+	return account.Proxy.URL()
 }
 
 func exchangeVertexServiceAccountToken(ctx context.Context, key *vertexServiceAccountKey, proxyURL string) (string, time.Duration, error) {
@@ -210,19 +265,25 @@ func exchangeVertexServiceAccountToken(ctx context.Context, key *vertexServiceAc
 }
 
 func newVertexServiceAccountHTTPClient(proxyURL string) (*http.Client, error) {
-	client := &http.Client{Timeout: 15 * time.Second}
 	proxyURL = strings.TrimSpace(proxyURL)
 	if proxyURL == "" {
-		return client, nil
+		return &http.Client{Timeout: 15 * time.Second}, nil
 	}
-	parsedProxyURL, err := url.Parse(proxyURL)
+
+	_, parsedProxy, err := proxyurl.Parse(proxyURL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid service account proxy url: %w", err)
 	}
-	client.Transport = &http.Transport{
-		Proxy: http.ProxyURL(parsedProxyURL),
+	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return nil, fmt.Errorf("unexpected default transport type %T", http.DefaultTransport)
 	}
-	return client, nil
+	transport := defaultTransport.Clone()
+	transport.Proxy = nil
+	if err := proxyutil.ConfigureTransportProxy(transport, parsedProxy); err != nil {
+		return nil, fmt.Errorf("invalid service account proxy url: %w", err)
+	}
+	return &http.Client{Timeout: 15 * time.Second, Transport: transport}, nil
 }
 
 func buildVertexGeminiURL(projectID, location, model, action string, stream bool) (string, error) {

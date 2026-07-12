@@ -10,7 +10,12 @@ import (
 const userVisibleNetworkRedaction = "*.*.*.*"
 
 var (
-	userVisibleURLHostRegex     = regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.-]*://)(?:[^@\s/"']+@)?(\[[0-9a-f:.%]+\]|[a-z0-9.-]+)(:\d{1,5})?`)
+	userVisibleURLRegex         = regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.-]*://)(?:[^@\s/"'?]+@)?(\[[0-9a-f:.%]+\]|[a-z0-9.-]+)(:\d{1,5})?`)
+	userVisibleAPIKeyValueRegex = regexp.MustCompile(`(?i)(\b(?:api[_-]?key|apikey|x-api-key|x-goog-api-key|key)\b"?\s*[:=]\s*"?)([^"'\s,}&\]]{6,})("?)`)
+	userVisibleSkTokenRegex     = regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{12,}\b`)
+	userVisibleBearerRegex      = regexp.MustCompile(`(?i)\b(bearer\s+)([A-Za-z0-9._~+/\-]{8,}=*)`)
+	userVisibleJWTRegex         = regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b`)
+	userVisibleAccountRegex     = regexp.MustCompile(`(?i)(\b(?:account[_-]?id|accountid|account[_-]?name|accountname)\b"?\s*[:=]\s*"?)([^,"\s}]+)("?)`)
 	userVisibleDomainRegex      = regexp.MustCompile(`\b(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}\b`)
 	userVisibleIPv4Regex        = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
 	userVisibleBracketIPv6Regex = regexp.MustCompile(`\[[0-9A-Fa-f:.%]+\]`)
@@ -18,6 +23,14 @@ var (
 )
 
 // UserErrorRequest is the redacted failed-request view returned to end users.
+// UserErrorRequest 是面向终端用户的"错误请求"精简脱敏视图（白名单）。
+// 严禁包含 account / api_key_prefix / upstream_endpoint / user_email 等
+// 敏感或内部字段。注：message（网关标准化错误描述）与 key_name
+// （用户自有 API Key 名称，KeysView 中本就可见）经产品决策对该用户开放；
+// client_ip / user_agent / group_name / request_type / stream 均为该用户
+// 自己请求的属性，经产品决策（2026-07-03）开放，
+// 与用量明细已向用户展示自身 ip_address/user_agent/分组/类型 的口径对齐；
+// error_body 仅在详情接口（GetUserErrorRequestDetail）按归属校验后返回。
 type UserErrorRequest struct {
 	ID              int64     `json:"id"`
 	CreatedAt       time.Time `json:"created_at"`
@@ -29,6 +42,11 @@ type UserErrorRequest struct {
 	Message         string    `json:"message"`
 	KeyName         string    `json:"key_name"`
 	KeyDeleted      bool      `json:"key_deleted"`
+	ClientIP        string    `json:"client_ip,omitempty"`
+	GroupName       string    `json:"group_name,omitempty"`
+	RequestType     *int16    `json:"request_type,omitempty"`
+	Stream          bool      `json:"stream"`
+	UserAgent       string    `json:"user_agent,omitempty"`
 }
 
 // UserErrorRequestList is the paginated failed-request result for users.
@@ -58,6 +76,8 @@ func MapUserErrorCategory(phase, errType string) string {
 			return "quota"
 		case "invalid_request_error":
 			return "invalid_request"
+		case "cyber_policy":
+			return "cyber"
 		}
 	}
 	return "other"
@@ -80,6 +100,8 @@ func CategoryToFilter(category string) (phases []string, errorTypes []string) {
 		return nil, []string{"billing_error", "subscription_error"}
 	case "invalid_request":
 		return nil, []string{"invalid_request_error"}
+	case "cyber":
+		return []string{"request"}, []string{"cyber_policy"}
 	default:
 		return nil, nil
 	}
@@ -90,7 +112,13 @@ func sanitizeUserVisibleErrorText(text string) string {
 		return ""
 	}
 
-	out := userVisibleURLHostRegex.ReplaceAllString(text, `${1}`+userVisibleNetworkRedaction+`${3}`)
+	out := text
+	out = replaceUserVisibleCapture(out, userVisibleAPIKeyValueRegex, 2, maskUserVisibleSecret)
+	out = replaceUserVisibleCapture(out, userVisibleBearerRegex, 2, maskUserVisibleSecret)
+	out = userVisibleJWTRegex.ReplaceAllStringFunc(out, maskUserVisibleSecret)
+	out = userVisibleSkTokenRegex.ReplaceAllStringFunc(out, maskUserVisibleSecret)
+	out = replaceUserVisibleCapture(out, userVisibleAccountRegex, 2, func(string) string { return "***" })
+	out = userVisibleURLRegex.ReplaceAllString(out, `${1}`+userVisibleNetworkRedaction+`${3}`)
 	out = userVisibleDomainRegex.ReplaceAllString(out, userVisibleNetworkRedaction)
 	out = userVisibleIPv4Regex.ReplaceAllStringFunc(out, func(match string) string {
 		if ip := net.ParseIP(match); ip != nil && ip.To4() != nil {
@@ -121,6 +149,40 @@ func sanitizeUserVisibleErrorText(text string) string {
 	return out
 }
 
+func replaceUserVisibleCapture(input string, re *regexp.Regexp, group int, repl func(string) string) string {
+	return re.ReplaceAllStringFunc(input, func(match string) string {
+		indexes := re.FindStringSubmatchIndex(match)
+		startIdx := group * 2
+		endIdx := startIdx + 1
+		if len(indexes) <= endIdx || indexes[startIdx] < 0 || indexes[endIdx] < 0 {
+			return match
+		}
+		start := indexes[startIdx]
+		end := indexes[endIdx]
+		return match[:start] + repl(match[start:end]) + match[end:]
+	})
+}
+
+func maskUserVisibleSecret(secret string) string {
+	secret = strings.TrimSpace(secret)
+	if secret == "" {
+		return "***"
+	}
+
+	prefixLen := 6
+	suffixLen := 4
+	if strings.HasPrefix(strings.ToLower(secret), "sk-") {
+		prefixLen = 8
+	}
+	if len(secret) <= prefixLen+suffixLen {
+		if len(secret) <= 4 {
+			return "***"
+		}
+		return secret[:2] + "..." + secret[len(secret)-2:]
+	}
+	return secret[:prefixLen] + "..." + secret[len(secret)-suffixLen:]
+}
+
 // ToUserErrorRequest converts an internal ops error to the user-safe list view.
 func ToUserErrorRequest(e *OpsErrorLog) *UserErrorRequest {
 	if e == nil {
@@ -129,6 +191,10 @@ func ToUserErrorRequest(e *OpsErrorLog) *UserErrorRequest {
 	model := e.RequestedModel
 	if model == "" {
 		model = e.Model
+	}
+	clientIP := ""
+	if e.ClientIP != nil {
+		clientIP = *e.ClientIP
 	}
 	return &UserErrorRequest{
 		ID:              e.ID,
@@ -141,6 +207,11 @@ func ToUserErrorRequest(e *OpsErrorLog) *UserErrorRequest {
 		Message:         sanitizeUserVisibleErrorText(e.Message),
 		KeyName:         e.APIKeyName,
 		KeyDeleted:      e.APIKeyDeleted,
+		ClientIP:        clientIP,
+		GroupName:       e.GroupName,
+		RequestType:     e.RequestType,
+		Stream:          e.Stream,
+		UserAgent:       e.UserAgent,
 	}
 }
 

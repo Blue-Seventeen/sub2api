@@ -128,6 +128,20 @@ func TestMigration124BackfillsLegacyOIDCSecurityFlagsSafely(t *testing.T) {
 	require.Contains(t, sql, "'false'")
 }
 
+func TestMigration133AllowsEmailOAuthProvidersWithoutDroppingDingTalk(t *testing.T) {
+	content, err := FS.ReadFile("133_allow_email_oauth_provider_types.sql")
+	require.NoError(t, err)
+
+	sql := string(content)
+	require.Contains(t, sql, "users_signup_source_check")
+	require.Contains(t, sql, "auth_identities_provider_type_check")
+	require.Contains(t, sql, "auth_identity_channels_provider_type_check")
+	require.Contains(t, sql, "pending_auth_sessions_provider_type_check")
+	require.Contains(t, sql, "'github'")
+	require.Contains(t, sql, "'google'")
+	require.Contains(t, sql, "'dingtalk'")
+}
+
 func TestMigration135AllowsGitHubAndGoogleAuthProviders(t *testing.T) {
 	content, err := FS.ReadFile("135_allow_email_oauth_provider_types.sql")
 	require.NoError(t, err)
@@ -139,6 +153,7 @@ func TestMigration135AllowsGitHubAndGoogleAuthProviders(t *testing.T) {
 	require.Contains(t, sql, "pending_auth_sessions_provider_type_check")
 	require.Contains(t, sql, "'github'")
 	require.Contains(t, sql, "'google'")
+	require.Contains(t, sql, "'dingtalk'")
 }
 
 func TestMigration143KeepsAllOAuthProviderConstraintsAligned(t *testing.T) {
@@ -154,4 +169,115 @@ func TestMigration143KeepsAllOAuthProviderConstraintsAligned(t *testing.T) {
 	require.Contains(t, sql, "'github'")
 	require.Contains(t, sql, "'google'")
 	require.Contains(t, sql, "'dingtalk'")
+}
+
+func TestMigration151AddsAccountAutoPauseExpiryPartialIndex(t *testing.T) {
+	content, err := FS.ReadFile("151_account_autopause_expiry_index_notx.sql")
+	require.NoError(t, err)
+
+	sql := string(content)
+	require.Contains(t, sql, "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_accounts_autopause_expiry_due")
+	require.Contains(t, sql, "ON accounts (expires_at)")
+	require.Contains(t, sql, "WHERE deleted_at IS NULL")
+	require.Contains(t, sql, "schedulable = TRUE")
+	require.Contains(t, sql, "auto_pause_on_expired = TRUE")
+	require.Contains(t, sql, "expires_at IS NOT NULL")
+}
+
+func TestMigration158BackfillsGrokMediaGenerationGroups(t *testing.T) {
+	content, err := FS.ReadFile("158_enable_grok_media_generation_groups.sql")
+	require.NoError(t, err)
+
+	sql := string(content)
+	require.Contains(t, sql, "UPDATE groups")
+	require.Contains(t, sql, "SET allow_image_generation = true")
+	require.Contains(t, sql, "WHERE platform = 'grok'")
+	require.Contains(t, sql, "AND allow_image_generation = false")
+}
+
+func TestMigration159AddsGroupPeakRateWindowsSafely(t *testing.T) {
+	content, err := FS.ReadFile("159_add_group_peak_rate_windows.sql")
+	require.NoError(t, err)
+
+	sql := string(content)
+	require.Contains(t, sql, "ALTER TABLE groups ADD COLUMN IF NOT EXISTS peak_rate_windows JSONB NOT NULL DEFAULT '[]'::jsonb")
+	require.Contains(t, sql, "ALTER TABLE groups ALTER COLUMN peak_rate_windows SET DEFAULT '[]'::jsonb")
+	require.Contains(t, sql, "WHERE peak_rate_windows IS NULL")
+	require.Contains(t, sql, "ALTER TABLE groups ALTER COLUMN peak_rate_windows SET NOT NULL")
+	require.Contains(t, sql, "UPDATE groups")
+	require.Contains(t, sql, "jsonb_build_array")
+	require.Contains(t, sql, "jsonb_build_object")
+	require.Contains(t, sql, "'start'")
+	require.Contains(t, sql, "'end'")
+	require.Contains(t, sql, "'multiplier'")
+	require.Contains(t, sql, "lpad(split_part(peak_start, ':', 1), 2, '0')")
+	require.Contains(t, sql, "lpad(split_part(peak_end, ':', 1), 2, '0')")
+	require.Contains(t, sql, "WHERE peak_rate_enabled = TRUE")
+	require.Contains(t, sql, "COALESCE(peak_start, '') ~ '^([01]?[0-9]|2[0-3]):[0-5][0-9]$'")
+	require.Contains(t, sql, "COALESCE(peak_end, '') ~ '^([01]?[0-9]|2[0-3]):[0-5][0-9]$'")
+	require.Contains(t, sql, "< (split_part(peak_end, ':', 1)::int * 60 + split_part(peak_end, ':', 2)::int)")
+	require.Contains(t, sql, "peak_rate_multiplier >= 0")
+	require.Contains(t, sql, "peak_rate_windows = '[]'::jsonb")
+	require.NotContains(t, sql, "DROP COLUMN")
+}
+
+func TestMigration154AddsSparkShadowColumnsAndConstraintsWithoutHotIndexes(t *testing.T) {
+	content, err := FS.ReadFile("154_account_spark_shadow.sql")
+	require.NoError(t, err)
+
+	sql := string(content)
+	require.Contains(t, sql, "ADD COLUMN IF NOT EXISTS parent_account_id BIGINT")
+	require.Contains(t, sql, "ADD COLUMN IF NOT EXISTS quota_dimension VARCHAR(20) NOT NULL DEFAULT 'global'")
+	require.Contains(t, sql, "chk_accounts_parent_dimension")
+	// 约束已放开为「影子 ⇒ 非 global 维度」（spark 不再写死进 parent 约束）
+	require.Contains(t, sql, "parent_account_id IS NOT NULL AND quota_dimension <> 'global'")
+	require.NotContains(t, sql, "parent_account_id IS NOT NULL AND quota_dimension = 'spark'")
+	require.Contains(t, sql, "chk_accounts_parent_not_self")
+	require.Contains(t, sql, "fk_accounts_parent_account_id")
+	require.Contains(t, sql, "FOREIGN KEY (parent_account_id) REFERENCES accounts(id)")
+	require.Contains(t, sql, "ON DELETE RESTRICT")
+	require.Contains(t, sql, "NOT VALID")
+	require.NotContains(t, sql, "CREATE INDEX")
+	require.NotContains(t, sql, "CREATE UNIQUE INDEX")
+	require.NotContains(t, sql, "CONCURRENTLY")
+}
+
+func TestMigration154aAddsSparkShadowIndexesConcurrently(t *testing.T) {
+	content, err := FS.ReadFile("154a_account_spark_shadow_indexes_notx.sql")
+	require.NoError(t, err)
+
+	sql := string(content)
+	require.Contains(t, sql, "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_accounts_parent_account_id")
+	require.Contains(t, sql, "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS uq_accounts_spark_shadow_per_parent")
+	require.Contains(t, sql, "ON accounts (parent_account_id)")
+	require.Contains(t, sql, "WHERE parent_account_id IS NOT NULL")
+	require.Contains(t, sql, "quota_dimension = 'spark'")
+	require.Contains(t, sql, "deleted_at IS NULL")
+}
+
+func TestMigration173AllowsCyberBlockedUsageRequestType(t *testing.T) {
+	entries, err := FS.ReadDir(".")
+	require.NoError(t, err)
+
+	previousIndex := -1
+	currentIndex := -1
+	for i, entry := range entries {
+		switch entry.Name() {
+		case "172_video_per_second_billing_metadata.sql":
+			previousIndex = i
+		case "173_allow_cyber_blocked_usage_request_type.sql":
+			currentIndex = i
+		}
+	}
+	require.NotEqual(t, -1, previousIndex)
+	require.NotEqual(t, -1, currentIndex)
+	require.Less(t, previousIndex, currentIndex)
+
+	content, err := FS.ReadFile("173_allow_cyber_blocked_usage_request_type.sql")
+	require.NoError(t, err)
+
+	sql := string(content)
+	require.Contains(t, sql, "DROP CONSTRAINT IF EXISTS usage_logs_request_type_check")
+	require.Contains(t, sql, "ADD CONSTRAINT usage_logs_request_type_check")
+	require.Contains(t, sql, "CHECK (request_type IN (0, 1, 2, 3, 4)) NOT VALID")
 }

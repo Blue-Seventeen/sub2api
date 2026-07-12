@@ -88,8 +88,11 @@ func TestParseProxySubscriptionPreservesDNSNameserverPolicy(t *testing.T) {
 	parsed, err := ParseProxySubscription([]byte(`
 dns:
   enable: true
+  listen: 0.0.0.0:53
   nameserver-policy:
     "+.entry.example.qpon": tcp://dns.example:8080
+  nameserver_policy:
+    "+.unsafe.example": tcp://unsafe.example:8080
 proxies:
   - name: HK-01
     type: ss
@@ -112,6 +115,35 @@ proxies:
 	}
 	if !strings.Contains(parsed.RawDNSConfig, "entry.example.qpon") {
 		t.Fatalf("raw dns config missing policy domain: %q", parsed.RawDNSConfig)
+	}
+	for _, dropped := range []string{"listen", "nameserver_policy", "unsafe.example"} {
+		if strings.Contains(parsed.RawDNSConfig, dropped) {
+			t.Fatalf("raw dns config should drop %q: %q", dropped, parsed.RawDNSConfig)
+		}
+	}
+}
+
+func TestParseProxySubscriptionDNSPolicyOnlyAllowsMatchingDomains(t *testing.T) {
+	_, err := ParseProxySubscription([]byte(`
+dns:
+  nameserver-policy:
+    "+.entry.example.invalid": tcp://dns.example:8080
+proxies:
+  - name: policy-covered
+    type: ss
+    server: t.hk01.entry.example.invalid
+    port: 8388
+    cipher: aes-128-gcm
+    password: remote-secret
+  - name: not-covered
+    type: ss
+    server: other.example.invalid
+    port: 8389
+    cipher: aes-128-gcm
+    password: remote-secret
+`))
+	if err == nil {
+		t.Fatal("expected non-policy domain to keep DNS validation and be rejected")
 	}
 }
 
@@ -168,19 +200,23 @@ func TestManagedProxySubscriptionFetchOptions(t *testing.T) {
 	}
 }
 
-// TestValidateManagedProxyNodeServer 覆盖验收标准 2/5c：域名放行，字面私网/loopback/元数据 IP 拒绝。
 func TestValidateManagedProxyNodeServer(t *testing.T) {
-	allowed := []string{
-		"t.hk01.entry.example.qpon",
-		"example.com",
+	ctx := context.Background()
+	allowedWithoutPolicy := []string{
 		"8.8.8.8",
 		"1.1.1.1",
 		"2606:4700:4700::1111",
 	}
-	for _, server := range allowed {
-		if err := validateManagedProxyNodeServer(server); err != nil {
+	for _, server := range allowedWithoutPolicy {
+		if err := validateManagedProxyNodeServer(ctx, server, false); err != nil {
 			t.Errorf("expected server %q to be allowed, got: %v", server, err)
 		}
+	}
+	if err := validateManagedProxyNodeServer(ctx, "t.hk01.entry.example.invalid", true); err != nil {
+		t.Fatalf("expected policy-managed domain to be allowed, got: %v", err)
+	}
+	if err := validateManagedProxyNodeServer(ctx, "t.hk01.entry.example.invalid", false); err == nil {
+		t.Fatal("expected unresolved domain without dns policy to keep legacy DNS validation and be blocked")
 	}
 
 	blocked := []string{
@@ -196,8 +232,8 @@ func TestValidateManagedProxyNodeServer(t *testing.T) {
 		"",
 	}
 	for _, server := range blocked {
-		if err := validateManagedProxyNodeServer(server); err == nil {
-			t.Errorf("expected server %q to be blocked", server)
+		if err := validateManagedProxyNodeServer(ctx, server, true); err == nil {
+			t.Errorf("expected server %q to be blocked even with dns policy", server)
 		}
 	}
 }

@@ -466,6 +466,7 @@
                     ? 'text-primary-600 dark:text-primary-400'
                     : 'text-gray-400 dark:text-dark-500'"
                   :title="t('admin.users.sortBy')"
+                  :data-test="`usage-sort-trigger-${usageKey}`"
                   @click.stop="toggleUsageSortMenu(usageKey)"
                 >
                   <span
@@ -502,6 +503,7 @@
                     :class="isUsageSortActive(usageKey, metric)
                       ? 'font-medium text-primary-600 dark:text-primary-400'
                       : 'text-gray-700 dark:text-gray-300'"
+                    :data-test="`usage-sort-${usageKey}-${metric}`"
                     @click.stop="toggleUsageSort(usageKey, metric)"
                   >
                     <span>{{ metric === 'today' ? t('admin.users.today') : t('admin.users.total') }}</span>
@@ -1221,6 +1223,8 @@ const getPlatformUsage = (userId: number, platform: string): PlatformUsage | und
 type UsageMetric = 'today' | 'total'
 type UsageSortState = { key: string; metric: UsageMetric; order: 'asc' | 'desc' } | null
 const USAGE_SORT_STORAGE_KEY = 'admin-users-usage-sort'
+// 列头排序按钮点击后弹出的"今日/近30天"选择菜单，同时只允许一个列展开。
+const openUsageSortMenu = ref<string | null>(null)
 
 const loadInitialUsageSort = (): UsageSortState => {
   try {
@@ -1247,6 +1251,12 @@ const persistUsageSort = () => {
   } catch {
     // localStorage may be unavailable in restricted browser contexts.
   }
+}
+const clearUsageSort = () => {
+  if (!usageSort.value) return
+  usageSort.value = null
+  openUsageSortMenu.value = null
+  persistUsageSort()
 }
 
 const getUsageSortOrder = (
@@ -1279,21 +1289,24 @@ const toggleUsageSort = (key: string, metric: UsageMetric) => {
   openUsageSortMenu.value = null
 }
 
-const getUsageSortValue = (userId: number, state: NonNullable<UsageSortState>) => {
+const getUsageValue = (userId: number, key: string, metric: UsageMetric): number => {
   const stats = usageStats.value[userId]
   if (!stats) return 0
-  if (state.key === 'usage') {
-    return state.metric === 'today'
+  if (key === 'usage') {
+    return metric === 'today'
       ? getBatchRealTodayCost(userId)
       : getBatchRealTotalCost(userId)
   }
-  const platform = USAGE_COLUMN_PLATFORMS[state.key]
+  const platform = USAGE_COLUMN_PLATFORMS[key]
   if (!platform) return 0
   const usage = stats.by_platform?.find((item) => item.platform === platform)
-  return state.metric === 'today'
+  return metric === 'today'
     ? usage?.today_actual_cost ?? 0
     : usage?.total_actual_cost ?? 0
 }
+
+const getUsageSortValue = (userId: number, state: NonNullable<UsageSortState>) =>
+  getUsageValue(userId, state.key, state.metric)
 // User attribute definitions and values
 const attributeDefinitions = ref<UserAttributeDefinition[]>([])
 const userAttributeValues = ref<Record<number, Record<number, string>>>({})
@@ -1414,7 +1427,6 @@ const refreshCurrentPageSecondaryData = () => {
 // Action Menu State
 const activeMenuId = ref<number | null>(null)
 const menuPosition = ref<{ top: number; left: number } | null>(null)
-const openUsageSortMenu = ref<string | null>(null)
 
 const openActionMenu = (user: AdminUser, e: MouseEvent) => {
   if (activeMenuId.value === user.id) {
@@ -1634,6 +1646,7 @@ const handlePageSizeChange = (pageSize: number) => {
 }
 
 const handleSort = (key: string, order: 'asc' | 'desc') => {
+  clearUsageSort()
   sortState.sort_by = key
   sortState.sort_order = order
   pagination.page = 1

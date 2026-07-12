@@ -1,7 +1,8 @@
 <template>
   <span
     :class="[
-      'inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium transition-colors',
+      'inline-flex max-w-full items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium transition-colors',
+      props.peakDisplayMode === 'full' ? 'flex-wrap' : 'min-w-0',
       badgeClass
     ]"
   >
@@ -14,12 +15,25 @@
       <template v-if="hasEffectiveRate">
         <!-- 默认倍率删除线 + 最终倍率高亮 -->
         <span class="line-through opacity-50 mr-0.5">{{ rateMultiplier }}x</span>
-        <span class="font-bold">{{ effectiveRateMultiplier }}x</span>
+        <span class="font-bold">{{ displayRateMultiplier }}x</span>
       </template>
       <template v-else>
         {{ labelText }}
       </template>
     </span>
+    <PeakRatePill
+      v-if="hasPeakRate"
+      :peak-rate-enabled="props.peakRateEnabled"
+      :peak-start="props.peakStart"
+      :peak-end="props.peakEnd"
+      :peak-rate-multiplier="props.peakRateMultiplier"
+      :peak-rate-windows="props.peakRateWindows"
+      :display-mode="props.peakDisplayMode"
+      :base-multiplier="peakBaseMultiplier"
+      :pill-class="peakRateClass"
+      include-billing-note
+      data-test="group-badge-peak-rate"
+    />
   </span>
 </template>
 
@@ -27,7 +41,13 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { SubscriptionType, GroupPlatform } from '@/types'
+import {
+  hasPeakRate as hasPeakRateFields,
+  type PeakRateDisplayMode,
+  type PeakRateWindow,
+} from '@/utils/peak-rate'
 import PlatformIcon from './PlatformIcon.vue'
+import PeakRatePill from './PeakRatePill.vue'
 
 interface Props {
   name: string
@@ -35,6 +55,13 @@ interface Props {
   subscriptionType?: SubscriptionType
   rateMultiplier?: number
   effectiveRateMultiplier?: number | null // 用户最终倍率
+  userRateMultiplier?: number | null // 用户专属倍率
+  peakRateEnabled?: boolean
+  peakStart?: string
+  peakEnd?: string
+  peakRateMultiplier?: number
+  peakRateWindows?: PeakRateWindow[]
+  peakDisplayMode?: PeakRateDisplayMode
   showRate?: boolean
   daysRemaining?: number | null // 剩余天数（订阅类型时使用）
   /**
@@ -50,6 +77,9 @@ const props = withDefaults(defineProps<Props>(), {
   showRate: true,
   daysRemaining: null,
   effectiveRateMultiplier: null,
+  userRateMultiplier: null,
+  peakRateEnabled: false,
+  peakDisplayMode: 'compact',
   alwaysShowRate: false
 })
 
@@ -57,15 +87,31 @@ const { t } = useI18n()
 
 const isSubscription = computed(() => props.subscriptionType === 'subscription')
 
+const displayRateMultiplier = computed(() => props.effectiveRateMultiplier ?? props.userRateMultiplier)
+
 // 是否存在与默认倍率不同的最终倍率。
 const hasEffectiveRate = computed(() => {
   return (
-    props.effectiveRateMultiplier !== null &&
-    props.effectiveRateMultiplier !== undefined &&
+    displayRateMultiplier.value !== null &&
+    displayRateMultiplier.value !== undefined &&
     props.rateMultiplier !== undefined &&
-    props.effectiveRateMultiplier !== props.rateMultiplier
+    displayRateMultiplier.value !== props.rateMultiplier
   )
 })
+
+const peakRateFields = computed(() => ({
+  peak_rate_enabled: props.peakRateEnabled,
+  peak_start: props.peakStart,
+  peak_end: props.peakEnd,
+  peak_rate_multiplier: props.peakRateMultiplier,
+  peak_rate_windows: props.peakRateWindows
+}))
+
+const hasPeakRate = computed(() => {
+  return Boolean(props.showRate && hasPeakRateFields(peakRateFields.value))
+})
+
+const peakBaseMultiplier = computed(() => displayRateMultiplier.value ?? props.rateMultiplier ?? 1)
 
 // 是否显示右侧标签
 const showLabel = computed(() => {
@@ -124,6 +170,12 @@ const labelClass = computed(() => {
   if (props.platform === 'gemini') {
     return `${base} bg-blue-200/60 text-blue-800 dark:bg-blue-800/40 dark:text-blue-300`
   }
+  if (props.platform === 'antigravity') {
+    return `${base} bg-purple-200/60 text-purple-800 dark:bg-purple-800/40 dark:text-purple-300`
+  }
+  if (props.platform === 'grok') {
+    return `${base} bg-zinc-300/70 text-zinc-800 dark:bg-zinc-700/60 dark:text-zinc-200`
+  }
   if (props.platform === 'zhipu') {
     return `${base} bg-emerald-200/60 text-emerald-800 dark:bg-emerald-800/40 dark:text-emerald-300`
   }
@@ -140,6 +192,14 @@ const labelClass = computed(() => {
     return `${base} bg-fuchsia-200/60 text-fuchsia-800 dark:bg-fuchsia-800/40 dark:text-fuchsia-300`
   }
   return `${base} bg-violet-200/60 text-violet-800 dark:bg-violet-800/40 dark:text-violet-300`
+})
+
+const peakRateClass = computed(() => {
+  const base = 'px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+  if (props.peakDisplayMode === 'full') {
+    return `${base} max-w-full whitespace-normal break-words leading-4`
+  }
+  return `${base} whitespace-nowrap`
 })
 
 // Badge color based on platform and subscription type
@@ -159,6 +219,16 @@ const badgeClass = computed(() => {
     return isSubscription.value
       ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
       : 'bg-sky-50 text-sky-700 dark:bg-sky-900/20 dark:text-sky-400'
+  }
+  if (props.platform === 'antigravity') {
+    return isSubscription.value
+      ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
+      : 'bg-fuchsia-50 text-fuchsia-700 dark:bg-fuchsia-900/20 dark:text-fuchsia-400'
+  }
+  if (props.platform === 'grok') {
+    return isSubscription.value
+      ? 'bg-zinc-200 text-zinc-800 dark:bg-zinc-700 dark:text-zinc-100'
+      : 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200'
   }
   if (props.platform === 'zhipu') {
     return isSubscription.value

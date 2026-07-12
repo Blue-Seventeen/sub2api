@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -147,17 +148,19 @@ func TestGetUserErrorRequestDetail_OwnershipEnforced(t *testing.T) {
 	if got2 == nil {
 		t.Fatal("expected non-nil detail for legitimate access")
 	}
-	if got2.ID != 42 {
-		t.Errorf("want ID=42, got %d", got2.ID)
-	}
-	if got2.ErrorBody != `{"error":"upstream"}` {
-		t.Errorf("want ErrorBody=%q, got %q", `{"error":"upstream"}`, got2.ErrorBody)
-	}
-	if got2.UpstreamStatusCode == nil || *got2.UpstreamStatusCode != 503 {
-		t.Errorf("want UpstreamStatusCode=503, got %v", got2.UpstreamStatusCode)
-	}
-	if got2.Message != "upstream failed" {
-		t.Errorf("want Message=%q, got %q", "upstream failed", got2.Message)
+	if got2 != nil {
+		if got2.ID != 42 {
+			t.Errorf("want ID=42, got %d", got2.ID)
+		}
+		if got2.ErrorBody != `{"error":"upstream"}` {
+			t.Errorf("want ErrorBody=%q, got %q", `{"error":"upstream"}`, got2.ErrorBody)
+		}
+		if got2.UpstreamStatusCode == nil || *got2.UpstreamStatusCode != 503 {
+			t.Errorf("want UpstreamStatusCode=503, got %v", got2.UpstreamStatusCode)
+		}
+		if got2.Message != "upstream failed" {
+			t.Errorf("want Message=%q, got %q", "upstream failed", got2.Message)
+		}
 	}
 }
 
@@ -187,6 +190,111 @@ func TestGetUserErrorRequestDetail_NotFound(t *testing.T) {
 	}
 	if got != nil {
 		t.Fatalf("expected nil detail, got %+v", got)
+	}
+}
+
+func TestUserErrorRequestRedactsNetworkAndSecrets(t *testing.T) {
+	apiKeySecret := "sk-user-visible-secret"
+	authSecret := "sk-auth-secret"
+	detailSecret := "sk-detail-secret"
+	detailAuthSecret := "detail-token-secret"
+	bareSecret := "sk-proj-user-visible-secret-1234567890"
+	bareBearer := "bare-token-secret-1234567890"
+	jwtSecret := "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyLWlkIn0.abcdefghijklmnopqrstuvwxyz"
+
+	item := ToUserErrorRequest(&OpsErrorLog{
+		ID:              10,
+		Phase:           "network",
+		Type:            "upstream_error",
+		Model:           "gpt-5.4",
+		InboundEndpoint: "/v1/responses",
+		StatusCode:      502,
+		Platform:        "openai",
+		Message:         `Post "https://japan.zelly.cn/v1/responses?api_key=` + apiKeySecret + `": dial tcp 43.165.178.21:443: connect: account_name=OpenAI_Free authorization: Bearer ` + authSecret,
+	})
+	if item == nil {
+		t.Fatal("expected user error item")
+	}
+	for _, leaked := range []string{"japan.zelly.cn", "43.165.178.21", apiKeySecret, authSecret, "OpenAI_Free"} {
+		if strings.Contains(item.Message, leaked) {
+			t.Fatalf("message leaked %q: %s", leaked, item.Message)
+		}
+	}
+	for _, expected := range []string{"https://*.*.*.*/v1/responses?api_key=sk-user-...cret", "account_name=***", "authorization: Bearer sk-auth-...cret"} {
+		if !strings.Contains(item.Message, expected) {
+			t.Fatalf("message missing %q: %s", expected, item.Message)
+		}
+	}
+	queryOnly := ToUserErrorRequest(&OpsErrorLog{
+		Message: `Get "https://query.secret.example?api_key=` + apiKeySecret + `&target=/v1/responses": failed`,
+	})
+	if queryOnly == nil {
+		t.Fatal("expected query-only URL item")
+	}
+	for _, leaked := range []string{"query.secret.example", apiKeySecret} {
+		if strings.Contains(queryOnly.Message, leaked) {
+			t.Fatalf("query-only URL message leaked %q: %s", leaked, queryOnly.Message)
+		}
+	}
+	if !strings.Contains(queryOnly.Message, "https://*.*.*.*?api_key=sk-user-...cret&target=/v1/responses") {
+		t.Fatalf("query-only URL should keep path/query but mask host and key: %s", queryOnly.Message)
+	}
+	pathOnly := ToUserErrorRequest(&OpsErrorLog{
+		Message: `POST /v1/responses?target=/backend-api/codex/responses&api_key=` + apiKeySecret + ` failed: invalid API key ` + bareSecret + ` accountName=prod-openai accountID=2553 Bearer ` + bareBearer + ` jwt=` + jwtSecret,
+	})
+	if pathOnly == nil {
+		t.Fatal("expected path-only item")
+	}
+	for _, leaked := range []string{apiKeySecret, bareSecret, "prod-openai", "2553", bareBearer, jwtSecret} {
+		if strings.Contains(pathOnly.Message, leaked) {
+			t.Fatalf("path-only message leaked %q: %s", leaked, pathOnly.Message)
+		}
+	}
+	for _, expected := range []string{"/v1/responses?target=/backend-api/codex/responses&api_key=sk-user-...cret", "sk-proj-...7890", "accountName=***", "accountID=***", "Bearer bare-t...7890"} {
+		if !strings.Contains(pathOnly.Message, expected) {
+			t.Fatalf("path-only message missing %q: %s", expected, pathOnly.Message)
+		}
+	}
+
+	detail := ToUserErrorRequestDetail(&OpsErrorLogDetail{
+		OpsErrorLog: OpsErrorLog{
+			ID:         11,
+			Phase:      "upstream",
+			Type:       "upstream_error",
+			Model:      "gpt-5.4",
+			StatusCode: 502,
+			Message:    "failed",
+		},
+		ErrorBody: `{"error":{"message":"request to https://api.secret.example/v1 failed","api_key":"` + detailSecret + `","authorization":"Bearer ` + detailAuthSecret + `"}}`,
+	})
+	if detail == nil {
+		t.Fatal("expected user error detail")
+	}
+	for _, leaked := range []string{"api.secret.example", detailSecret, detailAuthSecret} {
+		if strings.Contains(detail.ErrorBody, leaked) {
+			t.Fatalf("error_body leaked %q: %s", leaked, detail.ErrorBody)
+		}
+	}
+	if !strings.Contains(detail.ErrorBody, "https://*.*.*.*/v1") {
+		t.Fatalf("error_body should mask host but keep path: %s", detail.ErrorBody)
+	}
+}
+
+func TestUserErrorRequestDoesNotMutateAdminSource(t *testing.T) {
+	secret := "sk-admin-source-secret"
+	source := &OpsErrorLog{
+		Message: "api_key=" + secret + " https://admin-source.example/v1",
+	}
+
+	item := ToUserErrorRequest(source)
+	if item == nil {
+		t.Fatal("expected user error item")
+	}
+	if !strings.Contains(source.Message, secret) || !strings.Contains(source.Message, "admin-source.example") {
+		t.Fatalf("source should remain unmodified for admin path: %s", source.Message)
+	}
+	if item != nil && (strings.Contains(item.Message, secret) || strings.Contains(item.Message, "admin-source.example")) {
+		t.Fatalf("user message should be redacted: %s", item.Message)
 	}
 }
 
@@ -225,16 +333,16 @@ func TestGetUserErrorRequestDetail_DeletedKeyOwnerAccess(t *testing.T) {
 	mk := func() *OpsErrorLogDetail {
 		return &OpsErrorLogDetail{
 			OpsErrorLog: OpsErrorLog{
-				ID:            55,
-				Phase:         "auth",
-				Type:          "api_error",
-				StatusCode:    401,
-				Message:       "Invalid API key",
-				UserID:        nil,
-				APIKeyName:    "my-old-key",
-				APIKeyDeleted: true,
+				ID:                    55,
+				Phase:                 "auth",
+				Type:                  "api_error",
+				StatusCode:            401,
+				Message:               "Invalid API key",
+				UserID:                nil,
+				APIKeyName:            "my-old-key",
+				APIKeyDeleted:         true,
+				DeletedKeyOwnerUserID: &ownerUID,
 			},
-			DeletedKeyOwnerUserID: &ownerUID,
 		}
 	}
 

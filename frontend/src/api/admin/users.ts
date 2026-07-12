@@ -121,6 +121,7 @@ export async function create(userData: {
   password: string
   username?: string
   notes?: string
+  role?: 'admin' | 'user'
   balance?: number
   unified_rate_enabled?: boolean
   unified_rate_multiplier?: number
@@ -309,7 +310,7 @@ export async function bindUserAuthIdentity(
 /**
  * Platform quota types
  */
-export type PlatformQuotaPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity'
+export type PlatformQuotaPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok'
 export type PlatformQuotaWindow = 'daily' | 'weekly' | 'monthly'
 
 export interface PlatformQuotaItem {

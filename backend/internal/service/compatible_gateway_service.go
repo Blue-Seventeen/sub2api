@@ -1701,6 +1701,35 @@ func applyCompatibleBillableQuantities(result *ForwardResult, prepared *compatib
 	}
 }
 
+func applyCompatibleUsageFallback(result *ForwardResult, account *Account, group *Group, estimatedInputTokens int) {
+	if result == nil || account == nil || !account.UseNewAPIStyleInterfaceForGroup(group) {
+		return
+	}
+	if result.Usage.InputTokens <= 0 && estimatedInputTokens > 0 {
+		result.Usage.InputTokens = estimatedInputTokens
+		result.UsageEstimated = true
+	}
+}
+
+func shouldWarnCompatibleZeroCost(account *Account, group *Group, result *ForwardResult, cost *CostBreakdown) bool {
+	if account == nil || result == nil || cost == nil || !account.UseNewAPIStyleInterfaceForGroup(group) {
+		return false
+	}
+	if cost.ActualCost != 0 || cost.TotalCost != 0 {
+		return false
+	}
+	return result.RequestCount > 0 || result.BillableUnitType != "" || result.BillableDurationSeconds > 0 || result.BillableCharacterCount > 0
+}
+
+func firstExistingGJSONInt(results ...gjson.Result) int {
+	for _, result := range results {
+		if result.Exists() {
+			return int(result.Int())
+		}
+	}
+	return 0
+}
+
 func isCompatibleASRRequest(prepared *compatiblePreparedRequest) bool {
 	if prepared == nil || compatiblePreparedClientRoute(prepared) != CompatibleRouteChatCompletions {
 		return false
