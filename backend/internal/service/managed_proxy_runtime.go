@@ -165,6 +165,9 @@ func newManagedProxyRuntimeWithRunner(cfg config.ManagedProxyConfig, repo ProxyS
 }
 
 func ProvideManagedProxyRuntime(cfg *config.Config, repo ProxySubscriptionRepository) *ManagedProxyRuntime {
+	if cfg != nil {
+		SetManagedProxySubscriptionFetchOptions(cfg.ManagedProxy.SubscriptionUserAgent, cfg.ManagedProxy.SubscriptionAppendClashFlag)
+	}
 	rt := NewManagedProxyRuntime(cfg, repo)
 	SetDefaultManagedProxyResolver(rt)
 	rt.Start()

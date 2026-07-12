@@ -167,6 +167,14 @@ type ManagedProxyConfig struct {
 	MaxInstances              int    `mapstructure:"max_instances"`
 	DefaultRefreshIntervalSec int    `mapstructure:"default_refresh_interval_sec"`
 	HealthCheckURL            string `mapstructure:"health_check_url"`
+	// SubscriptionUserAgent 抓取订阅时使用的 User-Agent。
+	// 部分机场（V2Board/Xboard 等）按 UA 决定返回 Clash YAML 还是 base64 v2ray，
+	// 默认使用主流 Clash-Meta 客户端标识以确保拿到 Clash YAML。
+	SubscriptionUserAgent string `mapstructure:"subscription_user_agent"`
+	// SubscriptionAppendClashFlag 为 true 时，抓取 URL 未含 flag 参数则追加 &flag=clash。
+	// 默认关闭：部分机场（如魔戒）追加 flag=clash 会降级为 legacy 档并丢失 hysteria2 等节点，
+	// 仅对「只认 flag、忽略 UA」的机场按需开启。
+	SubscriptionAppendClashFlag bool `mapstructure:"subscription_append_clash_flag"`
 }
 
 type IdempotencyConfig struct {
@@ -2040,6 +2048,8 @@ func setDefaults() {
 	viper.SetDefault("managed_proxy.max_instances", 32)
 	viper.SetDefault("managed_proxy.default_refresh_interval_sec", 3600)
 	viper.SetDefault("managed_proxy.health_check_url", "https://www.gstatic.com/generate_204")
+	viper.SetDefault("managed_proxy.subscription_user_agent", "clash-verge/v2.0.0")
+	viper.SetDefault("managed_proxy.subscription_append_clash_flag", false)
 	viper.SetDefault("concurrency.ping_interval", 10)
 
 	// TokenRefresh

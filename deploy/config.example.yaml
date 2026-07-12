@@ -82,6 +82,14 @@ managed_proxy:
   max_instances: 32
   default_refresh_interval_sec: 3600
   health_check_url: "https://www.gstatic.com/generate_204"
+  # 抓取订阅使用的 User-Agent。部分机场（V2Board/Xboard 等）按 UA 决定返回 Clash YAML
+  # 还是 base64 v2ray；默认用主流 Clash-Meta 客户端标识以拿到 Clash YAML（含 hysteria2 等节点）。
+  # 可用 MANAGED_PROXY_SUBSCRIPTION_USER_AGENT 覆盖。
+  subscription_user_agent: "clash-verge/v2.0.0"
+  # 为 true 时，订阅 URL 未含 flag 参数则抓取时追加 &flag=clash。默认 false：
+  # 部分机场（如魔戒）追加 flag=clash 会降级为 legacy 档并丢失 hysteria2 等节点，
+  # 仅对「只认 flag、忽略 UA」的机场按需开启。可用 MANAGED_PROXY_SUBSCRIPTION_APPEND_CLASH_FLAG 覆盖。
+  subscription_append_clash_flag: false
 
 # =============================================================================
 # CORS Configuration

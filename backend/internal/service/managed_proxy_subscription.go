@@ -12,12 +12,59 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
 const maxManagedProxySubscriptionBytes = 10 << 20
+
+// defaultManagedProxySubscriptionUserAgent 默认抓取订阅使用的 User-Agent。
+// 部分机场（V2Board/Xboard 等）按 UA 决定返回 Clash YAML 还是 base64 v2ray 订阅，
+// 使用主流 Clash-Meta 客户端标识可确保拿到 Clash YAML（并尽量拿到 hysteria2 等 meta 协议节点）。
+const defaultManagedProxySubscriptionUserAgent = "clash-verge/v2.0.0"
+
+var (
+	managedProxySubscriptionFetchMu         sync.RWMutex
+	managedProxySubscriptionUserAgent       = defaultManagedProxySubscriptionUserAgent
+	managedProxySubscriptionAppendClashFlag = false
+)
+
+// SetManagedProxySubscriptionFetchOptions 在启动装配时由配置注入抓取参数。
+// userAgent 为空时回退到默认 Clash-Meta 标识。
+func SetManagedProxySubscriptionFetchOptions(userAgent string, appendClashFlag bool) {
+	managedProxySubscriptionFetchMu.Lock()
+	defer managedProxySubscriptionFetchMu.Unlock()
+	if ua := strings.TrimSpace(userAgent); ua != "" {
+		managedProxySubscriptionUserAgent = ua
+	} else {
+		managedProxySubscriptionUserAgent = defaultManagedProxySubscriptionUserAgent
+	}
+	managedProxySubscriptionAppendClashFlag = appendClashFlag
+}
+
+func managedProxySubscriptionFetchOptions() (userAgent string, appendClashFlag bool) {
+	managedProxySubscriptionFetchMu.RLock()
+	defer managedProxySubscriptionFetchMu.RUnlock()
+	return managedProxySubscriptionUserAgent, managedProxySubscriptionAppendClashFlag
+}
+
+// ensureClashProxyFormatFlag 在订阅 URL 未显式携带 flag 时追加 &flag=clash。
+// 仅改动 query，不改 scheme/host（订阅 URL 的 SSRF 校验因此不受影响）；已含 flag 时保持原样，尊重用户设置。
+func ensureClashProxyFormatFlag(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return raw
+	}
+	q := u.Query()
+	if q.Has("flag") {
+		return raw
+	}
+	q.Set("flag", "clash")
+	u.RawQuery = q.Encode()
+	return u.String()
+}
 
 var managedProxySubscriptionBlockedCIDRs = mustParseManagedProxySubscriptionCIDRs([]string{
 	"0.0.0.0/8",
@@ -69,11 +116,17 @@ func FetchProxySubscription(ctx context.Context, subscriptionURL string) (*Parse
 	if err := validateManagedProxySubscriptionURL(subscriptionURL); err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, subscriptionURL, nil)
+	userAgent, appendClashFlag := managedProxySubscriptionFetchOptions()
+	fetchURL := subscriptionURL
+	if appendClashFlag {
+		// 仅追加 query（host/scheme 不变），SSRF 校验结果不受影响。
+		fetchURL = ensureClashProxyFormatFlag(subscriptionURL)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fetchURL, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "sub2api-managed-proxy/1.0")
+	req.Header.Set("User-Agent", userAgent)
 	client := managedProxySubscriptionHTTPClient()
 	resp, err := client.Do(req)
 	if err != nil {
@@ -237,8 +290,16 @@ func ParseProxySubscription(data []byte) (*ParsedProxySubscription, error) {
 		Proxies []map[string]any `yaml:"proxies"`
 		DNS     map[string]any   `yaml:"dns"`
 	}
-	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return nil, fmt.Errorf("parse clash subscription: %w", err)
+	yamlErr := yaml.Unmarshal(data, &doc)
+	if yamlErr != nil || len(doc.Proxies) == 0 {
+		// 回退：可能是 base64 / 明文 URI 列表订阅（vmess/vless/ss/trojan/hysteria2/tuic），
+		// 而非 Clash YAML。此类订阅不带顶层 dns。
+		if uriProxies := parseProxyURIListSubscription(data); len(uriProxies) > 0 {
+			doc.Proxies = uriProxies
+			doc.DNS = nil
+		} else if yamlErr != nil {
+			return nil, fmt.Errorf("parse clash subscription: %w", yamlErr)
+		}
 	}
 	if len(doc.Proxies) == 0 {
 		return nil, errors.New("subscription contains no Clash proxies")
