@@ -134,6 +134,40 @@ proxies:
 	}
 }
 
+// TestEnsureClashProxyFormatFlag 覆盖 Phase 1：抓取 URL 幂等追加 flag=clash。
+func TestEnsureClashProxyFormatFlag(t *testing.T) {
+	// 无 flag → 追加 flag=clash，且保留原有 token
+	got := ensureClashProxyFormatFlag("https://sub.example.com/api/v1/client/subscribe?token=abc")
+	if !strings.Contains(got, "flag=clash") || !strings.Contains(got, "token=abc") {
+		t.Fatalf("expected flag=clash appended and token kept, got: %q", got)
+	}
+	// 已含 flag → 尊重用户，不覆盖
+	got = ensureClashProxyFormatFlag("https://sub.example.com/s?token=abc&flag=meta")
+	if strings.Contains(got, "flag=clash") || !strings.Contains(got, "flag=meta") {
+		t.Fatalf("existing flag must be respected, got: %q", got)
+	}
+	// 无 query → 追加
+	got = ensureClashProxyFormatFlag("https://sub.example.com/s")
+	if !strings.Contains(got, "flag=clash") {
+		t.Fatalf("expected flag=clash on query-less url, got: %q", got)
+	}
+}
+
+// TestManagedProxySubscriptionFetchOptions 覆盖 Phase 1：UA/flag 可配置、空 UA 回退默认。
+func TestManagedProxySubscriptionFetchOptions(t *testing.T) {
+	origUA, origFlag := managedProxySubscriptionFetchOptions()
+	t.Cleanup(func() { SetManagedProxySubscriptionFetchOptions(origUA, origFlag) })
+
+	SetManagedProxySubscriptionFetchOptions("clash-verge/v2.0.0", true)
+	if ua, flag := managedProxySubscriptionFetchOptions(); ua != "clash-verge/v2.0.0" || !flag {
+		t.Fatalf("options = (%q,%v), want (clash-verge/v2.0.0,true)", ua, flag)
+	}
+	SetManagedProxySubscriptionFetchOptions("", false)
+	if ua, _ := managedProxySubscriptionFetchOptions(); ua != defaultManagedProxySubscriptionUserAgent {
+		t.Fatalf("empty UA should fall back to default, got: %q", ua)
+	}
+}
+
 // TestValidateManagedProxyNodeServer 覆盖验收标准 2/5c：域名放行，字面私网/loopback/元数据 IP 拒绝。
 func TestValidateManagedProxyNodeServer(t *testing.T) {
 	allowed := []string{
