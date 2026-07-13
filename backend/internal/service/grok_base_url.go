@@ -39,6 +39,10 @@ func buildGrokMediaURLForAccount(account *Account, endpoint GrokMediaEndpoint, r
 			return xai.BuildAPIKeyImagesEditsURL(baseURL)
 		case GrokMediaEndpointVideosGenerations:
 			return xai.BuildAPIKeyVideosGenerationsURL(baseURL)
+		case GrokMediaEndpointVideosEdits:
+			return xai.BuildAPIKeyVideosEditsURL(baseURL)
+		case GrokMediaEndpointVideosExtensions:
+			return xai.BuildAPIKeyVideosExtensionsURL(baseURL)
 		case GrokMediaEndpointVideoStatus:
 			return xai.BuildAPIKeyVideoURL(baseURL, requestID)
 		default:

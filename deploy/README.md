@@ -1,6 +1,6 @@
 # Hack3rX Sub2API Custom 部署文件
 
-本目录保存 Docker Compose、systemd、示例配置和部署辅助脚本。
+本目录保存 Docker Compose、Apple container、systemd、示例配置和部署辅助脚本。
 
 > 当前项目是自定义 fork，不建议直接使用官方 Sub2API 镜像覆盖部署。生产环境应优先使用本仓库 `dev` 分支构建出的自定义镜像或发布包。
 
@@ -10,6 +10,7 @@
 |---|---|
 | Docker Compose | 推荐；适合新机器、迁移、测试和生产部署 |
 | 本地构建镜像 | 推荐；确保包含本 fork 的兼容、推广、使用记录和备份锁改动 |
+| Apple container | 可选；适合 Apple silicon + macOS 26 的本地或自管部署 |
 | 二进制 + systemd | 可选；适合已有运维体系 |
 
 ## 主要文件
@@ -19,11 +20,26 @@
 | `docker-compose.yml` | Docker Compose 示例，使用 named volume |
 | `docker-compose.local.yml` | 本地目录挂载示例，便于迁移和调试 |
 | `docker-deploy.sh` | Docker 部署辅助脚本 |
+| `apple-container.sh` | Apple `container` 生命周期脚本 |
+| `APPLE_CONTAINER.md` | Apple `container` 部署与运维说明 |
 | `.env.example` | 环境变量示例，不能填入真实密钥后提交 |
 | `config.example.yaml` | 配置文件示例 |
 | `DOCKER.md` | Docker 部署说明 |
 | `install.sh` | 二进制安装脚本 |
 | `sub2api.service` | systemd 服务示例 |
+
+## Apple Container
+
+Apple silicon 且运行 macOS 26 的机器可使用 Apple `container` 1.1.0 或更高版本。脚本会按顺序启动 PostgreSQL、Redis 和 Sub2API，并执行就绪检查，但不提供持续重启守护；生产部署仍推荐 Docker Compose。
+
+```bash
+./apple-container.sh init
+./apple-container.sh up
+./apple-container.sh status
+./apple-container.sh logs app -f
+```
+
+使用前必须在 `.env` 中将 `APPLE_CONTAINER_SUB2API_IMAGE` 指向本 fork 构建的镜像，不能直接替换为官方镜像，否则自定义功能会缺失。完整限制见 [APPLE_CONTAINER.md](./APPLE_CONTAINER.md)。
 
 ## 安全注意事项
 
@@ -39,6 +55,7 @@
 - 如果新版本包含应用内 migration，必须让新应用容器启动并完成迁移后再切流；多实例部署时先保留一个新应用节点执行迁移，健康检查通过后再滚动升级剩余节点。
 - v0.1.145 自定义多时段高峰倍率包含 `159_add_group_peak_rate_windows.sql`，该 migration 只给 `groups` 增加 additive JSONB 字段并从旧单段高峰字段回填第一段。旧容器回退会忽略 `peak_rate_windows`，多窗口只按 legacy 第一段生效。
 - 多时段高峰倍率同时覆盖标准余额分组和订阅分组，token、per_request、image、duration、character 计费都会叠加命中的高峰倍率。回退期间如果编辑高峰配置，再升级时新容器读路径会优先使用 legacy 第一段以保持兼容；只有在新版本再次保存分组后，`peak_rate_windows` 才会被持久同步。
+- v0.1.153 新增 `174_add_usage_logs_api_key_latest_ip_index_notx.sql`，仅并发创建 usage 查询索引；旧容器会忽略该索引，可继续使用同一数据库。
 
 ## 迁移注意事项
 

@@ -382,7 +382,7 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 					h.writeFailoverError(c, route, failoverErr, failoverErr.StatusCode, true, account.Platform)
 					return
 				}
-				switch fs.HandleFailoverError(c.Request.Context(), h.compatibleService, account.ID, account.Platform, failoverErr) {
+				switch fs.HandleFailoverError(c.Request.Context(), h.compatibleService, account.ID, account.Platform, account.GetPoolModeRetryCount(), failoverErr) {
 				case FailoverContinue:
 					continue
 				case FailoverCanceled:

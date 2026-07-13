@@ -487,7 +487,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						h.handleFailoverExhausted(c, failoverErr, service.PlatformGemini, true)
 						return
 					}
-					action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, failoverErr)
+					action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, account.GetPoolModeRetryCount(), failoverErr)
 					switch action {
 					case FailoverContinue:
 						lastFailedAccount = account
@@ -955,7 +955,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						h.handleFailoverExhausted(c, failoverErr, account.Platform, true)
 						return
 					}
-					action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, failoverErr)
+					action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, account.GetPoolModeRetryCount(), failoverErr)
 					switch action {
 					case FailoverContinue:
 						lastFailedAccount = account
@@ -1564,17 +1564,18 @@ func (h *GatewayHandler) usageUnrestricted(c *gin.Context, ctx context.Context, 
 			remaining := h.calculateSubscriptionRemaining(apiKey.Group, subscription)
 			resp["remaining"] = remaining
 			resp["subscription"] = gin.H{
-				"daily_usage_usd":    subscription.DailyUsageUSD,
-				"weekly_usage_usd":   subscription.WeeklyUsageUSD,
-				"monthly_usage_usd":  subscription.MonthlyUsageUSD,
-				"custom_usage_usd":   subscription.CustomUsageUSD,
-				"custom_used_usd":    subscription.CustomUsageUSD,
-				"daily_limit_usd":    apiKey.Group.DailyLimitUSD,
-				"weekly_limit_usd":   apiKey.Group.WeeklyLimitUSD,
-				"monthly_limit_usd":  apiKey.Group.MonthlyLimitUSD,
-				"custom_limit_hours": apiKey.Group.CustomLimitHours,
-				"custom_limit_usd":   apiKey.Group.CustomLimitUSD,
-				"expires_at":         subscription.ExpiresAt,
+				"daily_usage_usd":     subscription.DailyUsageUSD,
+				"weekly_usage_usd":    subscription.WeeklyUsageUSD,
+				"monthly_usage_usd":   subscription.MonthlyUsageUSD,
+				"custom_usage_usd":    subscription.CustomUsageUSD,
+				"custom_used_usd":     subscription.CustomUsageUSD,
+				"daily_limit_usd":     apiKey.Group.DailyLimitUSD,
+				"weekly_limit_usd":    apiKey.Group.WeeklyLimitUSD,
+				"monthly_limit_usd":   apiKey.Group.MonthlyLimitUSD,
+				"custom_limit_hours":  apiKey.Group.CustomLimitHours,
+				"custom_limit_usd":    apiKey.Group.CustomLimitUSD,
+				"weekly_window_start": subscription.WeeklyWindowStart,
+				"expires_at":          subscription.ExpiresAt,
 			}
 		}
 

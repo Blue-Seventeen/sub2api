@@ -73,6 +73,22 @@ func RegisterGatewayRoutes(
 		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 		writeVideosUnsupported(c)
 	}
+	videoEditHandler := func(c *gin.Context) {
+		if getGroupPlatform(c) == service.PlatformGrok {
+			h.OpenAIGateway.GrokVideoEdit(c)
+			return
+		}
+		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
+		c.JSON(http.StatusNotFound, gin.H{"error": gin.H{"type": "not_found_error", "message": "Videos API is not supported for this platform"}})
+	}
+	videoExtensionHandler := func(c *gin.Context) {
+		if getGroupPlatform(c) == service.PlatformGrok {
+			h.OpenAIGateway.GrokVideoExtension(c)
+			return
+		}
+		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
+		c.JSON(http.StatusNotFound, gin.H{"error": gin.H{"type": "not_found_error", "message": "Videos API is not supported for this platform"}})
+	}
 	// API网关（Claude API兼容）
 	gateway := r.Group("/v1")
 	gateway.Use(bodyLimit)
@@ -196,7 +212,9 @@ func RegisterGatewayRoutes(
 		gateway.GET("/videos", h.NewAPIStyleGateway.Videos)
 		gateway.POST("/videos", h.NewAPIStyleGateway.Videos)
 		gateway.POST("/videos/generations", videoGenerationHandler)
-		gateway.GET("/videos/:id", videoStatusHandler)
+		gateway.POST("/videos/edits", videoEditHandler)
+		gateway.POST("/videos/extensions", videoExtensionHandler)
+		gateway.GET("/videos/:request_id", videoStatusHandler)
 		gateway.POST("/videos/:id", h.NewAPIStyleGateway.Videos)
 		gateway.GET("/video/generations", h.NewAPIStyleGateway.VideoGenerations)
 		gateway.POST("/video/generations", h.NewAPIStyleGateway.VideoGenerations)
@@ -278,7 +296,9 @@ func RegisterGatewayRoutes(
 	r.GET("/videos", append(newAPIOnly, h.NewAPIStyleGateway.Videos)...)
 	r.POST("/videos", append(newAPIOnly, h.NewAPIStyleGateway.Videos)...)
 	r.POST("/videos/generations", append(newAPIOnly, videoGenerationHandler)...)
-	r.GET("/videos/:id", append(newAPIOnly, videoStatusHandler)...)
+	r.POST("/videos/edits", append(newAPIOnly, videoEditHandler)...)
+	r.POST("/videos/extensions", append(newAPIOnly, videoExtensionHandler)...)
+	r.GET("/videos/:request_id", append(newAPIOnly, videoStatusHandler)...)
 	r.POST("/videos/:id", append(newAPIOnly, h.NewAPIStyleGateway.Videos)...)
 	r.GET("/video/generations", append(newAPIOnly, h.NewAPIStyleGateway.VideoGenerations)...)
 	r.POST("/video/generations", append(newAPIOnly, h.NewAPIStyleGateway.VideoGenerations)...)

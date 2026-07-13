@@ -330,7 +330,7 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 					h.writeFailoverError(c, route, failoverErr, failoverErr.StatusCode, true, account.Platform)
 					return
 				}
-				switch fs.HandleFailoverError(c.Request.Context(), h.base.gatewayService, account.ID, account.Platform, failoverErr) {
+				switch fs.HandleFailoverError(c.Request.Context(), h.base.gatewayService, account.ID, account.Platform, account.GetPoolModeRetryCount(), failoverErr) {
 				case FailoverContinue:
 					continue
 				case FailoverCanceled:
