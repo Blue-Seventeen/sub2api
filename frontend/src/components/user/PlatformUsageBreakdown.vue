@@ -33,9 +33,9 @@
           {{ item.isOther ? t('admin.users.platformOther') : platformDisplayName(item.platform) }}
         </span>
         <span class="font-mono">
-          {{ formatCostAmount(item.today_actual_cost) }}
+          {{ formatCostAmount(getDisplayTodayCost(item)) }}
           <span class="opacity-50">/</span>
-          {{ formatCostAmount(item.total_actual_cost) }}
+          {{ formatCostAmount(getDisplayTotalCost(item)) }}
         </span>
       </div>
     </div>
@@ -66,17 +66,25 @@ interface BreakdownRow {
   platform: string
   today_actual_cost: number
   total_actual_cost: number
+  real_today_actual_cost?: number
+  real_total_actual_cost?: number
   isOther?: boolean
 }
+
+const getDisplayTodayCost = (item: BreakdownRow): number =>
+  item.real_today_actual_cost ?? item.today_actual_cost
+
+const getDisplayTotalCost = (item: BreakdownRow): number =>
+  item.real_total_actual_cost ?? item.total_actual_cost
 
 const sortedBreakdown = computed<BreakdownRow[]>(() => {
   const list = props.byPlatform ?? []
   const rows: BreakdownRow[] = [...list]
-    .sort((a, b) => b.total_actual_cost - a.total_actual_cost)
     .map((p) => ({ ...p }))
+    .sort((a, b) => getDisplayTotalCost(b) - getDisplayTotalCost(a))
 
-  const sumTotal = rows.reduce((s, r) => s + r.total_actual_cost, 0)
-  const sumToday = rows.reduce((s, r) => s + r.today_actual_cost, 0)
+  const sumTotal = rows.reduce((s, r) => s + getDisplayTotalCost(r), 0)
+  const sumToday = rows.reduce((s, r) => s + getDisplayTodayCost(r), 0)
   const diffTotal = Math.max(0, props.total - sumTotal)
   const diffToday = Math.max(0, props.today - sumToday)
   if (diffTotal > OTHER_THRESHOLD || diffToday > OTHER_THRESHOLD) {

@@ -403,6 +403,12 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 	if len(videoMultiplierOverride) > 0 {
 		videoMultiplier = videoMultiplierOverride[0]
 	}
+	if result != nil && result.WebSearchCalls > 0 {
+		// Codex alpha/search 网页搜索按次计费：上游不返回 usage/token 字段，单价只取
+		// 分组覆盖价（nil 时默认 0.01 = 官方 $10/1000 次），不参与渠道级模型定价。
+		// 倍率沿用当前 fork 的统一计费语义：基础倍率叠加命中窗口的高峰倍率。
+		return s.billingService.CalculateWebSearchCost(result.WebSearchCalls, webSearchPricePerCallFromAPIKey(apiKey), multiplier), nil
+	}
 	if isGrokVideoUsageResult(result, billingModels) {
 		if resolved := s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey); resolved == nil || resolved.Mode != BillingModeToken {
 			return s.calculateOpenAIVideoCost(ctx, billingModel, apiKey, result, videoMultiplier), nil

@@ -9,7 +9,7 @@ import (
 // ChatCompletionsToResponsesResponse preserves the current fork call site while
 // delegating to the upstream v0.1.130 bridge implementation.
 func ChatCompletionsToResponsesResponse(resp *ChatCompletionsResponse) *ResponsesResponse {
-	return ChatCompletionsResponseToResponses(resp, "")
+	return ChatCompletionsResponseToResponses(resp, "", nil, false, nil)
 }
 
 func sanitizeToolCallArgumentsJSON(raw string) string {

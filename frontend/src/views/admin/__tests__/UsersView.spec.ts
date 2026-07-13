@@ -89,6 +89,9 @@ const DataTableStub = {
       </template>
       <div v-for="row in data" :key="row.id">
         <slot name="cell-last_used_at" :value="row.last_used_at" :row="row" />
+        <div data-test="usage">
+          <slot name="cell-usage" :row="row" />
+        </div>
       </div>
     </div>
   `
@@ -170,6 +173,83 @@ describe('admin UsersView', () => {
       }),
       expect.any(Object)
     )
+  })
+
+  it('prefers real batch usage totals in the usage column', async () => {
+    vi.useFakeTimers()
+    localStorage.setItem('user-column-settings-version', '3')
+    localStorage.setItem(
+      'user-hidden-columns',
+      JSON.stringify([
+        'notes',
+        'groups',
+        'subscriptions',
+        'concurrency',
+        'usage_anthropic',
+        'usage_openai',
+        'usage_gemini',
+        'usage_antigravity',
+        'balance_platform_quota'
+      ])
+    )
+    getBatchUsersUsage.mockResolvedValueOnce({
+      stats: {
+        42: {
+          user_id: 42,
+          today_actual_cost: 8,
+          total_actual_cost: 9,
+          real_today_actual_cost: 0.12,
+          real_total_actual_cost: 0.34,
+          by_platform: [
+            {
+              platform: 'openai',
+              today_actual_cost: 8,
+              total_actual_cost: 9,
+              real_today_actual_cost: 0.12,
+              real_total_actual_cost: 0.34
+            }
+          ]
+        }
+      }
+    })
+
+    const wrapper = mount(UsersView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: {
+            template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>'
+          },
+          DataTable: DataTableStub,
+          Pagination: true,
+          ConfirmDialog: true,
+          EmptyState: true,
+          GroupBadge: true,
+          Select: true,
+          UserAttributesConfigModal: true,
+          UserConcurrencyCell: true,
+          UserCreateModal: true,
+          UserEditModal: true,
+          UserApiKeysModal: true,
+          UserAllowedGroupsModal: true,
+          UserBalanceModal: true,
+          UserBalanceHistoryModal: true,
+          GroupReplaceModal: true,
+          Icon: true,
+          Teleport: true
+        }
+      }
+    })
+
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(50)
+    await flushPromises()
+
+    const usageText = wrapper.get('[data-test="usage"]').text()
+    expect(usageText).toContain('$0.1200')
+    expect(usageText).toContain('$0.3400')
+    expect(usageText).not.toContain('$8.0000')
+    expect(usageText).not.toContain('$9.0000')
   })
 
   it('clears usage current-page sort when switching to last_used_at server sort', async () => {

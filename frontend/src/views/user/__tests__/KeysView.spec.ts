@@ -166,6 +166,9 @@ const DataTableStub = {
         <div data-test="current-concurrency">
           <slot name="cell-current_concurrency" :value="row.current_concurrency" :row="row" />
         </div>
+        <div data-test="usage">
+          <slot name="cell-usage" :row="row" />
+        </div>
         <div
           v-if="columns.some((col) => col.key === 'last_used_ip')"
           data-test="last-used-ip"
@@ -371,6 +374,28 @@ describe('user KeysView column settings', () => {
     const wrapper = await mountView()
 
     expect(wrapper.get('[data-test="current-concurrency"]').text()).toBe('3')
+  })
+
+  it('prefers real batch usage cost values when available', async () => {
+    getDashboardApiKeysUsage.mockResolvedValueOnce({
+      stats: {
+        1: {
+          api_key_id: 1,
+          today_actual_cost: 8,
+          total_actual_cost: 9,
+          real_today_actual_cost: 0.12,
+          real_total_actual_cost: 0.34,
+        },
+      },
+    })
+
+    const wrapper = await mountView()
+
+    const usageText = wrapper.get('[data-test="usage"]').text()
+    expect(usageText).toContain('$0.1200')
+    expect(usageText).toContain('$0.3400')
+    expect(usageText).not.toContain('$8.0000')
+    expect(usageText).not.toContain('$9.0000')
   })
 
   it('marks current concurrency as sortable', async () => {

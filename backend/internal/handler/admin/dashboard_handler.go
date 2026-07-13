@@ -555,7 +555,7 @@ func (h *DashboardHandler) GetBatchUsersUsage(c *gin.Context) {
 		Day     string  `json:"day"`
 		UserIDs []int64 `json:"user_ids"`
 	}{
-		V:       2, // bump 当响应结构变化（如加入 by_platform 时）
+		V:       3, // bump when response shape changes (real cost fields are included).
 		Day:     timezone.Today().Format("2006-01-02"),
 		UserIDs: userIDs,
 	})
@@ -599,8 +599,10 @@ func (h *DashboardHandler) GetBatchAPIKeysUsage(c *gin.Context) {
 	}
 
 	keyRaw, _ := json.Marshal(struct {
+		V         int     `json:"v"`
 		APIKeyIDs []int64 `json:"api_key_ids"`
 	}{
+		V:         2, // bump when response shape changes (real cost fields are included).
 		APIKeyIDs: apiKeyIDs,
 	})
 	cacheKey := string(keyRaw)

@@ -22,7 +22,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -720,18 +719,24 @@ func (s *AccountTestService) testGrokAccountConnection(c *gin.Context, account *
 		testModelID = mapped
 	}
 
-	authToken := ""
-	if account.Type == AccountTypeAPIKey {
+	var authToken string
+	switch account.Type {
+	case AccountTypeAPIKey:
 		authToken = strings.TrimSpace(account.GetCredential("api_key"))
 		if authToken == "" {
 			return s.sendErrorAndEnd(c, "Grok API key not configured")
 		}
-	} else {
+	case AccountTypeOAuth:
+		if s.grokTokenProvider == nil {
+			return s.sendErrorAndEnd(c, "Grok token provider not configured")
+		}
 		var err error
 		authToken, err = s.grokTokenProvider.GetAccessToken(ctx, account)
 		if err != nil {
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to get Grok access token: %s", err.Error()))
 		}
+	default:
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Unsupported Grok account type: %s", account.Type))
 	}
 
 	apiURL, err := buildGrokResponsesURLForAccount(account)
@@ -771,6 +776,7 @@ func (s *AccountTestService) testGrokAccountConnection(c *gin.Context, account *
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json, text/event-stream")
 		req.Header.Set("Authorization", "Bearer "+authToken)
+		applyGrokCLIHeaders(req.Header)
 		req.Header.Set("User-Agent", "sub2api-grok/1.0")
 
 		resp, err = s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
@@ -789,10 +795,19 @@ func (s *AccountTestService) testGrokAccountConnection(c *gin.Context, account *
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if snapshot := xai.ParseQuotaHeaders(resp.Header, resp.StatusCode); snapshot != nil && s.accountRepo != nil {
+	now := time.Now()
+	snapshot := parseGrokQuotaSnapshot(resp.Header, resp.StatusCode, now)
+	if snapshot != nil && s.accountRepo != nil {
+		resetAt, limited := grokRateLimitResetAt(snapshot, now)
+		if limited {
+			normalizeGrokExhaustedWindowResets(snapshot, resetAt, now)
+		}
 		_ = s.accountRepo.UpdateExtra(ctx, account.ID, map[string]any{
 			grokQuotaSnapshotExtraKey: snapshot,
 		})
+		if limited {
+			persistGrokRateLimit(ctx, s.accountRepo, account, resetAt)
+		}
 	}
 
 	if resp.StatusCode != http.StatusOK {

@@ -364,6 +364,7 @@
 
           <button
             type="button"
+            data-testid="grok-account-type-api-key"
             @click="accountCategory = 'apikey'"
             :class="[
               'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
@@ -1121,7 +1122,7 @@
             class="input"
             :placeholder="defaultApiKeyBaseUrl"
           />
-          <p class="input-hint">{{ baseUrlHint }}</p>
+          <p v-if="baseUrlHint" class="input-hint">{{ baseUrlHint }}</p>
         </div>
         <div>
           <label class="input-label">{{ t('admin.accounts.apiKeyRequired') }}</label>
@@ -1132,7 +1133,7 @@
             class="input font-mono"
             :placeholder="apiKeyPlaceholder"
           />
-          <p class="input-hint">{{ apiKeyHint }}</p>
+          <p v-if="apiKeyHint" class="input-hint">{{ apiKeyHint }}</p>
         </div>
 
         <!-- Gemini API Key tier selection -->
@@ -3627,6 +3628,8 @@ const apiKeyPlaceholder = computed(() => {
       return 'sk-proj-...'
     case 'gemini':
       return 'AIza...'
+    case 'grok':
+      return 'xai-...'
     case 'zhipu':
       return 'xxxxxxxx.xxxxxxxx'
     case 'openrouter':

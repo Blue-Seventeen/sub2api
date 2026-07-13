@@ -1,7 +1,11 @@
-import { describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
 
 import ModelDistributionChart from '../ModelDistributionChart.vue'
+
+const { getUserBreakdown } = vi.hoisted(() => ({
+  getUserBreakdown: vi.fn(),
+}))
 
 const messages: Record<string, string> = {
   'admin.dashboard.modelDistribution': 'Model Distribution',
@@ -42,7 +46,15 @@ vi.mock('vue-chartjs', () => ({
   },
 }))
 
+vi.mock('@/api/admin/dashboard', () => ({
+  getUserBreakdown,
+}))
+
 describe('ModelDistributionChart', () => {
+  beforeEach(() => {
+    getUserBreakdown.mockReset()
+  })
+
   const modelStats = [
     {
       model: 'model-a',
@@ -143,6 +155,56 @@ describe('ModelDistributionChart', () => {
     expect(wrapper.text()).not.toContain('Account Cost')
     expect(wrapper.findAll('thead th')).toHaveLength(5)
     expect(wrapper.findAll('tbody tr')[0].findAll('td')).toHaveLength(5)
+  })
+
+  it('loads user breakdown rows when expanding a model', async () => {
+    getUserBreakdown.mockResolvedValueOnce({
+      users: [
+        {
+          user_id: 7,
+          email: 'alice@example.com',
+          requests: 3,
+          input_tokens: 10,
+          output_tokens: 20,
+          cache_tokens: 2,
+          total_tokens: 32,
+          cost: 1.5,
+          actual_cost: 1.2,
+          real_actual_cost: 0.8,
+          account_cost: 1.1,
+        },
+      ],
+      start_date: '2026-07-01',
+      end_date: '2026-07-02',
+    })
+    const wrapper = mount(ModelDistributionChart, {
+      props: {
+        modelStats,
+        startDate: '2026-07-01',
+        endDate: '2026-07-02',
+        filters: { account_id: 12 },
+      },
+      global: {
+        stubs: {
+          LoadingSpinner: true,
+        },
+      },
+    })
+
+    await wrapper.findAll('tbody tr')[0].trigger('click')
+    await flushPromises()
+
+    expect(getUserBreakdown).toHaveBeenCalledWith(
+      expect.objectContaining({
+        account_id: 12,
+        start_date: '2026-07-01',
+        end_date: '2026-07-02',
+        model: 'model-a',
+        model_source: 'requested',
+      })
+    )
+    expect(wrapper.text()).toContain('alice@example.com')
+    expect(wrapper.text()).toContain('$0.800')
   })
 
   it('renders Others in the spending ranking table and uses a dedicated chart color', async () => {

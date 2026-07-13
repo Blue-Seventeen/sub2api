@@ -499,7 +499,9 @@ func (r *usageLogRepository) GetBatchUserUsageStats(ctx context.Context, userIDs
 			ul.user_id,
 			` + usageLogEffectivePlatformExpr + ` as platform,
 			COALESCE(SUM(ul.actual_cost) FILTER (WHERE ul.created_at >= $2 AND ul.created_at < $3), 0) as total_cost,
-			COALESCE(SUM(ul.actual_cost) FILTER (WHERE ul.created_at >= $4), 0) as today_cost
+			COALESCE(SUM(ul.actual_cost) FILTER (WHERE ul.created_at >= $4), 0) as today_cost,
+			COALESCE(SUM(ul.real_actual_cost) FILTER (WHERE ul.created_at >= $2 AND ul.created_at < $3), 0) as real_total_cost,
+			COALESCE(SUM(ul.real_actual_cost) FILTER (WHERE ul.created_at >= $4), 0) as real_today_cost
 		FROM usage_logs ul
 		LEFT JOIN groups g ON g.id = ul.group_id
 		LEFT JOIN accounts a ON a.id = ul.account_id
@@ -518,7 +520,9 @@ func (r *usageLogRepository) GetBatchUserUsageStats(ctx context.Context, userIDs
 		var platform sql.NullString
 		var total float64
 		var todayTotal float64
-		if err := rows.Scan(&userID, &platform, &total, &todayTotal); err != nil {
+		var realTotal float64
+		var realTodayTotal float64
+		if err := rows.Scan(&userID, &platform, &total, &todayTotal, &realTotal, &realTodayTotal); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
@@ -528,11 +532,15 @@ func (r *usageLogRepository) GetBatchUserUsageStats(ctx context.Context, userIDs
 		}
 		stats.TotalActualCost += total
 		stats.TodayActualCost += todayTotal
+		stats.RealTotalActualCost += realTotal
+		stats.RealTodayActualCost += realTodayTotal
 		if platform.Valid && platform.String != "" {
 			stats.ByPlatform = append(stats.ByPlatform, PlatformUsage{
-				Platform:        platform.String,
-				TotalActualCost: total,
-				TodayActualCost: todayTotal,
+				Platform:            platform.String,
+				TotalActualCost:     total,
+				TodayActualCost:     todayTotal,
+				RealTotalActualCost: realTotal,
+				RealTodayActualCost: realTodayTotal,
 			})
 		}
 	}
@@ -574,7 +582,9 @@ func (r *usageLogRepository) GetBatchAPIKeyUsageStats(ctx context.Context, apiKe
 		SELECT
 			api_key_id,
 			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $2 AND created_at < $3), 0) as total_cost,
-			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $4), 0) as today_cost
+			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $4), 0) as today_cost,
+			COALESCE(SUM(real_actual_cost) FILTER (WHERE created_at >= $2 AND created_at < $3), 0) as real_total_cost,
+			COALESCE(SUM(real_actual_cost) FILTER (WHERE created_at >= $4), 0) as real_today_cost
 		FROM usage_logs
 		WHERE api_key_id = ANY($1)
 		  AND created_at >= LEAST($2, $4)
@@ -589,13 +599,17 @@ func (r *usageLogRepository) GetBatchAPIKeyUsageStats(ctx context.Context, apiKe
 		var apiKeyID int64
 		var total float64
 		var todayTotal float64
-		if err := rows.Scan(&apiKeyID, &total, &todayTotal); err != nil {
+		var realTotal float64
+		var realTodayTotal float64
+		if err := rows.Scan(&apiKeyID, &total, &todayTotal, &realTotal, &realTodayTotal); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
 		if stats, ok := result[apiKeyID]; ok {
 			stats.TotalActualCost = total
 			stats.TodayActualCost = todayTotal
+			stats.RealTotalActualCost = realTotal
+			stats.RealTodayActualCost = realTodayTotal
 		}
 	}
 	if err := rows.Close(); err != nil {

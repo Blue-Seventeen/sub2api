@@ -256,16 +256,25 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 			return nil, err
 		}
 	}
+	grokCacheIdentity := ""
 	if account.Platform == PlatformGrok {
+		grokCacheIdentity = resolveGrokCacheIdentity(c, responsesBody, promptCacheKey, upstreamModel)
 		patchedBody, patchErr := patchGrokResponsesBody(responsesBody, upstreamModel)
 		if patchErr != nil {
 			return nil, patchErr
 		}
-		responsesBody = patchedBody
+		responsesBody, patchErr = applyGrokResponsesCacheIdentity(patchedBody, responsesBody, grokCacheIdentity, account.IsGrokOAuth())
+		if patchErr != nil {
+			return nil, fmt.Errorf("apply grok prompt cache identity: %w", patchErr)
+		}
 		if len(responsesBodyWithoutContinuation) > 0 {
 			responsesBodyWithoutContinuation, patchErr = patchGrokResponsesBody(responsesBodyWithoutContinuation, upstreamModel)
 			if patchErr != nil {
 				return nil, patchErr
+			}
+			responsesBodyWithoutContinuation, patchErr = applyGrokResponsesCacheIdentity(responsesBodyWithoutContinuation, responsesBodyWithoutContinuation, grokCacheIdentity, account.IsGrokOAuth())
+			if patchErr != nil {
+				return nil, fmt.Errorf("apply grok prompt cache identity to retry body: %w", patchErr)
 			}
 		}
 	}
@@ -297,7 +306,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 		var upstreamReq *http.Request
 		if account.Platform == PlatformGrok {
-			upstreamReq, err = buildGrokResponsesRequest(upstreamCtx, c, account, requestBody, token)
+			upstreamReq, err = buildGrokResponsesRequest(upstreamCtx, c, account, requestBody, token, grokCacheIdentity)
 		} else {
 			upstreamReq, err = s.buildUpstreamRequest(upstreamCtx, c, account, requestBody, token, isStream, promptCacheKey, false)
 		}
@@ -316,14 +325,15 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 			}
 		}
 		if account.Type == AccountTypeOAuth && account.Platform != PlatformGrok {
-			// Anthropic Messages compatibility uses the ChatGPT Codex SSE endpoint.
-			// Match airgate-openai's request shape: the SSE endpoint does not need
-			// the Responses experimental beta header, and forcing originator can make
-			// ChatGPT select a different internal continuation path.
-			upstreamReq.Header.Del("OpenAI-Beta")
-			upstreamReq.Header.Del("originator")
+			ensureCodexIdentityHeaders(upstreamReq.Header)
+			enforceCodexIdentityHeaders(upstreamReq.Header)
+			logger.L().Debug("openai messages: upstream identity restored",
+				zap.Int64("account_id", account.ID),
+				zap.String("upstream_model", upstreamModel),
+				zap.Bool("compat_identity_restored", true),
+			)
 		}
-		if account.Type == AccountTypeOAuth && account.Platform != PlatformGrok && promptCacheKey != "" && strings.TrimSpace(c.GetHeader("conversation_id")) == "" {
+		if account.Type == AccountTypeOAuth && promptCacheKey != "" && strings.TrimSpace(c.GetHeader("conversation_id")) == "" {
 			upstreamReq.Header.Del("conversation_id")
 		}
 		if compatTurnState != "" && upstreamReq.Header.Get("x-codex-turn-state") == "" {
@@ -377,7 +387,7 @@ handleBridgeResponse:
 	if resp.StatusCode >= 400 {
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
 		if account.Platform == PlatformGrok {
-			s.updateGrokUsageSnapshot(ctx, account.ID, xai.ParseQuotaHeaders(resp.Header, resp.StatusCode))
+			s.updateGrokUsageSnapshot(ctx, account, xai.ParseQuotaHeaders(resp.Header, resp.StatusCode))
 			s.handleGrokAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
 		}
 
@@ -482,7 +492,7 @@ handleBridgeResponse:
 	// 排除 spark 影子:其 codex_* 仅由 QueryUsage(/wham/usage bengalfox)更新(外审第7轮 P1)。
 	if handleErr == nil && account.Type == AccountTypeOAuth && !account.IsShadow() {
 		if account.Platform == PlatformGrok {
-			s.updateGrokUsageSnapshot(ctx, account.ID, xai.ParseQuotaHeaders(resp.Header, resp.StatusCode))
+			s.updateGrokUsageSnapshot(ctx, account, xai.ParseQuotaHeaders(resp.Header, resp.StatusCode))
 		} else if snapshot := ParseCodexRateLimitHeaders(resp.Header); snapshot != nil {
 			s.updateCodexUsageSnapshot(ctx, account.ID, snapshot)
 		}
