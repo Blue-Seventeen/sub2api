@@ -814,6 +814,7 @@ func buildUsageLogScanValues(opts usageLogScanRowOptions) []any {
 		sql.NullString{},  // fallback_chain
 		sql.NullString{},  // upstream_transport
 		false,             // cache_ttl_overridden
+		false,             // long_context_billing_applied
 		sql.NullInt64{},   // channel_id
 		sql.NullString{},  // model_mapping_chain
 		sql.NullString{},  // billing_tier

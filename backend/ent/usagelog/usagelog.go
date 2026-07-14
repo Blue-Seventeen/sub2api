@@ -70,6 +70,8 @@ const (
 	FieldUnifiedRateMultiplier = "unified_rate_multiplier"
 	// FieldRateMultiplier holds the string denoting the rate_multiplier field in the database.
 	FieldRateMultiplier = "rate_multiplier"
+	// FieldLongContextBillingApplied holds the string denoting the long_context_billing_applied field in the database.
+	FieldLongContextBillingApplied = "long_context_billing_applied"
 	// FieldAccountRateMultiplier holds the string denoting the account_rate_multiplier field in the database.
 	FieldAccountRateMultiplier = "account_rate_multiplier"
 	// FieldBillingType holds the string denoting the billing_type field in the database.
@@ -216,6 +218,7 @@ var Columns = []string{
 	FieldRealActualCost,
 	FieldUnifiedRateMultiplier,
 	FieldRateMultiplier,
+	FieldLongContextBillingApplied,
 	FieldAccountRateMultiplier,
 	FieldBillingType,
 	FieldRequestType,
@@ -306,6 +309,8 @@ var (
 	DefaultUnifiedRateMultiplier float64
 	// DefaultRateMultiplier holds the default value on creation for the "rate_multiplier" field.
 	DefaultRateMultiplier float64
+	// DefaultLongContextBillingApplied holds the default value on creation for the "long_context_billing_applied" field.
+	DefaultLongContextBillingApplied bool
 	// DefaultBillingType holds the default value on creation for the "billing_type" field.
 	DefaultBillingType int8
 	// DefaultRequestType holds the default value on creation for the "request_type" field.
@@ -508,6 +513,11 @@ func ByUnifiedRateMultiplier(opts ...sql.OrderTermOption) OrderOption {
 // ByRateMultiplier orders the results by the rate_multiplier field.
 func ByRateMultiplier(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldRateMultiplier, opts...).ToFunc()
+}
+
+// ByLongContextBillingApplied orders the results by the long_context_billing_applied field.
+func ByLongContextBillingApplied(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldLongContextBillingApplied, opts...).ToFunc()
 }
 
 // ByAccountRateMultiplier orders the results by the account_rate_multiplier field.
