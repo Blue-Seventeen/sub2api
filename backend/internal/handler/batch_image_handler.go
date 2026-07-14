@@ -234,10 +234,16 @@ func batchImageOwnerFromContext(c *gin.Context) (service.BatchImageOwner, bool) 
 	if !ok || apiKey == nil || apiKey.ID <= 0 || apiKey.UserID <= 0 {
 		return service.BatchImageOwner{}, false
 	}
+	var unifiedRateMultiplier *float64
+	if apiKey.User != nil {
+		value := apiKey.User.EffectiveUnifiedRateMultiplier()
+		unifiedRateMultiplier = &value
+	}
 	return service.BatchImageOwner{
-		UserID:   apiKey.UserID,
-		APIKeyID: apiKey.ID,
-		GroupID:  apiKey.GroupID,
+		UserID:                apiKey.UserID,
+		APIKeyID:              apiKey.ID,
+		GroupID:               apiKey.GroupID,
+		UnifiedRateMultiplier: unifiedRateMultiplier,
 	}, true
 }
 

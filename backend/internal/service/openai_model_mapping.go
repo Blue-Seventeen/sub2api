@@ -8,17 +8,22 @@ import "strings"
 func resolveOpenAIForwardModel(account *Account, requestedModel, messagesDispatchMappedModel string) string {
 	messagesDispatchMappedModel = strings.TrimSpace(messagesDispatchMappedModel)
 	if account == nil {
-		if messagesDispatchMappedModel != "" {
+		if messagesDispatchMappedModel != "" && shouldUseMessagesDispatchMappedModel(requestedModel) {
 			return messagesDispatchMappedModel
 		}
 		return requestedModel
 	}
 
 	mappedModel, matched := account.ResolveMappedModel(requestedModel)
-	if !matched && messagesDispatchMappedModel != "" {
+	if !matched && messagesDispatchMappedModel != "" && shouldUseMessagesDispatchMappedModel(requestedModel) {
 		return messagesDispatchMappedModel
 	}
 	return mappedModel
+}
+
+func shouldUseMessagesDispatchMappedModel(requestedModel string) bool {
+	model := strings.ToLower(lastOpenAIModelSegment(requestedModel))
+	return strings.HasPrefix(model, "claude-")
 }
 
 // openAIOAuthForeignModelPrefixes 列出明确属于其他厂商家族的模型名前缀。

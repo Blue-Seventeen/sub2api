@@ -133,6 +133,17 @@ func TestToUserErrorRequest_RedactsNetworkIdentifiersInUserVisibleMessage(t *tes
 	}
 }
 
+func TestSanitizeUserVisibleErrorText_RedactsExtendedCredentials(t *testing.T) {
+	raw := "Authorization: Basic dXNlcjpwYXNzd29yZA== client_secret=client-secret-value password=super-secret Cookie=session=abcdef123456"
+
+	got := sanitizeUserVisibleErrorText(raw)
+	for _, leaked := range []string{"dXNlcjpwYXNzd29yZA==", "client-secret-value", "super-secret", "session=abcdef123456"} {
+		if strings.Contains(got, leaked) {
+			t.Fatalf("sanitized text leaked %q: %q", leaked, got)
+		}
+	}
+}
+
 func TestToUserErrorRequest_LeavesSourceOpsLogUnchangedForAdminPath(t *testing.T) {
 	message := `Post "https://japan.zelly.cn/v1/responses": dial tcp 43.165.178.21:443`
 	src := &OpsErrorLog{
@@ -315,6 +326,16 @@ func TestToUserErrorRequestDetail_RedactsGenericAPIKeys(t *testing.T) {
 	}
 	if !strings.Contains(out.ErrorBody, `"authorization":"Bearer bare-t...7890"`) {
 		t.Fatalf("Bearer token should be partially masked, got %q", out.ErrorBody)
+	}
+}
+
+func TestSanitizeUserVisibleErrorText_RedactsGenericTokenFields(t *testing.T) {
+	input := "token=plain-token-secret access_token: access-token-secret refresh_token=refresh-token-secret admin_api_key=admin-key-secret SUB2API_ADMIN_API_KEY=sub2api-admin-secret"
+	out := SanitizeUserVisibleErrorText(input)
+	for _, secret := range []string{"plain-token-secret", "access-token-secret", "refresh-token-secret", "admin-key-secret", "sub2api-admin-secret"} {
+		if strings.Contains(out, secret) {
+			t.Fatalf("token value %q leaked in %q", secret, out)
+		}
 	}
 }
 

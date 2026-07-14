@@ -13,6 +13,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/stretchr/testify/require"
 )
 
@@ -53,7 +54,7 @@ func TestBatchImagePublicService_Submit(t *testing.T) {
 		require.Equal(t, "files/gemini_api/output", batchImageDerefString(job.ProviderOutputRef))
 		require.NotNil(t, job.AccountID)
 		require.Equal(t, int64(202), *job.AccountID)
-		require.Equal(t, 1, job.PricingSnapshotVersion)
+		require.Equal(t, 3, job.PricingSnapshotVersion)
 		require.InDelta(t, 0.25, job.BaseUnitPrice, 1e-12)
 		require.InDelta(t, 1.0, job.GroupRateMultiplier, 1e-12)
 		require.InDelta(t, 1.0, job.AccountRateMultiplier, 1e-12)
@@ -101,6 +102,102 @@ func TestBatchImagePublicService_Submit(t *testing.T) {
 		require.InDelta(t, 0.25, *job.HoldAmount, 1e-12)
 	})
 
+	t.Run("applies unified and peak multipliers at submit time", func(t *testing.T) {
+		svc, repo, _, _, _ := newTestBatchImagePublicService(true)
+		requestTime := time.Date(2026, time.July, 14, 10, 30, 0, 0, timezone.Location())
+		svc.Now = func() time.Time { return requestTime }
+		groupID := int64(7)
+		svc.GroupRepo = &publicBatchImageGroupRepo{groups: map[int64]*Group{
+			groupID: {
+				ID:                           groupID,
+				Platform:                     PlatformGemini,
+				RateMultiplier:               2,
+				PeakRateEnabled:              true,
+				PeakRateWindows:              []PeakRateWindow{{Start: "10:00", End: "11:00", Multiplier: 3}},
+				AllowImageGeneration:         true,
+				AllowBatchImageGeneration:    true,
+				BatchImageDiscountMultiplier: 0.5,
+				BatchImageHoldMultiplier:     0.6,
+			},
+		}}
+		unifiedRate := 1.5
+
+		got, err := svc.Submit(ctx, BatchImageOwner{
+			UserID:                11,
+			APIKeyID:              22,
+			GroupID:               &groupID,
+			UnifiedRateMultiplier: &unifiedRate,
+		}, validBatchImageSubmitRequest(), "")
+		require.NoError(t, err)
+		require.InDelta(t, 2.25, got.EstimatedCost, 1e-12)
+
+		job := repo.jobs[got.ID]
+		require.InDelta(t, 6, job.GroupRateMultiplier, 1e-12)
+		require.InDelta(t, 2.25, job.BillableUnitPrice*2, 1e-12)
+		require.InDelta(t, 1.8, *job.HoldAmount, 1e-12)
+	})
+
+	t.Run("independent image rate still applies unified and peak multipliers", func(t *testing.T) {
+		svc, repo, _, _, _ := newTestBatchImagePublicService(true)
+		requestTime := time.Date(2026, time.July, 14, 10, 30, 0, 0, timezone.Location())
+		svc.Now = func() time.Time { return requestTime }
+		groupID := int64(7)
+		svc.GroupRepo = &publicBatchImageGroupRepo{groups: map[int64]*Group{
+			groupID: {
+				ID:                           groupID,
+				Platform:                     PlatformGemini,
+				RateMultiplier:               5,
+				PeakRateEnabled:              true,
+				PeakRateWindows:              []PeakRateWindow{{Start: "10:00", End: "11:00", Multiplier: 3}},
+				AllowImageGeneration:         true,
+				AllowBatchImageGeneration:    true,
+				ImageRateIndependent:         true,
+				ImageRateMultiplier:          0.4,
+				BatchImageDiscountMultiplier: 0.5,
+				BatchImageHoldMultiplier:     0.6,
+			},
+		}}
+		unifiedRate := 2.0
+
+		got, err := svc.Submit(ctx, BatchImageOwner{
+			UserID:                11,
+			APIKeyID:              22,
+			GroupID:               &groupID,
+			UnifiedRateMultiplier: &unifiedRate,
+		}, validBatchImageSubmitRequest(), "")
+		require.NoError(t, err)
+		require.InDelta(t, 0.6, got.EstimatedCost, 1e-12)
+		require.InDelta(t, 1.2, repo.jobs[got.ID].GroupRateMultiplier, 1e-12)
+	})
+
+	t.Run("zero unified multiplier produces a zero charge snapshot", func(t *testing.T) {
+		svc, repo, _, _, _ := newTestBatchImagePublicService(true)
+		groupID := int64(7)
+		svc.GroupRepo = &publicBatchImageGroupRepo{groups: map[int64]*Group{
+			groupID: {
+				ID:                           groupID,
+				Platform:                     PlatformGemini,
+				RateMultiplier:               1,
+				AllowImageGeneration:         true,
+				AllowBatchImageGeneration:    true,
+				BatchImageDiscountMultiplier: 0.5,
+				BatchImageHoldMultiplier:     0.6,
+			},
+		}}
+		unifiedRate := 0.0
+
+		got, err := svc.Submit(ctx, BatchImageOwner{
+			UserID:                11,
+			APIKeyID:              22,
+			GroupID:               &groupID,
+			UnifiedRateMultiplier: &unifiedRate,
+		}, validBatchImageSubmitRequest(), "")
+		require.NoError(t, err)
+		require.Zero(t, got.EstimatedCost)
+		require.InDelta(t, 1, repo.jobs[got.ID].GroupRateMultiplier, 1e-12)
+		require.Zero(t, *repo.jobs[got.ID].HoldAmount)
+	})
+
 	t.Run("uses configured group 1k image price for batch image base price", func(t *testing.T) {
 		svc, repo, _, _, _ := newTestBatchImagePublicService(true)
 		groupID := int64(7)
@@ -138,6 +235,78 @@ func TestBatchImagePublicService_Submit(t *testing.T) {
 		require.Empty(t, repo.jobs)
 		require.Empty(t, queue.enqueued)
 		require.Empty(t, gemini.submits)
+	})
+
+	t.Run("pricing that would overflow usage amounts rejects before provider submit", func(t *testing.T) {
+		tests := []struct {
+			name  string
+			setup func(*BatchImagePublicService, *float64)
+		}{
+			{
+				name: "standard cost",
+				setup: func(svc *BatchImagePublicService, unifiedRate *float64) {
+					svc.Pricing = &fakeBatchImagePricingResolver{unitPrice: maxBatchImageSnapshotAmount/2 + 1}
+					*unifiedRate = 0
+				},
+			},
+			{
+				name: "account stats cost",
+				setup: func(svc *BatchImagePublicService, unifiedRate *float64) {
+					groupID := int64(7)
+					imagePrice := 6000.0
+					svc.GroupRepo = &publicBatchImageGroupRepo{groups: map[int64]*Group{
+						groupID: {
+							ID:                           groupID,
+							Platform:                     PlatformGemini,
+							RateMultiplier:               0,
+							AllowImageGeneration:         true,
+							AllowBatchImageGeneration:    true,
+							ImagePrice1K:                 &imagePrice,
+							BatchImageDiscountMultiplier: maxBatchImageSnapshotMultiplier,
+							BatchImageHoldMultiplier:     maxBatchImageSnapshotMultiplier,
+						},
+					}}
+				},
+			},
+			{
+				name: "usage rate multiplier",
+				setup: func(svc *BatchImagePublicService, unifiedRate *float64) {
+					groupID := int64(7)
+					imagePrice := 0.0
+					svc.GroupRepo = &publicBatchImageGroupRepo{groups: map[int64]*Group{
+						groupID: {
+							ID:                           groupID,
+							Platform:                     PlatformGemini,
+							RateMultiplier:               2,
+							AllowImageGeneration:         true,
+							AllowBatchImageGeneration:    true,
+							ImagePrice1K:                 &imagePrice,
+							BatchImageDiscountMultiplier: 600000,
+							BatchImageHoldMultiplier:     600000,
+						},
+					}}
+				},
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				svc, repo, queue, gemini, _ := newTestBatchImagePublicService(true)
+				unifiedRate := 1.0
+				tt.setup(svc, &unifiedRate)
+				groupID := int64(7)
+				_, err := svc.Submit(ctx, BatchImageOwner{
+					UserID:                11,
+					APIKeyID:              22,
+					GroupID:               &groupID,
+					UnifiedRateMultiplier: &unifiedRate,
+				}, validBatchImageSubmitRequest(), "")
+				require.ErrorIs(t, err, ErrBatchImageSettlementPricingMissing)
+				require.Empty(t, repo.jobs)
+				require.Empty(t, queue.enqueued)
+				require.Empty(t, gemini.submits)
+			})
+		}
 	})
 
 	t.Run("group batch image disabled rejects before provider submit", func(t *testing.T) {

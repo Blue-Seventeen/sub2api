@@ -601,7 +601,7 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 				UpstreamInTok:  usage.InputTokens,
 				UpstreamOutTok: usage.OutputTokens,
 			})
-			clientMsg := msg
+			clientMsg := sanitizeUserVisibleErrorText(sanitizeUpstreamErrorMessage(msg))
 			if clientMsg == "" {
 				clientMsg = "Request blocked by upstream cyber-security policy"
 			}
@@ -950,7 +950,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 					})
 					if !clientDisconnected {
 						writeStreamHeaders()
-						clientMsg := msg
+						clientMsg := sanitizeUserVisibleErrorText(sanitizeUpstreamErrorMessage(msg))
 						if clientMsg == "" {
 							clientMsg = "Request blocked by upstream cyber-security policy"
 						}

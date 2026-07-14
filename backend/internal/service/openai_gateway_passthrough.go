@@ -542,6 +542,9 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 	if contentType == "" {
 		contentType = "application/json"
 	}
+	if cyberHit {
+		body = sanitizeClientVisibleUpstreamErrorPayload(body)
+	}
 	c.Data(resp.StatusCode, contentType, body)
 
 	if upstreamMsg == "" {

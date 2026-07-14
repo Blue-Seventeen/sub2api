@@ -392,6 +392,16 @@ func TestPeakMultiplier_AllBillingModesUsePeakAwareMultiplier(t *testing.T) {
 	if math.Abs(imageMultiplier-wantMultiplier) > 1e-9 {
 		t.Fatalf("image multiplier = %v, want %v", imageMultiplier, wantMultiplier)
 	}
+	videoMultiplier := computePeakAwareVideoMultiplier(apiKey, baseMultiplier, at(15, 0))
+	if math.Abs(videoMultiplier-wantMultiplier) > 1e-9 {
+		t.Fatalf("video multiplier = %v, want %v", videoMultiplier, wantMultiplier)
+	}
+	apiKey.Group.VideoRateIndependent = true
+	apiKey.Group.VideoRateMultiplier = 0.4
+	videoMultiplier = computePeakAwareVideoMultiplier(apiKey, baseMultiplier, at(15, 0))
+	if math.Abs(videoMultiplier-1.0) > 1e-9 {
+		t.Fatalf("independent video multiplier = %v, want 1", videoMultiplier)
+	}
 
 	svc := &BillingService{}
 	resolver := &ModelPricingResolver{}

@@ -104,13 +104,16 @@ func TestWriteOpenAICompactSSEBridge_AfterKeepaliveCommitFailureEmitsFailedEvent
 	defer stop()
 	waitForKeepaliveBeats()
 
-	require.True(t, writeOpenAICompactSSEBridge(c, http.StatusBadGateway, []byte(`{"error":{"message":"upstream exploded"}}`)))
+	require.True(t, writeOpenAICompactSSEBridge(c, http.StatusBadGateway, []byte(`{"error":{"message":"upstream exploded via https://relay.internal.example at 10.0.0.8 token=leaked-secret"}}`)))
 
 	events := parseCompactBridgeSSE(t, stripKeepaliveComments(rec.Body.String()))
 	require.Len(t, events, 1)
 	require.Equal(t, "response.failed", events[0][0])
 	require.Equal(t, "failed", gjson.Get(events[0][1], "response.status").String())
 	require.Contains(t, gjson.Get(events[0][1], "response.error.message").String(), "upstream exploded")
+	for _, leaked := range []string{"relay.internal.example", "10.0.0.8", "leaked-secret"} {
+		require.NotContains(t, events[0][1], leaked)
+	}
 	require.NotEmpty(t, gjson.Get(events[0][1], "response.id").String())
 
 	streamErr, ok := GetOpsStreamError(c)

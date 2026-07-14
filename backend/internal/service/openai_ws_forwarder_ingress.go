@@ -372,6 +372,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	}
 
 	writeClientMessage := func(message []byte) error {
+		message = sanitizeClientVisibleOpenAIWSEvent(message)
 		writeCtx, cancel := context.WithTimeout(ctx, s.openAIWSWriteTimeout())
 		defer cancel()
 		return clientConn.Write(writeCtx, coderws.MessageText, message)
@@ -864,7 +865,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					lease.MarkBroken()
 					return nil, &UpstreamFailoverError{
 						StatusCode:      http.StatusTooManyRequests,
-						ResponseBody:    append([]byte(nil), upstreamMessage...),
+						ResponseBody:    sanitizeClientVisibleOpenAIWSEvent(upstreamMessage),
 						ResponseHeaders: cloneHeader(lease.HandshakeHeaders()),
 					}
 				}
@@ -897,6 +898,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 						UpstreamOutTok: usage.OutputTokens,
 					})
 				}
+				upstreamMessage = sanitizeClientVisibleOpenAIWSEvent(upstreamMessage)
 			}
 
 			if !clientDisconnected {

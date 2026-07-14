@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -125,8 +126,8 @@ func (s *BatchImageSettlementService) Settle(ctx context.Context, batchID string
 		return nil, ErrBatchImageSettlementManifestConflict
 	}
 
-	unitPrice, err := s.settlementUnitPrice(ctx, job)
-	if err == nil && unitPrice < 0 {
+	realUnitPrice, err := s.settlementUnitPrice(ctx, job)
+	if err == nil && realUnitPrice < 0 {
 		err = ErrBatchImageSettlementPricingMissing
 	}
 	if err != nil {
@@ -135,21 +136,29 @@ func (s *BatchImageSettlementService) Settle(ctx context.Context, batchID string
 		}
 		return nil, err
 	}
+	unitPrice := batchImageSettlementUsageUnitPrice(job, realUnitPrice)
 	actualCost := float64(job.SuccessCount) * unitPrice
+	realActualCost := float64(job.SuccessCount) * realUnitPrice
+	if !batchImageSettlementAmountsWithinBounds(job, realUnitPrice, actualCost, realActualCost) {
+		if failErr := s.recordSettlementFailure(ctx, job, "SETTLEMENT_PRICING_OUT_OF_RANGE", "settlement pricing exceeds storage bounds"); failErr != nil {
+			return nil, failErr
+		}
+		return nil, ErrBatchImageSettlementPricingMissing
+	}
 	result.ActualCost = actualCost
 	holdAmount := job.EstimatedCost
 	if job.HoldAmount != nil {
 		holdAmount = *job.HoldAmount
 	}
-	if actualCost-holdAmount > batchImageCostEpsilon {
-		msg := fmt.Sprintf("actual cost %.10f exceeds held amount %.10f", actualCost, holdAmount)
+	if realActualCost-holdAmount > batchImageCostEpsilon {
+		msg := fmt.Sprintf("actual cost %.10f exceeds held amount %.10f", realActualCost, holdAmount)
 		if failErr := s.recordSettlementFailure(ctx, job, "SETTLEMENT_COST_EXCEEDS_HOLD", msg); failErr != nil {
 			return nil, failErr
 		}
 		return nil, ErrBatchImageSettlementCostExceedsHold
 	}
 
-	if err := captureBatchImageBalanceHold(ctx, s.BillingRepo, job, actualCost, manifestHash); err != nil {
+	if err := captureBatchImageBalanceHold(ctx, s.BillingRepo, job, realActualCost, manifestHash); err != nil {
 		msg := truncateBatchImageMessage(err.Error(), batchImageMaxErrorMessageLength)
 		if failErr := s.recordSettlementFailure(ctx, job, "SETTLEMENT_BILLING_FAILED", msg); failErr != nil {
 			return nil, failErr
@@ -167,19 +176,44 @@ func (s *BatchImageSettlementService) Settle(ctx context.Context, batchID string
 		Now:             &now,
 		OutputExpiresAt: &outputExpiresAt,
 		EventPayload: map[string]any{
-			"batch_id":      job.BatchID,
-			"request_id":    result.RequestID,
-			"success_count": job.SuccessCount,
-			"fail_count":    job.FailCount,
-			"actual_cost":   actualCost,
-			"manifest_hash": manifestHash,
+			"batch_id":         job.BatchID,
+			"request_id":       result.RequestID,
+			"success_count":    job.SuccessCount,
+			"fail_count":       job.FailCount,
+			"actual_cost":      actualCost,
+			"real_actual_cost": realActualCost,
+			"manifest_hash":    manifestHash,
 		},
 	}); err != nil {
 		return nil, err
 	}
-	s.recordUsageLog(ctx, job, actualCost, result.RequestID, now)
+	s.recordUsageLog(ctx, job, realUnitPrice, actualCost, realActualCost, result.RequestID, now)
 
 	return result, nil
+}
+
+func batchImageSettlementAmountsWithinBounds(job *BatchImageJob, resolvedUnitPrice, actualCost, realActualCost float64) bool {
+	if job == nil {
+		return false
+	}
+	standardUnitPrice := job.BaseUnitPrice
+	accountStatsRate := job.BatchDiscountMultiplier
+	if job.PricingSnapshotVersion < 1 {
+		standardUnitPrice = resolvedUnitPrice
+		accountStatsRate = 1
+	}
+	standardCost := standardUnitPrice * float64(job.SuccessCount)
+	accountStatsCost := standardCost * accountStatsRate
+	usageRateMultiplier := job.GroupRateMultiplier * job.BatchDiscountMultiplier
+	if usageRateMultiplier < 0 || math.IsNaN(usageRateMultiplier) || math.IsInf(usageRateMultiplier, 0) || usageRateMultiplier > maxBatchImageSnapshotMultiplier {
+		return false
+	}
+	for _, value := range []float64{resolvedUnitPrice, actualCost, realActualCost, standardUnitPrice, standardCost, accountStatsCost} {
+		if value < 0 || math.IsNaN(value) || math.IsInf(value, 0) || value > maxBatchImageSnapshotAmount {
+			return false
+		}
+	}
+	return true
 }
 
 // isBatchImageSettlementRetryExhausted 判断 settling job 是否已达重试上限。
@@ -249,12 +283,22 @@ func (s *BatchImageSettlementService) failExhaustedSettlement(ctx context.Contex
 	return ErrBatchImageSettlementBillingFailed
 }
 
-func (s *BatchImageSettlementService) recordUsageLog(ctx context.Context, job *BatchImageJob, actualCost float64, requestID string, createdAt time.Time) {
+func (s *BatchImageSettlementService) recordUsageLog(ctx context.Context, job *BatchImageJob, resolvedUnitPrice, actualCost, realActualCost float64, requestID string, createdAt time.Time) {
 	if s == nil || s.UsageLogRepo == nil || job == nil || job.APIKeyID == nil || job.AccountID == nil {
 		return
 	}
 	billingMode := string(BillingModeImage)
 	accountRateMultiplier := job.AccountRateMultiplier
+	standardUnitPrice := job.BaseUnitPrice
+	accountStatsRate := job.BatchDiscountMultiplier
+	if job.PricingSnapshotVersion < 1 {
+		standardUnitPrice = resolvedUnitPrice
+		accountStatsRate = 1
+	}
+	standardCost := standardUnitPrice * float64(job.SuccessCount)
+	accountStatsCost := standardCost * accountStatsRate
+	unifiedRateMultiplier := batchImageSettlementUnifiedRateMultiplier(job, actualCost, realActualCost)
+	usageRateMultiplier := job.GroupRateMultiplier * job.BatchDiscountMultiplier * unifiedRateMultiplier
 	inboundEndpoint := "/v1/images/batches"
 	upstreamEndpoint := "vertex:batchPredictionJobs"
 	imageSize := "1K"
@@ -268,11 +312,14 @@ func (s *BatchImageSettlementService) recordUsageLog(ctx context.Context, job *B
 		InboundEndpoint:       &inboundEndpoint,
 		UpstreamEndpoint:      &upstreamEndpoint,
 		ImageCount:            job.SuccessCount,
-		ImageOutputCost:       actualCost,
-		TotalCost:             actualCost,
+		ImageOutputCost:       standardCost,
+		TotalCost:             standardCost,
 		ActualCost:            actualCost,
-		RateMultiplier:        job.GroupRateMultiplier * job.BatchDiscountMultiplier,
+		RealActualCost:        realActualCost,
+		RateMultiplier:        usageRateMultiplier,
+		UnifiedRateMultiplier: unifiedRateMultiplier,
 		AccountRateMultiplier: &accountRateMultiplier,
+		AccountStatsCost:      &accountStatsCost,
 		BillingType:           BillingTypeBalance,
 		RequestType:           RequestTypeSync,
 		BillingMode:           &billingMode,
@@ -293,6 +340,19 @@ func (s *BatchImageSettlementService) settlementUnitPrice(ctx context.Context, j
 		if job.BillableUnitPrice < 0 {
 			return 0, ErrBatchImageSettlementPricingMissing
 		}
+		if job.PricingSnapshotVersion >= 3 {
+			if job.HoldMultiplier <= 0 {
+				if job.BatchDiscountMultiplier == 0 {
+					return 0, nil
+				}
+				return 0, ErrBatchImageSettlementPricingMissing
+			}
+			unitPrice := job.HoldUnitPrice * job.BatchDiscountMultiplier / job.HoldMultiplier
+			if unitPrice < 0 {
+				return 0, ErrBatchImageSettlementPricingMissing
+			}
+			return unitPrice, nil
+		}
 		return job.BillableUnitPrice, nil
 	}
 	unitPrice, err := s.Pricing.BatchImageUnitPrice(ctx, job)
@@ -300,6 +360,32 @@ func (s *BatchImageSettlementService) settlementUnitPrice(ctx context.Context, j
 		return 0, err
 	}
 	return unitPrice, nil
+}
+
+func batchImageSettlementUsageUnitPrice(job *BatchImageJob, realUnitPrice float64) float64 {
+	if job != nil && job.PricingSnapshotVersion >= 1 {
+		if job.BillableUnitPrice < 0 {
+			return 0
+		}
+		return job.BillableUnitPrice
+	}
+	return realUnitPrice
+}
+
+func batchImageSettlementUnifiedRateMultiplier(job *BatchImageJob, actualCost, realActualCost float64) float64 {
+	if job == nil || job.PricingSnapshotVersion < 3 {
+		return 1
+	}
+	if realActualCost > 0 {
+		rate := actualCost / realActualCost
+		if rate >= 0 && !math.IsNaN(rate) && !math.IsInf(rate, 0) {
+			return rate
+		}
+	}
+	if actualCost == 0 && job.BillableUnitPrice == 0 && job.GroupRateMultiplier > 0 && job.BatchDiscountMultiplier > 0 {
+		return 0
+	}
+	return 1
 }
 
 func (s *BatchImageSettlementService) outputRetentionAfterTerminal() time.Duration {

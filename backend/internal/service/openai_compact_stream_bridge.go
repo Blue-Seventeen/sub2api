@@ -96,7 +96,7 @@ func writeOpenAICompactSSEBridge(c *gin.Context, statusCode int, finalResponse [
 func writeOpenAICompactSSEFailure(c *gin.Context, statusCode int, errorBody []byte) {
 	message := ""
 	if len(errorBody) > 0 {
-		message = sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(errorBody)))
+		message = sanitizeUserVisibleErrorText(sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(errorBody))))
 	}
 	if message == "" {
 		message = "Upstream compact request failed with HTTP " + strconv.Itoa(statusCode)
@@ -112,6 +112,8 @@ func writeOpenAICompactSSEFailureMessage(c *gin.Context, statusCode int, errType
 	if c == nil {
 		return
 	}
+	errType = sanitizeUserVisibleErrorText(sanitizeUpstreamErrorMessage(errType))
+	message = sanitizeUserVisibleErrorText(sanitizeUpstreamErrorMessage(message))
 	MarkOpsStreamError(c, errType, message, statusCode)
 	payload, err := json.Marshal(map[string]any{
 		"type": "response.failed",

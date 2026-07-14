@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
@@ -36,6 +38,44 @@ func TestCompatibleGatewayServicePrepareRequest_RewritesMappedModelForChat(t *te
 	}
 	if got := gjson.GetBytes(prepared.RequestBody, "model").String(); got != "glm-4.6v" {
 		t.Fatalf("patched request model = %q, want %q", got, "glm-4.6v")
+	}
+}
+
+func TestCompatibleOpenAIUsageMappersExcludeCacheReadAndCreationFromInput(t *testing.T) {
+	responsesUsage := responsesUsageToClaudeUsage(&apicompat.ResponsesUsage{
+		InputTokens:              100,
+		OutputTokens:             20,
+		CacheCreationInputTokens: 10,
+		InputTokensDetails:       &apicompat.ResponsesInputTokensDetails{CachedTokens: 25},
+	})
+	if responsesUsage.InputTokens != 65 || responsesUsage.CacheReadInputTokens != 25 || responsesUsage.CacheCreationInputTokens != 10 {
+		t.Fatalf("responses usage = %+v, want input=65 cache_read=25 cache_creation=10", responsesUsage)
+	}
+
+	chatUsage := chatUsageToClaudeUsage(&apicompat.ChatUsage{
+		PromptTokens:        80,
+		CompletionTokens:    10,
+		PromptTokensDetails: &apicompat.ChatTokenDetails{CachedTokens: 30, CacheCreationTokens: 5},
+	})
+	if chatUsage.InputTokens != 45 || chatUsage.CacheReadInputTokens != 30 || chatUsage.CacheCreationInputTokens != 5 {
+		t.Fatalf("chat usage = %+v, want input=45 cache_read=30 cache_creation=5", chatUsage)
+	}
+
+	legacyUsage := openAIUsageToClaudeUsage(OpenAIUsage{InputTokens: 60, CacheReadInputTokens: 15, CacheCreationInputTokens: 5})
+	if legacyUsage.InputTokens != 40 || legacyUsage.CacheReadInputTokens != 15 || legacyUsage.CacheCreationInputTokens != 5 {
+		t.Fatalf("legacy usage = %+v, want input=40 cache_read=15 cache_creation=5", legacyUsage)
+	}
+}
+
+func TestCompatibleChatUsageCanonicalCacheWriteZeroOverridesLegacyAlias(t *testing.T) {
+	var chunk apicompat.ChatCompletionsChunk
+	if err := json.Unmarshal([]byte(`{"usage":{"prompt_tokens":100,"completion_tokens":20,"prompt_tokens_details":{"cache_write_tokens":0,"cache_creation_tokens":19}}}`), &chunk); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	usage := chatUsageToClaudeUsage(chunk.Usage)
+	if usage.InputTokens != 100 || usage.CacheCreationInputTokens != 0 {
+		t.Fatalf("usage = %+v, want input=100 cache_creation=0", usage)
 	}
 }
 
@@ -259,6 +299,62 @@ func TestCompatibleGatewayServiceHandleChatPassthrough_NonStreamTracksDuration(t
 	}
 }
 
+func TestCompatibleGatewayServiceHandleChatAsMessages_NonStreamPreservesCacheCreation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body: io.NopCloser(strings.NewReader(`{
+			"id":"chatcmpl_cache",
+			"object":"chat.completion",
+			"model":"gpt-5.4",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":100,"completion_tokens":20,"total_tokens":120,"prompt_tokens_details":{"cached_tokens":25,"cache_write_tokens":10}}
+		}`)),
+	}
+	prepared := &compatiblePreparedRequest{
+		OriginalModel: "claude-sonnet-4",
+		UpstreamModel: "gpt-5.4",
+		ClientStream:  false,
+	}
+
+	result := (&CompatibleGatewayService{}).handleChatAsMessages(resp, c, prepared, time.Now().Add(-time.Millisecond))
+	if result.Usage.InputTokens != 65 || result.Usage.CacheReadInputTokens != 25 || result.Usage.CacheCreationInputTokens != 10 {
+		t.Fatalf("usage = %+v, want input=65 cache_read=25 cache_creation=10", result.Usage)
+	}
+}
+
+func TestCompatibleGatewayServiceHandleChatAsMessages_CanonicalZeroOverridesLegacyCacheCreation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body: io.NopCloser(strings.NewReader(`{
+			"id":"chatcmpl_cache_zero",
+			"object":"chat.completion",
+			"model":"gpt-5.4",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":100,"completion_tokens":20,"total_tokens":120,"prompt_tokens_details":{"cache_write_tokens":0,"cache_creation_tokens":19}}
+		}`)),
+	}
+	prepared := &compatiblePreparedRequest{
+		OriginalModel: "claude-sonnet-4",
+		UpstreamModel: "gpt-5.4",
+		ClientStream:  false,
+	}
+
+	result := (&CompatibleGatewayService{}).handleChatAsMessages(resp, c, prepared, time.Now().Add(-time.Millisecond))
+	if result.Usage.InputTokens != 100 || result.Usage.CacheCreationInputTokens != 0 {
+		t.Fatalf("usage = %+v, want input=100 cache_creation=0", result.Usage)
+	}
+}
+
 func TestCompatibleGatewayServiceHandleChatPassthrough_ASRDurationBilling(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -360,5 +456,63 @@ func TestCompatibleGatewayService_NonStreamTooLargeReturnsBadGateway(t *testing.
 				t.Fatalf("body = %q, want fragment %q", recorder.Body.String(), tt.wantFragment)
 			}
 		})
+	}
+}
+
+func TestCompatibleGatewayStreamWithoutTerminalSkipsBilling(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := &CompatibleGatewayService{}
+	prepared := &compatiblePreparedRequest{
+		OriginalModel: "glm-4.5-air",
+		UpstreamModel: "glm-4.5-air",
+		ClientStream:  true,
+		ClientRoute:   CompatibleRouteChatCompletions,
+		RequestBody:   []byte(`{"model":"glm-4.5-air","stream":true}`),
+	}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(
+			"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}\n\n",
+		)),
+	}
+
+	result := svc.handleChatPassthrough(resp, c, prepared, time.Now())
+	if result == nil {
+		t.Fatal("result is nil")
+	}
+	if !result.SkipUsageBilling {
+		t.Fatalf("SkipUsageBilling = false, want true when stream lacks terminal event")
+	}
+}
+
+func TestCompatibleGatewayStreamWithDoneKeepsBilling(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := &CompatibleGatewayService{}
+	prepared := &compatiblePreparedRequest{
+		OriginalModel: "glm-4.5-air",
+		UpstreamModel: "glm-4.5-air",
+		ClientStream:  true,
+		ClientRoute:   CompatibleRouteChatCompletions,
+		RequestBody:   []byte(`{"model":"glm-4.5-air","stream":true}`),
+	}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(
+			"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}\n\ndata: [DONE]\n\n",
+		)),
+	}
+
+	result := svc.handleChatPassthrough(resp, c, prepared, time.Now())
+	if result == nil {
+		t.Fatal("result is nil")
+	}
+	if result.SkipUsageBilling {
+		t.Fatalf("SkipUsageBilling = true, want false when stream has terminal event")
 	}
 }

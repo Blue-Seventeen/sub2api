@@ -1063,6 +1063,79 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardDirect_NonStreamingSuc
 	require.Equal(t, upstreamJSON, rec.Body.String())
 }
 
+func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardDirect_NonStreamingErrorRedactsSecrets(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	const upstreamJSON = `{"type":"error","error":{"type":"invalid_request_error","message":"invalid credentials at api.internal.example 10.0.0.8: Authorization: Bearer leaked-bearer"},"api_key":"leaked-api-key","access_token":"leaked-access-token"}`
+	upstream := &anthropicHTTPUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamJSON)),
+	}}
+	svc := &GatewayService{
+		cfg:              &config.Config{},
+		httpUpstream:     upstream,
+		rateLimitService: &RateLimitService{},
+	}
+
+	result, err := svc.forwardAnthropicAPIKeyPassthrough(context.Background(), c, newAnthropicAPIKeyAccountForTest(), []byte(`{"model":"x"}`), "x", "x", false, time.Now())
+	require.Error(t, err)
+	require.Nil(t, result)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.True(t, json.Valid(rec.Body.Bytes()))
+	require.Equal(t, "error", gjson.GetBytes(rec.Body.Bytes(), "type").String())
+	require.Equal(t, "invalid_request_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
+	require.Contains(t, gjson.GetBytes(rec.Body.Bytes(), "error.message").String(), "invalid credentials")
+	require.Equal(t, "***", gjson.GetBytes(rec.Body.Bytes(), "api_key").String())
+	require.Equal(t, "***", gjson.GetBytes(rec.Body.Bytes(), "access_token").String())
+	for _, secret := range []string{"leaked-bearer", "leaked-api-key", "leaked-access-token", "api.internal.example", "10.0.0.8"} {
+		require.NotContains(t, rec.Body.String(), secret)
+		require.NotContains(t, err.Error(), secret)
+	}
+}
+
+func TestGatewayService_AnthropicAPIKeyPassthrough_StreamingRedactsOnlyErrorEvents(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	const visibleContent = "Authorization: Bearer user-visible-output"
+	stream := strings.Join([]string{
+		`event: content_block_delta`,
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"` + visibleContent + `"}}`,
+		``,
+		`event: error`,
+		`data: {"type":"error","error":{"type":"authentication_error","message":"upstream api.internal.example 10.0.0.8 rejected Authorization: Bearer leaked-bearer"},"api_key":"leaked-api-key","token":"leaked-token"}`,
+		``,
+		`event: message_stop`,
+		`data: {"type":"message_stop"}`,
+		``,
+	}, "\n")
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(stream)),
+	}
+	svc := &GatewayService{cfg: &config.Config{}}
+
+	result, err := svc.handleStreamingResponseAnthropicAPIKeyPassthrough(context.Background(), resp, c, &Account{ID: 1}, time.Now(), "claude-test")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	out := rec.Body.String()
+	require.Contains(t, out, visibleContent, "successful content events must remain unchanged")
+	require.Contains(t, out, "event: error\n")
+	require.Contains(t, out, "rejected Authorization: ***")
+	require.Contains(t, out, `"api_key":"***"`)
+	require.Contains(t, out, `"token":"***"`)
+	for _, secret := range []string{"leaked-bearer", "leaked-api-key", "leaked-token", "api.internal.example", "10.0.0.8"} {
+		require.NotContains(t, out, secret)
+	}
+}
+
 func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardDirect_InvalidTokenType(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
@@ -1108,8 +1181,11 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardDirect_UpstreamRequest
 	result, err := svc.forwardAnthropicAPIKeyPassthrough(context.Background(), c, account, []byte(`{"model":"x"}`), "x", "x", false, time.Now())
 	require.Nil(t, result)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "upstream request failed")
-	require.Equal(t, http.StatusBadGateway, rec.Code)
+	var failoverErr *UpstreamFailoverError
+	require.True(t, errors.As(err, &failoverErr))
+	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Empty(t, rec.Body.String())
 }
 
 func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardDirect_EmptyResponseBody(t *testing.T) {

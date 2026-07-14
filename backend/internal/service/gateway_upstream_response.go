@@ -282,7 +282,7 @@ func sanitizeStreamError(err error) string {
 // ExtractUpstreamErrorMessage 从上游响应体中提取错误消息
 // 支持 Claude 风格的错误格式：{"type":"error","error":{"type":"...","message":"..."}}
 func ExtractUpstreamErrorMessage(body []byte) string {
-	return extractUpstreamErrorMessage(body)
+	return sanitizeUpstreamErrorMessage(extractUpstreamErrorMessage(body))
 }
 
 func extractUpstreamErrorMessage(body []byte) string {
@@ -305,6 +305,204 @@ func extractUpstreamErrorMessage(body []byte) string {
 
 	// 兜底：尝试顶层 message
 	return gjson.GetBytes(body, "message").String()
+}
+
+func sanitizeClientVisibleUpstreamErrorPayload(body []byte) []byte {
+	if len(body) == 0 {
+		return body
+	}
+	var value any
+	if json.Unmarshal(body, &value) == nil {
+		if encoded, err := json.Marshal(sanitizeClientVisibleUpstreamErrorValue(value, "")); err == nil {
+			return encoded
+		}
+	}
+	return []byte(sanitizeUserVisibleErrorText(sanitizeUpstreamErrorMessage(string(body))))
+}
+
+func sanitizeClientVisibleUpstreamErrorValue(value any, key string) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for childKey, childValue := range typed {
+			if isClientVisibleSensitiveErrorKey(childKey) {
+				out[childKey] = "***"
+				continue
+			}
+			out[childKey] = sanitizeClientVisibleUpstreamErrorValue(childValue, childKey)
+		}
+		return out
+	case []any:
+		out := make([]any, len(typed))
+		for i, childValue := range typed {
+			out[i] = sanitizeClientVisibleUpstreamErrorValue(childValue, key)
+		}
+		return out
+	case string:
+		if key == "type" || key == "object" || key == "event" {
+			cleaned := sanitizeUserVisibleCredentialText(sanitizeUpstreamErrorMessage(typed))
+			if isClientVisibleProtocolIdentifier(cleaned) {
+				return cleaned
+			}
+			return sanitizeUserVisibleNetworkText(cleaned)
+		}
+		return sanitizeUserVisibleErrorText(sanitizeUpstreamErrorMessage(typed))
+	default:
+		return value
+	}
+}
+
+func isClientVisibleProtocolIdentifier(value string) bool {
+	switch value {
+	case "response.failed", "response.incomplete", "response.cancelled", "response.canceled",
+		"response.compaction", "chat.completion", "chat.completion.chunk":
+		return true
+	default:
+		return false
+	}
+}
+
+func isClientVisibleSensitiveErrorKey(key string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(key))
+	compact := strings.NewReplacer("-", "", "_", "").Replace(normalized)
+	return compact == "authorization" || compact == "proxyauthorization" ||
+		strings.HasSuffix(compact, "apikey") || compact == "xapikey" || compact == "xgoogapikey" || compact == "key" ||
+		compact == "token" || strings.HasSuffix(compact, "token") ||
+		compact == "password" || strings.HasSuffix(compact, "password") || compact == "clientsecret" || strings.HasSuffix(compact, "secret") ||
+		compact == "cookie" || compact == "setcookie"
+}
+
+func sanitizeClientVisibleSSEEventBlock(block []byte) []byte {
+	if len(block) == 0 {
+		return block
+	}
+	text := string(block)
+	lineEnding := "\n"
+	if strings.Contains(text, "\r\n") {
+		lineEnding = "\r\n"
+	}
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	eventName := ""
+	dataIndexes := make([]int, 0, 1)
+	shouldSanitize := false
+	for i, line := range lines {
+		if strings.HasPrefix(line, "event:") {
+			eventName = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+			if isClientVisibleErrorSSEEventType(eventName) {
+				shouldSanitize = true
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "data:") {
+			dataIndexes = append(dataIndexes, i)
+			payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			if isClientVisibleErrorSSEData(payload) {
+				shouldSanitize = true
+			}
+		}
+	}
+	if !shouldSanitize || len(dataIndexes) == 0 {
+		return block
+	}
+	for _, idx := range dataIndexes {
+		line := lines[idx]
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "" || payload == "[DONE]" {
+			continue
+		}
+		safePayload := string(sanitizeClientVisibleUpstreamErrorPayload([]byte(payload)))
+		lines[idx] = "data: " + safePayload
+	}
+	return []byte(strings.Join(lines, lineEnding))
+}
+
+func isClientVisibleErrorSSEEventType(eventType string) bool {
+	switch strings.TrimSpace(eventType) {
+	case "error", "response.failed", "response.incomplete", "response.cancelled", "response.canceled":
+		return true
+	default:
+		return false
+	}
+}
+
+func isClientVisibleErrorSSEData(payload string) bool {
+	payload = strings.TrimSpace(payload)
+	if payload == "" || payload == "[DONE]" {
+		return false
+	}
+	if isClientVisibleErrorSSEEventType(strings.TrimSpace(gjson.Get(payload, "type").String())) {
+		return true
+	}
+	if gjson.Get(payload, "error").Exists() {
+		return true
+	}
+	if isClientVisibleErrorSSEEventType(strings.TrimSpace(gjson.Get(payload, "response.status").String())) {
+		return true
+	}
+	if gjson.Get(payload, "response.error").Exists() {
+		return true
+	}
+	return false
+}
+
+type clientVisibleSSESanitizingWriter struct {
+	w   io.Writer
+	buf []byte
+}
+
+func newClientVisibleSSESanitizingWriter(w io.Writer) *clientVisibleSSESanitizingWriter {
+	return &clientVisibleSSESanitizingWriter{w: w}
+}
+
+func (w *clientVisibleSSESanitizingWriter) Write(p []byte) (int, error) {
+	if w == nil || w.w == nil {
+		return len(p), nil
+	}
+	w.buf = append(w.buf, p...)
+	for {
+		idx, delimLen := findSSEEventDelimiter(w.buf)
+		if idx < 0 {
+			break
+		}
+		end := idx + delimLen
+		block := sanitizeClientVisibleSSEEventBlock(w.buf[:end])
+		if _, err := w.w.Write(block); err != nil {
+			return 0, err
+		}
+		w.buf = append(w.buf[:0], w.buf[end:]...)
+	}
+	return len(p), nil
+}
+
+func (w *clientVisibleSSESanitizingWriter) FlushRemaining() error {
+	if w == nil || w.w == nil || len(w.buf) == 0 {
+		return nil
+	}
+	block := sanitizeClientVisibleSSEEventBlock(w.buf)
+	w.buf = nil
+	_, err := w.w.Write(block)
+	return err
+}
+
+func findSSEEventDelimiter(buf []byte) (int, int) {
+	if idx := bytes.Index(buf, []byte("\n\n")); idx >= 0 {
+		return idx, 2
+	}
+	if idx := bytes.Index(buf, []byte("\r\n\r\n")); idx >= 0 {
+		return idx, 4
+	}
+	return -1, 0
+}
+
+func sanitizeClientVisibleOpenAIWSEvent(payload []byte) []byte {
+	if len(payload) == 0 {
+		return payload
+	}
+	eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
+	if isClientVisibleErrorSSEEventType(eventType) || gjson.GetBytes(payload, "error").Exists() || gjson.GetBytes(payload, "response.error").Exists() {
+		return sanitizeClientVisibleUpstreamErrorPayload(payload)
+	}
+	return payload
 }
 
 func extractUpstreamErrorCode(body []byte) string {
@@ -370,6 +568,7 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 
 	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(body))
 	upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+	clientUpstreamMsg := sanitizeUserVisibleErrorText(upstreamMsg)
 
 	// Print a compact upstream request fingerprint when we hit the Claude Code OAuth
 	// credential scope error. This avoids requiring env-var tweaks in a fixed deploy.
@@ -415,7 +614,10 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 		}
 	}
 	if shouldDisable {
-		return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: body}
+		return nil, &UpstreamFailoverError{
+			StatusCode:   resp.StatusCode,
+			ResponseBody: sanitizeClientVisibleUpstreamErrorPayload(body),
+		}
 	}
 
 	MarkResponseCommitted(c)
@@ -442,6 +644,7 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 		"upstream_error",
 		"Upstream request failed",
 	); matched {
+		errMsg = sanitizeUserVisibleErrorText(sanitizeUpstreamErrorMessage(errMsg))
 		c.JSON(status, gin.H{
 			"type": "error",
 			"error": gin.H{
@@ -450,7 +653,7 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 			},
 		})
 
-		summary := upstreamMsg
+		summary := clientUpstreamMsg
 		if summary == "" {
 			summary = errMsg
 		}
@@ -466,10 +669,11 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 
 	switch resp.StatusCode {
 	case 400:
-		c.Data(http.StatusBadRequest, "application/json", body)
-		summary := upstreamMsg
+		clientBody := sanitizeClientVisibleUpstreamErrorPayload(body)
+		c.Data(http.StatusBadRequest, "application/json", clientBody)
+		summary := clientUpstreamMsg
 		if summary == "" {
-			summary = truncateForLog(body, 512)
+			summary = truncateForLog(clientBody, 512)
 		}
 		if summary == "" {
 			return nil, fmt.Errorf("upstream error: %d", resp.StatusCode)
@@ -510,10 +714,10 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 		},
 	})
 
-	if upstreamMsg == "" {
+	if clientUpstreamMsg == "" {
 		return nil, fmt.Errorf("upstream error: %d", resp.StatusCode)
 	}
-	return nil, fmt.Errorf("upstream error: %d message=%s", resp.StatusCode, upstreamMsg)
+	return nil, fmt.Errorf("upstream error: %d message=%s", resp.StatusCode, clientUpstreamMsg)
 }
 
 func (s *GatewayService) handleRetryExhaustedSideEffects(ctx context.Context, resp *http.Response, account *Account) {
@@ -605,6 +809,7 @@ func (s *GatewayService) handleRetryExhaustedError(ctx context.Context, resp *ht
 		"upstream_error",
 		"Upstream request failed after retries",
 	); matched {
+		errMsg = sanitizeUpstreamErrorMessage(errMsg)
 		c.JSON(status, gin.H{
 			"type": "error",
 			"error": gin.H{
@@ -812,7 +1017,8 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 		}
 
 		if eventName == "error" {
-			return nil, dataLine, nil, &sseStreamErrorEventError{RawData: dataLine}
+			safeData := string(sanitizeClientVisibleUpstreamErrorPayload([]byte(dataLine)))
+			return nil, safeData, nil, &sseStreamErrorEventError{RawData: safeData}
 		}
 
 		if dataLine == "" {
@@ -843,6 +1049,10 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 		eventType, _ := event["type"].(string)
 		if eventName == "" {
 			eventName = eventType
+		}
+		if eventName == "error" || eventType == "error" {
+			safeData := string(sanitizeClientVisibleUpstreamErrorPayload([]byte(dataLine)))
+			return nil, safeData, nil, &sseStreamErrorEventError{RawData: safeData}
 		}
 		eventChanged := false
 

@@ -2399,6 +2399,7 @@ func TestOpenAIGatewayServiceRecordUsage_ImageFallbackUsesImageMultiplier(t *tes
 		2.0,
 		UsageTokens{},
 		"",
+		false,
 	)
 
 	require.NoError(t, err)
@@ -3076,8 +3077,10 @@ func TestOpenAIGatewayCalculateUsageCost_NoChannelUnitPricingFallsBackToTokenUsa
 		[]string{"claude-sonnet-4"},
 		1.0,
 		1.0,
+		1.0,
 		tokens,
 		"",
+		false,
 	)
 
 	require.NoError(t, err)

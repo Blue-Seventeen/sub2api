@@ -383,14 +383,13 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				Kind:               "request_error",
 				Message:            safeErr,
 			})
-			c.JSON(http.StatusBadGateway, gin.H{
-				"type": "error",
-				"error": gin.H{
-					"type":    "upstream_error",
-					"message": "Upstream request failed",
-				},
-			})
-			return nil, fmt.Errorf("upstream request failed: %s", safeErr)
+			if errors.Is(err, context.Canceled) {
+				return nil, err
+			}
+			return nil, &UpstreamFailoverError{
+				StatusCode:   http.StatusBadGateway,
+				ResponseBody: []byte(`{"type":"error","error":{"type":"upstream_error","message":"Upstream request failed"}}`),
+			}
 		}
 
 		// 优先检测thinking block签名错误（400）并重试一次

@@ -56,6 +56,7 @@ const (
 
 	maxNewAPIStyleMultipartModelBytes          = 64 << 10
 	maxNewAPIStyleAudioStreamErrorCaptureBytes = 1 << 20
+	maxNewAPIStyleTerminalLinePrefixBytes      = 8 << 10
 )
 
 var ErrNewAPIStyleUnsupportedCapability = errors.New("new-api style capability unsupported")
@@ -235,7 +236,13 @@ func (s *NewAPIStyleGatewayService) Forward(
 			Kind:               "request_error",
 			Message:            safeErr,
 		})
-		return nil, upstreamEndpoint, fmt.Errorf("new-api style upstream request failed: %w", err)
+		if errors.Is(err, context.Canceled) {
+			return nil, upstreamEndpoint, err
+		}
+		return nil, upstreamEndpoint, &UpstreamFailoverError{
+			StatusCode:   http.StatusBadGateway,
+			ResponseBody: []byte(`{"error":{"type":"upstream_error","message":"Upstream request failed"}}`),
+		}
 	}
 	if resp == nil {
 		return nil, upstreamEndpoint, fmt.Errorf("new-api style upstream response is nil")
@@ -251,8 +258,9 @@ func (s *NewAPIStyleGatewayService) Forward(
 		}
 		upstreamMsg := sanitizeUpstreamErrorMessage(ExtractUpstreamErrorMessage(respBody))
 		setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, "")
+		shouldFailover := newAPIStyleShouldFailoverStatus(resp.StatusCode)
 		eventKind := "http_error"
-		if s.gatewayService != nil && s.gatewayService.shouldFailoverUpstreamError(resp.StatusCode) {
+		if shouldFailover {
 			eventKind = "failover"
 		}
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -266,10 +274,22 @@ func (s *NewAPIStyleGatewayService) Forward(
 			Kind:                 eventKind,
 			Message:              upstreamMsg,
 		})
-		return nil, upstreamEndpoint, &UpstreamFailoverError{
-			StatusCode:      resp.StatusCode,
-			ResponseBody:    respBody,
-			ResponseHeaders: resp.Header.Clone(),
+		safeBody := sanitizeClientVisibleUpstreamErrorPayload(respBody)
+		if shouldFailover {
+			return nil, upstreamEndpoint, &UpstreamFailoverError{
+				StatusCode:      resp.StatusCode,
+				ResponseBody:    safeBody,
+				ResponseHeaders: resp.Header.Clone(),
+			}
+		}
+		safeMessage := strings.TrimSpace(ExtractUpstreamErrorMessage(safeBody))
+		if safeMessage == "" {
+			safeMessage = "Upstream request failed"
+		}
+		return nil, upstreamEndpoint, &CompatibleClientError{
+			StatusCode: resp.StatusCode,
+			ErrorType:  "upstream_error",
+			Message:    safeMessage,
 		}
 	}
 
@@ -293,11 +313,13 @@ func (s *NewAPIStyleGatewayService) Forward(
 	if opts.Stream || isEventStream(resp.Header.Get("Content-Type")) {
 		captureAudioStream := isNewAPIStyleASRRoute(opts) || isNewAPIStyleTTSRoute(opts)
 		captureStreamUsage := newAPIStyleShouldCaptureStreamUsage(opts)
+		captureStreamTerminal := newAPIStyleShouldCaptureTerminal(opts, resp.Header.Get("Content-Type"))
 		var audioStreamCapture bytes.Buffer
+		var streamTerminalCapture *newAPIStyleSSETerminalCaptureWriter
 		var usageCapture *newAPIStyleSSEUsageCaptureWriter
 		streamReader := io.Reader(resp.Body)
-		if captureAudioStream || captureStreamUsage {
-			writers := make([]io.Writer, 0, 2)
+		if captureAudioStream || captureStreamUsage || captureStreamTerminal {
+			writers := make([]io.Writer, 0, 3)
 			if captureAudioStream {
 				writers = append(writers, &tailBufferWriter{
 					buffer: &audioStreamCapture,
@@ -305,25 +327,64 @@ func (s *NewAPIStyleGatewayService) Forward(
 				})
 			}
 			if captureStreamUsage {
-				usageCapture = &newAPIStyleSSEUsageCaptureWriter{}
+				usageCapture = &newAPIStyleSSEUsageCaptureWriter{route: opts.Route}
 				writers = append(writers, usageCapture)
+			}
+			if captureStreamTerminal {
+				streamTerminalCapture = &newAPIStyleSSETerminalCaptureWriter{route: opts.Route}
+				writers = append(writers, streamTerminalCapture)
 			}
 			streamReader = io.TeeReader(resp.Body, io.MultiWriter(writers...))
 		}
+		var copiedBytes int64
+		var copyErr error
 		if c != nil {
 			c.Status(resp.StatusCode)
-			_, copyErr := io.Copy(c.Writer, streamReader)
-			if copyErr != nil {
-				result.SkipUsageBilling = true
+			if isEventStream(resp.Header.Get("Content-Type")) {
+				safeWriter := newClientVisibleSSESanitizingWriter(c.Writer)
+				copiedBytes, copyErr = io.Copy(safeWriter, streamReader)
+				if flushErr := safeWriter.FlushRemaining(); copyErr == nil && flushErr != nil {
+					copyErr = flushErr
+				}
+			} else {
+				copiedBytes, copyErr = io.Copy(c.Writer, streamReader)
 			}
-			if f, ok := c.Writer.(http.Flusher); ok {
-				f.Flush()
+			if copiedBytes > 0 || copyErr == nil {
+				if f, ok := c.Writer.(http.Flusher); ok {
+					f.Flush()
+				}
 			}
 		} else {
-			_, copyErr := io.Copy(io.Discard, streamReader)
-			if copyErr != nil {
+			copiedBytes, copyErr = io.Copy(io.Discard, streamReader)
+		}
+		if copyErr != nil {
+			safeMessage := "Upstream stream disconnected"
+			setOpsUpstreamError(c, http.StatusBadGateway, safeMessage, "")
+			if copiedBytes == 0 {
+				return nil, upstreamEndpoint, &UpstreamFailoverError{
+					StatusCode:             http.StatusBadGateway,
+					ResponseBody:           []byte(`{"error":{"type":"upstream_error","message":"Upstream stream disconnected"}}`),
+					RetryableOnSameAccount: true,
+				}
+			}
+			terminal, successfulTerminal := streamTerminalCapture.State()
+			if terminal {
+				result.SkipUsageBilling = !successfulTerminal
+			} else if captureStreamTerminal {
+				result.SkipUsageBilling = true
+				return nil, upstreamEndpoint, errors.New("upstream stream disconnected")
+			} else {
 				result.SkipUsageBilling = true
 			}
+		}
+		if copyErr == nil && captureStreamTerminal && newAPIStyleRequiresTerminalEvent(opts.Route) {
+			terminal, successfulTerminal := streamTerminalCapture.State()
+			if !terminal {
+				result.SkipUsageBilling = true
+				setOpsUpstreamError(c, http.StatusBadGateway, "Upstream stream closed before terminal event", "")
+				return nil, upstreamEndpoint, errors.New("upstream stream closed before terminal event")
+			}
+			result.SkipUsageBilling = !successfulTerminal
 		}
 		if captureAudioStream {
 			if upstreamMsg, ok := newAPIStyleAudioUpstreamErrorPayload(opts, audioStreamCapture.Bytes()); ok {
@@ -367,6 +428,70 @@ func (s *NewAPIStyleGatewayService) Forward(
 	return result, upstreamEndpoint, nil
 }
 
+func newAPIStyleStreamTerminalState(route NewAPIStyleRoute, payload []byte) (terminal bool, successful bool) {
+	w := &newAPIStyleSSETerminalCaptureWriter{route: route}
+	_, _ = w.Write(payload)
+	return w.State()
+}
+
+func newAPIStyleTerminalEventType(route NewAPIStyleRoute, eventType string) (terminal bool, successful bool) {
+	switch route {
+	case NewAPIStyleRouteResponses:
+		switch eventType {
+		case "response.failed", "response.incomplete", "response.cancelled", "response.canceled":
+			return true, false
+		case "response.completed", "response.done":
+			return true, true
+		}
+	case NewAPIStyleRouteMessages:
+		switch eventType {
+		case "error":
+			return true, false
+		case "message_stop":
+			return true, true
+		}
+	}
+	return false, false
+}
+
+func newAPIStyleRequiresTerminalEvent(route NewAPIStyleRoute) bool {
+	switch route {
+	case NewAPIStyleRouteChatCompletions, NewAPIStyleRouteMessages, NewAPIStyleRouteResponses:
+		return true
+	default:
+		return false
+	}
+}
+
+func newAPIStyleShouldCaptureTerminal(opts NewAPIStyleForwardOptions, contentType string) bool {
+	if !newAPIStyleRequiresTerminalEvent(opts.Route) {
+		return false
+	}
+	if isEventStream(contentType) {
+		return true
+	}
+	if !opts.Stream {
+		return false
+	}
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		mediaType = strings.ToLower(strings.TrimSpace(strings.SplitN(contentType, ";", 2)[0]))
+	}
+	return !strings.HasPrefix(mediaType, "audio/") &&
+		!strings.HasPrefix(mediaType, "image/") &&
+		!strings.HasPrefix(mediaType, "video/") &&
+		mediaType != "application/octet-stream"
+}
+
+func newAPIStyleShouldFailoverStatus(statusCode int) bool {
+	switch statusCode {
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests, 529:
+		return true
+	default:
+		return statusCode >= http.StatusInternalServerError
+	}
+}
+
 func (s *NewAPIStyleGatewayService) ForwardOpenAI(
 	ctx context.Context,
 	c *gin.Context,
@@ -385,9 +510,7 @@ func OpenAIForwardResultFromForwardResult(result *ForwardResult) *OpenAIForwardR
 		return nil
 	}
 	openAIInputTokens := result.Usage.InputTokens
-	if result.Usage.CacheReadInputTokens > 0 {
-		openAIInputTokens += result.Usage.CacheReadInputTokens
-	}
+	openAIInputTokens += result.Usage.CacheReadInputTokens + result.Usage.CacheCreationInputTokens
 	return &OpenAIForwardResult{
 		RequestID: result.RequestID,
 		Usage: OpenAIUsage{
@@ -436,13 +559,22 @@ func (s *NewAPIStyleGatewayService) buildTargetURL(account *Account, opts NewAPI
 	if baseURL == "" {
 		return "", "", fmt.Errorf("new-api style base_url is required for platform %s", account.Platform)
 	}
+	if s.gatewayService != nil && s.gatewayService.cfg != nil {
+		validatedBaseURL, err := s.gatewayService.validateUpstreamBaseURL(baseURL)
+		if err != nil {
+			return "", "", err
+		}
+		baseURL = validatedBaseURL
+	}
 	baseURL = strings.TrimRight(baseURL, "/")
 
 	path := newAPIStyleRoutePath(account.Platform, opts)
 	if opts.Route == NewAPIStyleRouteChatCompletions && account.Platform == PlatformZhipu {
-		// NewAPI-style zhipu accounts are OpenAI-compatible relay accounts.
-		// Keep the official /api/paas/v4 path for non-NewAPI compatible probes.
-		path = "/v1/chat/completions"
+		if isZhipuOfficialBaseURL(baseURL) {
+			path = zhipuCompatibleChatPath
+		} else {
+			path = "/v1/chat/completions"
+		}
 	}
 	if path == "" {
 		if opts.Route == NewAPIStyleRouteAudio || opts.Route == NewAPIStyleRouteQwenTTS || opts.Route == NewAPIStyleRouteQwenImage {
@@ -852,9 +984,9 @@ func (s *NewAPIStyleGatewayService) applyUsageGuardrails(result *ForwardResult, 
 	}
 	usage := ClaudeUsage{}
 	if len(respBody) > 0 {
-		usage = parseNewAPIStyleUsage(respBody)
+		usage = parseNewAPIStyleUsageForRoute(respBody, opts.Route)
 		if !claudeUsageHasAny(usage) {
-			usage = parseNewAPIStyleSSEUsage(respBody)
+			usage = parseNewAPIStyleSSEUsageForRoute(respBody, opts.Route)
 		}
 	}
 	s.applyUsageGuardrailsWithParsedUsage(result, opts, respBody, usage)
@@ -1066,6 +1198,240 @@ type tailBufferWriter struct {
 	limit  int
 }
 
+type newAPIStyleSSETerminalCaptureWriter struct {
+	route           NewAPIStyleRoute
+	pending         []byte
+	discardLine     bool
+	eventTerminal   bool
+	eventSuccessful bool
+	terminal        bool
+	successful      bool
+	scanJSONStarted bool
+	scanDepth       int
+	scanInString    bool
+	scanEscaped     bool
+	scanStringRole  byte
+	scanString      []byte
+	scanKey         string
+	scanWantKey     bool
+	scanWantValue   bool
+}
+
+func (w *newAPIStyleSSETerminalCaptureWriter) Write(p []byte) (int, error) {
+	n := len(p)
+	for len(p) > 0 {
+		idx := bytes.IndexByte(p, '\n')
+		if idx < 0 {
+			w.appendLineFragment(p)
+			break
+		}
+		w.appendLineFragment(p[:idx])
+		w.finishLine()
+		p = p[idx+1:]
+	}
+	return n, nil
+}
+
+func (w *newAPIStyleSSETerminalCaptureWriter) appendLineFragment(fragment []byte) {
+	if w == nil || len(fragment) == 0 {
+		return
+	}
+	w.scanLineFragment(fragment)
+	if w.discardLine {
+		return
+	}
+	remaining := maxNewAPIStyleTerminalLinePrefixBytes - len(w.pending)
+	if remaining <= 0 {
+		w.pending = nil
+		w.discardLine = true
+		return
+	}
+	if len(fragment) <= remaining {
+		w.pending = append(w.pending, fragment...)
+		return
+	}
+	w.pending = append(w.pending, fragment[:remaining]...)
+	w.pending = nil
+	w.discardLine = true
+}
+
+func (w *newAPIStyleSSETerminalCaptureWriter) scanLineFragment(fragment []byte) {
+	const maxScannedStringBytes = 128
+	for _, ch := range fragment {
+		if !w.scanJSONStarted {
+			if ch == '{' {
+				w.scanJSONStarted = true
+				w.scanDepth = 1
+				w.scanWantKey = true
+			}
+			continue
+		}
+		if w.scanInString {
+			if w.scanEscaped {
+				w.scanEscaped = false
+				if w.scanStringRole != 0 && len(w.scanString) < maxScannedStringBytes {
+					w.scanString = append(w.scanString, ch)
+				}
+				continue
+			}
+			if ch == '\\' {
+				w.scanEscaped = true
+				continue
+			}
+			if ch != '"' {
+				if w.scanStringRole != 0 && len(w.scanString) < maxScannedStringBytes {
+					w.scanString = append(w.scanString, ch)
+				}
+				continue
+			}
+			w.scanInString = false
+			value := string(w.scanString)
+			switch w.scanStringRole {
+			case 1:
+				w.scanKey = value
+				w.scanWantKey = false
+			case 2:
+				if strings.EqualFold(w.scanKey, "type") {
+					w.captureScannedEventType(value)
+				}
+				w.scanWantValue = false
+			}
+			w.scanStringRole = 0
+			w.scanString = w.scanString[:0]
+			continue
+		}
+
+		switch ch {
+		case '"':
+			w.scanInString = true
+			w.scanStringRole = 0
+			w.scanString = w.scanString[:0]
+			if w.scanDepth == 1 && w.scanWantKey {
+				w.scanStringRole = 1
+			} else if w.scanDepth == 1 && w.scanWantValue {
+				w.scanStringRole = 2
+			}
+		case '{', '[':
+			if w.scanDepth == 1 && w.scanWantValue {
+				w.scanWantValue = false
+			}
+			w.scanDepth++
+		case '}', ']':
+			w.scanDepth--
+		case ':':
+			if w.scanDepth == 1 && w.scanKey != "" {
+				w.scanWantValue = true
+			}
+		case ',':
+			if w.scanDepth == 1 {
+				w.scanKey = ""
+				w.scanWantKey = true
+				w.scanWantValue = false
+			}
+		}
+	}
+}
+
+func (w *newAPIStyleSSETerminalCaptureWriter) captureScannedEventType(eventType string) {
+	terminal, successful := newAPIStyleTerminalEventType(w.route, strings.ToLower(strings.TrimSpace(eventType)))
+	if !terminal {
+		return
+	}
+	if !w.eventTerminal || !successful {
+		w.eventTerminal = true
+		w.eventSuccessful = successful
+	}
+}
+
+func (w *newAPIStyleSSETerminalCaptureWriter) finishLine() {
+	if w == nil {
+		return
+	}
+	if !w.discardLine && len(bytes.TrimSpace(w.pending)) == 0 {
+		w.finishEvent()
+	} else if !w.discardLine {
+		w.consumeLine(w.pending)
+	}
+	w.pending = nil
+	w.discardLine = false
+	w.scanJSONStarted = false
+	w.scanDepth = 0
+	w.scanInString = false
+	w.scanEscaped = false
+	w.scanStringRole = 0
+	w.scanString = w.scanString[:0]
+	w.scanKey = ""
+	w.scanWantKey = false
+	w.scanWantValue = false
+}
+
+func (w *newAPIStyleSSETerminalCaptureWriter) State() (terminal bool, successful bool) {
+	if w == nil {
+		return false, false
+	}
+	return w.terminal, w.successful
+}
+
+func (w *newAPIStyleSSETerminalCaptureWriter) consumeLine(rawLine []byte) {
+	terminal, successful := newAPIStyleTerminalStateFromLine(w.route, rawLine)
+	if !terminal {
+		return
+	}
+	if !w.eventTerminal || !successful {
+		w.eventTerminal = true
+		w.eventSuccessful = successful
+	}
+}
+
+func (w *newAPIStyleSSETerminalCaptureWriter) finishEvent() {
+	if w == nil || !w.eventTerminal {
+		return
+	}
+	if !w.terminal || !w.eventSuccessful {
+		w.terminal = true
+		w.successful = w.eventSuccessful
+	}
+	w.eventTerminal = false
+	w.eventSuccessful = false
+}
+
+func newAPIStyleTerminalStateFromLine(route NewAPIStyleRoute, rawLine []byte) (terminal bool, successful bool) {
+	line := strings.TrimSpace(string(rawLine))
+	if line == "" {
+		return false, false
+	}
+	lowerLine := strings.ToLower(line)
+	if strings.HasPrefix(lowerLine, "event:") {
+		return newAPIStyleTerminalEventType(route, strings.TrimSpace(lowerLine[len("event:"):]))
+	}
+	data := line
+	if strings.HasPrefix(lowerLine, "data:") {
+		data = strings.TrimSpace(line[len("data:"):])
+	}
+	if strings.EqualFold(data, "[DONE]") {
+		return route != NewAPIStyleRouteResponses && route != NewAPIStyleRouteMessages, true
+	}
+	if gjson.Valid(data) {
+		return newAPIStyleTerminalEventType(route, strings.ToLower(strings.TrimSpace(gjson.Get(data, "type").String())))
+	}
+	compact := strings.NewReplacer(" ", "", "\t", "").Replace(strings.ToLower(data))
+	for _, eventType := range []string{
+		"response.failed",
+		"response.incomplete",
+		"response.cancelled",
+		"response.canceled",
+		"response.completed",
+		"response.done",
+		"message_stop",
+		"error",
+	} {
+		if strings.Contains(compact, `"type":"`+eventType+`"`) {
+			return newAPIStyleTerminalEventType(route, eventType)
+		}
+	}
+	return false, false
+}
+
 func (w *tailBufferWriter) Write(p []byte) (int, error) {
 	n := len(p)
 	if w == nil || w.buffer == nil || w.limit <= 0 {
@@ -1092,6 +1458,7 @@ func (w *tailBufferWriter) Write(p []byte) (int, error) {
 type newAPIStyleSSEUsageCaptureWriter struct {
 	pending string
 	usage   ClaudeUsage
+	route   NewAPIStyleRoute
 }
 
 func (w *newAPIStyleSSEUsageCaptureWriter) Write(p []byte) (int, error) {
@@ -1101,6 +1468,9 @@ func (w *newAPIStyleSSEUsageCaptureWriter) Write(p []byte) (int, error) {
 	}
 	w.pending += string(p)
 	w.pending = strings.ReplaceAll(w.pending, "\r\n", "\n")
+	if usage := parseNewAPIStyleUsageFromEventTail(w.pending, w.route); claudeUsageHasAny(usage) {
+		w.usage = mergeNewAPIStyleUsage(w.usage, usage)
+	}
 	for {
 		idx := strings.Index(w.pending, "\n\n")
 		if idx < 0 {
@@ -1111,7 +1481,11 @@ func (w *newAPIStyleSSEUsageCaptureWriter) Write(p []byte) (int, error) {
 		}
 		event := w.pending[:idx]
 		w.pending = w.pending[idx+2:]
-		if usage := parseNewAPIStyleSSEUsageEvent(event); claudeUsageHasAny(usage) {
+		usage := parseNewAPIStyleSSEUsageEventForRoute(event, w.route)
+		if !claudeUsageHasAny(usage) {
+			usage = parseNewAPIStyleUsageFromEventTail(event, w.route)
+		}
+		if claudeUsageHasAny(usage) {
 			w.usage = mergeNewAPIStyleUsage(w.usage, usage)
 		}
 	}
@@ -1121,10 +1495,66 @@ func (w *newAPIStyleSSEUsageCaptureWriter) Usage() ClaudeUsage {
 	if w == nil {
 		return ClaudeUsage{}
 	}
-	if usage := parseNewAPIStyleSSEUsageEvent(w.pending); claudeUsageHasAny(usage) {
+	usage := parseNewAPIStyleSSEUsageEventForRoute(w.pending, w.route)
+	if !claudeUsageHasAny(usage) {
+		usage = parseNewAPIStyleUsageFromEventTail(w.pending, w.route)
+	}
+	if claudeUsageHasAny(usage) {
 		return mergeNewAPIStyleUsage(w.usage, usage)
 	}
 	return w.usage
+}
+
+func parseNewAPIStyleUsageFromEventTail(event string, route NewAPIStyleRoute) ClaudeUsage {
+	lower := strings.ToLower(event)
+	usageKey := strings.LastIndex(lower, `"usage"`)
+	if usageKey < 0 {
+		return ClaudeUsage{}
+	}
+	colon := strings.IndexByte(event[usageKey+len(`"usage"`):], ':')
+	if colon < 0 {
+		return ClaudeUsage{}
+	}
+	start := usageKey + len(`"usage"`) + colon + 1
+	for start < len(event) && (event[start] == ' ' || event[start] == '\t' || event[start] == '\r' || event[start] == '\n') {
+		start++
+	}
+	if start >= len(event) || event[start] != '{' {
+		return ClaudeUsage{}
+	}
+	depth := 0
+	inString := false
+	escaped := false
+	for i := start; i < len(event); i++ {
+		ch := event[i]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if ch == '\\' {
+				escaped = true
+				continue
+			}
+			if ch == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch ch {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				payload := `{"usage":` + event[start:i+1] + `}`
+				return parseNewAPIStyleUsageForRoute([]byte(payload), route)
+			}
+		}
+	}
+	return ClaudeUsage{}
 }
 
 func requestContainsAudioInput(body []byte, contentType string) bool {
@@ -1149,6 +1579,10 @@ func requestContainsAudioInput(body []byte, contentType string) bool {
 }
 
 func parseNewAPIStyleUsage(body []byte) ClaudeUsage {
+	return parseNewAPIStyleUsageForRoute(body, NewAPIStyleRouteResponses)
+}
+
+func parseNewAPIStyleUsageForRoute(body []byte, route NewAPIStyleRoute) ClaudeUsage {
 	usage := gjson.GetBytes(body, "usage")
 	if !usage.Exists() {
 		usage = gjson.GetBytes(body, "response.usage")
@@ -1159,31 +1593,38 @@ func parseNewAPIStyleUsage(body []byte) ClaudeUsage {
 	if !usage.Exists() {
 		return ClaudeUsage{}
 	}
-	cacheRead := int(firstPositiveInt(
-		usage.Get("cache_read_input_tokens").Int(),
-		usage.Get("cached_tokens").Int(),
-		usage.Get("prompt_tokens_details.cached_tokens").Int(),
-		usage.Get("input_tokens_details.cached_tokens").Int(),
-	))
-	input := int(usage.Get("input_tokens").Int())
-	if input == 0 {
-		input = int(usage.Get("prompt_tokens").Int())
-	}
-	if usage.Get("input_tokens").Int() == 0 && input >= cacheRead && cacheRead > 0 {
-		input -= cacheRead
-	}
+	cacheRead := firstExistingGJSONInt(
+		usage.Get("input_tokens_details.cached_tokens"),
+		usage.Get("prompt_tokens_details.cached_tokens"),
+		usage.Get("cache_read_input_tokens"),
+		usage.Get("cached_tokens"),
+	)
 	cacheCreation5m := int(usage.Get("cache_creation.ephemeral_5m_input_tokens").Int())
 	cacheCreation1h := int(usage.Get("cache_creation.ephemeral_1h_input_tokens").Int())
-	cacheCreation := int(firstPositiveInt(
-		usage.Get("cache_creation_input_tokens").Int(),
-		usage.Get("cache_creation_tokens").Int(),
-		usage.Get("input_tokens_details.cache_creation_input_tokens").Int(),
-		usage.Get("input_tokens_details.cache_creation_tokens").Int(),
-		usage.Get("prompt_tokens_details.cache_creation_input_tokens").Int(),
-		usage.Get("prompt_tokens_details.cache_creation_tokens").Int(),
-	))
+	cacheCreation := firstExistingGJSONInt(
+		usage.Get("input_tokens_details.cache_write_tokens"),
+		usage.Get("input_tokens_details.cache_creation_tokens"),
+		usage.Get("input_tokens_details.cache_creation_input_tokens"),
+		usage.Get("prompt_tokens_details.cache_write_tokens"),
+		usage.Get("prompt_tokens_details.cache_creation_tokens"),
+		usage.Get("prompt_tokens_details.cache_creation_input_tokens"),
+		usage.Get("cache_write_input_tokens"),
+		usage.Get("cache_write_tokens"),
+		usage.Get("cache_creation_input_tokens"),
+		usage.Get("cache_creation_tokens"),
+	)
 	if cacheCreation == 0 && (cacheCreation5m > 0 || cacheCreation1h > 0) {
 		cacheCreation = cacheCreation5m + cacheCreation1h
+	}
+	inputResult := usage.Get("input_tokens")
+	input := int(inputResult.Int())
+	usesOpenAITotalInput := route != NewAPIStyleRouteMessages && inputResult.Exists() && newAPIStyleCacheBreakdownExists(usage)
+	if input == 0 {
+		input = int(usage.Get("prompt_tokens").Int())
+		usesOpenAITotalInput = true
+	}
+	if usesOpenAITotalInput {
+		input = openAIUncachedInputTokens(input, cacheRead+cacheCreation)
 	}
 	return ClaudeUsage{
 		InputTokens:              input,
@@ -1200,18 +1641,48 @@ func parseNewAPIStyleUsage(body []byte) ClaudeUsage {
 	}
 }
 
+func newAPIStyleCacheBreakdownExists(usage gjson.Result) bool {
+	for _, result := range []gjson.Result{
+		usage.Get("input_tokens_details.cached_tokens"),
+		usage.Get("prompt_tokens_details.cached_tokens"),
+		usage.Get("cache_read_input_tokens"),
+		usage.Get("cached_tokens"),
+		usage.Get("input_tokens_details.cache_write_tokens"),
+		usage.Get("input_tokens_details.cache_creation_tokens"),
+		usage.Get("input_tokens_details.cache_creation_input_tokens"),
+		usage.Get("prompt_tokens_details.cache_write_tokens"),
+		usage.Get("prompt_tokens_details.cache_creation_tokens"),
+		usage.Get("prompt_tokens_details.cache_creation_input_tokens"),
+		usage.Get("cache_write_input_tokens"),
+		usage.Get("cache_write_tokens"),
+		usage.Get("cache_creation_input_tokens"),
+		usage.Get("cache_creation_tokens"),
+		usage.Get("cache_creation.ephemeral_5m_input_tokens"),
+		usage.Get("cache_creation.ephemeral_1h_input_tokens"),
+	} {
+		if result.Exists() {
+			return true
+		}
+	}
+	return false
+}
+
 func parseNewAPIStyleSSEUsage(body []byte) ClaudeUsage {
+	return parseNewAPIStyleSSEUsageForRoute(body, NewAPIStyleRouteMessages)
+}
+
+func parseNewAPIStyleSSEUsageForRoute(body []byte, route NewAPIStyleRoute) ClaudeUsage {
 	text := strings.ReplaceAll(string(body), "\r\n", "\n")
 	var out ClaudeUsage
 	for _, event := range strings.Split(text, "\n\n") {
-		if usage := parseNewAPIStyleSSEUsageEvent(event); claudeUsageHasAny(usage) {
+		if usage := parseNewAPIStyleSSEUsageEventForRoute(event, route); claudeUsageHasAny(usage) {
 			out = mergeNewAPIStyleUsage(out, usage)
 		}
 	}
 	return out
 }
 
-func parseNewAPIStyleSSEUsageEvent(event string) ClaudeUsage {
+func parseNewAPIStyleSSEUsageEventForRoute(event string, route NewAPIStyleRoute) ClaudeUsage {
 	var dataLines []string
 	for _, line := range strings.Split(event, "\n") {
 		line = strings.TrimSpace(line)
@@ -1227,7 +1698,7 @@ func parseNewAPIStyleSSEUsageEvent(event string) ClaudeUsage {
 	if len(dataLines) == 0 {
 		return ClaudeUsage{}
 	}
-	return parseNewAPIStyleUsage([]byte(strings.Join(dataLines, "\n")))
+	return parseNewAPIStyleUsageForRoute([]byte(strings.Join(dataLines, "\n")), route)
 }
 
 func mergeNewAPIStyleUsage(base, next ClaudeUsage) ClaudeUsage {

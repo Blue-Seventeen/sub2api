@@ -125,14 +125,13 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 				Kind:               "request_error",
 				Message:            safeErr,
 			})
-			c.JSON(http.StatusBadGateway, gin.H{
-				"type": "error",
-				"error": gin.H{
-					"type":    "upstream_error",
-					"message": "Upstream request failed",
-				},
-			})
-			return nil, fmt.Errorf("upstream request failed: %s", safeErr)
+			if errors.Is(err, context.Canceled) {
+				return nil, err
+			}
+			return nil, &UpstreamFailoverError{
+				StatusCode:   http.StatusBadGateway,
+				ResponseBody: []byte(`{"type":"error","error":{"type":"upstream_error","message":"Upstream request failed"}}`),
+			}
 		}
 
 		// 透传分支禁止 400 请求体降级重试（该重试会改写请求体）
@@ -216,7 +215,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 			})
 			return nil, &UpstreamFailoverError{
 				StatusCode:             resp.StatusCode,
-				ResponseBody:           respBody,
+				ResponseBody:           sanitizeClientVisibleUpstreamErrorPayload(respBody),
 				RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
 			}
 		}
@@ -250,7 +249,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 		})
 		return nil, &UpstreamFailoverError{
 			StatusCode:             resp.StatusCode,
-			ResponseBody:           respBody,
+			ResponseBody:           sanitizeClientVisibleUpstreamErrorPayload(respBody),
 			RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
 		}
 	}
@@ -483,6 +482,7 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 		keepaliveTimer.Reset(keepaliveInterval)
 	}
 	inPartialEvent := false
+	currentEventName := ""
 
 	for {
 		select {
@@ -521,6 +521,10 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 			}
 
 			line := ev.line
+			trimmedLine := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmedLine, "event:") {
+				currentEventName = strings.TrimSpace(strings.TrimPrefix(trimmedLine, "event:"))
+			}
 			if data, ok := extractAnthropicSSEDataLine(line); ok {
 				trimmed := strings.TrimSpace(data)
 				if anthropicStreamEventIsTerminal("", trimmed) {
@@ -539,7 +543,8 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 			}
 
 			if !clientDisconnected {
-				restored := string(reverseToolNamesIfPresent(c, []byte(line)))
+				clientLine := sanitizeAnthropicPassthroughSSELine(line, currentEventName)
+				restored := string(reverseToolNamesIfPresent(c, []byte(clientLine)))
 				if _, err := io.WriteString(w, restored); err != nil {
 					clientDisconnected = true
 					logger.LegacyPrintf("service.gateway", "[Anthropic passthrough] Client disconnected during streaming, continue draining upstream for usage: account=%d", account.ID)
@@ -552,6 +557,7 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 					lastDataAt = time.Now()
 					resetKeepaliveTimer()
 					inPartialEvent = false
+					currentEventName = ""
 				} else {
 					inPartialEvent = true
 				}
@@ -593,6 +599,18 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 			resetKeepaliveTimer()
 		}
 	}
+}
+
+func sanitizeAnthropicPassthroughSSELine(line, eventName string) string {
+	data, ok := extractAnthropicSSEDataLine(line)
+	if !ok || data == "" {
+		return line
+	}
+	if eventName != "error" && gjson.Get(data, "type").String() != "error" {
+		return line
+	}
+	prefixLen := len(line) - len(data)
+	return line[:prefixLen] + string(sanitizeClientVisibleUpstreamErrorPayload([]byte(data)))
 }
 
 func extractAnthropicSSEDataLine(line string) (string, bool) {
@@ -787,6 +805,9 @@ func (s *GatewayService) handleNonStreamingResponseAnthropicAPIKeyPassthrough(
 	contentType := strings.TrimSpace(resp.Header.Get("Content-Type"))
 	if contentType == "" {
 		contentType = "application/json"
+	}
+	if resp.StatusCode >= http.StatusBadRequest {
+		body = sanitizeClientVisibleUpstreamErrorPayload(body)
 	}
 	body = reverseToolNamesIfPresent(c, body)
 	c.Data(resp.StatusCode, contentType, body)

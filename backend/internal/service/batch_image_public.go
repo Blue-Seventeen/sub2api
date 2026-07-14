@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,6 +32,8 @@ const (
 	maxBatchImageReferenceImageBytes    = 10 * 1024 * 1024
 	defaultBatchImageMaxReferenceImages = 1000
 	defaultBatchImageMaxReferenceBytes  = 128 * 1024 * 1024
+	maxBatchImageSnapshotMultiplier     = 999999.9999
+	maxBatchImageSnapshotAmount         = 9999999999.0
 )
 
 type BatchImageAccountSelectionRepository interface {
@@ -75,9 +78,10 @@ type BatchImageReferenceInput struct {
 }
 
 type BatchImageOwner struct {
-	UserID   int64
-	APIKeyID int64
-	GroupID  *int64
+	UserID                int64
+	APIKeyID              int64
+	GroupID               *int64
+	UnifiedRateMultiplier *float64
 }
 
 type BatchImagePublicService struct {
@@ -91,6 +95,7 @@ type BatchImagePublicService struct {
 	BillingRepo       UsageBillingRepository
 	AuthCache         APIKeyAuthCacheInvalidator
 	Config            *config.Config
+	Now               func() time.Time
 }
 
 type BatchImagePricingSnapshot struct {
@@ -234,7 +239,7 @@ func (s *BatchImagePublicService) Submit(ctx context.Context, owner BatchImageOw
 	if err != nil {
 		return nil, err
 	}
-	pricingSnapshot, err := s.resolvePricingSnapshot(ctx, owner, normalized, provider.Name(), account)
+	pricingSnapshot, err := s.resolvePricingSnapshot(ctx, owner, normalized, provider.Name(), account, s.requestTime())
 	if err != nil {
 		return nil, err
 	}
@@ -276,7 +281,7 @@ func (s *BatchImagePublicService) Submit(ctx context.Context, owner BatchImageOw
 		HoldMultiplier:          pricingSnapshot.HoldMultiplier,
 		BillableUnitPrice:       pricingSnapshot.BillableUnitPrice,
 		HoldUnitPrice:           pricingSnapshot.HoldUnitPrice,
-		PricingSnapshotVersion:  1,
+		PricingSnapshotVersion:  3,
 		Currency:                "USD",
 		HoldID:                  &holdID,
 		IdempotencyKey:          batchImageOptionalStringPtr(idempotencyKey),
@@ -994,9 +999,10 @@ func (s *BatchImagePublicService) ensureGroupAllowsBatchImage(ctx context.Contex
 	return nil
 }
 
-func (s *BatchImagePublicService) resolvePricingSnapshot(ctx context.Context, owner BatchImageOwner, req BatchImageSubmitRequest, provider string, account *Account) (*BatchImagePricingSnapshot, error) {
+func (s *BatchImagePublicService) resolvePricingSnapshot(ctx context.Context, owner BatchImageOwner, req BatchImageSubmitRequest, provider string, account *Account, requestTime time.Time) (*BatchImagePricingSnapshot, error) {
 	unit := -1.0
 	groupMultiplier := 1.0
+	peakMultiplier := 1.0
 	discountMultiplier := defaultBatchImageDiscountMultiplier
 	holdMultiplier := defaultBatchImageHoldMultiplier
 	if owner.GroupID != nil && *owner.GroupID > 0 {
@@ -1031,6 +1037,7 @@ func (s *BatchImagePublicService) resolvePricingSnapshot(ctx context.Context, ow
 		if groupMultiplier < 0 {
 			groupMultiplier = 0
 		}
+		peakMultiplier = group.PeakMultiplierAt(requestTime)
 		discountMultiplier = group.BatchImageDiscountMultiplier
 		if discountMultiplier < 0 {
 			discountMultiplier = 0
@@ -1041,6 +1048,18 @@ func (s *BatchImagePublicService) resolvePricingSnapshot(ctx context.Context, ow
 		if configuredUnit := group.GetImagePrice(req.ImageSize); configuredUnit != nil && *configuredUnit >= 0 {
 			unit = *configuredUnit
 		}
+	}
+	unifiedMultiplier := 1.0
+	if owner.UnifiedRateMultiplier != nil {
+		unifiedMultiplier = *owner.UnifiedRateMultiplier
+		if unifiedMultiplier < 0 {
+			unifiedMultiplier = 0
+		}
+	}
+	groupMultiplier *= peakMultiplier
+	finalGroupMultiplier := groupMultiplier * unifiedMultiplier
+	if groupMultiplier > maxBatchImageSnapshotMultiplier || finalGroupMultiplier > maxBatchImageSnapshotMultiplier {
+		return nil, ErrBatchImageSettlementPricingMissing
 	}
 	if unit < 0 {
 		if s.Pricing == nil {
@@ -1069,9 +1088,40 @@ func (s *BatchImagePublicService) resolvePricingSnapshot(ctx context.Context, ow
 	if accountMultiplier < 0 {
 		accountMultiplier = 0
 	}
-	standardUnitPrice := unit * groupMultiplier * accountMultiplier
+	if accountMultiplier > maxBatchImageSnapshotMultiplier ||
+		discountMultiplier > maxBatchImageSnapshotMultiplier ||
+		holdMultiplier > maxBatchImageSnapshotMultiplier {
+		return nil, ErrBatchImageSettlementPricingMissing
+	}
+	standardUnitPrice := unit * finalGroupMultiplier * accountMultiplier
+	realStandardUnitPrice := unit * groupMultiplier * accountMultiplier
+	if unifiedMultiplier == 0 {
+		realStandardUnitPrice = 0
+	}
 	billableUnitPrice := standardUnitPrice * discountMultiplier
-	holdUnitPrice := standardUnitPrice * holdMultiplier
+	holdUnitPrice := realStandardUnitPrice * holdMultiplier
+	usageRateMultiplier := finalGroupMultiplier * discountMultiplier
+	if math.IsNaN(usageRateMultiplier) || math.IsInf(usageRateMultiplier, 0) || usageRateMultiplier > maxBatchImageSnapshotMultiplier {
+		return nil, ErrBatchImageSettlementPricingMissing
+	}
+	standardCostUpperBound := unit * float64(len(req.Items))
+	accountStatsCostUpperBound := standardCostUpperBound * discountMultiplier
+	estimatedCost := billableUnitPrice * float64(len(req.Items))
+	holdAmount := holdUnitPrice * float64(len(req.Items))
+	for _, value := range []float64{
+		unit,
+		standardUnitPrice,
+		billableUnitPrice,
+		holdUnitPrice,
+		standardCostUpperBound,
+		accountStatsCostUpperBound,
+		estimatedCost,
+		holdAmount,
+	} {
+		if math.IsNaN(value) || math.IsInf(value, 0) || value > maxBatchImageSnapshotAmount {
+			return nil, ErrBatchImageSettlementPricingMissing
+		}
+	}
 	return &BatchImagePricingSnapshot{
 		BaseUnitPrice:           unit,
 		GroupRateMultiplier:     groupMultiplier,
@@ -1080,9 +1130,16 @@ func (s *BatchImagePublicService) resolvePricingSnapshot(ctx context.Context, ow
 		HoldMultiplier:          holdMultiplier,
 		BillableUnitPrice:       billableUnitPrice,
 		HoldUnitPrice:           holdUnitPrice,
-		EstimatedCost:           billableUnitPrice * float64(len(req.Items)),
-		HoldAmount:              holdUnitPrice * float64(len(req.Items)),
+		EstimatedCost:           estimatedCost,
+		HoldAmount:              holdAmount,
 	}, nil
+}
+
+func (s *BatchImagePublicService) requestTime() time.Time {
+	if s != nil && s.Now != nil {
+		return s.Now()
+	}
+	return time.Now()
 }
 
 func (s *BatchImagePublicService) enabled() bool {

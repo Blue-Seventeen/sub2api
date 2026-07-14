@@ -1301,8 +1301,8 @@ const getUsageValue = (userId: number, key: string, metric: UsageMetric): number
   if (!platform) return 0
   const usage = stats.by_platform?.find((item) => item.platform === platform)
   return metric === 'today'
-    ? usage?.today_actual_cost ?? 0
-    : usage?.total_actual_cost ?? 0
+    ? usage?.real_today_actual_cost ?? usage?.today_actual_cost ?? 0
+    : usage?.real_total_actual_cost ?? usage?.total_actual_cost ?? 0
 }
 
 const getUsageSortValue = (userId: number, state: NonNullable<UsageSortState>) =>

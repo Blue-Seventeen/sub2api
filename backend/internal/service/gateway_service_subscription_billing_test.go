@@ -47,20 +47,24 @@ func TestBuildUsageBillingCommand_SubscriptionAppliesRateMultiplier(t *testing.T
 			wantBalance:    0,
 		},
 		{
-			name:           "balance billing keeps using ActualCost (regression)",
+			name:           "balance billing uses RealActualCost",
 			totalCost:      1.0,
 			actualCost:     2.0,
 			isSubscription: false,
 			wantSub:        0,
-			wantBalance:    2.0,
+			wantBalance:    1.2,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+			realActualCost := 0.0
+			if !tt.isSubscription {
+				realActualCost = tt.wantBalance
+			}
 			p := &postUsageBillingParams{
-				Cost:               &CostBreakdown{TotalCost: tt.totalCost, ActualCost: tt.actualCost},
+				Cost:               &CostBreakdown{TotalCost: tt.totalCost, ActualCost: tt.actualCost, RealActualCost: realActualCost},
 				User:               &User{ID: 1},
 				APIKey:             &APIKey{ID: 2, GroupID: &groupID},
 				Account:            &Account{ID: 3},

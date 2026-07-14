@@ -210,7 +210,7 @@ func TestPrepareUsageLogInsert_PersistsBillableQuantityMetadata(t *testing.T) {
 	require.Equal(t, 7, prepared.args[43])
 	require.Equal(t, 1234, prepared.args[44])
 	require.Equal(t, sql.NullString{String: unitType, Valid: true}, prepared.args[46])
-	require.Equal(t, sql.NullString{String: billingMode, Valid: true}, prepared.args[59])
+	require.Equal(t, sql.NullString{String: billingMode, Valid: true}, prepared.args[63])
 }
 
 func TestCoalesceTrimmedString(t *testing.T) {

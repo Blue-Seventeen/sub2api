@@ -101,14 +101,14 @@ func TestNewAPIStyleGatewayService_StreamCopyErrorSkipsUsageBilling(t *testing.T
 		InboundPath: "/v1/chat/completions",
 		ContentType: "application/json",
 	})
-	if err != nil {
-		t.Fatalf("Forward() error = %v", err)
+	if err == nil {
+		t.Fatal("Forward() error = nil, want partial-stream read error")
 	}
-	if result == nil {
-		t.Fatal("result is nil")
-		return
+	if result != nil {
+		t.Fatalf("result = %+v, want nil so partial output cannot be billed", result)
 	}
-	if !result.SkipUsageBilling {
-		t.Fatalf("SkipUsageBilling = %v, want true", result.SkipUsageBilling)
+	var failoverErr *UpstreamFailoverError
+	if errors.As(err, &failoverErr) {
+		t.Fatal("partial stream must not fail over to another account")
 	}
 }

@@ -4,11 +4,13 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -424,7 +426,7 @@ func TestHandleStreamingResponse_SSEErrorEvent_ReturnsTypedErrorWithRawData(t *t
 	// typed error 必须可被 errors.As 匹配，RawData 必须保留上游 dataLine 原文
 	var sseErr *sseStreamErrorEventError
 	require.True(t, errors.As(err, &sseErr), "SSE event:error 必须包成 *sseStreamErrorEventError，期望: %v", err)
-	require.Equal(t, errorJSON, sseErr.RawData)
+	require.JSONEq(t, errorJSON, sseErr.RawData)
 
 	// 字符串兼容：保留与旧实现一致的 "have error in stream"，避免破坏依赖该字符串的日志检索
 	require.Equal(t, "have error in stream", err.Error())
@@ -432,6 +434,85 @@ func TestHandleStreamingResponse_SSEErrorEvent_ReturnsTypedErrorWithRawData(t *t
 	// 在 Forward 主流程中调用方依赖 ExtractUpstreamErrorMessage 从 RawData 解析出 message
 	extracted := ExtractUpstreamErrorMessage([]byte(sseErr.RawData))
 	require.Equal(t, "Anthropic upstream is overloaded", extracted)
+}
+
+func TestHandleStreamingResponse_SSEErrorEvent_RedactsSecretsInRawData(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := newMinimalGatewayService()
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	const errorJSON = `{"type":"error","error":{"type":"authentication_error","message":"upstream rejected Authorization: Bearer leaked-bearer"},"api_key":"leaked-api-key","token":"leaked-token"}`
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{},
+		Body:       io.NopCloser(strings.NewReader("event: error\ndata: " + errorJSON + "\n\n")),
+	}
+
+	result, err := svc.handleStreamingResponse(context.Background(), resp, c, &Account{ID: 1}, time.Now(), "model", "model", false)
+	require.Error(t, err)
+	require.Nil(t, result)
+
+	var sseErr *sseStreamErrorEventError
+	require.True(t, errors.As(err, &sseErr))
+	require.True(t, json.Valid([]byte(sseErr.RawData)))
+	require.Contains(t, sseErr.RawData, "upstream rejected Authorization: ***")
+	require.Contains(t, sseErr.RawData, `"api_key":"***"`)
+	require.Contains(t, sseErr.RawData, `"token":"***"`)
+	for _, secret := range []string{"leaked-bearer", "leaked-api-key", "leaked-token"} {
+		require.NotContains(t, sseErr.RawData, secret)
+	}
+	extracted := ExtractUpstreamErrorMessage([]byte(errorJSON))
+	require.Contains(t, extracted, "upstream rejected Authorization: ***")
+	require.NotContains(t, extracted, "leaked-bearer")
+}
+
+func TestHandleStreamingResponse_SSEErrorDataType_RedactsWithoutEventName(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := newMinimalGatewayService()
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	const errorJSON = `{"type":"error","error":{"type":"api.internal.example","message":"failed via https://relay.internal.example at 10.0.0.8"},"token":"leaked-token"}`
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{},
+		Body:       io.NopCloser(strings.NewReader("data: " + errorJSON + "\n\n")),
+	}
+
+	result, err := svc.handleStreamingResponse(context.Background(), resp, c, &Account{ID: 1}, time.Now(), "model", "model", false)
+	require.Error(t, err)
+	require.Nil(t, result)
+
+	var sseErr *sseStreamErrorEventError
+	require.True(t, errors.As(err, &sseErr))
+	require.True(t, json.Valid([]byte(sseErr.RawData)))
+	require.Contains(t, sseErr.RawData, `"type":"error"`)
+	require.Contains(t, sseErr.RawData, `"token":"***"`)
+	for _, leaked := range []string{"api.internal.example", "relay.internal.example", "10.0.0.8", "leaked-token"} {
+		require.NotContains(t, sseErr.RawData, leaked)
+	}
+}
+
+func TestSanitizeClientVisibleUpstreamErrorPayload_PreservesProtocolIdentifiersOnly(t *testing.T) {
+	raw := []byte(`{"type":"response.failed","object":"response.compaction","event":"chat.completion.chunk","error":{"type":"api.internal.example"}}`)
+
+	got := sanitizeClientVisibleUpstreamErrorPayload(raw)
+	require.JSONEq(t, `{"type":"response.failed","object":"response.compaction","event":"chat.completion.chunk","error":{"type":"*.*.*.*"}}`, string(got))
+}
+
+func TestSanitizeClientVisibleUpstreamErrorPayload_RedactsHeaderAndCamelCaseSecretFields(t *testing.T) {
+	raw := []byte(`{"x-api-key":"plain-upstream-key","x-goog-api-key":"plain-google-key","accessToken":"plain-access-token","clientSecret":"plain-client-secret","error":{"code":"cyber_policy","message":"blocked"}}`)
+
+	got := string(sanitizeClientVisibleUpstreamErrorPayload(raw))
+	require.Contains(t, got, "cyber_policy")
+	for _, secret := range []string{"plain-upstream-key", "plain-google-key", "plain-access-token", "plain-client-secret"} {
+		require.NotContains(t, got, secret)
+	}
 }
 
 // 边界用例：上游只发了 event: error 而没有 data 行。RawData 为空，
@@ -492,7 +573,7 @@ func TestHandleStreamingResponse_SSEErrorEvent_AfterPartialStreamOutput(t *testi
 	require.Error(t, err)
 	var sseErr *sseStreamErrorEventError
 	require.True(t, errors.As(err, &sseErr), "已发数据后再来的 SSE event:error 必须仍包成 typed error，期望: %v", err)
-	require.Equal(t, errorJSON, sseErr.RawData)
+	require.JSONEq(t, errorJSON, sseErr.RawData)
 
 	// c.Writer 必定已被写过（message_start 已转发）— 这是 handler 838 行 streamStarted 守卫触发的条件，
 	// 修复前/后均会让 handler 直接走 handleFailoverExhausted 而非切账号；不变。
@@ -532,4 +613,28 @@ func TestHandleStreamingResponse_SSEErrorEvent_NonJSONDataLine(t *testing.T) {
 		_ = ExtractUpstreamErrorMessage([]byte(sseErr.RawData))
 	})
 	require.Equal(t, "", ExtractUpstreamErrorMessage([]byte(sseErr.RawData)))
+}
+
+func TestSanitizeClientVisibleSSEEventBlock_RedactsErrorEventOnly(t *testing.T) {
+	errorBlock := []byte("event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"POST https://upstream.example/v1 failed from 10.0.0.1 with admin_api_key=admin-secret-123456\"}}}\n\n")
+
+	got := string(sanitizeClientVisibleSSEEventBlock(errorBlock))
+	require.Contains(t, got, "event: response.failed")
+	for _, leaked := range []string{"upstream.example", "10.0.0.1", "admin-secret-123456"} {
+		require.NotContains(t, got, leaked)
+	}
+
+	normalBlock := []byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"visit example.com\"}\n\n")
+	require.Equal(t, string(normalBlock), string(sanitizeClientVisibleSSEEventBlock(normalBlock)))
+}
+
+func TestSanitizeClientVisibleOpenAIWSEvent_RedactsErrorEventOnly(t *testing.T) {
+	errorEvent := []byte(`{"type":"error","error":{"message":"connect https://ws.internal.example from 10.0.0.2 with SUB2API_ADMIN_API_KEY=admin-secret-123456"}}`)
+	got := string(sanitizeClientVisibleOpenAIWSEvent(errorEvent))
+	for _, leaked := range []string{"ws.internal.example", "10.0.0.2", "admin-secret-123456"} {
+		require.NotContains(t, got, leaked)
+	}
+
+	tokenEvent := []byte(`{"type":"response.output_text.delta","delta":"example.com is text"}`)
+	require.Equal(t, string(tokenEvent), string(sanitizeClientVisibleOpenAIWSEvent(tokenEvent)))
 }

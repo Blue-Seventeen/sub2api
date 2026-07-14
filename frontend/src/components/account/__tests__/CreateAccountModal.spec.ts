@@ -100,11 +100,20 @@ async function selectButtonByText(wrapper: ReturnType<typeof mountModal>, text: 
   await button?.trigger('click')
 }
 
+async function selectPlatform(wrapper: ReturnType<typeof mountModal>, platform: 'openai' | 'anthropic') {
+  if (platform === 'anthropic') {
+    return
+  }
+  await wrapper.get(`[data-testid="account-platform-${platform}"]`).trigger('click')
+}
+
 async function submitApiKeyAccount(platform: 'openai' | 'anthropic', enableLongContextBilling = false) {
   const wrapper = mountModal()
-  await selectButtonByText(wrapper, platform === 'openai' ? 'OpenAI' : 'admin.accounts.claudeConsole')
+  await selectPlatform(wrapper, platform)
   if (platform === 'openai') {
-    await selectButtonByText(wrapper, 'API Key')
+    await wrapper.get('[data-testid="openai-account-type-apikey"]').trigger('click')
+  } else {
+    await selectButtonByText(wrapper, 'admin.accounts.claudeConsole')
   }
   await wrapper.get('form#create-account-form input[type="text"]').setValue(`${platform} account`)
   await wrapper.get('form#create-account-form input[type="password"]').setValue('test-api-key')
@@ -117,7 +126,7 @@ async function submitApiKeyAccount(platform: 'openai' | 'anthropic', enableLongC
 
 async function openCodexImportStep(toggleClicks = 0) {
   const wrapper = mountModal()
-  await selectButtonByText(wrapper, 'OpenAI')
+  await selectPlatform(wrapper, 'openai')
   for (let click = 0; click < toggleClicks; click += 1) {
     await wrapper.get('[data-testid="openai-long-context-billing-toggle"]').trigger('click')
   }

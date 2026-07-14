@@ -11,12 +11,16 @@ const userVisibleNetworkRedaction = "*.*.*.*"
 
 var (
 	userVisibleURLRegex         = regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.-]*://)(?:[^@\s/"'?]+@)?(\[[0-9a-f:.%]+\]|[a-z0-9.-]+)(:\d{1,5})?`)
-	userVisibleAPIKeyValueRegex = regexp.MustCompile(`(?i)(\b(?:api[_-]?key|apikey|x-api-key|x-goog-api-key|key)\b"?\s*[:=]\s*"?)([^"'\s,}&\]]{6,})("?)`)
+	userVisibleAPIKeyValueRegex = regexp.MustCompile(`(?i)(\b(?:[a-z0-9_-]*(?:api[_-]?key|apikey)|x-api-key|x-goog-api-key|key)\b"?\s*[:=]\s*"?)([^"'\s,}&\]]{6,})("?)`)
+	userVisibleTokenValueRegex  = regexp.MustCompile(`(?i)(\b(?:access[_-]?token|refresh[_-]?token|id[_-]?token|session[_-]?token|token)\b"?\s*[:=]\s*"?)([^"'\s,}&\]]{6,})("?)`)
 	userVisibleSkTokenRegex     = regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{12,}\b`)
 	userVisibleBearerRegex      = regexp.MustCompile(`(?i)\b(bearer\s+)([A-Za-z0-9._~+/\-]{8,}=*)`)
+	userVisibleBasicAuthRegex   = regexp.MustCompile(`(?i)\b(basic\s+)([A-Za-z0-9+/]{8,}=*)`)
+	userVisibleSecretValueRegex = regexp.MustCompile(`(?i)(\b(?:client[_-]?secret|password|passwd|cookie|set-cookie)\b"?\s*[:=]\s*"?)([^"'\s,}&\]]{6,})("?)`)
 	userVisibleJWTRegex         = regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b`)
 	userVisibleAccountRegex     = regexp.MustCompile(`(?i)(\b(?:account[_-]?id|accountid|account[_-]?name|accountname)\b"?\s*[:=]\s*"?)([^,"\s}]+)("?)`)
 	userVisibleDomainRegex      = regexp.MustCompile(`\b(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}\b`)
+	userVisibleLocalhostRegex   = regexp.MustCompile(`(?i)\blocalhost\b`)
 	userVisibleIPv4Regex        = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
 	userVisibleBracketIPv6Regex = regexp.MustCompile(`\[[0-9A-Fa-f:.%]+\]`)
 	userVisibleBareIPv6Regex    = regexp.MustCompile(`[0-9A-Fa-f]{0,4}:[0-9A-Fa-f:.%]{2,}`)
@@ -111,15 +115,27 @@ func sanitizeUserVisibleErrorText(text string) string {
 	if text == "" {
 		return ""
 	}
+	return sanitizeUserVisibleNetworkText(sanitizeUserVisibleCredentialText(text))
+}
 
+func sanitizeUserVisibleCredentialText(text string) string {
 	out := text
 	out = replaceUserVisibleCapture(out, userVisibleAPIKeyValueRegex, 2, maskUserVisibleSecret)
+	out = replaceUserVisibleCapture(out, userVisibleTokenValueRegex, 2, maskUserVisibleSecret)
 	out = replaceUserVisibleCapture(out, userVisibleBearerRegex, 2, maskUserVisibleSecret)
+	out = replaceUserVisibleCapture(out, userVisibleBasicAuthRegex, 2, maskUserVisibleSecret)
+	out = replaceUserVisibleCapture(out, userVisibleSecretValueRegex, 2, maskUserVisibleSecret)
 	out = userVisibleJWTRegex.ReplaceAllStringFunc(out, maskUserVisibleSecret)
 	out = userVisibleSkTokenRegex.ReplaceAllStringFunc(out, maskUserVisibleSecret)
 	out = replaceUserVisibleCapture(out, userVisibleAccountRegex, 2, func(string) string { return "***" })
+	return out
+}
+
+func sanitizeUserVisibleNetworkText(text string) string {
+	out := text
 	out = userVisibleURLRegex.ReplaceAllString(out, `${1}`+userVisibleNetworkRedaction+`${3}`)
 	out = userVisibleDomainRegex.ReplaceAllString(out, userVisibleNetworkRedaction)
+	out = userVisibleLocalhostRegex.ReplaceAllString(out, userVisibleNetworkRedaction)
 	out = userVisibleIPv4Regex.ReplaceAllStringFunc(out, func(match string) string {
 		if ip := net.ParseIP(match); ip != nil && ip.To4() != nil {
 			return userVisibleNetworkRedaction
@@ -147,6 +163,10 @@ func sanitizeUserVisibleErrorText(text string) string {
 		return match
 	})
 	return out
+}
+
+func SanitizeUserVisibleErrorText(text string) string {
+	return sanitizeUserVisibleErrorText(text)
 }
 
 func replaceUserVisibleCapture(input string, re *regexp.Regexp, group int, repl func(string) string) string {

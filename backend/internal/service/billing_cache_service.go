@@ -959,7 +959,7 @@ func (s *BillingCacheService) checkBillingEligibility(ctx context.Context, user 
 	if (!isSubscriptionMode || freshSubscription) && userID <= 0 {
 		return ErrBillingUserInvalid
 	}
-	effectiveMultiplier := s.resolveEffectiveGroupRateMultiplier(ctx, userID, group)
+	effectiveMultiplier := s.resolveBillingEligibilityMultiplierAt(ctx, user, group, time.Now())
 
 	if isSubscriptionMode {
 		if err := s.checkSubscriptionEligibility(ctx, userID, group, subscription); err != nil {
@@ -974,7 +974,7 @@ func (s *BillingCacheService) checkBillingEligibility(ctx context.Context, user 
 	}
 
 	// user × platform quota 仅在 standard（余额）模式生效；订阅模式豁免
-	if !isSubscriptionMode {
+	if !isSubscriptionMode && effectiveMultiplier != 0 {
 		if err := s.checkUserPlatformQuotaEligibility(ctx, userID, platform); err != nil {
 			return err
 		}
@@ -993,6 +993,21 @@ func (s *BillingCacheService) checkBillingEligibility(ctx context.Context, user 
 	}
 
 	return nil
+}
+
+func (s *BillingCacheService) resolveBillingEligibilityMultiplierAt(ctx context.Context, user *User, group *Group, billingAt time.Time) float64 {
+	userID := int64(0)
+	if user != nil {
+		userID = user.ID
+	}
+	multiplier := s.resolveEffectiveGroupRateMultiplier(ctx, userID, group)
+	if group != nil {
+		multiplier *= group.PeakMultiplierAt(billingAt)
+	}
+	if user != nil {
+		multiplier *= user.EffectiveUnifiedRateMultiplier()
+	}
+	return multiplier
 }
 
 // checkRPM 执行并行 RPM 限流，所有适用的限制同时生效，任一超限即拒绝：

@@ -132,7 +132,7 @@ func TestVertexServiceAccountHTTPClientRecordsDependency(t *testing.T) {
 	ctx := servertiming.WithCollector(context.Background(), collector)
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
 	require.NoError(t, err)
-	response, err := client.Do(request)
+	response, err := servertiming.Do(client, request)
 	require.NoError(t, err)
 	require.NoError(t, response.Body.Close())
 	require.Contains(t, collector.HeaderValue(time.Now(), "bypass"), "dep_http;dur=")

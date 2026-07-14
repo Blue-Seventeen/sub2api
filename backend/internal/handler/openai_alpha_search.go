@@ -78,6 +78,10 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 	reqLog = reqLog.With(zap.String("model", requestedModel))
 	setOpsRequestContext(c, requestedModel, false)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeSync))
+	if !groupAllowsRequestedModel(apiKey.Group, requestedModel) {
+		h.errorResponse(c, http.StatusForbidden, "permission_error", groupModelsListDisallowedMessage(requestedModel))
+		return
+	}
 
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, requestedModel)
 	forwardBody := openAIModelMappedBody(body, channelMapping.Mapped, channelMapping.MappedModel, h.gatewayService.ReplaceModelInBody)
@@ -92,7 +96,7 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 		defer userRelease()
 	}
 
-	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
+	if err := h.billingCacheService.CheckBillingEligibilityFreshSubscription(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
 		status, code, message, retryAfter := billingErrorDetails(err)
 		if retryAfter > 0 {
 			c.Header("Retry-After", strconv.Itoa(retryAfter))
@@ -104,6 +108,7 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 	searchID := strings.TrimSpace(gjson.GetBytes(body, "id").String())
 	sessionHash := h.gatewayService.GenerateSessionHashWithFallback(c, nil, searchID)
 	failedAccountIDs := make(map[int64]struct{})
+	sameAccountRetryCount := make(map[int64]int)
 	var lastFailoverErr *service.UpstreamFailoverError
 	switchCount := 0
 	routingStart := time.Now()
@@ -179,6 +184,24 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 		if c.Writer.Size() != writerSizeBeforeForward {
 			h.handleFailoverExhausted(c, failoverErr, true)
 			return
+		}
+		if failoverErr.RetryableOnSameAccount {
+			retryLimit := account.GetPoolModeRetryCount()
+			if sameAccountRetryCount[account.ID] < retryLimit {
+				sameAccountRetryCount[account.ID]++
+				reqLog.Warn("openai_alpha_search.pool_mode_same_account_retry",
+					zap.Int64("account_id", account.ID),
+					zap.Int("upstream_status", failoverErr.StatusCode),
+					zap.Int("retry_limit", retryLimit),
+					zap.Int("retry_count", sameAccountRetryCount[account.ID]),
+				)
+				select {
+				case <-c.Request.Context().Done():
+					return
+				case <-time.After(sameAccountRetryDelay):
+				}
+				continue
+			}
 		}
 		h.gatewayService.RecordOpenAIAccountSwitch()
 		failedAccountIDs[account.ID] = struct{}{}

@@ -344,4 +344,104 @@ describe('admin UsersView', () => {
       expect.any(Object)
     )
   })
+
+  it('sorts platform usage columns by real cost when available', async () => {
+    vi.useFakeTimers()
+    localStorage.setItem('user-column-settings-version', '3')
+    localStorage.setItem(
+      'user-hidden-columns',
+      JSON.stringify([
+        'notes',
+        'groups',
+        'subscriptions',
+        'concurrency',
+        'usage_anthropic',
+        'usage_gemini',
+        'usage_antigravity',
+        'balance_platform_quota'
+      ])
+    )
+
+    listUsers.mockResolvedValue({
+      items: [
+        createAdminUser({ id: 1, email: 'actual-high@example.com' }),
+        createAdminUser({ id: 2, email: 'real-high@example.com' })
+      ],
+      total: 2,
+      page: 1,
+      page_size: 20,
+      pages: 1
+    })
+    getBatchUsersUsage.mockResolvedValue({
+      stats: {
+        1: {
+          user_id: 1,
+          today_actual_cost: 1,
+          total_actual_cost: 1,
+          by_platform: [
+            {
+              platform: 'openai',
+              today_actual_cost: 10,
+              total_actual_cost: 10,
+              real_today_actual_cost: 1,
+              real_total_actual_cost: 1
+            }
+          ]
+        },
+        2: {
+          user_id: 2,
+          today_actual_cost: 2,
+          total_actual_cost: 2,
+          by_platform: [
+            {
+              platform: 'openai',
+              today_actual_cost: 2,
+              total_actual_cost: 2,
+              real_today_actual_cost: 9,
+              real_total_actual_cost: 9
+            }
+          ]
+        }
+      }
+    })
+
+    const wrapper = mount(UsersView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: {
+            template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>'
+          },
+          DataTable: DataTableStub,
+          Pagination: true,
+          ConfirmDialog: true,
+          EmptyState: true,
+          GroupBadge: true,
+          Select: true,
+          UserAttributesConfigModal: true,
+          UserConcurrencyCell: true,
+          UserCreateModal: true,
+          UserEditModal: true,
+          UserApiKeysModal: true,
+          UserAllowedGroupsModal: true,
+          UserBalanceModal: true,
+          UserBalanceHistoryModal: true,
+          GroupReplaceModal: true,
+          Icon: true,
+          Teleport: true
+        }
+      }
+    })
+
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(50)
+    await flushPromises()
+
+    await wrapper.get('[data-test="usage-sort-trigger-usage_openai"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="usage-sort-usage_openai-total"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="row-order"]').text()).toBe('real-high@example.com,actual-high@example.com')
+  })
 })

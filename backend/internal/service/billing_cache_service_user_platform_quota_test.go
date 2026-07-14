@@ -11,6 +11,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
+	"github.com/stretchr/testify/require"
 )
 
 // fakeIncrCache 仅记录 IncrUserPlatformQuotaUsageCache 被调用的参数。
@@ -633,6 +634,40 @@ func TestCheckBillingEligibility_SubscriptionMode_BypassesPlatformQuota(t *testi
 	if fake.called {
 		t.Error("GetUserPlatformQuotaCache must NOT be called in subscription mode (C-NEW-2)")
 	}
+}
+
+func TestCheckBillingEligibility_ZeroUnifiedRateBypassesBalanceAndPlatformQuota(t *testing.T) {
+	fake := &fakeZeroQuotaCache{}
+	cfg := &config.Config{}
+	cfg.Billing.UserPlatformQuotaCacheTTLSeconds = 60
+	s := &BillingCacheService{
+		cache:                 fake,
+		cfg:                   cfg,
+		userPlatformQuotaRepo: &fakeQuotaRepo{},
+	}
+
+	err := s.CheckBillingEligibility(context.Background(), &User{
+		ID:                    42,
+		UnifiedRateEnabled:    true,
+		UnifiedRateMultiplier: 0,
+	}, nil, &Group{ID: 10, RateMultiplier: 2}, nil, "openai")
+	require.NoError(t, err)
+	require.False(t, fake.called, "zero-charge requests must not consume or be blocked by platform quota")
+}
+
+func TestResolveBillingEligibilityMultiplierAt_ZeroPeakRate(t *testing.T) {
+	s := &BillingCacheService{}
+	billingAt := time.Date(2026, time.July, 13, 9, 30, 0, 0, timezone.Location())
+	group := &Group{
+		ID:                 10,
+		RateMultiplier:     2,
+		PeakRateEnabled:    true,
+		PeakRateWindows:    []PeakRateWindow{{Start: "09:00", End: "10:00", Multiplier: 0}},
+		PeakRateMultiplier: 0,
+	}
+
+	got := s.resolveBillingEligibilityMultiplierAt(context.Background(), &User{ID: 42}, group, billingAt)
+	require.Zero(t, got, "a zero peak window must bypass balance and platform quota eligibility checks")
 }
 
 // TestCheckBillingEligibility_NonSubscriptionGroup_AppliesQuota 验证：

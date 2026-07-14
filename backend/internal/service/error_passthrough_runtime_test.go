@@ -169,6 +169,45 @@ func TestGatewayHandleErrorResponse_AppliesRuleFor422(t *testing.T) {
 	assert.Equal(t, "上游请求失败", errField["message"])
 }
 
+func TestGatewayHandleErrorResponse_PassthroughRuleRedactsSecrets(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	rule := newNonFailoverPassthroughRule(http.StatusUnprocessableEntity, "invalid schema", http.StatusTeapot, "")
+	rule.PassthroughBody = true
+	rule.CustomMessage = nil
+	ruleSvc := &ErrorPassthroughService{}
+	ruleSvc.setLocalCache([]*model.ErrorPassthroughRule{rule})
+	BindErrorPassthroughService(c, ruleSvc)
+
+	svc := &GatewayService{}
+	respBody := []byte(`{"error":{"message":"invalid schema; Authorization: Bearer leaked-bearer; api_key=leaked-api-key; token=leaked-token"}}`)
+	resp := &http.Response{
+		StatusCode: http.StatusUnprocessableEntity,
+		Body:       io.NopCloser(bytes.NewReader(respBody)),
+		Header:     http.Header{},
+	}
+	account := &Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeAPIKey}
+
+	_, err := svc.handleErrorResponse(context.Background(), resp, c, account)
+	require.Error(t, err)
+	assert.Equal(t, http.StatusTeapot, rec.Code)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
+	errField, ok := payload["error"].(map[string]any)
+	require.True(t, ok)
+	message, ok := errField["message"].(string)
+	require.True(t, ok)
+	assert.Contains(t, message, "invalid schema")
+	assert.Contains(t, message, "Authorization: ***")
+	for _, secret := range []string{"leaked-bearer", "leaked-api-key", "leaked-token"} {
+		assert.NotContains(t, message, secret)
+		assert.NotContains(t, err.Error(), secret)
+	}
+}
+
 func TestOpenAIHandleErrorResponse_AppliesRuleFor422(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()

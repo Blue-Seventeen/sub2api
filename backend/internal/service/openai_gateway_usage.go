@@ -160,9 +160,11 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	baseMultiplier := multiplier
 	unifiedMultiplier := effectiveUnifiedMultiplier(user)
 	finalBaseMultiplier := finalRateFromBaseMultiplier(baseMultiplier, user)
-	multiplier, imageMultiplier := computePeakAwareMultipliers(apiKey, finalBaseMultiplier, timezone.Now())
-	realMultiplier, realImageMultiplier := computePeakAwareMultipliers(apiKey, baseMultiplier, timezone.Now())
-	videoMultiplier := resolveVideoRateMultiplier(apiKey, finalBaseMultiplier)
+	billingAt := timezone.Now()
+	multiplier, imageMultiplier := computePeakAwareMultipliers(apiKey, finalBaseMultiplier, billingAt)
+	realMultiplier, realImageMultiplier := computePeakAwareMultipliers(apiKey, baseMultiplier, billingAt)
+	videoMultiplier := computePeakAwareVideoMultiplier(apiKey, finalBaseMultiplier, billingAt)
+	realVideoMultiplier := computePeakAwareVideoMultiplier(apiKey, baseMultiplier, billingAt)
 
 	var cost *CostBreakdown
 	var err error
@@ -224,7 +226,11 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		cost = &CostBreakdown{BillingMode: string(BillingModeToken)}
 	}
 	useImageRate := usageUsesImageMultiplier(result.ImageCount, costBillingMode(cost), result.RequestCount, result.TaskCount, result.BillableDurationSeconds, result.BillableCharacterCount)
-	applyRealActualCostFromRates(cost, useImageRate, multiplier, imageMultiplier, realMultiplier, realImageMultiplier, user)
+	if costBillingMode(cost) == string(BillingModeVideo) {
+		cost.RealActualCost = realCostFromActualRate(cost.ActualCost, videoMultiplier, realVideoMultiplier, user)
+	} else {
+		applyRealActualCostFromRates(cost, useImageRate, multiplier, imageMultiplier, realMultiplier, realImageMultiplier, user)
+	}
 
 	// Determine billing type
 	isSubscriptionBilling := subscription != nil && apiKey.Group != nil && apiKey.Group.IsSubscriptionType()

@@ -881,7 +881,7 @@ func truncateForLog(b []byte, maxBytes int) string {
 	if maxBytes <= 0 {
 		maxBytes = 2048
 	}
-	s := logredact.RedactText(string(b), "key")
+	s := sanitizeUserVisibleErrorText(logredact.RedactText(string(b), "key", "admin_api_key", "sub2api_admin_api_key"))
 	b = []byte(s)
 	if len(b) > maxBytes {
 		b = b[:maxBytes]

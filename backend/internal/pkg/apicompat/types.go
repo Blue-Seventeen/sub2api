@@ -692,6 +692,44 @@ type ChatTokenDetails struct {
 	ReasoningTokens          int `json:"reasoning_tokens,omitempty"`
 	AcceptedPredictionTokens int `json:"accepted_prediction_tokens,omitempty"`
 	RejectedPredictionTokens int `json:"rejected_prediction_tokens,omitempty"`
+	cacheCreationTokensSet   bool
+	cacheWriteTokensSet      bool
+}
+
+func (d *ChatTokenDetails) UnmarshalJSON(data []byte) error {
+	type alias ChatTokenDetails
+	var decoded alias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var presence struct {
+		CacheCreationTokens *json.RawMessage `json:"cache_creation_tokens"`
+		CacheWriteTokens    *json.RawMessage `json:"cache_write_tokens"`
+	}
+	if err := json.Unmarshal(data, &presence); err != nil {
+		return err
+	}
+	*d = ChatTokenDetails(decoded)
+	d.cacheCreationTokensSet = presence.CacheCreationTokens != nil
+	d.cacheWriteTokensSet = presence.CacheWriteTokens != nil
+	return nil
+}
+
+func (d *ChatTokenDetails) EffectiveCacheCreationTokens() int {
+	if d == nil {
+		return 0
+	}
+	if d.cacheWriteTokensSet || d.CacheWriteTokens != 0 {
+		return d.CacheWriteTokens
+	}
+	if d.cacheCreationTokensSet || d.CacheCreationTokens != 0 {
+		return d.CacheCreationTokens
+	}
+	return 0
+}
+
+func (d *ChatTokenDetails) HasCanonicalCacheWriteTokens() bool {
+	return d != nil && (d.cacheWriteTokensSet || d.CacheWriteTokens != 0)
 }
 
 // ChatCompletionsChunk is a single streaming chunk from POST /v1/chat/completions.

@@ -1016,16 +1016,17 @@ func ChatUsageToResponsesUsage(usage *ChatUsage) *ResponsesUsage {
 	}
 	if usage.PromptTokensDetails != nil && (usage.PromptTokensDetails.CachedTokens > 0 ||
 		usage.PromptTokensDetails.CacheCreationTokens > 0 || usage.PromptTokensDetails.CacheWriteTokens > 0) {
+		cacheCreationTokens := usage.PromptTokensDetails.EffectiveCacheCreationTokens()
+		legacyCacheCreationTokens := usage.PromptTokensDetails.CacheCreationTokens
+		if usage.PromptTokensDetails.HasCanonicalCacheWriteTokens() {
+			legacyCacheCreationTokens = cacheCreationTokens
+		}
 		out.InputTokensDetails = &ResponsesInputTokensDetails{
 			CachedTokens:        usage.PromptTokensDetails.CachedTokens,
-			CacheCreationTokens: usage.PromptTokensDetails.CacheCreationTokens,
+			CacheCreationTokens: legacyCacheCreationTokens,
 			CacheWriteTokens:    usage.PromptTokensDetails.CacheWriteTokens,
 		}
-		if usage.PromptTokensDetails.CacheWriteTokens > 0 {
-			out.CacheCreationInputTokens = usage.PromptTokensDetails.CacheWriteTokens
-		} else {
-			out.CacheCreationInputTokens = usage.PromptTokensDetails.CacheCreationTokens
-		}
+		out.CacheCreationInputTokens = cacheCreationTokens
 	}
 	return out
 }

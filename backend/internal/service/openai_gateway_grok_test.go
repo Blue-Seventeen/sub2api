@@ -172,7 +172,7 @@ func TestBuildGrokResponsesRequestUsesAccountBaseURLAndBearerToken(t *testing.T)
 		},
 	}
 
-	req, err := buildGrokResponsesRequest(context.Background(), nil, account, []byte(`{"model":"grok-4.3"}`), "access-token")
+	req, err := buildGrokResponsesRequest(context.Background(), nil, account, []byte(`{"model":"grok-4.3"}`), "access-token", "")
 	require.NoError(t, err)
 	require.Equal(t, http.MethodPost, req.Method)
 	require.Equal(t, "https://xai.test/v1/responses", req.URL.String())
@@ -1247,7 +1247,7 @@ func TestHandleGrokAccountUpstreamErrorTempUnschedulesReadinessStates(t *testing
 	}
 }
 
-func TestHandleGrokAccountUpstreamErrorDoesNotShortenExistingPause(t *testing.T) {
+func TestHandleGrokAccountUpstreamError429DoesNotShortenExistingPause(t *testing.T) {
 	existingUntil := time.Now().Add(15 * time.Minute)
 	account := &Account{
 		ID:                      62,
@@ -1261,8 +1261,9 @@ func TestHandleGrokAccountUpstreamErrorDoesNotShortenExistingPause(t *testing.T)
 
 	svc.handleGrokAccountUpstreamError(context.Background(), account, http.StatusTooManyRequests, http.Header{"Retry-After": []string{"45"}}, nil)
 
-	require.Equal(t, 1, repo.tempUnschedCalls)
-	require.WithinDuration(t, existingUntil, repo.lastTempUnschedUntil, time.Second)
+	require.Equal(t, 1, repo.rateLimitedCalls)
+	require.WithinDuration(t, time.Now().Add(45*time.Second), repo.lastRateLimitResetAt, time.Second)
+	require.Zero(t, repo.tempUnschedCalls)
 	value, ok := svc.openaiAccountRuntimeBlockUntil.Load(account.ID)
 	require.True(t, ok)
 	runtimeUntil, ok := value.(time.Time)

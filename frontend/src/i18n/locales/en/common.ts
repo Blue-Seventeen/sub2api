@@ -4,7 +4,7 @@ export default {
     submitting: 'Submitting...',
     justNow: 'just now',
     peakRateTooltip: 'Peak rate: {window}',
-    peakRateImageNote: '; image tokens billed as tokens are also affected, per-image billing is unaffected',
+    peakRateImageNote: '; token, per-request, image, duration, and character billing all include the peak multiplier',
     save: 'Save',
     saved: 'Saved successfully',
     deleted: 'Deleted successfully',

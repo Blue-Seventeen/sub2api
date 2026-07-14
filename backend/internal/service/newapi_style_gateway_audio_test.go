@@ -158,6 +158,30 @@ func TestNewAPIStyleZhipuNewAPIChatUsesV1Path(t *testing.T) {
 	require.Equal(t, 6, result.Usage.OutputTokens)
 }
 
+func TestNewAPIStyleZhipuOfficialChatKeepsPaaSPath(t *testing.T) {
+	upstream := &httpUpstreamRecorder{resp: newAPIStyleAudioResponse("application/json", `{"id":"chatcmpl_test","model":"glm-4.5","choices":[],"usage":{"prompt_tokens":4,"completion_tokens":6}}`)}
+	svc := &NewAPIStyleGatewayService{httpUpstream: upstream}
+	account := newAPIStyleAudioAccount(PlatformZhipu, nil)
+	account.Credentials["base_url"] = "https://open.bigmodel.cn"
+
+	result, endpoint, err := svc.Forward(context.Background(), newAPIStyleTestContext(), account, NewAPIStyleForwardOptions{
+		Route:        NewAPIStyleRouteChatCompletions,
+		Method:       http.MethodPost,
+		RequestBody:  []byte(`{"model":"glm-4.5","messages":[{"role":"user","content":"hi"}]}`),
+		InboundPath:  "/v1/chat/completions",
+		ContentType:  "application/json",
+		HeaderSource: http.Header{"Authorization": []string{"Bearer client-token"}},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, zhipuCompatibleChatPath, endpoint)
+	require.NotNil(t, upstream.lastReq)
+	require.Equal(t, zhipuCompatibleChatPath, upstream.lastReq.URL.Path)
+	require.Equal(t, "Bearer zhipu-token", upstream.lastReq.Header.Get("Authorization"))
+	require.Equal(t, 4, result.Usage.InputTokens)
+	require.Equal(t, 6, result.Usage.OutputTokens)
+}
+
 func TestZhipuOfficialCompatibleChatKeepsPaaSPath(t *testing.T) {
 	preset := zhipuCompatibleProviderPreset()
 
@@ -235,11 +259,20 @@ func TestNewAPIStyleStreamParsesAnthropicSSEUsageDetails(t *testing.T) {
 func TestNewAPIStyleUsageParsesOpenAIStyleDetailAliases(t *testing.T) {
 	usage := parseNewAPIStyleUsage([]byte(`{"usage":{"prompt_tokens":100,"completion_tokens":20,"cached_tokens":9,"cache_creation_tokens":4,"output_tokens_details":{"image_tokens":6}}}`))
 
-	require.Equal(t, 91, usage.InputTokens)
+	require.Equal(t, 87, usage.InputTokens)
 	require.Equal(t, 9, usage.CacheReadInputTokens)
 	require.Equal(t, 4, usage.CacheCreationInputTokens)
 	require.Equal(t, 20, usage.OutputTokens)
 	require.Equal(t, 6, usage.ImageOutputTokens)
+}
+
+func TestNewAPIStyleUsageExcludesResponsesCachedTokensFromInput(t *testing.T) {
+	usage := parseNewAPIStyleUsage([]byte(`{"usage":{"input_tokens":100,"output_tokens":20,"cache_creation_input_tokens":10,"input_tokens_details":{"cached_tokens":25,"cache_creation_tokens":10}}}`))
+
+	require.Equal(t, 65, usage.InputTokens)
+	require.Equal(t, 25, usage.CacheReadInputTokens)
+	require.Equal(t, 10, usage.CacheCreationInputTokens)
+	require.Equal(t, 20, usage.OutputTokens)
 }
 
 func TestNewAPIStyleUsageGuardrailsPreserveCacheBreakdownForOpenAIForwardResult(t *testing.T) {
@@ -263,12 +296,42 @@ func TestNewAPIStyleUsageGuardrailsPreserveCacheBreakdownForOpenAIForwardResult(
 
 	openAIResult := OpenAIForwardResultFromForwardResult(result)
 	require.NotNil(t, openAIResult)
-	require.Equal(t, 35, openAIResult.Usage.InputTokens)
+	require.Equal(t, 53, openAIResult.Usage.InputTokens)
 	require.Equal(t, 5, openAIResult.Usage.CacheReadInputTokens)
 	require.Equal(t, 18, openAIResult.Usage.CacheCreationInputTokens)
 	require.Equal(t, 7, openAIResult.Usage.CacheCreation5mTokens)
 	require.Equal(t, 11, openAIResult.Usage.CacheCreation1hTokens)
 	require.Equal(t, 12, openAIResult.Usage.ImageOutputTokens)
+}
+
+func TestNewAPIStyleUsageNestedExplicitZeroOverridesLegacyCacheAliases(t *testing.T) {
+	usage := parseNewAPIStyleUsage([]byte(`{"usage":{"input_tokens":100,"cached_tokens":25,"cache_creation_tokens":10,"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":0}}}`))
+
+	require.Equal(t, 100, usage.InputTokens)
+	require.Zero(t, usage.CacheReadInputTokens)
+	require.Zero(t, usage.CacheCreationInputTokens)
+}
+
+func TestNewAPIStyleUsageParsesCacheWriteAliases(t *testing.T) {
+	usage := parseNewAPIStyleUsage([]byte(`{"usage":{"input_tokens":100,"output_tokens":20,"input_tokens_details":{"cached_tokens":25,"cache_write_tokens":10}}}`))
+
+	require.Equal(t, 65, usage.InputTokens)
+	require.Equal(t, 25, usage.CacheReadInputTokens)
+	require.Equal(t, 10, usage.CacheCreationInputTokens)
+}
+
+func TestNewAPIStyleUsageTopLevelCacheWriteIsPartOfOpenAITotalInput(t *testing.T) {
+	usage := parseNewAPIStyleUsage([]byte(`{"usage":{"input_tokens":100,"output_tokens":20,"cache_write_input_tokens":10}}`))
+
+	require.Equal(t, 90, usage.InputTokens)
+	require.Equal(t, 10, usage.CacheCreationInputTokens)
+}
+
+func TestNewAPIStyleMessagesUsageKeepsAnthropicUncachedInput(t *testing.T) {
+	usage := parseNewAPIStyleUsageForRoute([]byte(`{"usage":{"input_tokens":100,"output_tokens":20,"cache_creation_input_tokens":10}}`), NewAPIStyleRouteMessages)
+
+	require.Equal(t, 100, usage.InputTokens)
+	require.Equal(t, 10, usage.CacheCreationInputTokens)
 }
 
 func TestNewAPIStyleSSEUsageCaptureWriterParsesSplitEvents(t *testing.T) {

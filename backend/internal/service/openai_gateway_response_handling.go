@@ -1066,7 +1066,22 @@ func sanitizeOpenAIResponseFailedEventForClient(payload []byte, eventType string
 	if eventType != "response.failed" || len(payload) == 0 || !gjson.ValidBytes(payload) {
 		return payload, false
 	}
-	updated := payload
+	updated := sanitizeClientVisibleUpstreamErrorPayload(payload)
+	for _, messagePath := range []string{"response.error.message", "error.message", "message"} {
+		message := gjson.GetBytes(updated, messagePath)
+		if !message.Exists() || message.Type != gjson.String {
+			continue
+		}
+		sanitizedMessage := sanitizeUserVisibleErrorText(sanitizeUpstreamErrorMessage(message.String()))
+		if sanitizedMessage == message.String() {
+			continue
+		}
+		next, err := sjson.SetBytes(updated, messagePath, sanitizedMessage)
+		if err != nil {
+			return payload, false
+		}
+		updated = next
+	}
 	if clientOutputStarted && isOpenAIContextWindowError(extractOpenAISSEErrorMessage(payload), payload) {
 		errorPath := ""
 		switch {

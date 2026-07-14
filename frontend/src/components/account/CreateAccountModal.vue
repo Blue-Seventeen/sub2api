@@ -95,6 +95,7 @@
                 v-for="option in filteredPlatformOptions"
                 :key="option.value"
                 type="button"
+                :data-testid="`account-platform-${option.value}`"
                 @click="form.platform = option.value"
                 :ref="(el) => setPlatformOptionRef(option.value, el as HTMLElement | null)"
                 :class="[
@@ -305,6 +306,7 @@
 
           <button
             type="button"
+            data-testid="openai-account-type-apikey"
             @click="accountCategory = 'apikey'"
             :class="[
               'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
@@ -4082,20 +4084,15 @@ const ensureSelectedPlatformVisible = async () => {
   if (!selected) {
     return
   }
+  if (typeof selected.scrollIntoView !== 'function') {
+    return
+  }
   selected.scrollIntoView({
     behavior: 'smooth',
     block: 'nearest',
     inline: 'nearest'
   })
 }
-
-watch(() => form.platform, () => {
-  void ensureSelectedPlatformVisible()
-})
-
-watch(filteredPlatformOptions, () => {
-  void ensureSelectedPlatformVisible()
-})
 
 // Bedrock credentials
 const bedrockAuthMode = ref<'sigv4' | 'apikey'>('sigv4')
@@ -4400,6 +4397,14 @@ const selectedCreateProxyId = computed(() =>
 )
 
 const isAutoBestProxySelected = computed(() => form.proxy_id === AUTO_PROXY_BEST_SENTINEL)
+
+watch(() => form.platform, () => {
+  void ensureSelectedPlatformVisible()
+})
+
+watch(filteredPlatformOptions, () => {
+  void ensureSelectedPlatformVisible()
+})
 
 const buildCreateProxyConfig = () => {
   return selectedCreateProxyId.value ? { proxy_id: selectedCreateProxyId.value } : {}

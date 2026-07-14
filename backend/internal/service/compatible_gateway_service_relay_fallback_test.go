@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +19,7 @@ type compatibleGatewayHTTPUpstreamRecorder struct {
 	responses []*http.Response
 	urls      []string
 	profiles  []HTTPUpstreamProfile
+	err       error
 }
 
 func (u *compatibleGatewayHTTPUpstreamRecorder) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
@@ -27,12 +29,44 @@ func (u *compatibleGatewayHTTPUpstreamRecorder) Do(req *http.Request, _ string, 
 func (u *compatibleGatewayHTTPUpstreamRecorder) DoWithTLS(req *http.Request, _ string, _ int64, _ int, _ *tlsfingerprint.Profile) (*http.Response, error) {
 	u.urls = append(u.urls, req.URL.String())
 	u.profiles = append(u.profiles, HTTPUpstreamProfileFromContext(req.Context()))
+	if u.err != nil {
+		return nil, u.err
+	}
 	if len(u.responses) == 0 {
 		return nil, nil
 	}
 	resp := u.responses[0]
 	u.responses = u.responses[1:]
 	return resp, nil
+}
+
+func TestCompatibleGatewayServiceForward_TransportErrorTriggersFailover(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	upstream := &compatibleGatewayHTTPUpstreamRecorder{err: errors.New("dial tcp 10.0.0.8:443: connection refused")}
+	svc := newCompatibleGatewayServiceForTest(upstream)
+	account := &Account{
+		ID:       42,
+		Platform: PlatformZhipu,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"api_key":  "upstream-key",
+			"base_url": "https://relay.example.com",
+		},
+	}
+
+	_, _, err := svc.Forward(context.Background(), c, account, CompatibleRouteChatCompletions, []byte(`{"model":"glm-4.6","messages":[]}`))
+	var failoverErr *UpstreamFailoverError
+	if !errors.As(err, &failoverErr) {
+		t.Fatalf("Forward() error = %T, want *UpstreamFailoverError", err)
+	}
+	if failoverErr.StatusCode != http.StatusBadGateway {
+		t.Fatalf("failover status = %d, want %d", failoverErr.StatusCode, http.StatusBadGateway)
+	}
+	if rec.Body.Len() != 0 {
+		t.Fatalf("transport failover wrote response body: %q", rec.Body.String())
+	}
 }
 
 func newCompatibleGatewayHTTPResponse(statusCode int, body string) *http.Response {
@@ -929,8 +963,8 @@ func TestCompatibleGatewayServiceForward_ParsesChatUsagePromptCompletionForZhipu
 	if result == nil {
 		t.Fatal("Forward() result is nil")
 	}
-	if result != nil && (result.Usage.InputTokens != 12 || result.Usage.OutputTokens != 4 || result.Usage.CacheReadInputTokens != 2) {
-		t.Fatalf("usage = %+v, want input=12 output=4 cached=2", result.Usage)
+	if result != nil && (result.Usage.InputTokens != 10 || result.Usage.OutputTokens != 4 || result.Usage.CacheReadInputTokens != 2) {
+		t.Fatalf("usage = %+v, want input=10 output=4 cached=2", result.Usage)
 	}
 }
 
@@ -981,8 +1015,8 @@ func TestCompatibleGatewayServiceForward_KeepsStreamingChatUsageAfterFinishChunk
 	if result == nil {
 		t.Fatal("Forward() result is nil")
 	}
-	if result != nil && (result.Usage.InputTokens != 12 || result.Usage.OutputTokens != 4 || result.Usage.CacheReadInputTokens != 2) {
-		t.Fatalf("usage = %+v, want input=12 output=4 cached=2", result.Usage)
+	if result != nil && (result.Usage.InputTokens != 10 || result.Usage.OutputTokens != 4 || result.Usage.CacheReadInputTokens != 2) {
+		t.Fatalf("usage = %+v, want input=10 output=4 cached=2", result.Usage)
 	}
 	if !strings.Contains(rec.Body.String(), `"content":"hel"`) {
 		t.Fatalf("response body = %s, want contains streamed content", rec.Body.String())

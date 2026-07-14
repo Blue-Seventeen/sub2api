@@ -60,6 +60,7 @@ func applyErrorPassthroughRule(
 	if !rule.PassthroughBody && rule.CustomMessage != nil {
 		errMsg = *rule.CustomMessage
 	}
+	errMsg = sanitizeUserVisibleErrorText(sanitizeUpstreamErrorMessage(errMsg))
 
 	// 命中 skip_monitoring 时在 context 中标记，供 ops_error_logger 跳过记录。
 	if rule.SkipMonitoring {

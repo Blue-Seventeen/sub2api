@@ -278,8 +278,6 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 		cmd.SubscriptionCost = p.Cost.ActualCost
 	} else if p.Cost.RealActualCost > 0 {
 		cmd.BalanceCost = p.Cost.RealActualCost
-	} else if p.Cost.ActualCost > 0 {
-		cmd.BalanceCost = p.Cost.ActualCost
 	}
 
 	if p.shouldDeductAPIKeyQuota() {
@@ -758,12 +756,13 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	baseMultiplier := multiplier
 	unifiedRateMultiplier := effectiveUnifiedMultiplier(user)
 	finalBaseMultiplier := finalRateFromBaseMultiplier(baseMultiplier, user)
-	realMultiplier, realImageMultiplier := computePeakAwareMultipliers(apiKey, baseMultiplier, timezone.Now())
+	billingAt := timezone.Now()
+	realMultiplier, realImageMultiplier := computePeakAwareMultipliers(apiKey, baseMultiplier, billingAt)
 	// token 倍率叠加高峰因子（token 计费含图片 token，图片按次倍率不受影响）。高峰因子按请求时刻现算，
 	// 不并入上面的 getUserGroupRateMultiplier，以免污染 user:group 倍率缓存。
 
 	// 确定计费模型
-	multiplier, imageMultiplier := computePeakAwareMultipliers(apiKey, finalBaseMultiplier, timezone.Now())
+	multiplier, imageMultiplier := computePeakAwareMultipliers(apiKey, finalBaseMultiplier, billingAt)
 	billingModel := forwardResultBillingModel(result.Model, result.UpstreamModel)
 	if input.BillingModelSource == BillingModelSourceChannelMapped && input.ChannelMappedModel != "" {
 		billingModel = input.ChannelMappedModel

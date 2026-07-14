@@ -937,9 +937,12 @@ func (s *CompatibleGatewayService) executePreparedRequest(
 			resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 			if err != nil {
 				ClearAutoSelectedProxyStickyOnTransportError(ctx, account, err)
-				return nil, false, &CompatibleUpstreamError{
-					StatusCode: http.StatusBadGateway,
-					Message:    sanitizeUpstreamErrorMessage(err.Error()),
+				if errors.Is(err, context.Canceled) {
+					return nil, false, err
+				}
+				return nil, false, &UpstreamFailoverError{
+					StatusCode:   http.StatusBadGateway,
+					ResponseBody: []byte(`{"error":{"type":"upstream_error","message":"Upstream request failed"}}`),
 				}
 			}
 
@@ -1149,10 +1152,12 @@ func (s *CompatibleGatewayService) handleMessagesResponse(resp *http.Response, c
 		c.Status(resp.StatusCode)
 		scanner := bufio.NewScanner(resp.Body)
 		scanner.Buffer(make([]byte, 0, 64*1024), defaultMaxLineSize)
+		terminal := newCompatibleStreamTerminalTracker(CompatibleRouteMessages)
 		var firstTokenMs *int
 		var eventBuf bytes.Buffer
 		for scanner.Scan() {
 			line := scanner.Text()
+			terminal.ObserveLine(line)
 			if strings.HasPrefix(line, "data: ") {
 				payload := strings.TrimPrefix(line, "data: ")
 				markCompatibleFirstToken(startTime, &firstTokenMs, payload)
@@ -1164,6 +1169,9 @@ func (s *CompatibleGatewayService) handleMessagesResponse(resp *http.Response, c
 			}
 		}
 		scanErr := scanner.Err()
+		if scanErr == nil && !terminal.Seen() {
+			scanErr = errCompatibleStreamMissingTerminal
+		}
 		logCompatibleStreamScannerError(prepared, scanErr)
 		flushCompatibleSSEBuffer(c, &eventBuf)
 		return buildCompatibleStreamForwardResult(resp, prepared, usage, startTime, firstTokenMs, scanErr)
@@ -1188,27 +1196,17 @@ func (s *CompatibleGatewayService) handleResponsesResponse(resp *http.Response, 
 		scanner := bufio.NewScanner(resp.Body)
 		scanner.Buffer(make([]byte, 0, 64*1024), defaultMaxLineSize)
 		usage := ClaudeUsage{}
+		terminal := newCompatibleStreamTerminalTracker(CompatibleRouteResponses)
 		var firstTokenMs *int
 		var eventBuf bytes.Buffer
 		for scanner.Scan() {
 			line := scanner.Text()
+			terminal.ObserveLine(line)
 			if strings.HasPrefix(line, "data: ") {
 				payload := strings.TrimPrefix(line, "data: ")
 				markCompatibleFirstToken(startTime, &firstTokenMs, payload)
 				if gjson.Get(payload, "response.usage").Exists() {
-					usage.InputTokens = firstExistingGJSONInt(
-						gjson.Get(payload, "response.usage.input_tokens"),
-						gjson.Get(payload, "response.usage.prompt_tokens"),
-					)
-					usage.OutputTokens = firstExistingGJSONInt(
-						gjson.Get(payload, "response.usage.output_tokens"),
-						gjson.Get(payload, "response.usage.completion_tokens"),
-					)
-					usage.CacheReadInputTokens = firstExistingGJSONInt(
-						gjson.Get(payload, "response.usage.input_tokens_details.cached_tokens"),
-						gjson.Get(payload, "response.usage.prompt_tokens_details.cached_tokens"),
-						gjson.Get(payload, "response.usage.cached_tokens"),
-					)
+					usage = parseNewAPIStyleUsageForRoute([]byte(payload), NewAPIStyleRouteResponses)
 				}
 			}
 			appendCompatibleSSELine(&eventBuf, line)
@@ -1217,6 +1215,9 @@ func (s *CompatibleGatewayService) handleResponsesResponse(resp *http.Response, 
 			}
 		}
 		scanErr := scanner.Err()
+		if scanErr == nil && !terminal.Seen() {
+			scanErr = errCompatibleStreamMissingTerminal
+		}
 		logCompatibleStreamScannerError(prepared, scanErr)
 		flushCompatibleSSEBuffer(c, &eventBuf)
 		return buildCompatibleStreamForwardResult(resp, prepared, usage, startTime, firstTokenMs, scanErr)
@@ -1242,10 +1243,12 @@ func (s *CompatibleGatewayService) handleChatPassthrough(resp *http.Response, c 
 		scanner := bufio.NewScanner(resp.Body)
 		scanner.Buffer(make([]byte, 0, 64*1024), defaultMaxLineSize)
 		usage := ClaudeUsage{}
+		terminal := newCompatibleStreamTerminalTracker(CompatibleRouteChatCompletions)
 		var firstTokenMs *int
 		var eventBuf bytes.Buffer
 		for scanner.Scan() {
 			line := scanner.Text()
+			terminal.ObserveLine(line)
 			if strings.HasPrefix(line, "data: ") {
 				payload := strings.TrimPrefix(line, "data: ")
 				if payload != "[DONE]" {
@@ -1263,6 +1266,9 @@ func (s *CompatibleGatewayService) handleChatPassthrough(resp *http.Response, c 
 			}
 		}
 		scanErr := scanner.Err()
+		if scanErr == nil && !terminal.Seen() {
+			scanErr = errCompatibleStreamMissingTerminal
+		}
 		logCompatibleStreamScannerError(prepared, scanErr)
 		flushCompatibleSSEBuffer(c, &eventBuf)
 		return buildCompatibleStreamForwardResult(resp, prepared, usage, startTime, firstTokenMs, scanErr)
@@ -1450,9 +1456,10 @@ func (s *CompatibleGatewayService) handleChatAsMessages(resp *http.Response, c *
 		usage := ClaudeUsage{}
 		if anthropicResp != nil {
 			usage = ClaudeUsage{
-				InputTokens:          anthropicResp.Usage.InputTokens,
-				OutputTokens:         anthropicResp.Usage.OutputTokens,
-				CacheReadInputTokens: anthropicResp.Usage.CacheReadInputTokens,
+				InputTokens:              anthropicResp.Usage.InputTokens,
+				OutputTokens:             anthropicResp.Usage.OutputTokens,
+				CacheCreationInputTokens: anthropicResp.Usage.CacheCreationInputTokens,
+				CacheReadInputTokens:     anthropicResp.Usage.CacheReadInputTokens,
 			}
 		}
 		return buildCompatibleForwardResult(resp, prepared, usage, false, startTime, nil, body)
@@ -1784,9 +1791,71 @@ func flushCompatibleSSEBuffer(c *gin.Context, buf *bytes.Buffer) {
 	if c == nil || buf == nil || buf.Len() == 0 {
 		return
 	}
-	_, _ = c.Writer.Write(buf.Bytes())
+	_, _ = c.Writer.Write(sanitizeClientVisibleSSEEventBlock(buf.Bytes()))
 	c.Writer.Flush()
 	buf.Reset()
+}
+
+var errCompatibleStreamMissingTerminal = errors.New("compatible upstream stream closed before terminal event")
+
+type compatibleStreamTerminalTracker struct {
+	route     CompatibleRequestRoute
+	eventType string
+	seen      bool
+}
+
+func newCompatibleStreamTerminalTracker(route CompatibleRequestRoute) *compatibleStreamTerminalTracker {
+	return &compatibleStreamTerminalTracker{route: route}
+}
+
+func (t *compatibleStreamTerminalTracker) ObserveLine(line string) {
+	if t == nil || t.seen {
+		return
+	}
+	if strings.HasPrefix(line, "event:") {
+		t.eventType = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+		if t.isTerminalEvent(t.eventType) {
+			t.seen = true
+		}
+		return
+	}
+	if !strings.HasPrefix(line, "data: ") {
+		return
+	}
+	payload := strings.TrimSpace(strings.TrimPrefix(line, "data: "))
+	if payload == "[DONE]" {
+		t.seen = true
+		return
+	}
+	eventType := strings.TrimSpace(gjson.Get(payload, "type").String())
+	if eventType == "" {
+		eventType = t.eventType
+	}
+	if t.isTerminalEvent(eventType) {
+		t.seen = true
+	}
+}
+
+func (t *compatibleStreamTerminalTracker) Seen() bool {
+	return t != nil && t.seen
+}
+
+func (t *compatibleStreamTerminalTracker) isTerminalEvent(eventType string) bool {
+	switch t.route {
+	case CompatibleRouteMessages:
+		return eventType == "message_stop" || eventType == "error"
+	case CompatibleRouteResponses:
+		switch eventType {
+		case "response.completed", "response.done", "response.failed", "response.incomplete", "response.cancelled", "response.canceled", "error":
+			return true
+		default:
+			return false
+		}
+	case CompatibleRouteChatCompletions:
+		return eventType == "done" || eventType == "error"
+	default:
+		return false
+	}
 }
 
 func logCompatibleStreamScannerError(prepared *compatiblePreparedRequest, err error) {
@@ -1810,7 +1879,7 @@ func logCompatibleStreamScannerError(prepared *compatiblePreparedRequest, err er
 
 func openAIUsageToClaudeUsage(usage OpenAIUsage) ClaudeUsage {
 	return ClaudeUsage{
-		InputTokens:              usage.InputTokens,
+		InputTokens:              openAIUncachedInputTokens(usage.InputTokens, usage.CacheReadInputTokens+usage.CacheCreationInputTokens),
 		OutputTokens:             usage.OutputTokens,
 		CacheCreationInputTokens: usage.CacheCreationInputTokens,
 		CacheReadInputTokens:     usage.CacheReadInputTokens,
@@ -1822,12 +1891,14 @@ func responsesUsageToClaudeUsage(usage *apicompat.ResponsesUsage) ClaudeUsage {
 		return ClaudeUsage{}
 	}
 	out := ClaudeUsage{
-		InputTokens:  usage.InputTokens,
-		OutputTokens: usage.OutputTokens,
+		InputTokens:              usage.InputTokens,
+		OutputTokens:             usage.OutputTokens,
+		CacheCreationInputTokens: usage.CacheCreationInputTokens,
 	}
 	if usage.InputTokensDetails != nil {
 		out.CacheReadInputTokens = usage.InputTokensDetails.CachedTokens
 	}
+	out.InputTokens = openAIUncachedInputTokens(out.InputTokens, out.CacheReadInputTokens+out.CacheCreationInputTokens)
 	return out
 }
 
@@ -1841,6 +1912,15 @@ func chatUsageToClaudeUsage(usage *apicompat.ChatUsage) ClaudeUsage {
 	}
 	if usage.PromptTokensDetails != nil {
 		out.CacheReadInputTokens = usage.PromptTokensDetails.CachedTokens
+		out.CacheCreationInputTokens = usage.PromptTokensDetails.EffectiveCacheCreationTokens()
 	}
+	out.InputTokens = openAIUncachedInputTokens(out.InputTokens, out.CacheReadInputTokens+out.CacheCreationInputTokens)
 	return out
+}
+
+func openAIUncachedInputTokens(total, cached int) int {
+	if total <= cached {
+		return 0
+	}
+	return total - max(cached, 0)
 }

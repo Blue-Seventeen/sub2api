@@ -48,6 +48,15 @@ func TestResolveOpenAIForwardModel(t *testing.T) {
 			expectedModel:  "gpt6",
 		},
 		{
+			name: "ordinary unknown gpt model ignores default mapped model",
+			account: &Account{
+				Credentials: map[string]any{},
+			},
+			requestedModel:              "gpt6",
+			messagesDispatchMappedModel: "gpt-5.4",
+			expectedModel:               "gpt6",
+		},
+		{
 			name: "account exact mapping overrides messages dispatch model",
 			account: &Account{
 				Credentials: map[string]any{

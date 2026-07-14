@@ -395,21 +395,24 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 
 			var upstreamErr *service.CompatibleUpstreamError
 			if errors.As(err, &upstreamErr) {
+				msg := sanitizeCompatibleUpstreamClientMessage(upstreamErr.Message)
+				if msg == "" {
+					msg = "Upstream request failed"
+				}
 				if h.base.errorPassthroughService != nil && len(upstreamErr.ResponseBody) > 0 {
 					if rule := h.base.errorPassthroughService.MatchRule(account.Platform, upstreamErr.StatusCode, upstreamErr.ResponseBody); rule != nil {
 						respCode := upstreamErr.StatusCode
 						if !rule.PassthroughCode && rule.ResponseCode != nil {
 							respCode = *rule.ResponseCode
 						}
-						msg := upstreamErr.Message
 						if !rule.PassthroughBody && rule.CustomMessage != nil {
-							msg = *rule.CustomMessage
+							msg = service.SanitizeUserVisibleErrorText(*rule.CustomMessage)
 						}
 						h.writeRouteError(c, route, respCode, "upstream_error", msg, streamStarted)
 						return
 					}
 				}
-				h.writeRouteError(c, route, upstreamErr.StatusCode, "upstream_error", upstreamErr.Message, streamStarted)
+				h.writeRouteError(c, route, upstreamErr.StatusCode, "upstream_error", msg, streamStarted)
 				return
 			}
 
@@ -427,7 +430,7 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 				return
 			}
 
-			h.writeRouteError(c, route, http.StatusBadGateway, "upstream_error", err.Error(), streamStarted)
+			h.writeRouteError(c, route, http.StatusBadGateway, "upstream_error", sanitizeCompatibleUpstreamClientMessage(err.Error()), streamStarted)
 			return
 		}
 
@@ -541,7 +544,7 @@ func (h *CompatibleGatewayHandler) writeFailoverError(c *gin.Context, route serv
 	}
 	statusCode := failoverErr.StatusCode
 	responseBody := failoverErr.ResponseBody
-	msg := service.ExtractUpstreamErrorMessage(responseBody)
+	msg := sanitizeCompatibleUpstreamClientMessage(service.ExtractUpstreamErrorMessage(responseBody))
 	if msg == "" {
 		_, _, msg = h.base.mapUpstreamError(statusCode)
 	}
@@ -552,7 +555,7 @@ func (h *CompatibleGatewayHandler) writeFailoverError(c *gin.Context, route serv
 				respCode = *rule.ResponseCode
 			}
 			if !rule.PassthroughBody && rule.CustomMessage != nil {
-				msg = *rule.CustomMessage
+				msg = service.SanitizeUserVisibleErrorText(*rule.CustomMessage)
 			}
 			h.writeRouteError(c, route, respCode, "upstream_error", msg, streamStarted)
 			return
@@ -563,6 +566,10 @@ func (h *CompatibleGatewayHandler) writeFailoverError(c *gin.Context, route serv
 		errMsg = msg
 	}
 	h.writeRouteError(c, route, status, errType, errMsg, streamStarted)
+}
+
+func sanitizeCompatibleUpstreamClientMessage(message string) string {
+	return strings.TrimSpace(service.SanitizeUserVisibleErrorText(message))
 }
 
 func (h *CompatibleGatewayHandler) writeRouteError(c *gin.Context, route service.CompatibleRequestRoute, status int, errType, message string, streamStarted bool) {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -41,6 +42,47 @@ func TestBatchImageSettlementService_SettlesAndChargesSuccessfulImagesOnly(t *te
 	require.NotContains(t, fmt.Sprintf("%+v", billing.captures[0]), batchImageTestData)
 	require.NotContains(t, fmt.Sprintf("%+v", billing.captures[0]), "gs://")
 	require.NotContains(t, fmt.Sprintf("%+v", billing.captures[0]), "prompt")
+}
+
+func TestBatchImageSettlementService_V3SnapshotSeparatesActualAndRealCost(t *testing.T) {
+	repo := newFakeBatchImageRepository()
+	job := testSettlingBatchImageJob("imgbatch_v3_snapshot")
+	job.SuccessCount = 2
+	job.FailCount = 0
+	job.ItemCount = 2
+	job.PricingSnapshotVersion = 3
+	job.BaseUnitPrice = 0.25
+	job.GroupRateMultiplier = 6
+	job.AccountRateMultiplier = 1
+	job.BatchDiscountMultiplier = 0.5
+	job.HoldMultiplier = 0.6
+	job.BillableUnitPrice = 1.125
+	job.HoldUnitPrice = 0.9
+	holdAmount := 1.8
+	job.HoldAmount = &holdAmount
+	job.EstimatedCost = 2.25
+	repo.jobs[job.BatchID] = job
+	billing := &fakeBatchImageBillingRepo{}
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	svc := &BatchImageSettlementService{
+		Repo:         repo,
+		BillingRepo:  billing,
+		UsageLogRepo: usageRepo,
+		Pricing:      &fakeBatchImagePricingResolver{unitPrice: 0.25},
+	}
+
+	result, err := svc.Settle(context.Background(), job.BatchID)
+	require.NoError(t, err)
+	require.InDelta(t, 2.25, result.ActualCost, 1e-12)
+	require.Len(t, billing.captures, 1)
+	require.InDelta(t, 1.5, billing.captures[0].ActualAmount, 1e-12)
+	require.NotNil(t, repo.jobs[job.BatchID].ActualCost)
+	require.InDelta(t, 2.25, *repo.jobs[job.BatchID].ActualCost, 1e-12)
+	require.NotNil(t, usageRepo.lastLog)
+	require.InDelta(t, 2.25, usageRepo.lastLog.ActualCost, 1e-12)
+	require.InDelta(t, 1.5, usageRepo.lastLog.RealActualCost, 1e-12)
+	require.InDelta(t, 1.5, usageRepo.lastLog.UnifiedRateMultiplier, 1e-12)
+	require.InDelta(t, 4.5, usageRepo.lastLog.RateMultiplier, 1e-12)
 }
 
 func TestBatchImageSettlementService_ZeroSuccessCanComplete(t *testing.T) {
@@ -132,6 +174,51 @@ func TestBatchImageSettlementService_ValidationErrors(t *testing.T) {
 	}
 }
 
+func TestBatchImageSettlementService_RejectsUsageAmountOverflow(t *testing.T) {
+	repo := newFakeBatchImageRepository()
+	job := testSettlingBatchImageJob("imgbatch_usage_overflow")
+	job.PricingSnapshotVersion = 2
+	job.BaseUnitPrice = maxBatchImageSnapshotAmount
+	job.BillableUnitPrice = 0
+	job.BatchDiscountMultiplier = 1
+	job.SuccessCount = 2
+	job.FailCount = 0
+	job.ItemCount = 2
+	holdAmount := 0.0
+	job.HoldAmount = &holdAmount
+	repo.jobs[job.BatchID] = job
+	billing := &fakeBatchImageBillingRepo{}
+	svc := &BatchImageSettlementService{Repo: repo, BillingRepo: billing, Pricing: &fakeBatchImagePricingResolver{unitPrice: 0.25}}
+
+	_, err := svc.Settle(context.Background(), job.BatchID)
+	require.ErrorIs(t, err, ErrBatchImageSettlementPricingMissing)
+	require.Empty(t, billing.captures)
+	require.Equal(t, "SETTLEMENT_PRICING_OUT_OF_RANGE", batchImageDerefString(repo.jobs[job.BatchID].LastErrorCode))
+}
+
+func TestBatchImageSettlementService_RejectsUsageRateMultiplierOverflow(t *testing.T) {
+	repo := newFakeBatchImageRepository()
+	job := testSettlingBatchImageJob("imgbatch_usage_rate_overflow")
+	job.PricingSnapshotVersion = 2
+	job.BaseUnitPrice = 0
+	job.BillableUnitPrice = 0
+	job.GroupRateMultiplier = 2
+	job.BatchDiscountMultiplier = 600000
+	job.SuccessCount = 2
+	job.FailCount = 0
+	job.ItemCount = 2
+	holdAmount := 0.0
+	job.HoldAmount = &holdAmount
+	repo.jobs[job.BatchID] = job
+	billing := &fakeBatchImageBillingRepo{}
+	svc := &BatchImageSettlementService{Repo: repo, BillingRepo: billing, Pricing: &fakeBatchImagePricingResolver{unitPrice: 0.25}}
+
+	_, err := svc.Settle(context.Background(), job.BatchID)
+	require.ErrorIs(t, err, ErrBatchImageSettlementPricingMissing)
+	require.Empty(t, billing.captures)
+	require.Equal(t, "SETTLEMENT_PRICING_OUT_OF_RANGE", batchImageDerefString(repo.jobs[job.BatchID].LastErrorCode))
+}
+
 func TestBatchImageSettlementService_CostExceedingHoldDoesNotCharge(t *testing.T) {
 	repo := newFakeBatchImageRepository()
 	job := testSettlingBatchImageJob("imgbatch_cost_over_hold")
@@ -179,6 +266,63 @@ func TestBatchImageSettlementService_UsesSubmittedPricingSnapshot(t *testing.T) 
 	require.Len(t, billing.captures, 1)
 	require.InDelta(t, 0.5, billing.captures[0].ActualAmount, 1e-12)
 	require.InDelta(t, 0.55, billing.captures[0].HoldAmount, 1e-12)
+}
+
+func TestBatchImageSettlementService_RecordUsageUsesDistinctCostScopes(t *testing.T) {
+	apiKeyID := int64(321)
+	accountID := int64(654)
+	job := &BatchImageJob{
+		BatchID:                 "imgbatch_usage_costs",
+		UserID:                  123,
+		APIKeyID:                &apiKeyID,
+		AccountID:               &accountID,
+		Model:                   "gemini-2.5-flash-image",
+		SuccessCount:            2,
+		PricingSnapshotVersion:  3,
+		BaseUnitPrice:           0.25,
+		GroupRateMultiplier:     6,
+		AccountRateMultiplier:   1.25,
+		BatchDiscountMultiplier: 0.5,
+	}
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	svc := &BatchImageSettlementService{UsageLogRepo: usageRepo}
+	actualCost := 2.8125
+	realActualCost := 1.875
+
+	svc.recordUsageLog(context.Background(), job, job.BillableUnitPrice, actualCost, realActualCost, "batch-request", time.Now())
+
+	require.NotNil(t, usageRepo.lastLog)
+	require.InDelta(t, 0.5, usageRepo.lastLog.TotalCost, 1e-12)
+	require.InDelta(t, 0.5, usageRepo.lastLog.ImageOutputCost, 1e-12)
+	require.InDelta(t, actualCost, usageRepo.lastLog.ActualCost, 1e-12)
+	require.InDelta(t, realActualCost, usageRepo.lastLog.RealActualCost, 1e-12)
+	require.InDelta(t, 4.5, usageRepo.lastLog.RateMultiplier, 1e-12)
+	require.InDelta(t, 1.5, usageRepo.lastLog.UnifiedRateMultiplier, 1e-12)
+	require.NotNil(t, usageRepo.lastLog.AccountStatsCost)
+	require.InDelta(t, 0.25, *usageRepo.lastLog.AccountStatsCost, 1e-12)
+}
+
+func TestBatchImageSettlementService_RecordUsageUsesResolvedPriceForLegacyJob(t *testing.T) {
+	apiKeyID := int64(321)
+	accountID := int64(654)
+	job := &BatchImageJob{
+		BatchID:               "imgbatch_usage_legacy",
+		UserID:                123,
+		APIKeyID:              &apiKeyID,
+		AccountID:             &accountID,
+		Model:                 "gemini-2.5-flash-image",
+		SuccessCount:          2,
+		AccountRateMultiplier: 1.25,
+	}
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	svc := &BatchImageSettlementService{UsageLogRepo: usageRepo}
+
+	svc.recordUsageLog(context.Background(), job, 0.25, 0.5, 0.5, "batch-request", time.Now())
+
+	require.NotNil(t, usageRepo.lastLog)
+	require.InDelta(t, 0.5, usageRepo.lastLog.TotalCost, 1e-12)
+	require.NotNil(t, usageRepo.lastLog.AccountStatsCost)
+	require.InDelta(t, 0.5, *usageRepo.lastLog.AccountStatsCost, 1e-12)
 }
 
 func TestBatchImageSettlementService_BillingFailureLeavesSettlingAndRecordsError(t *testing.T) {

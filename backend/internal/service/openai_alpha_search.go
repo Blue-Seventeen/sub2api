@@ -68,16 +68,18 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 	}
 
 	if resp.StatusCode >= http.StatusBadRequest {
-		upstreamMessage := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
+		safeRespBody := sanitizeClientVisibleUpstreamErrorPayload(respBody)
+		upstreamMessage := sanitizeUserVisibleErrorText(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
 		if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMessage, respBody) {
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
 			s.handleFailoverSideEffects(ctx, resp, account, respBody, upstreamModel)
 			return nil, &UpstreamFailoverError{
 				StatusCode:             resp.StatusCode,
-				ResponseBody:           respBody,
+				ResponseBody:           safeRespBody,
 				RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
 			}
 		}
+		respBody = safeRespBody
 	}
 
 	if !account.IsShadow() {

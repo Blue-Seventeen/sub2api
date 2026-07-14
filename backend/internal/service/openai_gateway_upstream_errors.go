@@ -296,7 +296,7 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		if contentType == "" {
 			contentType = "application/json"
 		}
-		c.Data(resp.StatusCode, contentType, body)
+		c.Data(resp.StatusCode, contentType, sanitizeClientVisibleUpstreamErrorPayload(body))
 		if cyberMsg == "" {
 			return nil, fmt.Errorf("openai cyber_policy: %d", resp.StatusCode)
 		}
@@ -483,7 +483,7 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 			UpstreamStatus: resp.StatusCode,
 		})
 		setOpsUpstreamError(c, resp.StatusCode, cyberMsg, truncateString(string(body), 2048))
-		clientMsg := cyberMsg
+		clientMsg := sanitizeUserVisibleErrorText(sanitizeUpstreamErrorMessage(cyberMsg))
 		if clientMsg == "" {
 			clientMsg = "Request blocked by upstream cyber-security policy"
 		}

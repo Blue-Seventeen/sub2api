@@ -17,16 +17,15 @@ func TestMergeAnthropicBeta(t *testing.T) {
 }
 
 func TestTruncateForLog_RedactsSensitiveFieldsBeforeLogging(t *testing.T) {
-	body := []byte(`{"error":{"message":"bad request","api_key":"sk-secret","access_token":"tok-secret"},"Authorization":"Bearer bearer-secret","Set-Cookie":"sid=cookie-secret"}`)
+	body := []byte(`{"error":{"message":"POST https://upstream.example/v1 failed from 10.0.0.1","api_key":"sk-secret","admin_api_key":"admin-secret","access_token":"tok-secret"},"Authorization":"Bearer bearer-secret","Set-Cookie":"sid=cookie-secret"}`)
 
 	got := truncateForLog(body, 2048)
 
-	require.NotContains(t, got, "sk-secret")
-	require.NotContains(t, got, "tok-secret")
-	require.NotContains(t, got, "bearer-secret")
-	require.NotContains(t, got, "cookie-secret")
+	for _, leaked := range []string{"sk-secret", "admin-secret", "tok-secret", "bearer-secret", "cookie-secret", "upstream.example", "10.0.0.1"} {
+		require.NotContains(t, got, leaked)
+	}
 	require.Contains(t, got, `"api_key":"***"`)
-	require.Contains(t, got, `"access_token":"***"`)
+	require.Contains(t, got, `"admin_api_key":"***"`)
 	require.Contains(t, got, `"Authorization":"***"`)
 	require.Contains(t, got, `"Set-Cookie":"***"`)
 }

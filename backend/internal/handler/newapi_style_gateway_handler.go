@@ -358,7 +358,8 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 				h.writeRouteError(c, route, status, errType, clientErr.Message, streamStarted)
 				return
 			}
-			h.writeRouteError(c, route, http.StatusBadGateway, "upstream_error", err.Error(), streamStarted)
+			responseStarted := streamStarted || c.Writer.Size() != writerSizeBefore
+			h.writeRouteError(c, route, http.StatusBadGateway, "upstream_error", service.SanitizeUserVisibleErrorText(err.Error()), responseStarted)
 			return
 		}
 
@@ -460,7 +461,7 @@ func (h *NewAPIStyleGatewayHandler) writeFailoverError(c *gin.Context, route ser
 	if status == 0 {
 		status = http.StatusBadGateway
 	}
-	message := service.ExtractUpstreamErrorMessage(failoverErr.ResponseBody)
+	message := service.SanitizeUserVisibleErrorText(service.ExtractUpstreamErrorMessage(failoverErr.ResponseBody))
 	if strings.TrimSpace(message) == "" {
 		message = "Upstream request failed"
 	}

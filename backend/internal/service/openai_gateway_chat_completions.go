@@ -424,7 +424,7 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 				UpstreamInTok:  usage.InputTokens,
 				UpstreamOutTok: usage.OutputTokens,
 			})
-			clientMsg := msg
+			clientMsg := sanitizeUserVisibleErrorText(sanitizeUpstreamErrorMessage(msg))
 			if clientMsg == "" {
 				clientMsg = "Request blocked by upstream cyber-security policy"
 			}
@@ -582,7 +582,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				if !clientDisconnected {
 					// 被 refusal 检测扣留的 pendingSSE 有意丢弃——cyber 拦截优先于部分内容下发。
 					writeStreamHeaders()
-					clientMsg := msg
+					clientMsg := sanitizeUserVisibleErrorText(sanitizeUpstreamErrorMessage(msg))
 					if clientMsg == "" {
 						clientMsg = "Request blocked by upstream cyber-security policy"
 					}

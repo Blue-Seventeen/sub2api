@@ -1386,7 +1386,7 @@ func TestOpenAIStreamingResponseFailedAfterOutputSanitizesVerboseResponseForClie
 
 	longInstructions := strings.Repeat("You are GPT-5.1 running in the Codex CLI. ", 20)
 	failedPayload := fmt.Sprintf(
-		`{"type":"response.failed","response":{"id":"resp_failed","object":"response","created_at":1782446336,"status":"failed","instructions":%q,"output":[{"type":"message","content":[{"type":"output_text","text":"large"}]}],"usage":{"input_tokens":123,"output_tokens":0},"error":{"code":"context_length_exceeded","message":"Your input exceeds the context window of this model. Please adjust your input and try again."}}}`,
+		`{"type":"response.failed","api_key":"sk-top-level-secret-123456","response":{"id":"resp_failed","object":"response","created_at":1782446336,"status":"failed","instructions":%q,"output":[{"type":"message","content":[{"type":"output_text","text":"large"}]}],"usage":{"input_tokens":123,"output_tokens":0},"error":{"code":"context_length_exceeded","details":"relay api.internal.example at 10.0.0.8 token=details-secret-123456","message":"Your input exceeds the context window of this model. api_key=sk-openai-stream-secret-123456 Authorization: Bearer openai-bearer-secret-123456 token=openai-token-secret-123456 Please adjust your input and try again."}}}`,
 		longInstructions,
 	)
 	resp := &http.Response{
@@ -1413,6 +1413,14 @@ func TestOpenAIStreamingResponseFailedAfterOutputSanitizesVerboseResponseForClie
 	require.Contains(t, body, "context_length_exceeded")
 	require.Contains(t, body, `"type":"invalid_request_error"`)
 	require.Contains(t, body, "Your input exceeds the context window")
+	require.Contains(t, body, "Please adjust your input and try again")
+	require.NotContains(t, body, "sk-openai-stream-secret-123456")
+	require.NotContains(t, body, "openai-bearer-secret-123456")
+	require.NotContains(t, body, "openai-token-secret-123456")
+	require.NotContains(t, body, "sk-top-level-secret-123456")
+	require.NotContains(t, body, "details-secret-123456")
+	require.NotContains(t, body, "api.internal.example")
+	require.NotContains(t, body, "10.0.0.8")
 	require.NotContains(t, body, "You are GPT-5.1 running in the Codex CLI")
 	require.NotContains(t, body, `"instructions"`)
 	require.NotContains(t, body, `"output"`)
@@ -1441,7 +1449,7 @@ func TestOpenAIStreamingContextWindowResponseFailedBeforeOutputPassesThrough(t *
 			`data: {"type":"response.created","response":{"id":"resp_1"}}`,
 			"",
 			"event: response.failed",
-			`data: {"type":"response.failed","error":{"type":"upstream_error","message":"Your input exceeds the context window of this model. Please adjust your input and try again.","code":null}}`,
+			`data: {"type":"response.failed","error":{"type":"upstream_error","message":"Your input exceeds the context window of this model. Authorization: Bearer top-level-bearer-secret-123456 Please adjust your input and try again.","code":null}}`,
 			"",
 		}, "\n"))),
 		Header: http.Header{"X-Request-Id": []string{"rid-context-window-failed"}},
@@ -1455,6 +1463,8 @@ func TestOpenAIStreamingContextWindowResponseFailedBeforeOutputPassesThrough(t *
 	require.Contains(t, rec.Body.String(), "response.failed")
 	require.Contains(t, rec.Body.String(), `"type":"upstream_error"`)
 	require.Contains(t, rec.Body.String(), "Your input exceeds the context window")
+	require.Contains(t, rec.Body.String(), "Please adjust your input and try again")
+	require.NotContains(t, rec.Body.String(), "top-level-bearer-secret-123456")
 }
 
 func TestOpenAIStreamingContextWindowResponseFailedBeforeOutputAppliesPassthroughRule(t *testing.T) {
@@ -1953,7 +1963,7 @@ func TestOpenAIStreamingPassthroughResponseFailedAfterOutputSanitizesVerboseResp
 
 	longInstructions := strings.Repeat("You are GPT-5.1 running in the Codex CLI. ", 20)
 	failedPayload := fmt.Sprintf(
-		`{"type":"response.failed","response":{"id":"resp_pass_failed","object":"response","created_at":1782446336,"status":"failed","instructions":%q,"output":[{"type":"message","content":[{"type":"output_text","text":"large"}]}],"usage":{"input_tokens":123,"output_tokens":0},"error":{"code":"context_length_exceeded","message":"Your input exceeds the context window of this model. Please adjust your input and try again."}}}`,
+		`{"type":"response.failed","response":{"id":"resp_pass_failed","object":"response","created_at":1782446336,"status":"failed","instructions":%q,"output":[{"type":"message","content":[{"type":"output_text","text":"large"}]}],"usage":{"input_tokens":123,"output_tokens":0},"error":{"code":"context_length_exceeded","message":"Your input exceeds the context window of this model. api_key=sk-grok-stream-secret-123456 Authorization: Bearer grok-bearer-secret-123456 token=grok-token-secret-123456 Please adjust your input and try again."}}}`,
 		longInstructions,
 	)
 	resp := &http.Response{
@@ -1972,7 +1982,7 @@ func TestOpenAIStreamingPassthroughResponseFailedAfterOutputSanitizesVerboseResp
 		Header: http.Header{"X-Request-Id": []string{"rid-pass-failed-after-output"}},
 	}
 
-	_, err := svc.handleStreamingResponsePassthrough(c.Request.Context(), resp, c, &Account{ID: 1, Platform: PlatformOpenAI, Name: "acc"}, time.Now(), "", "")
+	_, err := svc.handleStreamingResponsePassthrough(c.Request.Context(), resp, c, &Account{ID: 1, Platform: PlatformGrok, Name: "acc"}, time.Now(), "", "")
 	require.Error(t, err)
 
 	body := rec.Body.String()
@@ -1980,6 +1990,10 @@ func TestOpenAIStreamingPassthroughResponseFailedAfterOutputSanitizesVerboseResp
 	require.Contains(t, body, "context_length_exceeded")
 	require.Contains(t, body, `"type":"invalid_request_error"`)
 	require.Contains(t, body, "Your input exceeds the context window")
+	require.Contains(t, body, "Please adjust your input and try again")
+	require.NotContains(t, body, "sk-grok-stream-secret-123456")
+	require.NotContains(t, body, "grok-bearer-secret-123456")
+	require.NotContains(t, body, "grok-token-secret-123456")
 	require.NotContains(t, body, "You are GPT-5.1 running in the Codex CLI")
 	require.NotContains(t, body, `"instructions"`)
 	require.NotContains(t, body, `"output"`)
@@ -3157,7 +3171,7 @@ func TestHandleErrorResponseCyberPolicyPassthrough(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
-	cyberBody := `{"error":{"code":"cyber_policy","message":"flagged for cyber policy"}}`
+	cyberBody := `{"error":{"code":"cyber_policy","message":"flagged for cyber policy at https://internal.example/v1 (10.20.30.40)","authorization":"Bearer sk-upstream-secret","api_key":"upstream-secret"}}`
 	resp := &http.Response{
 		StatusCode: http.StatusBadRequest,
 		Header:     http.Header{"Content-Type": []string{"application/json"}, "X-Request-Id": []string{"rid"}},
@@ -3168,6 +3182,9 @@ func TestHandleErrorResponseCyberPolicyPassthrough(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, rec.Code, "passthrough upstream 400, not rewrapped 502")
 	require.Contains(t, rec.Body.String(), "cyber_policy", "client sees original cyber body")
 	require.NotContains(t, rec.Body.String(), "Upstream request failed", "must not 502-rewrap")
+	for _, secret := range []string{"internal.example", "10.20.30.40", "sk-upstream-secret", "upstream-secret"} {
+		require.NotContains(t, rec.Body.String(), secret)
+	}
 	mark := GetOpsCyberPolicy(c)
 	require.NotNil(t, mark)
 	require.Equal(t, http.StatusBadRequest, mark.UpstreamStatus)
@@ -3179,7 +3196,7 @@ func TestHandleCompatErrorResponseCyberPolicyEarlyReturn(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
-	cyberBody := `{"error":{"code":"cyber_policy","message":"flagged for cyber policy"}}`
+	cyberBody := `{"error":{"code":"cyber_policy","message":"flagged for cyber policy at https://internal.example with Authorization: Bearer compat-secret"}}`
 	resp := &http.Response{
 		StatusCode: http.StatusBadRequest,
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
@@ -3197,5 +3214,7 @@ func TestHandleCompatErrorResponseCyberPolicyEarlyReturn(t *testing.T) {
 	require.Equal(t, "invalid_request_error", gotType)
 	require.Contains(t, gotMsg, "flagged for cyber policy")
 	require.NotContains(t, gotMsg, "Upstream request failed")
+	require.NotContains(t, gotMsg, "internal.example")
+	require.NotContains(t, gotMsg, "compat-secret")
 	require.NotNil(t, GetOpsCyberPolicy(c))
 }

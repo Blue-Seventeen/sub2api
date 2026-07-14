@@ -379,6 +379,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		if clientDisconnected {
 			return
 		}
+		message = sanitizeClientVisibleOpenAIWSEvent(message)
 		frame := make([]byte, 0, len(message)+8)
 		frame = append(frame, "data: "...)
 		frame = append(frame, message...)
@@ -516,6 +517,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 					UpstreamOutTok: usage.OutputTokens,
 				})
 			}
+			message = sanitizeClientVisibleOpenAIWSEvent(message)
 		}
 
 		if eventType == "error" {
@@ -573,13 +575,14 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			setOpsUpstreamError(c, statusCode, errMsg, "")
 			if reqStream && !clientDisconnected {
 				flushBufferedStreamEvents("error_event")
-				emitStreamMessage(message, true)
+				emitStreamMessage(sanitizeClientVisibleOpenAIWSEvent(message), true)
 			}
 			if !reqStream {
+				safeErrMsg := sanitizeUserVisibleErrorText(errMsg)
 				c.JSON(statusCode, gin.H{
 					"error": gin.H{
 						"type":    "upstream_error",
-						"message": errMsg,
+						"message": safeErrMsg,
 					},
 				})
 			}
@@ -643,6 +646,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			finalResponse = s.replaceModelInResponseBody(finalResponse, mappedModel, originalModel)
 		}
 		finalResponse = s.correctToolCallsInResponseBody(finalResponse)
+		finalResponse = sanitizeClientVisibleOpenAIWSEvent(finalResponse)
 		populateOpenAIUsageFromResponseJSON(finalResponse, usage)
 		if responseID == "" {
 			responseID = strings.TrimSpace(gjson.GetBytes(finalResponse, "id").String())

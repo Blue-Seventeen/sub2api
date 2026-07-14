@@ -210,6 +210,27 @@ func (s *HTTPUpstreamSuite) TestNilConfigResponseHeaderTimeoutFallback() {
 	require.Equal(s.T(), 300*time.Second, transport.ResponseHeaderTimeout, "ResponseHeaderTimeout mismatch")
 }
 
+func (s *HTTPUpstreamSuite) TestRedirectCheckerReappliesURLAllowlist() {
+	s.cfg.Security.URLAllowlist = config.URLAllowlistConfig{
+		Enabled:           true,
+		AllowPrivateHosts: true,
+		UpstreamHosts:     []string{"allowed.example"},
+	}
+	svc := s.newService()
+	entry := mustGetOrCreateClient(s.T(), svc, "", 1, 1)
+	require.NotNil(s.T(), entry.client.CheckRedirect)
+
+	allowed, err := http.NewRequest(http.MethodGet, "https://allowed.example/next", nil)
+	require.NoError(s.T(), err)
+	require.NoError(s.T(), svc.redirectChecker(allowed, nil))
+
+	disallowed, err := http.NewRequest(http.MethodGet, "https://outside.example/next", nil)
+	require.NoError(s.T(), err)
+	err = svc.redirectChecker(disallowed, nil)
+	require.Error(s.T(), err)
+	require.Contains(s.T(), err.Error(), "redirect target rejected")
+}
+
 // TestCustomResponseHeaderTimeout 测试自定义响应头超时配置
 // 验证配置值能正确应用到 Transport
 func (s *HTTPUpstreamSuite) TestCustomResponseHeaderTimeout() {

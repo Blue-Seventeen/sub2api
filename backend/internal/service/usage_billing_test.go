@@ -127,6 +127,43 @@ func TestBuildUsageBillingCommandFingerprintsQuantitiesOnlyForQuantityModes(t *t
 	}
 }
 
+func TestBuildUsageBillingCommand_BalanceUsesRealActualCostOnly(t *testing.T) {
+	params := &postUsageBillingParams{
+		Cost:          &CostBreakdown{ActualCost: 0.25, RealActualCost: 0},
+		APIKey:        &APIKey{ID: 3, Quota: 10},
+		User:          &User{ID: 1},
+		Account:       &Account{ID: 2, Type: AccountTypeAPIKey},
+		APIKeyService: usageBillingAPIKeyQuotaStub{},
+	}
+
+	cmd := buildUsageBillingCommand("req-zero-real", &UsageLog{
+		Model:       "image-model",
+		BillingType: BillingTypeBalance,
+	}, params)
+	if cmd.BalanceCost != 0 {
+		t.Fatalf("BalanceCost = %v, want 0 when RealActualCost is an explicit zero", cmd.BalanceCost)
+	}
+	if cmd.APIKeyQuotaCost != 0.25 {
+		t.Fatalf("APIKeyQuotaCost = %v, want ActualCost to remain the quota cost", cmd.APIKeyQuotaCost)
+	}
+
+	params.Cost.RealActualCost = 0.12
+	cmd = buildUsageBillingCommand("req-real", nil, params)
+	if cmd.BalanceCost != 0.12 {
+		t.Fatalf("BalanceCost = %v, want RealActualCost", cmd.BalanceCost)
+	}
+}
+
+type usageBillingAPIKeyQuotaStub struct{}
+
+func (usageBillingAPIKeyQuotaStub) UpdateQuotaUsed(context.Context, int64, float64) error {
+	return nil
+}
+
+func (usageBillingAPIKeyQuotaStub) UpdateRateLimitUsage(context.Context, int64, float64) error {
+	return nil
+}
+
 func TestPostUsageBilling_FlusherModeFallsBackToDBWhenQuotaCacheNotSynced(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Database.UserPlatformQuotaFlusherEnabled = true

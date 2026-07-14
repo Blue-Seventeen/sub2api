@@ -200,12 +200,12 @@ func vertexServiceAccountProxyURL(account *Account) string {
 func newVertexServiceAccountHTTPClient(proxyURL string) (*http.Client, error) {
 	proxyURL = strings.TrimSpace(proxyURL)
 	if proxyURL == "" {
-		return servertiming.InstrumentClient(&http.Client{Timeout: 15 * time.Second}), nil
+		return &http.Client{Timeout: 15 * time.Second}, nil
 	}
 
 	_, parsedProxy, err := proxyurl.Parse(proxyURL)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("invalid service account proxy url: %w", err)
 	}
 	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
 	if !ok {
@@ -214,9 +214,9 @@ func newVertexServiceAccountHTTPClient(proxyURL string) (*http.Client, error) {
 	transport := defaultTransport.Clone()
 	transport.Proxy = nil
 	if err := proxyutil.ConfigureTransportProxy(transport, parsedProxy); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("invalid service account proxy url: %w", err)
 	}
-	return servertiming.InstrumentClient(&http.Client{Timeout: 15 * time.Second, Transport: transport}), nil
+	return &http.Client{Timeout: 15 * time.Second, Transport: transport}, nil
 }
 
 func exchangeVertexServiceAccountToken(ctx context.Context, key *vertexServiceAccountKey, proxyURL string) (string, time.Duration, error) {
@@ -255,7 +255,7 @@ func exchangeVertexServiceAccountToken(ctx context.Context, key *vertexServiceAc
 	if err != nil {
 		return "", 0, err
 	}
-	resp, err := client.Do(req)
+	resp, err := servertiming.Do(client, req)
 	if err != nil {
 		return "", 0, fmt.Errorf("service account token request failed: %w", err)
 	}
@@ -285,28 +285,6 @@ func exchangeVertexServiceAccountToken(ctx context.Context, key *vertexServiceAc
 		ttl -= vertexServiceAccountCacheSkew
 	}
 	return parsed.AccessToken, ttl, nil
-}
-
-func newVertexServiceAccountHTTPClient(proxyURL string) (*http.Client, error) {
-	proxyURL = strings.TrimSpace(proxyURL)
-	if proxyURL == "" {
-		return &http.Client{Timeout: 15 * time.Second}, nil
-	}
-
-	_, parsedProxy, err := proxyurl.Parse(proxyURL)
-	if err != nil {
-		return nil, fmt.Errorf("invalid service account proxy url: %w", err)
-	}
-	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
-	if !ok {
-		return nil, fmt.Errorf("unexpected default transport type %T", http.DefaultTransport)
-	}
-	transport := defaultTransport.Clone()
-	transport.Proxy = nil
-	if err := proxyutil.ConfigureTransportProxy(transport, parsedProxy); err != nil {
-		return nil, fmt.Errorf("invalid service account proxy url: %w", err)
-	}
-	return &http.Client{Timeout: 15 * time.Second, Transport: transport}, nil
 }
 
 func buildVertexGeminiURL(projectID, location, model, action string, stream bool) (string, error) {

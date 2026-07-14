@@ -389,7 +389,7 @@ func (s *httpUpstreamService) getClientEntryWithTLS(proxyURL string, accountID i
 	}
 
 	client := &http.Client{Transport: transport}
-	if s.shouldValidateResolvedIP() {
+	if s.shouldValidateRedirectURL() {
 		client.CheckRedirect = s.redirectChecker
 	}
 
@@ -421,6 +421,10 @@ func (s *httpUpstreamService) shouldValidateResolvedIP() bool {
 	return !s.cfg.Security.URLAllowlist.AllowPrivateHosts
 }
 
+func (s *httpUpstreamService) shouldValidateRedirectURL() bool {
+	return s.cfg != nil && s.cfg.Security.URLAllowlist.Enabled
+}
+
 func (s *httpUpstreamService) validateRequestHost(req *http.Request) error {
 	if !s.shouldValidateResolvedIP() {
 		return nil
@@ -441,6 +445,19 @@ func (s *httpUpstreamService) validateRequestHost(req *http.Request) error {
 func (s *httpUpstreamService) redirectChecker(req *http.Request, via []*http.Request) error {
 	if len(via) >= 10 {
 		return errors.New("stopped after 10 redirects")
+	}
+	if !s.shouldValidateRedirectURL() {
+		return nil
+	}
+	if req == nil || req.URL == nil {
+		return errors.New("redirect url is nil")
+	}
+	if _, err := urlvalidator.ValidateHTTPSURL(req.URL.String(), urlvalidator.ValidationOptions{
+		AllowedHosts:     s.cfg.Security.URLAllowlist.UpstreamHosts,
+		RequireAllowlist: true,
+		AllowPrivate:     s.cfg.Security.URLAllowlist.AllowPrivateHosts,
+	}); err != nil {
+		return fmt.Errorf("redirect target rejected: %w", err)
 	}
 	return s.validateRequestHost(req)
 }
@@ -556,7 +573,7 @@ func (s *httpUpstreamService) getClientEntry(proxyURL string, accountID int64, a
 		return nil, fmt.Errorf("build transport: %w", err)
 	}
 	client := &http.Client{Transport: transport}
-	if s.shouldValidateResolvedIP() {
+	if s.shouldValidateRedirectURL() {
 		client.CheckRedirect = s.redirectChecker
 	}
 	entry := &upstreamClientEntry{

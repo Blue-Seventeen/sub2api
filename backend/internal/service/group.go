@@ -474,3 +474,7 @@ func computePeakAwareMultipliers(apiKey *APIKey, base float64, now time.Time) (t
 	image = resolveImageRateMultiplier(apiKey, base) * peak
 	return
 }
+
+func computePeakAwareVideoMultiplier(apiKey *APIKey, base float64, now time.Time) float64 {
+	return resolveVideoRateMultiplier(apiKey, base) * peakMultiplierForAPIKey(apiKey, now)
+}
