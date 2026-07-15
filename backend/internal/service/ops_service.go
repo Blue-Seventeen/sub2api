@@ -240,7 +240,7 @@ func (s *OpsService) prepareErrorLogInput(ctx context.Context, entry *OpsInsertE
 	}
 
 	// Sanitize upstream error context if provided by gateway services.
-	if entry.UpstreamStatusCode != nil && *entry.UpstreamStatusCode <= 0 {
+	if entry.UpstreamStatusCode != nil && *entry.UpstreamStatusCode <= 0 && entry.ErrorPhase != string(GatewayFailureStageAccountAuth) {
 		entry.UpstreamStatusCode = nil
 	}
 	if entry.UpstreamErrorMessage != nil {

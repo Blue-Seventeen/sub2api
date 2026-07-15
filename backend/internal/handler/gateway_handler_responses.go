@@ -163,6 +163,9 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 	var lastFailedDurationMs int64
 
 	for {
+		if requestCtx.Err() != nil {
+			return
+		}
 		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(requestCtx, apiKey.GroupID, sessionHash, reqModel, fs.FailedAccountIDs, "", int64(0))
 		if err != nil {
 			if len(fs.FailedAccountIDs) == 0 {
@@ -182,6 +185,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 			case FailoverContinue:
 				continue
 			case FailoverCanceled:
+				failoverClientGone(c)
 				return
 			default:
 				if fs.LastFailoverErr != nil {
@@ -278,6 +282,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 					h.handleResponsesFailoverExhausted(c, fs.LastFailoverErr, streamStarted)
 					return
 				case FailoverCanceled:
+					failoverClientGone(c)
 					return
 				}
 			}
@@ -351,6 +356,14 @@ func (h *GatewayHandler) responsesErrorResponse(c *gin.Context, status int, code
 func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastErr *service.UpstreamFailoverError, streamStarted bool) {
 	if streamStarted {
 		return // Can't write error after stream started
+	}
+	if lastErr != nil {
+		copyFailoverRetryAfter(c, lastErr.ResponseHeaders)
+	}
+	if lastErr != nil && lastErr.IsCredentialFailure() {
+		status, message := credentialFailoverClientResponse(lastErr)
+		h.responsesErrorResponse(c, status, "server_error", message)
+		return
 	}
 	statusCode := http.StatusBadGateway
 	if lastErr != nil && lastErr.StatusCode > 0 {

@@ -14,7 +14,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -258,12 +257,13 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	}
 	grokCacheIdentity := ""
 	if account.Platform == PlatformGrok {
-		grokCacheIdentity = resolveGrokCacheIdentity(c, responsesBody, promptCacheKey, upstreamModel)
-		patchedBody, patchErr := patchGrokResponsesBody(responsesBody, upstreamModel)
+		grokIntentBody := responsesBody
+		grokCacheIdentity = resolveGrokCacheIdentity(c, grokIntentBody, promptCacheKey, upstreamModel)
+		patchedBody, patchErr := patchGrokResponsesBody(grokIntentBody, upstreamModel)
 		if patchErr != nil {
 			return nil, patchErr
 		}
-		responsesBody, patchErr = applyGrokResponsesCacheIdentity(patchedBody, responsesBody, grokCacheIdentity, account.IsGrokOAuth())
+		responsesBody, patchErr = applyGrokResponsesCacheIdentity(patchedBody, grokIntentBody, grokCacheIdentity, account.IsGrokOAuth())
 		if patchErr != nil {
 			return nil, fmt.Errorf("apply grok prompt cache identity: %w", patchErr)
 		}
@@ -289,7 +289,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	)
 
 	// 5. Get access token
-	token, _, err := s.GetAccessToken(ctx, account)
+	token, _, err := s.getRequestCredential(ctx, c, account)
 	if err != nil {
 		return nil, fmt.Errorf("get access token: %w", err)
 	}
@@ -922,7 +922,9 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			responseID = strings.TrimSpace(event.Response.ID)
 		}
 
-		isTerminalEvent := isOpenAICompatResponsesTerminalEvent(event.Type)
+		eventType := strings.TrimSpace(event.Type)
+		isBareErrorEvent := eventType == "error"
+		isTerminalEvent := isOpenAICompatResponsesTerminalEvent(eventType) || isBareErrorEvent
 		if isTerminalEvent {
 			if event.Response != nil {
 				if id := strings.TrimSpace(event.Response.ID); id != "" {
@@ -937,7 +939,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			}
 			// cyber_policy 致命不可重试：标记供 handler 事后记录；以 Anthropic SSE error 事件
 			// 回写让客户端感知并停止重试（F4），丢弃后续转换输出。
-			if strings.TrimSpace(event.Type) == "response.failed" {
+			if eventType == "response.failed" || isBareErrorEvent {
 				payloadBytes := []byte(payload)
 				if hit, code, msg := detectOpenAICyberPolicy(payloadBytes); hit {
 					MarkOpsCyberPolicy(c, CyberPolicyMark{
@@ -962,7 +964,10 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 					return true
 				}
 				message := extractOpenAISSEErrorMessage(payloadBytes)
-				if openAIStreamFailedEventShouldFailover(payloadBytes, message) {
+				// Once Anthropic output has started, switching accounts would splice
+				// two model streams together. Surface a proper Anthropic error event
+				// instead of returning a failover error that the handler cannot retry.
+				if !clientOutputStarted && openAIStreamFailedEventShouldFailover(payloadBytes, message) {
 					streamFailoverErr = s.newOpenAIStreamFailoverError(c, account, false, requestID, payloadBytes, message)
 					return true
 				}
