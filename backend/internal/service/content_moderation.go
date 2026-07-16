@@ -1251,7 +1251,11 @@ func (s *ContentModerationService) worker(id int) {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), maxContentModerationTimeoutMS*time.Millisecond+10*time.Second)
 		runtimeSnapshot, err := s.loadRuntimeSnapshot(ctx)
-		if err != nil || runtimeSnapshot == nil || runtimeSnapshot.config == nil || id >= runtimeSnapshot.config.WorkerCount {
+		var cfg *ContentModerationConfig
+		if runtimeSnapshot != nil {
+			cfg = runtimeSnapshot.config
+		}
+		if err != nil || cfg == nil || id >= cfg.WorkerCount {
 			cancel()
 			if err != nil || cfg == nil || !cfg.Enabled || cfg.Mode == ContentModerationModeOff || len(cfg.apiKeys()) == 0 {
 				time.Sleep(featureSwitchCacheTTL)
@@ -1260,7 +1264,6 @@ func (s *ContentModerationService) worker(id int) {
 			}
 			continue
 		}
-		cfg := runtimeSnapshot.config
 		task, ok := s.dequeueAsyncTask(ctx, time.Second)
 		if !ok {
 			cancel()

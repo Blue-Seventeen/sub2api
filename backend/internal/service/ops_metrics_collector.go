@@ -37,6 +37,10 @@ const (
 	bytesPerMB = 1024 * 1024
 )
 
+type opsSchedulableAccountLoadRepository interface {
+	ListSchedulableAccountLoads(ctx context.Context) ([]AccountWithConcurrency, error)
+}
+
 type OpsMetricsCollector struct {
 	opsRepo     OpsRepository
 	settingRepo SettingRepository

@@ -792,3 +792,46 @@ func TestGatewayServiceRecordUsage_MoonshotCompatibleFallbackEstimatesInputToken
 	require.Equal(t, 200, usageRepo.lastLog.OutputTokens)
 	require.True(t, usageRepo.lastLog.UsageEstimated)
 }
+
+func TestGatewayServiceRecordUsage_CompatibleFallbackDoesNotRequireNewAPIStyle(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	svc := newGatewayRecordUsageServiceForTest(usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{})
+
+	body := []byte(`{"model":"glm-5.1","messages":[{"role":"user","content":"hello"}]}`)
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformOpenAI)
+	require.NoError(t, err)
+	compatibleInputTokens := EstimateCompatibleInputTokensForPlatform(PlatformZhipu, parsed)
+
+	err = svc.RecordUsage(context.Background(), &RecordUsageInput{
+		Result: &ForwardResult{
+			RequestID: "zhipu_usage_fallback",
+			Usage: ClaudeUsage{
+				InputTokens:  0,
+				OutputTokens: 12,
+			},
+			Model:    "glm-5.1",
+			Duration: time.Second,
+		},
+		CompatibleInputTokens: compatibleInputTokens,
+		APIKey: &APIKey{
+			ID:      904,
+			Quota:   100,
+			GroupID: i64p(12),
+			Group: &Group{
+				ID:             12,
+				Platform:       PlatformZhipu,
+				Status:         StatusActive,
+				Hydrated:       true,
+				RateMultiplier: 1.0,
+			},
+		},
+		User:    &User{ID: 905},
+		Account: &Account{ID: 906, Platform: PlatformZhipu},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.Equal(t, compatibleInputTokens, usageRepo.lastLog.InputTokens)
+	require.Equal(t, 12, usageRepo.lastLog.OutputTokens)
+	require.True(t, usageRepo.lastLog.UsageEstimated)
+}

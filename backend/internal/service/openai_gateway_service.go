@@ -450,8 +450,12 @@ func NewOpenAIGatewayService(
 	balanceNotifyService *BalanceNotifyService,
 	settingService *SettingService,
 	proxyStatsRepo ProxyStatsRepository,
-	userPlatformQuotaRepo UserPlatformQuotaRepository,
+	userPlatformQuotaRepo ...UserPlatformQuotaRepository,
 ) *OpenAIGatewayService {
+	var quotaRepo UserPlatformQuotaRepository
+	if len(userPlatformQuotaRepo) > 0 {
+		quotaRepo = userPlatformQuotaRepo[0]
+	}
 	svc := &OpenAIGatewayService{
 		accountRepo:         accountRepo,
 		usageLogRepo:        usageLogRepo,
@@ -484,7 +488,7 @@ func NewOpenAIGatewayService(
 		balanceNotifyService:  balanceNotifyService,
 		settingService:        settingService,
 		proxyStatsRepo:        proxyStatsRepo,
-		userPlatformQuotaRepo: userPlatformQuotaRepo,
+		userPlatformQuotaRepo: quotaRepo,
 		responseHeaderFilter:  compileResponseHeaderFilter(cfg),
 		codexSnapshotThrottle: newAccountWriteThrottle(openAICodexSnapshotPersistMinInterval),
 	}

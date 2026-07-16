@@ -308,9 +308,9 @@ func ParseOpsUpstreamErrors(raw string) ([]*OpsUpstreamErrorEvent, error) {
 	return out, nil
 }
 
-// safeUpstreamURL returns a diagnostic URL with host/IP and query/fragment stripped.
-// It preserves only the scheme and path so ops logs can diagnose route mismatches
-// without exposing upstream domains, private IPs, or sensitive query parameters.
+// safeUpstreamURL returns a diagnostic URL with query/fragment/userinfo stripped.
+// Admin ops views need the host/IP to diagnose route and proxy mismatches; user
+// facing views must still apply their own network redaction before returning data.
 func safeUpstreamURL(rawURL string) string {
 	rawURL = strings.TrimSpace(rawURL)
 	if rawURL == "" {
@@ -336,12 +336,16 @@ func safeUpstreamURL(rawURL string) string {
 		}
 		return "<redacted>"
 	}
+	parsed.User = nil
+	parsed.RawQuery = ""
+	parsed.ForceQuery = false
+	parsed.Fragment = ""
 	path := parsed.EscapedPath()
 	if path == "" {
 		path = "/"
 	}
 	if parsed.Scheme == "" {
-		return "*.*.*.*" + path
+		return parsed.Host + path
 	}
-	return parsed.Scheme + "://*.*.*.*" + path
+	return parsed.Scheme + "://" + parsed.Host + path
 }

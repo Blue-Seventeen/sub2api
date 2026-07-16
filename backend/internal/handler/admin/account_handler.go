@@ -83,8 +83,12 @@ func NewAccountHandler(
 	crsSyncService *service.CRSSyncService,
 	sessionLimitCache service.SessionLimitCache,
 	rpmCache service.RPMCache,
-	tokenCacheInvalidator service.TokenCacheInvalidator,
+	tokenCacheInvalidator ...service.TokenCacheInvalidator,
 ) *AccountHandler {
+	var invalidator service.TokenCacheInvalidator
+	if len(tokenCacheInvalidator) > 0 {
+		invalidator = tokenCacheInvalidator[0]
+	}
 	return &AccountHandler{
 		adminService:            adminService,
 		oauthService:            oauthService,
@@ -101,7 +105,7 @@ func NewAccountHandler(
 		crsSyncService:          crsSyncService,
 		sessionLimitCache:       sessionLimitCache,
 		rpmCache:                rpmCache,
-		tokenCacheInvalidator:   tokenCacheInvalidator,
+		tokenCacheInvalidator:   invalidator,
 	}
 }
 

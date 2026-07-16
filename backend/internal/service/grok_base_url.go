@@ -49,5 +49,20 @@ func buildGrokMediaURLForAccount(account *Account, endpoint GrokMediaEndpoint, r
 			return "", fmt.Errorf("unsupported grok media endpoint: %s", endpoint)
 		}
 	}
-	return endpoint.upstreamURL(baseURL, requestID)
+	switch endpoint {
+	case GrokMediaEndpointImagesGenerations:
+		return xai.BuildImagesGenerationsURL(baseURL)
+	case GrokMediaEndpointImagesEdits:
+		return xai.BuildImagesEditsURL(baseURL)
+	case GrokMediaEndpointVideosGenerations:
+		return xai.BuildVideosGenerationsURL(baseURL)
+	case GrokMediaEndpointVideosEdits:
+		return xai.BuildVideosEditsURL(baseURL)
+	case GrokMediaEndpointVideosExtensions:
+		return xai.BuildVideosExtensionsURL(baseURL)
+	case GrokMediaEndpointVideoStatus:
+		return xai.BuildVideoURL(baseURL, requestID)
+	default:
+		return "", fmt.Errorf("unsupported grok media endpoint: %s", endpoint)
+	}
 }

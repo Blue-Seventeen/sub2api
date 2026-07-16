@@ -190,6 +190,16 @@ func (api *OAuthRefreshAPI) refresh(
 	refreshWindow time.Duration,
 	force bool,
 ) (*OAuthRefreshResult, error) {
+	if api == nil || api.accountRepo == nil {
+		return nil, errors.New("oauth refresh account repository is not configured")
+	}
+	if account == nil {
+		return nil, errors.New("oauth refresh account is nil")
+	}
+	if executor == nil {
+		return nil, errors.New("oauth refresh executor is nil")
+	}
+	requestPath := isOAuthRefreshRequestPath(ctx)
 	cacheKey := executor.CacheKey(account)
 
 	// 0. Acquire the in-process mutex first to serialize concurrent refreshes in the same process.
@@ -200,7 +210,6 @@ func (api *OAuthRefreshAPI) refresh(
 	defer localMu.Unlock()
 
 	// 1. Acquire the distributed refresh lock when available.
-	lockAcquired := false
 	if api.tokenCache != nil {
 		acquired, lockErr := api.tokenCache.AcquireRefreshLock(ctx, cacheKey, api.lockTTL)
 		if lockErr != nil {
@@ -225,13 +234,38 @@ func (api *OAuthRefreshAPI) refresh(
 	// 2. Re-read the latest account from DB so we always use the freshest refresh_token.
 	freshAccount, err := api.accountRepo.GetByID(ctx, account.ID)
 	if err != nil {
-		slog.Warn("oauth_refresh_db_reread_failed",
-			"account_id", account.ID,
-			"error", err,
-		)
-		freshAccount = account
+		if requestPath {
+			return nil, fmt.Errorf("%w: %v", errOAuthRefreshAccountRereadFailed, err)
+		}
+		return nil, &oauthRefreshStateUnavailableError{err: err}
 	} else if freshAccount == nil {
-		freshAccount = account
+		if requestPath {
+			return nil, fmt.Errorf("%w: account not found", errOAuthRefreshAccountStateChanged)
+		}
+		return nil, &oauthRefreshStateUnavailableError{err: fmt.Errorf("account not found")}
+	}
+	if freshAccount.ID != account.ID {
+		return nil, fmt.Errorf("%w: account identity mismatch", errOAuthRefreshAccountRereadFailed)
+	}
+	if !freshAccount.IsActive() {
+		if requestPath {
+			return nil, fmt.Errorf("%w: account is not active", errOAuthRefreshAccountStateChanged)
+		}
+		return &OAuthRefreshResult{Account: freshAccount}, nil
+	}
+	if requestPath && freshAccount.Platform == PlatformGrok {
+		if eligibilityErr := grokOAuthRequestAccountEligibilityError(freshAccount); eligibilityErr != nil {
+			return nil, withGrokCredentialFailureSnapshot(eligibilityErr, freshAccount)
+		}
+	}
+	if !executor.CanRefresh(freshAccount) {
+		if requestPath && freshAccount.IsGrokOAuth() && strings.TrimSpace(freshAccount.GetGrokRefreshToken()) == "" {
+			return nil, withGrokCredentialFailureSnapshot(errGrokOAuthRefreshTokenMissing, freshAccount)
+		}
+		if requestPath {
+			return nil, fmt.Errorf("%w: account is no longer refreshable", errOAuthRefreshAccountStateChanged)
+		}
+		return &OAuthRefreshResult{Account: freshAccount}, nil
 	}
 
 	// 3. Skip refresh only for non-forced calls when the account is already fresh.
@@ -240,6 +274,7 @@ func (api *OAuthRefreshAPI) refresh(
 	}
 
 	// 4. Execute provider-specific refresh logic.
+	attemptedAccount := snapshotOAuthRefreshAccount(freshAccount)
 	newCredentials, refreshErr := executor.Refresh(ctx, freshAccount)
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		// A provider implementation may ignore cancellation and return late
@@ -351,6 +386,39 @@ func (api *OAuthRefreshAPI) refresh(
 		NewCredentials: newCredentials,
 		Account:        freshAccount,
 	}, nil
+}
+
+func (api *OAuthRefreshAPI) releaseRefreshLock(parent context.Context, cacheKey string) {
+	cleanupParent := context.Background()
+	if parent != nil {
+		cleanupParent = context.WithoutCancel(parent)
+	}
+	ctx, cancel := context.WithTimeout(cleanupParent, defaultRefreshLockReleaseTimeout)
+	defer cancel()
+	if err := api.tokenCache.ReleaseRefreshLock(ctx, cacheKey); err != nil {
+		slog.Warn("oauth_refresh_lock_release_failed", "cache_key", cacheKey, "error", err)
+	}
+}
+
+func (api *OAuthRefreshAPI) loadGrokDurableAccountAfterPersist(parent context.Context, cacheKey string, accountID int64) (*Account, error) {
+	cleanupParent := context.Background()
+	if parent != nil {
+		cleanupParent = context.WithoutCancel(parent)
+	}
+	ctx, cancel := context.WithTimeout(cleanupParent, defaultRefreshPostPersistCleanupTimeout)
+	defer cancel()
+
+	if api.tokenCache != nil {
+		if err := api.tokenCache.DeleteAccessToken(ctx, cacheKey); err != nil {
+			slog.Warn("oauth_refresh_post_persist_cache_delete_failed",
+				"account_id", accountID,
+				"cache_key", cacheKey,
+				"error", err,
+			)
+		}
+	}
+
+	return api.accountRepo.GetByID(ctx, accountID)
 }
 
 // isRefreshRaceRecoverableError checks errors that may indicate another worker has already rotated the RT.

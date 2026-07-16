@@ -359,6 +359,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	var lastFailoverErr *service.UpstreamFailoverError
 	var lastFailedAccount *service.Account
 	var lastFailedDurationMs int64
+	var oauth429FailoverState service.OpenAIOAuth429FailoverState
 
 	for {
 		// Streaming Forward intentionally detaches the upstream request so usage can
@@ -555,8 +556,13 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}
+					if openAIFirstOutputFailoverExhausted(failoverErr, &firstOutputTimeoutSwitchCount) {
+						recordOpenAIProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, account, apiKey, forwardDurationMs, "handler.openai_gateway.responses")
+						h.handleFailoverExhausted(c, failoverErr, streamStarted)
+						return
+					}
 					switchCount++
-					if h.gatewayService.ShouldStopOpenAIOAuth429Failover(account, failoverErr.StatusCode, switchCount) {
+					if h.gatewayService.ShouldStopOpenAIOAuth429Failover(account, failoverErr.StatusCode, switchCount, &oauth429FailoverState) {
 						recordOpenAIProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, account, apiKey, forwardDurationMs, "handler.openai_gateway.responses")
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
@@ -566,7 +572,18 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 						zap.Int("upstream_status", failoverErr.StatusCode),
 						zap.Int("switch_count", switchCount),
 						zap.Int("max_switches", maxAccountSwitches),
-					)
+					}
+					if account.Proxy != nil {
+						failoverSwitchFields = append(failoverSwitchFields,
+							zap.Int64("proxy_id", account.Proxy.ID),
+							zap.String("proxy_name", account.Proxy.Name),
+							zap.String("proxy_host", account.Proxy.Host),
+							zap.Int("proxy_port", account.Proxy.Port),
+						)
+					} else if account.ProxyID != nil {
+						failoverSwitchFields = append(failoverSwitchFields, zap.Int64p("proxy_id", account.ProxyID))
+					}
+					reqLog.Warn("openai.upstream_failover_switching", failoverSwitchFields...)
 					lastFailedAccount = account
 					lastFailedDurationMs = forwardDurationMs
 					continue
@@ -940,6 +957,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	var lastFailedAccount *service.Account
 	var lastFailedDurationMs int64
 	effectiveMappedModel := preferredMappedModel
+	var oauth429FailoverState service.OpenAIOAuth429FailoverState
 
 	for {
 		if failoverClientGone(c) {
@@ -1137,7 +1155,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 						return
 					}
 					switchCount++
-					if h.gatewayService.ShouldStopOpenAIOAuth429Failover(account, failoverErr.StatusCode, switchCount) {
+					if h.gatewayService.ShouldStopOpenAIOAuth429Failover(account, failoverErr.StatusCode, switchCount, &oauth429FailoverState) {
 						recordOpenAIProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, account, apiKey, forwardDurationMs, "handler.openai_gateway.messages")
 						h.handleAnthropicFailoverExhausted(c, failoverErr, streamStarted)
 						return
@@ -1963,13 +1981,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			}
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(proxyErr, &failoverErr) {
-				h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
-				releaseAccountSlot()
-				failedAccountIDs[account.ID] = struct{}{}
-				lastFailoverErr = failoverErr
-				if switchCount >= maxAccountSwitches {
-					closeOpenAIWSFailoverExhausted(wsConn, failoverErr)
-					return
+				if handleWSFailover(account, failoverErr) {
+					continue
 				}
 				return
 			}
@@ -1977,14 +1990,14 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			if errors.Is(context.Cause(ctx), service.ErrOpenAIWSIngressLeaseLost) {
 				reqLog.Warn("openai.websocket_ingress_lease_lost",
 					zap.Int64("account_id", account.ID),
-					zap.Error(err),
+					zap.Error(proxyErr),
 				)
 				closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "websocket ingress capacity lease lost; please reconnect")
 				return
 			}
 
 			var closeErr *service.OpenAIWSClientCloseError
-			if errors.As(err, &closeErr) && closeErr.StatusCode() == coderws.StatusNormalClosure {
+			if errors.As(proxyErr, &closeErr) && closeErr.StatusCode() == coderws.StatusNormalClosure {
 				reqLog.Info("openai.websocket_ingress_closed_normally",
 					zap.Int64("account_id", account.ID),
 					zap.String("reason", closeErr.Reason()),
@@ -2346,6 +2359,41 @@ func isOpenAIImagesInboundEndpoint(c *gin.Context) bool {
 	default:
 		return false
 	}
+}
+
+func credentialFailoverClientResponse(failoverErr *service.UpstreamFailoverError) (int, string) {
+	_ = failoverErr
+	return http.StatusServiceUnavailable, service.GrokCredentialUnavailableClientMessage
+}
+
+func copyFailoverRetryAfter(c *gin.Context, headers http.Header) {
+	if c == nil || headers == nil {
+		return
+	}
+	retryAfter := strings.TrimSpace(headers.Get("Retry-After"))
+	if retryAfter == "" || len(retryAfter) > 128 || strings.ContainsAny(retryAfter, "\r\n") || !isSafeRetryAfter(retryAfter) {
+		return
+	}
+	c.Header("Retry-After", retryAfter)
+}
+
+func isSafeRetryAfter(value string) bool {
+	digitsOnly := true
+	for _, char := range value {
+		if char < '0' || char > '9' {
+			digitsOnly = false
+			break
+		}
+	}
+	if digitsOnly {
+		seconds, err := strconv.ParseUint(value, 10, 32)
+		return err == nil && seconds <= uint64((7*24*time.Hour)/time.Second)
+	}
+	retryAt, err := http.ParseTime(value)
+	if err != nil {
+		return false
+	}
+	return !retryAt.After(time.Now().Add(7 * 24 * time.Hour))
 }
 
 // handleFailoverExhaustedSimple 简化版本，用于没有响应体的情况

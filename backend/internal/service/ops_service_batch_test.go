@@ -35,6 +35,7 @@ func TestOpsServiceRecordErrorBatch_SanitizesAndBatches(t *testing.T) {
 				{
 					AccountID:            -2,
 					UpstreamStatusCode:   429,
+					UpstreamURL:          "https://user:pass@upstream.example.com/v1/chat/completions?api_key=secret#frag",
 					Message:              " token leaked ",
 					Detail:               `{"refresh_token":"secret"}`,
 					UpstreamRequestBody:  `{"api_key":"sk-secret","messages":[{"role":"user","content":"hello"}]}`,
@@ -69,6 +70,9 @@ func TestOpsServiceRecordErrorBatch_SanitizesAndBatches(t *testing.T) {
 	require.NotNil(t, first.UpstreamErrorsJSON)
 	require.NotContains(t, *first.UpstreamErrorsJSON, "secret")
 	require.Contains(t, *first.UpstreamErrorsJSON, "[REDACTED]")
+	require.Contains(t, *first.UpstreamErrorsJSON, "https://upstream.example.com/v1/chat/completions")
+	require.NotContains(t, *first.UpstreamErrorsJSON, "user:pass")
+	require.NotContains(t, *first.UpstreamErrorsJSON, "api_key=secret")
 	require.Contains(t, *first.UpstreamErrorsJSON, "upstream_request_body")
 	require.Contains(t, *first.UpstreamErrorsJSON, "upstream_response_body")
 

@@ -674,11 +674,6 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 	} else {
 		writeSanitizedOpenAIPassthroughError(c, resp.StatusCode, resp.Header)
 	}
-	if cyberHit {
-		body = sanitizeClientVisibleUpstreamErrorPayload(body)
-	}
-	c.Data(resp.StatusCode, contentType, body)
-
 	return fmt.Errorf("upstream error: %d (client response sanitized)", resp.StatusCode)
 }
 

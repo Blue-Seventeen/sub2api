@@ -1728,7 +1728,7 @@ func applyCompatibleBillableQuantities(result *ForwardResult, prepared *compatib
 }
 
 func applyCompatibleUsageFallback(result *ForwardResult, account *Account, group *Group, estimatedInputTokens int) {
-	if result == nil || account == nil || !account.UseNewAPIStyleInterfaceForGroup(group) {
+	if result == nil || account == nil || !account.IsCompatiblePlatform() {
 		return
 	}
 	if result.Usage.InputTokens <= 0 && estimatedInputTokens > 0 {

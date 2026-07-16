@@ -47,6 +47,10 @@ func RegisterGatewayRoutes(
 			h.OpenAIGateway.CodexModels(c)
 			return
 		}
+		if service.IsCompatiblePlatform(getGroupPlatform(c)) {
+			h.CompatibleGateway.Models(c)
+			return
+		}
 		h.Gateway.Models(c)
 	}
 	imagesHandler := func(c *gin.Context) {
@@ -141,20 +145,10 @@ func RegisterGatewayRoutes(
 			}
 			h.Gateway.CountTokens(c)
 		})
-		gateway.GET("/models", func(c *gin.Context) {
-			// Codex CLI / Codex app refresh their model picker from the provider's
-			// /models endpoint with a client_version query and expect the ChatGPT
-			// Codex manifest format; other clients keep the OpenAI-style list.
-			if isOpenAIGatewayPlatform(c) && c.Query("client_version") != "" {
-				h.OpenAIGateway.CodexModels(c)
-				return
-			}
-			if service.IsCompatiblePlatform(getGroupPlatform(c)) {
-				h.CompatibleGateway.Models(c)
-				return
-			}
-			h.Gateway.Models(c)
-		})
+		// Codex CLI / Codex app refresh their model picker from the provider's
+		// /models endpoint with a client_version query and expect the ChatGPT
+		// Codex manifest format; other clients keep the OpenAI-style list.
+		gateway.GET("/models", modelsHandler)
 		gateway.GET("/usage", h.Gateway.Usage)
 		// OpenAI Responses API: auto-route based on group platform
 		gateway.POST("/responses", func(c *gin.Context) {

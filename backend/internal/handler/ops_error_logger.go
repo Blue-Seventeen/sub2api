@@ -800,6 +800,9 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 				recoveredMsg += ": " + strings.TrimSpace(*upstreamErrorMessage)
 			}
 			recoveredMsg = truncateString(recoveredMsg, 2048)
+			recoveredPhase, recoveredBusinessLimited, recoveredOwner, recoveredSource := classifyOpsErrorLog(
+				c, "upstream_error", recoveredMsg, "", effectiveUpstreamStatus,
+			)
 			compat := service.CompatibilityLogFieldsFromContext(c)
 
 			entry := &service.OpsInsertErrorLogInput{

@@ -148,8 +148,8 @@ func TestNewAPIStyleOpenAITransportErrorFailsOverWithoutEviction(t *testing.T) {
 	if events[0].Kind != "request_error" || events[0].Platform != PlatformOpenAI {
 		t.Fatalf("event = kind %q platform %q, want request_error/openai", events[0].Kind, events[0].Platform)
 	}
-	if events[0].UpstreamURL != "https://*.*.*.*/v1/responses" {
-		t.Fatalf("event upstream url = %q, want redacted OpenAI responses url", events[0].UpstreamURL)
+	if events[0].UpstreamURL != "https://api.openai.com/v1/responses" {
+		t.Fatalf("event upstream url = %q, want diagnostic OpenAI responses url", events[0].UpstreamURL)
 	}
 }
 

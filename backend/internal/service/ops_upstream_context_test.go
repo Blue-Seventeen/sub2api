@@ -12,13 +12,15 @@ func TestSafeUpstreamURL(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"strips query and redacts host", "https://api.anthropic.com/v1/messages?beta=true", "https://*.*.*.*/v1/messages"},
-		{"strips fragment and redacts host", "https://api.openai.com/v1/responses#frag", "https://*.*.*.*/v1/responses"},
-		{"strips both and redacts host", "https://host/path?token=secret#x", "https://*.*.*.*/path"},
-		{"redacts host", "https://host/path", "https://*.*.*.*/path"},
+		{"strips query and preserves host", "https://api.anthropic.com/v1/messages?beta=true", "https://api.anthropic.com/v1/messages"},
+		{"strips fragment and preserves host", "https://api.openai.com/v1/responses#frag", "https://api.openai.com/v1/responses"},
+		{"strips both and preserves host", "https://host/path?token=secret#x", "https://host/path"},
+		{"preserves host", "https://host/path", "https://host/path"},
+		{"strips userinfo", "https://user:password@api.openai.com/v1/responses?api_key=secret", "https://api.openai.com/v1/responses"},
+		{"preserves ip host", "http://10.0.0.9:8080/v1/chat/completions?token=secret", "http://10.0.0.9:8080/v1/chat/completions"},
 		{"empty string", "", ""},
 		{"whitespace only", "  ", ""},
-		{"query before fragment", "https://h/p?a=1#f", "https://*.*.*.*/p"},
+		{"query before fragment", "https://h/p?a=1#f", "https://h/p"},
 		{"relative path", "/v1/responses?token=secret", "/v1/responses"},
 		{"schemeless host redacted", "api.openai.com/v1/responses?token=secret", "<redacted>"},
 	}

@@ -169,6 +169,23 @@ func ValidatedAPIKeyBaseURL(override string) (string, error) {
 	return ValidateAPIKeyBaseURL(EffectiveBaseURL(override))
 }
 
+// BaseURLValidator applies the caller's outbound URL trust policy before xAI
+// endpoint paths are appended. OAuth callers use the strict trusted-host
+// validator by default; API-key callers can inject the platform URL policy.
+type BaseURLValidator func(string) (string, error)
+
+func validatedBaseURLWithValidator(override string, validator BaseURLValidator) (string, error) {
+	if validator == nil {
+		return ValidatedBaseURL(override)
+	}
+	raw := EffectiveBaseURL(override)
+	validated, err := validator(raw)
+	if err != nil {
+		return "", err
+	}
+	return normalizeKnownBaseURLPath(validated)
+}
+
 type RuntimeSanityCheck struct {
 	Value     string `json:"value"`
 	Valid     bool   `json:"valid"`
