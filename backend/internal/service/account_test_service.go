@@ -813,8 +813,11 @@ func (s *AccountTestService) testGrokAccountConnection(c *gin.Context, account *
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json, text/event-stream")
 		req.Header.Set("Authorization", "Bearer "+authToken)
-		applyGrokCLIHeaders(req.Header)
-		req.Header.Set("User-Agent", "sub2api-grok/1.0")
+		if account.IsGrokOAuth() {
+			applyGrokCLIHeaders(req.Header)
+		}
+		// Keep account tests aligned with real Grok forwarding.
+		account.ApplyHeaderOverrides(req.Header)
 
 		resp, err = s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 		if err != nil {

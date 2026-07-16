@@ -146,6 +146,7 @@ docs/*
 !docs/升级部署-国外远程数据库节点.md
 !docs/升级部署-国内代理远程数据库节点.md
 !docs/升级部署 -子节点-镜像导入.md
+!docs/ASYNC_IMAGE_TASKS.md
 !docs/legal/
 !docs/legal/*.md
 .serena/

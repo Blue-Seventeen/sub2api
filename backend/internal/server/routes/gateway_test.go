@@ -30,6 +30,7 @@ func newGatewayRoutesTestRouter(platform ...string) *gin.Engine {
 			OpenAIGateway:      &handler.OpenAIGatewayHandler{},
 			NewAPIStyleGateway: handler.NewNewAPIStyleGatewayHandler(&handler.GatewayHandler{}),
 			CompatibleGateway:  handler.NewCompatibleGatewayHandler(nil, &handler.GatewayHandler{}),
+			AsyncImage:         handler.NewAsyncImageHandler(nil, nil),
 		},
 		servermiddleware.APIKeyAuthMiddleware(func(c *gin.Context) {
 			groupID := int64(1)
@@ -153,6 +154,25 @@ func TestGatewayRoutesQwenCompatibleModeAliasRejectsNonAliGroups(t *testing.T) {
 
 	require.Equal(t, http.StatusForbidden, w.Code)
 	require.Contains(t, w.Body.String(), "Qwen/DashScope")
+}
+
+func TestGatewayRoutesAsyncImagesPathsAreRegistered(t *testing.T) {
+	router := newGatewayRoutesTestRouter()
+	registered := make(map[string]bool)
+	for _, route := range router.Routes() {
+		registered[route.Method+" "+route.Path] = true
+	}
+
+	for _, route := range []string{
+		"POST /v1/images/generations/async",
+		"POST /v1/images/edits/async",
+		"GET /v1/images/tasks/:task_id",
+		"POST /images/generations/async",
+		"POST /images/edits/async",
+		"GET /images/tasks/:task_id",
+	} {
+		require.True(t, registered[route], "%s should be registered", route)
+	}
 }
 
 func TestGatewayRoutesGrokImagesAndVideosPathsAreRegistered(t *testing.T) {

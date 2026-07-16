@@ -145,7 +145,96 @@ describe('BulkEditAccountModal', () => {
     })
   })
 
+  it('全部目标为 Grok OAuth 时，官方主机 base_url 作为手动端点切换正常提交', async () => {
+    const wrapper = mountModal({
+      selectedPlatforms: ['grok'],
+      selectedTypes: ['oauth']
+    })
+
+    await wrapper.get('#bulk-edit-base-url-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-base-url').setValue('https://api.x.ai/v1')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledTimes(1)
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      credentials: {
+        base_url: 'https://api.x.ai/v1'
+      }
+    })
+  })
+
+  it('所选全为 grok 时展示快捷端点，点击后填入并自动勾选 base_url', async () => {
+    const wrapper = mountModal({
+      selectedPlatforms: ['grok'],
+      selectedTypes: ['oauth']
+    })
+
+    const presets = wrapper.findAll('[data-testid="grok-base-url-preset"]')
+    expect(presets.length).toBe(5)
+
+    // 第三个预设为区域 API (us-east-1.api.x.ai/v1)
+    await presets[2].trigger('click')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledTimes(1)
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      credentials: {
+        base_url: 'https://us-east-1.api.x.ai/v1'
+      }
+    })
+  })
+
+  it('所选含非 grok 平台时不展示快捷端点', async () => {
+    const wrapper = mountModal({
+      selectedPlatforms: ['grok', 'anthropic'],
+      selectedTypes: ['apikey']
+    })
+
+    expect(wrapper.findAll('[data-testid="grok-base-url-preset"]').length).toBe(0)
+  })
+
+  it('全部目标为 Grok OAuth 时，第三方 base_url 正常提交', async () => {
+    const wrapper = mountModal({
+      selectedPlatforms: ['grok'],
+      selectedTypes: ['oauth']
+    })
+
+    await wrapper.get('#bulk-edit-base-url-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-base-url').setValue('https://relay.example.com/v1')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledTimes(1)
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      credentials: {
+        base_url: 'https://relay.example.com/v1'
+      }
+    })
+  })
+
+  it('混合类型选择（含 apikey）时官方主机 base_url 不拦截', async () => {
+    const wrapper = mountModal({
+      selectedPlatforms: ['grok'],
+      selectedTypes: ['apikey', 'oauth']
+    })
+
+    await wrapper.get('#bulk-edit-base-url-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-base-url').setValue('https://api.x.ai/v1')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledTimes(1)
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      credentials: {
+        base_url: 'https://api.x.ai/v1'
+      }
+    })
+  })
+
   it('enables OpenAI account passthrough in bulk edit', async () => {
+
     const wrapper = mountModal({
       selectedPlatforms: ['openai'],
       selectedTypes: ['oauth']
@@ -241,7 +330,7 @@ describe('BulkEditAccountModal', () => {
       selectedTypes: ['oauth']
     })
 
-    // 仅开启子开关、不批量设置父开�?codex_cli_only：不应写入孤立字段，也不应调用接�?    await wrapper.get('#bulk-edit-openai-codex-app-server-enabled').setValue(true)
+    // 仅开启子开关、不批量设置父开�?codex_cli_only：不应写入孤立字段，也不应调用接�?    await wrapper.get('#bulk-edit-openai-codex-app-server-enabled').setValue(true)
     await wrapper.get('#bulk-edit-openai-codex-app-server-toggle').trigger('click')
     await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
     await flushPromises()

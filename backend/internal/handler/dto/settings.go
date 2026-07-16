@@ -13,6 +13,7 @@ type CustomMenuItem struct {
 	Label        string `json:"label"`
 	IconSVG      string `json:"icon_svg"`
 	URL          string `json:"url"`
+	PageSlug     string `json:"page_slug,omitempty"`
 	Visibility   string `json:"visibility"` // "user" or "admin"
 	SortOrder    int    `json:"sort_order"`
 	OpenInNewTab bool   `json:"open_in_new_tab"`
@@ -37,6 +38,8 @@ type SystemSettings struct {
 	InvitationCodeMissingPromptHTML  string                   `json:"invitation_code_missing_prompt_html"`
 	TotpEnabled                      bool                     `json:"totp_enabled"`
 	TotpEncryptionKeyConfigured      bool                     `json:"totp_encryption_key_configured"`
+	SessionBindingEnabled            bool                     `json:"session_binding_enabled"`
+	AuditLogRetentionDays            int                      `json:"audit_log_retention_days"`
 	LoginAgreementEnabled            bool                     `json:"login_agreement_enabled"`
 	LoginAgreementMode               string                   `json:"login_agreement_mode"`
 	LoginAgreementUpdatedAt          string                   `json:"login_agreement_updated_at"`
@@ -207,6 +210,8 @@ type SystemSettings struct {
 	PaymentVisibleMethodWxpayEnabled  bool   `json:"payment_visible_method_wxpay_enabled"`
 
 	// OpenAI account scheduling
+	OpenAILowUpstreamRatePriorityEnabled                   bool                      `json:"openai_low_upstream_rate_priority_enabled"`
+	OpenAIOAuthSchedulingRateMultiplier                    float64                   `json:"openai_oauth_scheduling_rate_multiplier"`
 	OpenAIAdvancedSchedulerEnabled                         bool                      `json:"openai_advanced_scheduler_enabled"`
 	OpenAIAdvancedSchedulerStickyWeightedEnabled           bool                      `json:"openai_advanced_scheduler_sticky_weighted_enabled"`
 	OpenAIAdvancedSchedulerSubscriptionPriorityEnabled     bool                      `json:"openai_advanced_scheduler_subscription_priority_enabled"`
@@ -218,6 +223,7 @@ type SystemSettings struct {
 	OpenAIAdvancedSchedulerWeightTTFT                      string                    `json:"openai_advanced_scheduler_weight_ttft"`
 	OpenAIAdvancedSchedulerWeightReset                     string                    `json:"openai_advanced_scheduler_weight_reset"`
 	OpenAIAdvancedSchedulerWeightQuotaHeadroom             string                    `json:"openai_advanced_scheduler_weight_quota_headroom"`
+	OpenAIAdvancedSchedulerWeightUpstreamCost              string                    `json:"openai_advanced_scheduler_weight_upstream_cost"`
 	OpenAIAdvancedSchedulerWeightPreviousResponse          string                    `json:"openai_advanced_scheduler_weight_previous_response"`
 	OpenAIAdvancedSchedulerWeightSessionSticky             string                    `json:"openai_advanced_scheduler_weight_session_sticky"`
 	OpenAIAdvancedSchedulerEffectiveLBTopK                 string                    `json:"openai_advanced_scheduler_effective_lb_top_k"`
@@ -228,6 +234,7 @@ type SystemSettings struct {
 	OpenAIAdvancedSchedulerEffectiveWeightTTFT             string                    `json:"openai_advanced_scheduler_effective_weight_ttft"`
 	OpenAIAdvancedSchedulerEffectiveWeightReset            string                    `json:"openai_advanced_scheduler_effective_weight_reset"`
 	OpenAIAdvancedSchedulerEffectiveWeightQuotaHeadroom    string                    `json:"openai_advanced_scheduler_effective_weight_quota_headroom"`
+	OpenAIAdvancedSchedulerEffectiveWeightUpstreamCost     string                    `json:"openai_advanced_scheduler_effective_weight_upstream_cost"`
 	OpenAIAdvancedSchedulerEffectiveWeightPreviousResponse string                    `json:"openai_advanced_scheduler_effective_weight_previous_response"`
 	OpenAIAdvancedSchedulerEffectiveWeightSessionSticky    string                    `json:"openai_advanced_scheduler_effective_weight_session_sticky"`
 	OpenAIFastPolicySettings                               *OpenAIFastPolicySettings `json:"openai_fast_policy_settings,omitempty"`
@@ -288,6 +295,7 @@ type SystemSettings struct {
 	AffiliateRebateFreezeHours   int     `json:"affiliate_rebate_freeze_hours"`
 	AffiliateRebateDurationDays  int     `json:"affiliate_rebate_duration_days"`
 	AffiliateRebatePerInviteeCap float64 `json:"affiliate_rebate_per_invitee_cap"`
+	AdminRechargeRebateEnabled   bool    `json:"affiliate_admin_recharge_enabled"`
 
 	// 系统全局默认平台配额（key = platform，nil/缺省 = 不限制）
 	DefaultPlatformQuotas map[string]*service.DefaultPlatformQuotaSetting `json:"default_platform_quotas,omitempty"`

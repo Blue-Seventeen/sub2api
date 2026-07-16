@@ -41,7 +41,10 @@ func ProvideAdminHandlers(
 	paymentHandler *admin.PaymentHandler,
 	promotionHandler *admin.PromotionHandler,
 	complianceHandler *admin.ComplianceHandler,
+	auditLogHandler *admin.AuditLogHandler,
+	upstreamBillingProbe *service.UpstreamBillingProbeService,
 ) *AdminHandlers {
+	accountHandler.SetUpstreamBillingProbeService(upstreamBillingProbe)
 	return &AdminHandlers{
 		Dashboard:              dashboardHandler,
 		User:                   userHandler,
@@ -75,6 +78,7 @@ func ProvideAdminHandlers(
 		Payment:                paymentHandler,
 		Promotion:              promotionHandler,
 		Compliance:             complianceHandler,
+		AuditLog:               auditLogHandler,
 	}
 }
 
@@ -118,6 +122,7 @@ func ProvideHandlers(
 	paymentWebhookHandler *PaymentWebhookHandler,
 	promotionHandler *PromotionHandler,
 	availableChannelHandler *AvailableChannelHandler,
+	asyncImageHandler *AsyncImageHandler,
 	batchImageHandler *BatchImageHandler,
 	_ *service.IdempotencyCoordinator,
 	_ *service.IdempotencyCleanupService,
@@ -142,6 +147,7 @@ func ProvideHandlers(
 		PaymentWebhook:     paymentWebhookHandler,
 		AvailableChannel:   availableChannelHandler,
 		Promotion:          promotionHandler,
+		AsyncImage:         asyncImageHandler,
 		BatchImage:         batchImageHandler,
 	}
 }
@@ -167,6 +173,7 @@ var ProviderSet = wire.NewSet(
 	NewPaymentWebhookHandler,
 	NewPromotionHandler,
 	NewAvailableChannelHandler,
+	NewAsyncImageHandler,
 	NewBatchImageHandler,
 
 	// Admin handlers
@@ -202,6 +209,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewPaymentHandler,
 	admin.NewPromotionHandler,
 	admin.NewComplianceHandler,
+	admin.NewAuditLogHandler,
 
 	// AdminHandlers and Handlers constructors
 	ProvideAdminHandlers,

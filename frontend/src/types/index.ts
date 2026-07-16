@@ -102,7 +102,7 @@ export interface User {
 }
 
 export interface AdminUser extends User {
-  // 管理员备注（普通用户接口不返回�?
+  // 管理员备注（普通用户接口不返回�?
   notes: string
   real_balance?: number
   display_balance?: number
@@ -112,7 +112,7 @@ export interface AdminUser extends User {
 
   // 用户专属分组倍率配置 (group_id -> rate_multiplier)
   group_rates?: Record<number, number>
-  // 当前并发数（仅管理员列表接口返回�?
+  // 当前并发数（仅管理员列表接口返回�?
   current_concurrency?: number
 }
 
@@ -209,7 +209,7 @@ export interface PublicSettings {
   dingtalk_oauth_enabled: boolean
   backend_mode_enabled: boolean
   version: string
-  // 服务器全局时区（IANA 名称与当�?UTC 偏移），高峰时段等服务端本地时间窗口的展示标注用�?  // 可选：注入�?__APP_CONFIG__ 旧缓存可能缺�?
+  // 服务器全局时区（IANA 名称与当�?UTC 偏移），高峰时段等服务端本地时间窗口的展示标注用�?  // 可选：注入�?__APP_CONFIG__ 旧缓存可能缺�?
   server_timezone?: string
   server_utc_offset?: string
   balance_low_notify_enabled: boolean
@@ -523,11 +523,11 @@ export interface Group {
   peak_end: string
   peak_rate_multiplier: number
   peak_rate_windows: PeakRateWindow[]
-  // Claude Code 客户端限�?
+  // Claude Code 客户端限�?
   claude_code_only: boolean
   fallback_group_id: number | null
   fallback_group_id_on_invalid_request: number | null
-  // OpenAI Messages 调度开关（用户侧需要此字段判断是否展示 Claude Code 教程�?
+  // OpenAI Messages 调度开关（用户侧需要此字段判断是否展示 Claude Code 教程�?
   allow_messages_dispatch?: boolean
   default_mapped_model?: string
   messages_dispatch_model_config?: OpenAIMessagesDispatchModelConfig
@@ -544,22 +544,22 @@ export interface PeakRateWindow {
 }
 
 export interface AdminGroup extends Group {
-  // 模型路由配置（仅管理员可见，内部信息�?
+  // 模型路由配置（仅管理员可见，内部信息�?
   model_routing: Record<string, number[]> | null
   model_routing_enabled: boolean
 
-  // MCP XML 协议注入（仅 antigravity 平台使用�?
+  // MCP XML 协议注入（仅 antigravity 平台使用�?
   mcp_xml_inject: boolean
 
-  // 支持的模型系列（�?antigravity 平台使用�?
+  // 支持的模型系列（�?antigravity 平台使用�?
   supported_model_scopes?: string[]
 
-  // 分组下账号数量（仅管理员可见�?
+  // 分组下账号数量（仅管理员可见�?
   account_count?: number
   active_account_count?: number
   rate_limited_account_count?: number
 
-  // OpenAI Messages 调度配置（仅 openai 平台使用�?
+  // OpenAI Messages 调度配置（仅 openai 平台使用�?
   default_mapped_model?: string
   messages_dispatch_model_config?: OpenAIMessagesDispatchModelConfig
   models_list_config?: ModelsListConfig
@@ -679,7 +679,7 @@ export interface CreateGroupRequest {
   rpm_limit?: number
   require_oauth_only?: boolean
   require_privacy_set?: boolean
-  // 从指定分组复制账�?
+  // 从指定分组复制账�?
   copy_accounts_from_group_ids?: number[]
 }
 
@@ -948,21 +948,65 @@ export interface TempUnschedulableStatus {
   state?: TempUnschedulableState
 }
 
+export interface UpstreamBillingData {
+  object: 'sub2api.key_billing'
+  schema_version: 1
+  billing_scope: 'token'
+  group_rate_multiplier: number
+  user_rate_multiplier?: number
+  resolved_rate_multiplier: number
+  peak_rate_enabled: boolean
+  peak_start?: string
+  peak_end?: string
+  peak_rate_multiplier?: number
+  applied_peak_multiplier?: number
+  effective_rate_multiplier: number
+  timezone?: string
+  observed_at: string
+}
+
+export type UpstreamBillingProbeStatus = 'ok' | 'unsupported' | 'failed'
+
+export interface UpstreamBillingProbeSnapshot {
+  status: UpstreamBillingProbeStatus
+  data?: UpstreamBillingData
+  received_at?: string
+  fresh_until?: string
+  last_attempt_at: string
+  next_probe_at: string
+  failure_count?: number
+  http_status?: number
+  last_error?: string
+}
+
+export interface UpstreamBillingProbeSettings {
+  enabled: boolean
+  interval_minutes: number
+}
+
+export interface UpstreamBillingProbeResult {
+  account_id: number
+  snapshot?: UpstreamBillingProbeSnapshot
+  error?: string
+}
+
 export interface Account {
   id: number
   name: string
   notes?: string | null
   platform: AccountPlatform
   type: AccountType
-  // 后端响应�?credentials 已脱敏：access_token / refresh_token / id_token /
+  // 后端响应�?credentials 已脱敏：access_token / refresh_token / id_token /
   // api_key / session_key / cookie / aws_secret_access_key / aws_session_token /
-  // service_account_json / service_account / private_key 不会出现�?  // 改为通过 credentials_status.has_<key> 暴露存在性�?
+  // service_account_json / service_account / private_key 不会出现�?  // 改为通过 credentials_status.has_<key> 暴露存在性�?
   credentials?: Record<string, unknown>
   credentials_status?: Record<string, boolean>
   // Extra fields including Codex usage, OpenAI compact capability, and model-level rate limits.
   extra?: (CodexUsageSnapshot & OpenAICompactState & {
     model_rate_limits?: Record<string, { rate_limited_at: string; rate_limit_reset_at: string }>
     antigravity_credits_overages?: Record<string, { activated_at: string; active_until: string }>
+    upstream_billing_probe_enabled?: boolean
+    upstream_billing_probe?: UpstreamBillingProbeSnapshot
   } & Record<string, unknown>)
   proxy_id: number | null
   proxy_auto_select_best?: boolean
@@ -1004,32 +1048,32 @@ export interface Account {
   session_window_end: string | null
   session_window_status: 'allowed' | 'allowed_warning' | 'rejected' | null
 
-  // 5h窗口费用控制（仅 Anthropic OAuth/SetupToken 账号有效�?
+  // 5h窗口费用控制（仅 Anthropic OAuth/SetupToken 账号有效�?
   window_cost_limit?: number | null
   window_cost_sticky_reserve?: number | null
 
-  // 会话数量控制（仅 Anthropic OAuth/SetupToken 账号有效�?
+  // 会话数量控制（仅 Anthropic OAuth/SetupToken 账号有效�?
   max_sessions?: number | null
   session_idle_timeout_minutes?: number | null
 
-  // RPM 限制（仅 Anthropic OAuth/SetupToken 账号有效�?
+  // RPM 限制（仅 Anthropic OAuth/SetupToken 账号有效�?
   base_rpm?: number | null
   rpm_strategy?: string | null
   rpm_sticky_buffer?: number | null
   user_msg_queue_mode?: string | null  // "serialize" | "throttle" | null
 
-  // TLS指纹伪装（仅 Anthropic OAuth/SetupToken 账号有效�?
+  // TLS指纹伪装（仅 Anthropic OAuth/SetupToken 账号有效�?
   enable_tls_fingerprint?: boolean | null
   tls_fingerprint_profile_id?: number | null
 
-  // 会话ID伪装（仅 Anthropic OAuth/SetupToken 账号有效�?  // 启用后将�?5分钟内固�?metadata.user_id 中的 session ID
+  // 会话ID伪装（仅 Anthropic OAuth/SetupToken 账号有效�?  // 启用后将�?5分钟内固�?metadata.user_id 中的 session ID
   session_id_masking_enabled?: boolean | null
 
-  // 缓存 TTL 强制替换（仅 Anthropic OAuth/SetupToken 账号有效�?
+  // 缓存 TTL 强制替换（仅 Anthropic OAuth/SetupToken 账号有效�?
   cache_ttl_override_enabled?: boolean | null
   cache_ttl_override_target?: string | null
 
-  // 自定�?Base URL 中继转发（仅 Anthropic OAuth/SetupToken 账号有效�?
+  // 自定�?Base URL 中继转发（仅 Anthropic OAuth/SetupToken 账号有效�?
   custom_base_url_enabled?: boolean | null
   custom_base_url?: string | null
 
@@ -1053,13 +1097,13 @@ export interface Account {
 
   // 运行时状态（仅当启用对应限制时返回）
   current_window_cost?: number | null // 当前窗口费用
-  active_sessions?: number | null // 当前活跃会话�?
+  active_sessions?: number | null // 当前活跃会话�?
   current_rpm?: number | null // 当前分钟 RPM 计数
 
-  // 影子账号关系（spark 维度影子�?
+  // 影子账号关系（spark 维度影子�?
   parent_account_id?: number | null
   quota_dimension?: string
-  // 影子账号回填的母账号信息（仅影子非空�?
+  // 影子账号回填的母账号信息（仅影子非空�?
   parent_email?: string
   parent_plan_type?: string
   parent_privacy_mode?: string
@@ -1090,14 +1134,14 @@ export interface UsageProgress {
   utilization: number // Percentage (0-100+, 100 = 100%)
   resets_at: string | null
   remaining_seconds: number
-  window_stats?: WindowStats | null // 窗口期统计（从窗口开始到当前的使用量�?
+  window_stats?: WindowStats | null // 窗口期统计（从窗口开始到当前的使用量�?
   used_requests?: number
   limit_requests?: number
 }
 
-// Antigravity 单个模型的配额信�?
+// Antigravity 单个模型的配额信�?
 export interface AntigravityModelQuota {
-  utilization: number // 使用�?0-100
+  utilization: number // 使用�?0-100
   reset_time: string  // 重置时间 ISO8601
 }
 
@@ -1170,16 +1214,16 @@ export interface AccountUsageInfo {
     amount?: number
     minimum_balance?: number
   }> | null
-  // Antigravity 403 forbidden 状�?
+  // Antigravity 403 forbidden 状�?
   is_forbidden?: boolean
   forbidden_reason?: string
   forbidden_type?: string   // "validation" | "violation" | "forbidden"
   validation_url?: string   // 验证/申诉链接
 
-  // 状态标记（后端自动推导�?
-  needs_verify?: boolean    // 需要人工验证（forbidden_type=validation�?
-  is_banned?: boolean       // 账号被封（forbidden_type=violation�?
-  needs_reauth?: boolean    // token 失效需重新授权�?01�?
+  // 状态标记（后端自动推导�?
+  needs_verify?: boolean    // 需要人工验证（forbidden_type=validation�?
+  is_banned?: boolean       // 账号被封（forbidden_type=violation�?
+  needs_reauth?: boolean    // token 失效需重新授权�?01�?
   // 机器可读错误码：forbidden / unauthenticated / rate_limited / network_error
   error_code?: string
 
@@ -1318,7 +1362,7 @@ export interface AdminDataPayload {
   exported_at: string
   proxies: AdminDataProxy[]
   accounts: AdminDataAccount[]
-  // 导出时被排除�?spark 影子账号数量(影子不持凭据、其调度配置不在备份范围)�?
+  // 导出时被排除�?spark 影子账号数量(影子不持凭据、其调度配置不在备份范围)�?
   skipped_shadows?: number
 }
 
@@ -1477,6 +1521,8 @@ export interface UsageLog {
   image_output_size?: string | null
   image_size_source?: ImageSizeSource | null
   image_size_breakdown?: ImageSizeBreakdown | null
+  image_input_tokens: number
+  image_input_cost: number
   request_count: number
   task_count: number
   billable_duration_seconds?: number
@@ -1532,7 +1578,7 @@ export interface AdminUsageLog extends UsageLog {
   // 用户请求 IP（仅管理员可见）
   ip_address?: string | null
 
-  // 最小账号信息（仅管理员接口返回�?
+  // 最小账号信息（仅管理员接口返回�?
   account?: UsageLogAccountSummary
 }
 
@@ -1579,7 +1625,7 @@ export interface RedeemCode {
   group_id?: number | null // 订阅类型专用
   validity_days?: number // 订阅类型专用
   user?: User
-  group?: Group // 关联的分�?}
+  group?: Group // 关联的分�?}
 }
 
 export interface GenerateRedeemCodesRequest {
@@ -1613,21 +1659,21 @@ export interface RedeemCodeRequest {
 export interface DashboardStats {
   // 用户统计
   total_users: number
-  today_new_users: number // 今日新增用户�?
-  active_users: number // 今日有请求的用户�?
-  hourly_active_users: number // 当前小时活跃用户数（UTC�?
-  stats_updated_at: string // 统计更新时间（UTC RFC3339�?
+  today_new_users: number // 今日新增用户�?
+  active_users: number // 今日有请求的用户�?
+  hourly_active_users: number // 当前小时活跃用户数（UTC�?
+  stats_updated_at: string // 统计更新时间（UTC RFC3339�?
   stats_stale: boolean // 统计是否过期
 
   // API Key 统计
   total_api_keys: number
-  active_api_keys: number // 状态为 active �?API Key �?
+  active_api_keys: number // 状态为 active �?API Key �?
   // 账户统计
   total_accounts: number
-  normal_accounts: number // 正常账户�?
-  error_accounts: number // 异常账户�?
-  ratelimit_accounts: number // 限流账户�?
-  overload_accounts: number // 过载账户�?
+  normal_accounts: number // 正常账户�?
+  error_accounts: number // 异常账户�?
+  ratelimit_accounts: number // 限流账户�?
+  overload_accounts: number // 过载账户�?
   // 累计 Token 使用统计
   total_requests: number
   total_input_tokens: number
@@ -1656,11 +1702,11 @@ export interface DashboardStats {
 
   // 系统运行统计
   average_duration_ms: number // 平均响应时间
-  uptime: number // 系统运行时间(�?
+  uptime: number // 系统运行时间(�?
 
   // 性能指标
-  rpm: number // �?分钟平均每分钟请求数
-  tpm: number // �?分钟平均每分钟Token�?}
+  rpm: number // �?分钟平均每分钟请求数
+  tpm: number // �?分钟平均每分钟Token�?}
 }
 
 export interface UsageStatsResponse {
@@ -1719,7 +1765,7 @@ export interface EndpointStat {
   total_tokens: number
   cost: number
   actual_cost: number
-  // 管理端真实计费金额指�?
+  // 管理端真实计费金额指�?
   real_actual_cost?: number
 }
 
@@ -1766,7 +1812,7 @@ export interface UserSpendingRankingItem {
   user_id: number
   email: string
   actual_cost: number
-  // 管理端真实计费金额指�?
+  // 管理端真实计费金额指�?
   real_actual_cost?: number
   requests: number
   tokens: number
@@ -1775,7 +1821,7 @@ export interface UserSpendingRankingItem {
 export interface UserSpendingRankingResponse {
   ranking: UserSpendingRankingItem[]
   total_actual_cost: number
-  // 管理端真实计费总金额指�?
+  // 管理端真实计费总金额指�?
   real_total_actual_cost?: number
   total_requests: number
   total_tokens: number
@@ -1803,6 +1849,7 @@ export interface UpdateUserRequest {
   unified_rate_enabled?: boolean
   unified_rate_multiplier?: number
   concurrency?: number
+  rpm_limit?: number
   status?: 'active' | 'disabled'
   allowed_groups?: number[] | null
   // 用户专属分组倍率配置 (group_id -> rate_multiplier | null)
@@ -1940,7 +1987,7 @@ export interface UserErrorListParams {
   status_code?: number
   category?: string
   api_key_id?: number
-  // 服务端排�?列白名单见后�?opsErrorLogsOrderBy(created_at/model/status_code)
+  // 服务端排�?列白名单见后�?opsErrorLogsOrderBy(created_at/model/status_code)
   sort_by?: string
   sort_order?: 'asc' | 'desc'
 }

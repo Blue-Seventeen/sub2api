@@ -367,12 +367,19 @@ export interface SystemSettings {
   invitation_code_missing_prompt_html: string;
   totp_enabled: boolean; // TOTP 双因素认证
   totp_encryption_key_configured: boolean; // TOTP 加密密钥是否已配置
+  session_binding_enabled: boolean; // 会话 IP/UA 绑定
+  audit_log_retention_days: number; // 审计日志保留天数
   login_agreement_enabled: boolean;
   login_agreement_mode: "modal" | "checkbox" | string;
   login_agreement_updated_at: string;
   login_agreement_documents: LoginAgreementDocument[];
   // Default settings
   default_balance: number;
+  affiliate_rebate_rate: number;
+  affiliate_rebate_freeze_hours: number;
+  affiliate_rebate_duration_days: number;
+  affiliate_rebate_per_invitee_cap: number;
+  affiliate_admin_recharge_enabled: boolean;
   default_concurrency: number;
   default_user_rpm_limit: number;
   default_subscriptions: DefaultSubscriptionSetting[];
@@ -608,6 +615,8 @@ export interface SystemSettings {
   payment_visible_method_wxpay_source?: string;
   payment_visible_method_alipay_enabled?: boolean;
   payment_visible_method_wxpay_enabled?: boolean;
+  openai_low_upstream_rate_priority_enabled?: boolean;
+  openai_oauth_scheduling_rate_multiplier?: number;
   openai_advanced_scheduler_enabled?: boolean;
   openai_advanced_scheduler_sticky_weighted_enabled?: boolean;
   openai_advanced_scheduler_subscription_priority_enabled?: boolean;
@@ -619,6 +628,7 @@ export interface SystemSettings {
   openai_advanced_scheduler_weight_ttft?: string;
   openai_advanced_scheduler_weight_reset?: string;
   openai_advanced_scheduler_weight_quota_headroom?: string;
+  openai_advanced_scheduler_weight_upstream_cost?: string;
   openai_advanced_scheduler_weight_previous_response?: string;
   openai_advanced_scheduler_weight_session_sticky?: string;
   openai_advanced_scheduler_effective_lb_top_k?: string;
@@ -629,6 +639,7 @@ export interface SystemSettings {
   openai_advanced_scheduler_effective_weight_ttft?: string;
   openai_advanced_scheduler_effective_weight_reset?: string;
   openai_advanced_scheduler_effective_weight_quota_headroom?: string;
+  openai_advanced_scheduler_effective_weight_upstream_cost?: string;
   openai_advanced_scheduler_effective_weight_previous_response?: string;
   openai_advanced_scheduler_effective_weight_session_sticky?: string;
 
@@ -668,11 +679,18 @@ export interface UpdateSettingsRequest {
   invitation_code_enabled?: boolean;
   invitation_code_missing_prompt_html?: string;
   totp_enabled?: boolean; // TOTP 双因素认证
+  session_binding_enabled?: boolean; // 会话 IP/UA 绑定
+  audit_log_retention_days?: number; // 审计日志保留天数
   login_agreement_enabled?: boolean;
   login_agreement_mode?: "modal" | "checkbox" | string;
   login_agreement_updated_at?: string;
   login_agreement_documents?: LoginAgreementDocument[];
   default_balance?: number;
+  affiliate_rebate_rate?: number;
+  affiliate_rebate_freeze_hours?: number;
+  affiliate_rebate_duration_days?: number;
+  affiliate_rebate_per_invitee_cap?: number;
+  affiliate_admin_recharge_enabled?: boolean;
   default_concurrency?: number;
   default_user_rpm_limit?: number;
   default_subscriptions?: DefaultSubscriptionSetting[];
@@ -880,6 +898,8 @@ export interface UpdateSettingsRequest {
   payment_visible_method_wxpay_source?: string;
   payment_visible_method_alipay_enabled?: boolean;
   payment_visible_method_wxpay_enabled?: boolean;
+  openai_low_upstream_rate_priority_enabled?: boolean;
+  openai_oauth_scheduling_rate_multiplier?: number;
   openai_advanced_scheduler_enabled?: boolean;
   openai_advanced_scheduler_sticky_weighted_enabled?: boolean;
   openai_advanced_scheduler_subscription_priority_enabled?: boolean;
@@ -891,6 +911,7 @@ export interface UpdateSettingsRequest {
   openai_advanced_scheduler_weight_ttft?: string;
   openai_advanced_scheduler_weight_reset?: string;
   openai_advanced_scheduler_weight_quota_headroom?: string;
+  openai_advanced_scheduler_weight_upstream_cost?: string;
   openai_advanced_scheduler_weight_previous_response?: string;
   openai_advanced_scheduler_weight_session_sticky?: string;
   // 余额、订阅到期与账号限额通知
