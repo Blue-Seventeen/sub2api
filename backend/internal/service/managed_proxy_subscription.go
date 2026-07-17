@@ -12,12 +12,51 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
 const maxManagedProxySubscriptionBytes = 10 << 20
+const defaultManagedProxySubscriptionUserAgent = "sub2api-managed-proxy/1.0"
+
+var (
+	managedProxySubscriptionFetchMu         sync.RWMutex
+	managedProxySubscriptionUserAgent       = defaultManagedProxySubscriptionUserAgent
+	managedProxySubscriptionAppendClashFlag = false
+)
+
+func SetManagedProxySubscriptionFetchOptions(userAgent string, appendClashFlag bool) {
+	managedProxySubscriptionFetchMu.Lock()
+	defer managedProxySubscriptionFetchMu.Unlock()
+	if ua := strings.TrimSpace(userAgent); ua != "" {
+		managedProxySubscriptionUserAgent = ua
+	} else {
+		managedProxySubscriptionUserAgent = defaultManagedProxySubscriptionUserAgent
+	}
+	managedProxySubscriptionAppendClashFlag = appendClashFlag
+}
+
+func managedProxySubscriptionFetchOptions() (userAgent string, appendClashFlag bool) {
+	managedProxySubscriptionFetchMu.RLock()
+	defer managedProxySubscriptionFetchMu.RUnlock()
+	return managedProxySubscriptionUserAgent, managedProxySubscriptionAppendClashFlag
+}
+
+func ensureClashProxyFormatFlag(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return raw
+	}
+	q := u.Query()
+	if q.Has("flag") {
+		return raw
+	}
+	q.Set("flag", "clash")
+	u.RawQuery = q.Encode()
+	return u.String()
+}
 
 var managedProxySubscriptionBlockedCIDRs = mustParseManagedProxySubscriptionCIDRs([]string{
 	"0.0.0.0/8",
@@ -69,11 +108,16 @@ func FetchProxySubscription(ctx context.Context, subscriptionURL string) (*Parse
 	if err := validateManagedProxySubscriptionURL(subscriptionURL); err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, subscriptionURL, nil)
+	userAgent, appendClashFlag := managedProxySubscriptionFetchOptions()
+	fetchURL := subscriptionURL
+	if appendClashFlag {
+		fetchURL = ensureClashProxyFormatFlag(subscriptionURL)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fetchURL, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "sub2api-managed-proxy/1.0")
+	req.Header.Set("User-Agent", userAgent)
 	client := managedProxySubscriptionHTTPClient()
 	resp, err := client.Do(req)
 	if err != nil {
@@ -236,8 +280,14 @@ func ParseProxySubscription(data []byte) (*ParsedProxySubscription, error) {
 		Proxies []map[string]any `yaml:"proxies"`
 		DNS     map[string]any   `yaml:"dns"`
 	}
-	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return nil, fmt.Errorf("parse clash subscription: %w", err)
+	yamlErr := yaml.Unmarshal(data, &doc)
+	if yamlErr != nil || len(doc.Proxies) == 0 {
+		if uriProxies := parseProxyURIListSubscription(data); len(uriProxies) > 0 {
+			doc.Proxies = uriProxies
+			doc.DNS = nil
+		} else if yamlErr != nil {
+			return nil, fmt.Errorf("parse clash subscription: %w", yamlErr)
+		}
 	}
 	if len(doc.Proxies) == 0 {
 		return nil, errors.New("subscription contains no Clash proxies")

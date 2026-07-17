@@ -166,6 +166,41 @@ proxies:
 	}
 }
 
+func TestEnsureClashProxyFormatFlag(t *testing.T) {
+	got := ensureClashProxyFormatFlag("https://sub.example.com/api/v1/client/subscribe?token=abc")
+	if !strings.Contains(got, "flag=clash") || !strings.Contains(got, "token=abc") {
+		t.Fatalf("expected flag=clash appended and token kept, got: %q", got)
+	}
+
+	got = ensureClashProxyFormatFlag("https://sub.example.com/s?token=abc&flag=meta")
+	if strings.Contains(got, "flag=clash") || !strings.Contains(got, "flag=meta") {
+		t.Fatalf("existing flag must be respected, got: %q", got)
+	}
+
+	got = ensureClashProxyFormatFlag("https://sub.example.com/s")
+	if !strings.Contains(got, "flag=clash") {
+		t.Fatalf("expected flag=clash on query-less url, got: %q", got)
+	}
+}
+
+func TestManagedProxySubscriptionFetchOptionsKeepHistoricalDefault(t *testing.T) {
+	origUA, origFlag := managedProxySubscriptionFetchOptions()
+	t.Cleanup(func() { SetManagedProxySubscriptionFetchOptions(origUA, origFlag) })
+
+	SetManagedProxySubscriptionFetchOptions("", false)
+	if ua, flag := managedProxySubscriptionFetchOptions(); ua != defaultManagedProxySubscriptionUserAgent || flag {
+		t.Fatalf("default options = (%q,%v), want (%q,false)", ua, flag, defaultManagedProxySubscriptionUserAgent)
+	}
+	if defaultManagedProxySubscriptionUserAgent != "sub2api-managed-proxy/1.0" {
+		t.Fatalf("historical default UA changed: %q", defaultManagedProxySubscriptionUserAgent)
+	}
+
+	SetManagedProxySubscriptionFetchOptions("clash-verge/v2.0.0", true)
+	if ua, flag := managedProxySubscriptionFetchOptions(); ua != "clash-verge/v2.0.0" || !flag {
+		t.Fatalf("configured options = (%q,%v), want (clash-verge/v2.0.0,true)", ua, flag)
+	}
+}
+
 func TestValidateManagedProxyNodeServer(t *testing.T) {
 	ctx := context.Background()
 	allowedWithoutPolicy := []string{

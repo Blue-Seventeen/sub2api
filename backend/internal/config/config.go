@@ -161,15 +161,17 @@ type UpdateConfig struct {
 }
 
 type ManagedProxyConfig struct {
-	Enabled                   bool   `mapstructure:"enabled"`
-	MihomoBinaryPath          string `mapstructure:"mihomo_binary_path"`
-	WorkDir                   string `mapstructure:"work_dir"`
-	BindHost                  string `mapstructure:"bind_host"`
-	SyncIntervalSec           int    `mapstructure:"sync_interval_sec"`
-	StartTimeoutSec           int    `mapstructure:"start_timeout_sec"`
-	MaxInstances              int    `mapstructure:"max_instances"`
-	DefaultRefreshIntervalSec int    `mapstructure:"default_refresh_interval_sec"`
-	HealthCheckURL            string `mapstructure:"health_check_url"`
+	Enabled                     bool   `mapstructure:"enabled"`
+	MihomoBinaryPath            string `mapstructure:"mihomo_binary_path"`
+	WorkDir                     string `mapstructure:"work_dir"`
+	BindHost                    string `mapstructure:"bind_host"`
+	SyncIntervalSec             int    `mapstructure:"sync_interval_sec"`
+	StartTimeoutSec             int    `mapstructure:"start_timeout_sec"`
+	MaxInstances                int    `mapstructure:"max_instances"`
+	DefaultRefreshIntervalSec   int    `mapstructure:"default_refresh_interval_sec"`
+	HealthCheckURL              string `mapstructure:"health_check_url"`
+	SubscriptionUserAgent       string `mapstructure:"subscription_user_agent"`
+	SubscriptionAppendClashFlag bool   `mapstructure:"subscription_append_clash_flag"`
 }
 
 type IdempotencyConfig struct {
@@ -2282,6 +2284,8 @@ func setDefaults() {
 	viper.SetDefault("managed_proxy.max_instances", 32)
 	viper.SetDefault("managed_proxy.default_refresh_interval_sec", 3600)
 	viper.SetDefault("managed_proxy.health_check_url", "https://www.gstatic.com/generate_204")
+	viper.SetDefault("managed_proxy.subscription_user_agent", "sub2api-managed-proxy/1.0")
+	viper.SetDefault("managed_proxy.subscription_append_clash_flag", false)
 	viper.SetDefault("concurrency.ping_interval", 10)
 
 	// TokenRefresh

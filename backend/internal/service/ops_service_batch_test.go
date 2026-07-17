@@ -21,8 +21,8 @@ func TestOpsServiceRecordErrorBatch_SanitizesAndBatches(t *testing.T) {
 	}
 	svc := NewOpsService(repo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
-	msg := " upstream failed: https://example.com?access_token=secret-value "
-	detail := `{"authorization":"Bearer secret-token"}`
+	msg := " upstream failed: https://example.com?access_token=secret-value token sk-upstream-secret and Authorization: Bearer bearer-upstream-secret "
+	detail := `{"authorization":"Bearer secret-token","error":{"message":"api_key=sk-detail-secret and token=detail-token-secret"}}`
 	entries := []*OpsInsertErrorLogInput{
 		{
 			ErrorMessage:         "Authorization: Bearer sk-secret-token access_token=plain-secret",
@@ -61,9 +61,13 @@ func TestOpsServiceRecordErrorBatch_SanitizesAndBatches(t *testing.T) {
 	require.Nil(t, first.UpstreamStatusCode)
 	require.NotNil(t, first.UpstreamErrorMessage)
 	require.NotContains(t, *first.UpstreamErrorMessage, "secret-value")
+	require.NotContains(t, *first.UpstreamErrorMessage, "sk-upstream-secret")
+	require.NotContains(t, *first.UpstreamErrorMessage, "bearer-upstream-secret")
 	require.Contains(t, *first.UpstreamErrorMessage, "access_token=***")
 	require.NotNil(t, first.UpstreamErrorDetail)
 	require.NotContains(t, *first.UpstreamErrorDetail, "secret-token")
+	require.NotContains(t, *first.UpstreamErrorDetail, "sk-detail-secret")
+	require.NotContains(t, *first.UpstreamErrorDetail, "detail-token-secret")
 	require.NotContains(t, first.ErrorBody, "secret")
 	require.Equal(t, "request_body_timeout", first.NetworkErrorType)
 	require.Nil(t, first.UpstreamErrors)

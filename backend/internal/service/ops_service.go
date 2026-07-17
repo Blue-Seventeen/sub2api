@@ -258,7 +258,7 @@ func (s *OpsService) prepareErrorLogInput(ctx context.Context, entry *OpsInsertE
 		break
 	}
 
-	entry.ErrorMessage = truncateString(logredact.RedactText(strings.TrimSpace(entry.ErrorMessage), "key"), 2048)
+	entry.ErrorMessage = truncateString(sanitizeStoredCredentialText(strings.TrimSpace(entry.ErrorMessage)), 2048)
 
 	// Sanitize + truncate error_body to avoid storing sensitive data.
 	if strings.TrimSpace(entry.ErrorBody) != "" {
@@ -273,6 +273,7 @@ func (s *OpsService) prepareErrorLogInput(ctx context.Context, entry *OpsInsertE
 	if entry.UpstreamErrorMessage != nil {
 		msg := strings.TrimSpace(*entry.UpstreamErrorMessage)
 		msg = sanitizeUpstreamErrorMessage(msg)
+		msg = sanitizeStoredCredentialText(msg)
 		msg = truncateString(msg, 2048)
 		if strings.TrimSpace(msg) == "" {
 			entry.UpstreamErrorMessage = nil
@@ -626,7 +627,7 @@ func redactSensitiveJSON(v any) any {
 		}
 		return out
 	case string:
-		return logredact.RedactText(t, "key")
+		return sanitizeStoredCredentialText(t)
 	default:
 		return v
 	}
@@ -851,9 +852,44 @@ func sanitizeErrorBodyForStorage(raw string, maxBytes int) (sanitized string, tr
 	}
 
 	// Non-JSON: redact text patterns first, then best-effort truncate.
-	safe := logredact.RedactText(raw, "key")
+	safe := sanitizeStoredCredentialText(raw)
 	if maxBytes > 0 && len(safe) > maxBytes {
 		return truncateString(safe, maxBytes), true
 	}
 	return safe, false
+}
+
+func sanitizeStoredCredentialText(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+
+	out := logredact.RedactText(text,
+		"key",
+		"api-key",
+		"apikey",
+		"x-api-key",
+		"x-goog-api-key",
+		"authorization",
+		"access_token",
+		"refresh_token",
+		"id_token",
+		"session_token",
+		"token",
+		"client_secret",
+		"secret",
+		"password",
+		"passwd",
+		"cookie",
+		"set-cookie",
+	)
+	out = userVisibleAPIKeyValueRegex.ReplaceAllString(out, `${1}***${3}`)
+	out = userVisibleTokenValueRegex.ReplaceAllString(out, `${1}***${3}`)
+	out = userVisibleSecretValueRegex.ReplaceAllString(out, `${1}***${3}`)
+	out = userVisibleBearerRegex.ReplaceAllString(out, `${1}***`)
+	out = userVisibleBasicAuthRegex.ReplaceAllString(out, `${1}***`)
+	out = userVisibleJWTRegex.ReplaceAllString(out, `***`)
+	out = userVisibleSkTokenRegex.ReplaceAllString(out, `sk-***REDACTED***`)
+	return out
 }

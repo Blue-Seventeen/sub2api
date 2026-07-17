@@ -88,6 +88,11 @@ managed_proxy:
   max_instances: 32
   default_refresh_interval_sec: 3600
   health_check_url: "https://www.gstatic.com/generate_204"
+  # Subscription fetch User-Agent. Default keeps historical behavior.
+  # Set to "clash-verge/v2.0.0" for V2Board/Xboard panels that negotiate by UA.
+  subscription_user_agent: "sub2api-managed-proxy/1.0"
+  # Append flag=clash only for panels that require it; stored subscription URL is unchanged.
+  subscription_append_clash_flag: false
 
 # =============================================================================
 # CORS Configuration
