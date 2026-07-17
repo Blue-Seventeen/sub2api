@@ -1318,7 +1318,7 @@ func TestAPIKeyAuthUsageStillTouchesLastUsed(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
-	require.Equal(t, 1, touchCalls)
+	require.Eventually(t, func() bool { return touchCalls == 1 }, time.Second, 10*time.Millisecond)
 }
 
 func TestAPIKeyAuthAllowsBalanceBelowMinimumReserve(t *testing.T) {

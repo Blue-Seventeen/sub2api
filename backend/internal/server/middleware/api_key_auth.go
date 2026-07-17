@@ -146,13 +146,13 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 				UserID:      apiKey.User.ID,
 				Concurrency: apiKey.User.Concurrency,
 			})
-		c.Set(string(ContextKeyUserRole), apiKey.User.Role)
-		setGroupContext(c, apiKey.Group)
+			c.Set(string(ContextKeyUserRole), apiKey.User.Role)
+			setGroupContext(c, apiKey.Group)
 			if !billingInfoRequest {
 				apiKeyService.QueueTouchLastUsed(apiKey.ID)
 			}
-		c.Next()
-		return
+			c.Next()
+			return
 		}
 
 		// ── 5. 按端点需要加载订阅 ───────────────────────────────────
@@ -247,13 +247,13 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 			UserID:      apiKey.User.ID,
 			Concurrency: apiKey.User.Concurrency,
 		})
-	c.Set(string(ContextKeyUserRole), apiKey.User.Role)
-	setGroupContext(c, apiKey.Group)
+		c.Set(string(ContextKeyUserRole), apiKey.User.Role)
+		setGroupContext(c, apiKey.Group)
 		if !billingInfoRequest {
 			apiKeyService.QueueTouchLastUsed(apiKey.ID)
 		}
 
-	c.Next()
+		c.Next()
 	}
 }
 

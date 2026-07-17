@@ -298,7 +298,7 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 	if err != nil {
 		return nil, err
 	}
-	targetURL, err := buildGrokMediaURLForAccount(account, endpoint, requestID)
+	targetURL, err := buildGrokMediaURL(account, s.cfg, endpoint, requestID)
 	if err != nil {
 		return nil, err
 	}

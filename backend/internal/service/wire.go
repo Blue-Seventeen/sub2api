@@ -525,6 +525,7 @@ func ProvideAccountRefreshService(
 	openaiOAuthService *OpenAIOAuthService,
 	geminiOAuthService *GeminiOAuthService,
 	antigravityOAuthService *AntigravityOAuthService,
+	grokOAuthService *GrokOAuthService,
 	tokenCacheInvalidator TokenCacheInvalidator,
 ) *AccountRefreshService {
 	return NewAccountRefreshService(
@@ -533,6 +534,7 @@ func ProvideAccountRefreshService(
 		openaiOAuthService,
 		geminiOAuthService,
 		antigravityOAuthService,
+		grokOAuthService,
 		tokenCacheInvalidator,
 	)
 }

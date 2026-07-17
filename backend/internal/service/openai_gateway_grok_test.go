@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -172,7 +173,7 @@ func TestBuildGrokResponsesRequestUsesAccountBaseURLAndBearerToken(t *testing.T)
 		},
 	}
 
-	req, err := buildGrokResponsesRequest(context.Background(), nil, account, []byte(`{"model":"grok-4.3"}`), "access-token", "")
+	req, err := buildGrokResponsesRequest(context.Background(), nil, account, []byte(`{"model":"grok-4.3"}`), "access-token", "", nil)
 	require.NoError(t, err)
 	require.Equal(t, http.MethodPost, req.Method)
 	require.Equal(t, "https://xai.test/v1/responses", req.URL.String())
@@ -1205,7 +1206,8 @@ func TestForwardAsChatCompletionsForGrokAPIKeyCompatibleBaseURL(t *testing.T) {
 	require.Equal(t, "https://www.ganshuchang.asia/v1/chat/completions", upstream.lastReq.URL.String())
 	require.Equal(t, "Bearer xai-api-key", upstream.lastReq.Header.Get("Authorization"))
 	require.Equal(t, "text/event-stream", upstream.lastReq.Header.Get("Accept"))
-	require.Equal(t, "sub2api-grok/1.0", upstream.lastReq.Header.Get("User-Agent"))
+	require.Empty(t, upstream.lastReq.Header.Get("X-Grok-Client-Version"))
+	require.NotEqual(t, grokUpstreamUserAgent, upstream.lastReq.Header.Get("User-Agent"))
 	require.Equal(t, "grok-4.5", gjson.GetBytes(upstream.lastBody, "model").String())
 	require.True(t, gjson.GetBytes(upstream.lastBody, "stream_options.include_usage").Bool())
 	require.True(t, result.Stream)
@@ -1573,7 +1575,7 @@ func TestOpenAIWSHTTPBridgeGrok429PersistsRateLimit(t *testing.T) {
 func TestOpenAIWSHTTPBridgeGrokExhaustedSuccessPersistsRateLimit(t *testing.T) {
 	repo := &grokQuotaAccountRepo{}
 	resetAt := time.Now().Add(20 * time.Minute).UTC().Truncate(time.Second)
-	resp := grokMessagesSSECompletedResponse("resp_ws_limited", 0)
+	resp := openAICompatSSECompletedResponse("resp_ws_limited", "grok-4.3")
 	resp.Header.Set("X-Ratelimit-Limit-Requests", "10")
 	resp.Header.Set("X-Ratelimit-Remaining-Requests", "0")
 	resp.Header.Set("X-Ratelimit-Reset-Requests", fmt.Sprintf("%d", resetAt.Unix()))

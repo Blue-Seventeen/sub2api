@@ -182,8 +182,9 @@ func TestValidateXAIAPIKeyBaseURLStillRejectsUnsafeTargets(t *testing.T) {
 	_, err = ValidateAPIKeyBaseURL("https://127.0.0.1:8080/v1")
 	require.Error(t, err)
 
-	_, err = ValidateAPIKeyBaseURL("https://relay.example.com/custom")
-	require.Error(t, err)
+	baseURL, err := ValidateAPIKeyBaseURL("https://relay.example.com/custom")
+	require.NoError(t, err)
+	require.Equal(t, "https://relay.example.com/custom", baseURL)
 }
 
 func TestValidateBaseURLAllowsPublicThirdPartyGrokAPI(t *testing.T) {

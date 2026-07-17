@@ -91,7 +91,7 @@ func (h *PaymentHandler) GetPlans(c *gin.Context) {
 			CustomLimitHours: gi.CustomLimitHours, CustomLimitUSD: gi.CustomLimitUSD,
 			ModelScopes: gi.ModelScopes,
 			Name:        p.Name, Description: p.Description, Price: p.Price, OriginalPrice: p.OriginalPrice,
-			Currency:    p.Currency,
+			Currency:        p.Currency,
 			PeakRateEnabled: gi.PeakRateEnabled, PeakStart: gi.PeakStart,
 			PeakEnd: gi.PeakEnd, PeakRateMultiplier: gi.PeakRateMultiplier, PeakRateWindows: gi.PeakRateWindows,
 			ValidityDays: p.ValidityDays, ValidityUnit: p.ValidityUnit, Features: p.Features,

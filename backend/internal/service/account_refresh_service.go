@@ -20,6 +20,7 @@ type AccountRefreshService struct {
 	openaiOAuthService      *OpenAIOAuthService
 	geminiOAuthService      *GeminiOAuthService
 	antigravityOAuthService *AntigravityOAuthService
+	grokOAuthService        GrokOAuthTokenService
 	tokenCacheInvalidator   TokenCacheInvalidator
 }
 
@@ -29,6 +30,7 @@ func NewAccountRefreshService(
 	openaiOAuthService *OpenAIOAuthService,
 	geminiOAuthService *GeminiOAuthService,
 	antigravityOAuthService *AntigravityOAuthService,
+	grokOAuthService GrokOAuthTokenService,
 	tokenCacheInvalidator TokenCacheInvalidator,
 ) *AccountRefreshService {
 	return &AccountRefreshService{
@@ -37,6 +39,7 @@ func NewAccountRefreshService(
 		openaiOAuthService:      openaiOAuthService,
 		geminiOAuthService:      geminiOAuthService,
 		antigravityOAuthService: antigravityOAuthService,
+		grokOAuthService:        grokOAuthService,
 		tokenCacheInvalidator:   tokenCacheInvalidator,
 	}
 }
@@ -119,6 +122,23 @@ func (s *AccountRefreshService) RefreshAccount(ctx context.Context, account *Acc
 			if _, clearErr := s.adminService.ClearAccountError(ctx, account.ID); clearErr != nil {
 				return nil, fmt.Errorf("failed to clear account error: %w", clearErr)
 			}
+		}
+	case PlatformGrok:
+		if s.grokOAuthService == nil {
+			return nil, fmt.Errorf("grok oauth service not configured")
+		}
+		tokenInfo, refreshErr := s.grokOAuthService.RefreshAccountToken(ctx, account)
+		if refreshErr != nil {
+			return nil, refreshErr
+		}
+		newCredentials = s.grokOAuthService.BuildAccountCredentials(tokenInfo)
+		for k, v := range account.Credentials {
+			if _, exists := newCredentials[k]; !exists {
+				newCredentials[k] = v
+			}
+		}
+		if oldBaseURL := strings.TrimSpace(account.GetCredential("base_url")); oldBaseURL != "" {
+			newCredentials["base_url"] = oldBaseURL
 		}
 	default:
 		if s.oauthService == nil {

@@ -56,6 +56,7 @@ func TestRefreshSingleAccountRoutesGrokThroughGrokOAuthService(t *testing.T) {
 		RefreshToken: "new-refresh",
 		ExpiresAt:    1_800_000_000,
 	}}
+	accountRefreshSvc := service.NewAccountRefreshService(adminSvc, nil, nil, nil, nil, grokOAuth, nil)
 	handler := NewAccountHandler(
 		adminSvc,
 		nil,
@@ -66,6 +67,7 @@ func TestRefreshSingleAccountRoutesGrokThroughGrokOAuthService(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		accountRefreshSvc,
 		nil,
 		nil,
 		nil,
