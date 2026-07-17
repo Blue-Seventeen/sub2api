@@ -5,6 +5,7 @@ import (
 	"go/parser"
 	"go/token"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -41,6 +42,42 @@ func TestOpenAIRecordUsageInputsCarryQuotaPlatform(t *testing.T) {
 	}
 }
 
+func TestGatewayRecordUsageInputsCarryQuotaPlatform(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	require.NoError(t, err)
+
+	for _, path := range files {
+		name := filepath.Base(path)
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		t.Run(name, func(t *testing.T) {
+			fset := token.NewFileSet()
+			file, err := parser.ParseFile(fset, path, nil, 0)
+			require.NoError(t, err)
+
+			var missingQuotaPlatform []token.Position
+			var missingChannelUsageFields []token.Position
+			ast.Inspect(file, func(node ast.Node) bool {
+				literal, ok := node.(*ast.CompositeLit)
+				if !ok || !isGatewayRecordUsageInputLiteral(literal.Type) {
+					return true
+				}
+				if !compositeLiteralHasKey(literal, "QuotaPlatform") {
+					missingQuotaPlatform = append(missingQuotaPlatform, fset.Position(literal.Lbrace))
+				}
+				if !compositeLiteralHasKey(literal, "ChannelUsageFields") {
+					missingChannelUsageFields = append(missingChannelUsageFields, fset.Position(literal.Lbrace))
+				}
+				return true
+			})
+
+			require.Empty(t, missingQuotaPlatform, "gateway usage post-billing must receive request-time QuotaPlatform")
+			require.Empty(t, missingChannelUsageFields, "gateway usage post-billing must receive channel mapping fields")
+		})
+	}
+}
+
 func isOpenAIRecordUsageInputLiteral(expr ast.Expr) bool {
 	selector, ok := expr.(*ast.SelectorExpr)
 	if !ok {
@@ -48,6 +85,15 @@ func isOpenAIRecordUsageInputLiteral(expr ast.Expr) bool {
 	}
 	pkg, ok := selector.X.(*ast.Ident)
 	return ok && pkg.Name == "service" && selector.Sel.Name == "OpenAIRecordUsageInput"
+}
+
+func isGatewayRecordUsageInputLiteral(expr ast.Expr) bool {
+	selector, ok := expr.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	pkg, ok := selector.X.(*ast.Ident)
+	return ok && pkg.Name == "service" && selector.Sel.Name == "RecordUsageInput"
 }
 
 func compositeLiteralHasKey(literal *ast.CompositeLit, key string) bool {

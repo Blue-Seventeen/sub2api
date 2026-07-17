@@ -780,6 +780,38 @@ func TestNewAPIStyleAudioMultipartModelExtractionAndRewrite(t *testing.T) {
 	}
 }
 
+func TestNewAPIStyleAudioMultipartChannelMappedModelRewrite(t *testing.T) {
+	body, contentType := buildNewAPIStyleAudioMultipart(t, "public-asr", []byte("fake-audio-bytes"))
+	upstream := &httpUpstreamRecorder{resp: newAPIStyleAudioResponse("application/json", `{"text":"ok"}`)}
+	svc := &NewAPIStyleGatewayService{httpUpstream: upstream}
+	account := newAPIStyleAudioAccount(PlatformZhipu, nil)
+
+	result, _, err := svc.Forward(context.Background(), newAPIStyleTestContext(), account, NewAPIStyleForwardOptions{
+		Route:              NewAPIStyleRouteAudio,
+		RequestBody:        body,
+		Model:              "public-asr",
+		ChannelMappedModel: "glm-asr-upstream",
+		InboundPath:        "/v1/audio/transcriptions",
+		ContentType:        contentType,
+		HeaderSource: http.Header{
+			"Authorization": []string{"Bearer client-token"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Forward() error = %v", err)
+	}
+	if result == nil || result.Model != "glm-asr-upstream" {
+		t.Fatalf("result model = %#v, want channel mapped model", result)
+	}
+	model, fileBytes := readNewAPIStyleAudioMultipart(t, upstream.lastBody, upstream.lastReq.Header.Get("Content-Type"))
+	if model != "glm-asr-upstream" {
+		t.Fatalf("multipart model = %q, want channel mapped model", model)
+	}
+	if string(fileBytes) != "fake-audio-bytes" {
+		t.Fatalf("multipart file bytes = %q, want original file bytes", string(fileBytes))
+	}
+}
+
 func TestExtractNewAPIStyleModelReadsMultipartFormField(t *testing.T) {
 	body, contentType := buildNewAPIStyleAudioMultipart(t, "glm-asr", []byte("audio"))
 

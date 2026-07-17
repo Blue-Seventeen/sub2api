@@ -139,6 +139,10 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 		return
 	}
 	channelMapping, _ := h.base.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, model)
+	forwardModel := model
+	if channelMapping.Mapped {
+		forwardModel = channelMapping.MappedModel
+	}
 
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	parsedReq, err := service.ParseGatewayRequest(service.NewRequestBodyRef(body), "")
@@ -197,7 +201,8 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 		defer userReleaseFunc()
 	}
 
-	if err := h.base.billingCacheService.CheckBillingEligibilityFreshSubscription(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
+	quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
+	if err := h.base.billingCacheService.CheckBillingEligibilityFreshSubscription(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, quotaPlatform); err != nil {
 		status, code, message, retryAfter := billingErrorDetails(err)
 		if retryAfter > 0 {
 			c.Header("Retry-After", fmt.Sprintf("%d", retryAfter))
@@ -307,16 +312,17 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 			c,
 			account,
 			service.NewAPIStyleForwardOptions{
-				Route:        route,
-				Group:        apiKey.Group,
-				RequestBody:  body,
-				Stream:       stream,
-				Model:        model,
-				Method:       c.Request.Method,
-				InboundPath:  c.Request.URL.Path,
-				QueryString:  c.Request.URL.RawQuery,
-				ContentType:  c.GetHeader("Content-Type"),
-				HeaderSource: c.Request.Header,
+				Route:              route,
+				Group:              apiKey.Group,
+				RequestBody:        body,
+				Stream:             stream,
+				Model:              model,
+				ChannelMappedModel: forwardModel,
+				Method:             c.Request.Method,
+				InboundPath:        c.Request.URL.Path,
+				QueryString:        c.Request.URL.RawQuery,
+				ContentType:        c.GetHeader("Content-Type"),
+				HeaderSource:       c.Request.Header,
 			},
 		)
 		endProxyActiveUsage(activeUsageHandle)
@@ -392,6 +398,7 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 				User:                  apiKey.User,
 				Account:               account,
 				Subscription:          subscription,
+				QuotaPlatform:         quotaPlatform,
 				InboundEndpoint:       inboundEndpoint,
 				UpstreamEndpoint:      upstreamEndpoint,
 				UserAgent:             userAgent,

@@ -669,7 +669,6 @@ func usageLogFromServiceUser(l *service.UsageLog) UsageLog {
 		UsageEstimated:            l.UsageEstimated,
 		BillableUnitType:          l.BillableUnitType,
 		UserAgent:                 l.UserAgent,
-		IPAddress:                 l.IPAddress,
 		CacheTTLOverridden:        l.CacheTTLOverridden,
 		BillingMode:               l.BillingMode,
 		CreatedAt:                 l.CreatedAt,

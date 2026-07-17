@@ -1,8 +1,6 @@
 <template>
   <div class="flex min-h-0 flex-1 flex-col">
     <div class="card flex min-h-0 flex-1 flex-col overflow-hidden">
-      <IpGeoBatchToolbar :ips="rows.map((r) => r.client_ip)" @failed="emit('ipGeoBatchFailed')" />
-
       <DataTable
         :columns="columns"
         :data="rows"
@@ -78,16 +76,6 @@
           <span class="text-sm text-gray-900 dark:text-white">{{ row.platform || '-' }}</span>
         </template>
 
-        <template #cell-client_ip="{ row }">
-          <div @click.stop>
-            <div v-if="row.client_ip">
-              <span class="text-sm font-mono text-gray-600 dark:text-gray-400">{{ row.client_ip }}</span>
-              <IpGeoCell :ip="row.client_ip" />
-            </div>
-            <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
-          </div>
-        </template>
-
         <template #cell-created_at="{ row }">
           <span class="text-sm text-gray-600 dark:text-gray-400">{{ formatDateTime(row.created_at) }}</span>
         </template>
@@ -127,8 +115,6 @@ import DataTable from '@/components/common/DataTable.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import UserErrorDetailModal from '@/components/user/UserErrorDetailModal.vue'
-import IpGeoCell from '@/components/common/IpGeoCell.vue'
-import IpGeoBatchToolbar from '@/components/common/IpGeoBatchToolbar.vue'
 import { formatDateTime } from '@/utils/format'
 import {
   mapErrorSortKey,
@@ -153,7 +139,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'update:page', v: number): void
   (e: 'update:pageSize', v: number): void
-  (e: 'ipGeoBatchFailed'): void
   (e: 'sort', sortBy: string, sortOrder: 'asc' | 'desc'): void
 }>()
 
@@ -163,13 +148,12 @@ function onSort(key: string, order: 'asc' | 'desc') {
 
 const { t } = useI18n()
 
-// 列序对齐用户端用量明细:Key → 模型 → 端点 → IP → 分组 → 类型 → 平台 → 分类
+// 列序对齐用户端用量明细:Key → 模型 → 端点 → 分组 → 类型 → 平台 → 分类
 // → 结果(状态→消息)→ 时间 → UA(用量明细 UA 同在时间之后的尾部)
 const allColumns = computed<Column[]>(() => [
   { key: 'key_name', label: t('usage.errors.keyName') },
   { key: 'model', label: t('usage.errors.model'), sortable: true },
   { key: 'endpoint', label: t('usage.errors.endpoint') },
-  { key: 'client_ip', label: 'IP' },
   { key: 'group', label: t('admin.usage.group') },
   { key: 'type', label: t('usage.type') },
   { key: 'platform', label: t('usage.errors.platform') },

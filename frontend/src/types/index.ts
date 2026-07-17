@@ -1534,8 +1534,6 @@ export interface UsageLog {
 
   // User-Agent
   user_agent: string | null
-  ip_address?: string | null
-
   // Cache TTL Override
   cache_ttl_overridden: boolean
 
@@ -1965,7 +1963,6 @@ export interface UserErrorRequest {
   message: string
   key_name: string
   key_deleted: boolean
-  client_ip?: string
   group_name?: string
   request_type?: number
   stream?: boolean

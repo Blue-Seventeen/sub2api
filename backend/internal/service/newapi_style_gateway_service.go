@@ -86,18 +86,21 @@ func NewNewAPIStyleGatewayService(
 }
 
 type NewAPIStyleForwardOptions struct {
-	Route        NewAPIStyleRoute
-	Group        *Group
-	RequestBody  []byte
-	Stream       bool
-	Model        string
-	ImageSize    string
-	Method       string
-	InboundPath  string
-	QueryString  string
-	ForceTask    bool
-	ContentType  string
-	HeaderSource http.Header
+	Route       NewAPIStyleRoute
+	Group       *Group
+	RequestBody []byte
+	Stream      bool
+	Model       string
+	// ChannelMappedModel is resolved by handlers before async billing so
+	// forwarding and usage records share the same channel mapping semantics.
+	ChannelMappedModel string
+	ImageSize          string
+	Method             string
+	InboundPath        string
+	QueryString        string
+	ForceTask          bool
+	ContentType        string
+	HeaderSource       http.Header
 }
 
 func (s *NewAPIStyleGatewayService) Supports(account *Account, route NewAPIStyleRoute) bool {
@@ -189,12 +192,22 @@ func (s *NewAPIStyleGatewayService) Forward(
 	if !opts.Stream && len(opts.RequestBody) > 0 {
 		opts.Stream = gjson.GetBytes(opts.RequestBody, "stream").Bool()
 	}
+	body := opts.RequestBody
+	if channelMappedModel := strings.TrimSpace(opts.ChannelMappedModel); channelMappedModel != "" && opts.Model != "" && channelMappedModel != opts.Model {
+		rewrittenBody, rewrittenContentType, err := replaceNewAPIStyleModelInBody(body, opts.ContentType, channelMappedModel)
+		if err != nil {
+			return nil, "", err
+		}
+		body = rewrittenBody
+		opts.RequestBody = rewrittenBody
+		opts.ContentType = rewrittenContentType
+		opts.Model = channelMappedModel
+	}
 
 	targetURL, upstreamEndpoint, err := s.buildTargetURL(account, opts)
 	if err != nil {
 		return nil, upstreamEndpoint, err
 	}
-	body := opts.RequestBody
 	if opts.Model != "" {
 		if mapped := account.GetMappedModel(opts.Model); mapped != "" && mapped != opts.Model {
 			rewrittenBody, rewrittenContentType, err := replaceNewAPIStyleModelInBody(body, opts.ContentType, mapped)

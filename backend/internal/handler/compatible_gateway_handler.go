@@ -198,6 +198,13 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 		h.writeRouteError(c, route, securityAuditStatus(decision), securityAuditErrorCode(decision), securityAuditMessage(decision), false)
 		return
 	}
+	channelMapping, _ := h.base.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, parsed.Model)
+	forwardBody := body
+	forwardModel := parsed.Model
+	if channelMapping.Mapped {
+		forwardBody = h.base.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
+		forwardModel = channelMapping.MappedModel
+	}
 
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	parsed.SessionContext = &service.SessionContext{
@@ -240,7 +247,8 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 		}
 	}()
 
-	if err := h.base.billingCacheService.CheckBillingEligibilityFreshSubscription(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
+	quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
+	if err := h.base.billingCacheService.CheckBillingEligibilityFreshSubscription(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, quotaPlatform); err != nil {
 		status, code, message, retryAfter := billingErrorDetails(err)
 		if retryAfter > 0 {
 			c.Header("Retry-After", strconv.Itoa(retryAfter))
@@ -353,23 +361,24 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 					c,
 					account,
 					service.NewAPIStyleForwardOptions{
-						Route:        newAPIRoute,
-						Group:        apiKey.Group,
-						RequestBody:  body,
-						Stream:       parsed.Stream,
-						Model:        parsed.Model,
-						Method:       http.MethodPost,
-						InboundPath:  c.Request.URL.Path,
-						QueryString:  c.Request.URL.RawQuery,
-						ContentType:  c.GetHeader("Content-Type"),
-						HeaderSource: c.Request.Header,
+						Route:              newAPIRoute,
+						Group:              apiKey.Group,
+						RequestBody:        forwardBody,
+						Stream:             parsed.Stream,
+						Model:              parsed.Model,
+						ChannelMappedModel: forwardModel,
+						Method:             http.MethodPost,
+						InboundPath:        c.Request.URL.Path,
+						QueryString:        c.Request.URL.RawQuery,
+						ContentType:        c.GetHeader("Content-Type"),
+						HeaderSource:       c.Request.Header,
 					},
 				)
 			} else {
-				result, upstreamEndpoint, err = h.compatibleService.Forward(c.Request.Context(), c, account, route, body)
+				result, upstreamEndpoint, err = h.compatibleService.Forward(c.Request.Context(), c, account, route, forwardBody)
 			}
 		} else {
-			result, upstreamEndpoint, err = h.compatibleService.Forward(c.Request.Context(), c, account, route, body)
+			result, upstreamEndpoint, err = h.compatibleService.Forward(c.Request.Context(), c, account, route, forwardBody)
 		}
 		endProxyActiveUsage(activeUsageHandle)
 		if accountReleaseFunc != nil {
@@ -453,6 +462,7 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 				User:                  apiKey.User,
 				Account:               account,
 				Subscription:          subscription,
+				QuotaPlatform:         quotaPlatform,
 				InboundEndpoint:       inboundEndpoint,
 				UpstreamEndpoint:      upstreamEndpoint,
 				UserAgent:             userAgent,
@@ -463,6 +473,7 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 				UpstreamTransport:     compat.UpstreamTransport,
 				RequestPayloadHash:    requestPayloadHash,
 				APIKeyService:         h.base.apiKeyService,
+				ChannelUsageFields:    channelMapping.ToUsageFields(parsed.Model, result.UpstreamModel),
 			}); err != nil {
 				reqLog.Error("compatible.record_usage_failed", zap.Error(err), zap.Int64("account_id", account.ID))
 			}

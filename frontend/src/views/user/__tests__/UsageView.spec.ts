@@ -127,7 +127,6 @@ const usageLog = {
   created_at: '2026-03-08T00:00:00Z',
   model: 'gpt-5.4',
   reasoning_effort: null,
-  ip_address: '203.0.113.10',
   api_key: { name: 'demo-key' },
   billing_mode: 'token',
   request_type: 'sync',
@@ -256,14 +255,14 @@ describe('user UsageView', () => {
     expect(showSuccess).toHaveBeenCalled()
     const csvContent = csv.getCsv()
     expect(csvContent.startsWith('\uFEFF')).toBe(true)
-    expect(csvContent).toContain('IP Address')
+    expect(csvContent).not.toContain('IP Address')
     expect(csvContent).toContain('Image Output Tokens')
     expect(csvContent).toContain('Billable Duration Seconds')
     expect(csvContent).toContain('Billable Characters')
     expect(csvContent).toContain('Billed Cost')
     expect(csvContent).toContain('Original Cost')
     expect(csvContent).toContain('Image Output Cost')
-    expect(csvContent).toContain('203.0.113.10')
+    expect(csvContent).not.toContain('203.0.113.10')
     expect(csvContent).toContain(',4057,50,278272,4,150,12,345,')
     expect(csvContent).toContain('0.08100000')
     expect(csvContent).not.toContain('Upstream Endpoint')
@@ -290,7 +289,6 @@ describe('user UsageView', () => {
           image_count: 1,
           model: 'gpt-image-2',
           billing_mode: null,
-          ip_address: null,
         },
       ],
       total: 1,

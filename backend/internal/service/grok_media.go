@@ -284,6 +284,7 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 	requestID string,
 	body []byte,
 	contentType string,
+	channelMappedModel string,
 ) (*OpenAIForwardResult, error) {
 	startTime := time.Now()
 	if account == nil {
@@ -303,6 +304,10 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 	}
 
 	body, contentType, err = prepareGrokMediaForwardBody(endpoint, body, contentType)
+	if err != nil {
+		return nil, err
+	}
+	body, contentType, err = rewriteGrokMediaModelInBody(body, contentType, channelMappedModel)
 	if err != nil {
 		return nil, err
 	}
@@ -451,6 +456,18 @@ func prepareGrokMediaForwardBody(endpoint GrokMediaEndpoint, body []byte, conten
 		return nil, "", err
 	}
 	return out, "application/json", nil
+}
+
+func rewriteGrokMediaModelInBody(body []byte, contentType string, model string) ([]byte, string, error) {
+	model = strings.TrimSpace(model)
+	if model == "" || len(body) == 0 || !gjson.ValidBytes(body) {
+		return body, contentType, nil
+	}
+	out, err := sjson.SetBytes(body, "model", model)
+	if err != nil {
+		return nil, "", fmt.Errorf("rewrite grok media channel model: %w", err)
+	}
+	return out, contentType, nil
 }
 
 func normalizeGrokMediaForwardBody(endpoint GrokMediaEndpoint, body []byte, contentType string) ([]byte, string, error) {

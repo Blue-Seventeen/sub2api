@@ -181,7 +181,6 @@
           default-sort-key="created_at"
           default-sort-order="desc"
           @sort="handleSort"
-          @ipGeoBatchFailed="handleIpGeoBatchFailed"
         />
 
         <Pagination
@@ -205,7 +204,6 @@
         @sort="onErrorSort"
         @update:page="onErrorPage"
         @update:pageSize="onErrorPageSize"
-        @ipGeoBatchFailed="handleIpGeoBatchFailed"
       />
     </div>
   </AppLayout>
@@ -598,10 +596,6 @@ const handleSort = (key: string, order: 'asc' | 'desc') => {
   void loadLogs()
 }
 
-const handleIpGeoBatchFailed = () => {
-  appStore.showError(t('usage.ipGeo.batchFailed'))
-}
-
 const getRequestTypeExportText = (log: UsageLog): string => {
   const requestType = resolveUsageRequestType(log)
   if (requestType === 'cyber') return 'Cyber'
@@ -654,7 +648,6 @@ const exportToCSV = async () => {
       'Model',
       'Reasoning Effort',
       'Inbound Endpoint',
-      'IP Address',
       'Type',
       'Billing Mode',
       'Input Tokens',
@@ -677,7 +670,6 @@ const exportToCSV = async () => {
       log.model,
       formatReasoningEffort(log.reasoning_effort),
       log.inbound_endpoint || '',
-      log.ip_address || '',
       getRequestTypeExportText(log),
       getBillingModeLabel(getDisplayBillingMode(log), t),
       log.input_tokens,
@@ -723,7 +715,6 @@ const allColumns = computed<Column[]>(() => [
   { key: 'model', label: t('usage.model'), sortable: true },
   { key: 'reasoning_effort', label: t('usage.reasoningEffort'), sortable: false },
   { key: 'endpoint', label: t('usage.endpoint'), sortable: false },
-  { key: 'ip_address', label: 'IP', sortable: false },
   { key: 'group', label: t('admin.usage.group'), sortable: false },
   { key: 'stream', label: t('usage.type'), sortable: false },
   { key: 'billing_mode', label: t('admin.usage.billingMode'), sortable: false },
@@ -765,7 +756,6 @@ const errAllColumns = computed<Column[]>(() => [
   { key: 'key_name', label: t('usage.errors.keyName') },
   { key: 'model', label: t('usage.errors.model') },
   { key: 'endpoint', label: t('usage.errors.endpoint') },
-  { key: 'client_ip', label: 'IP' },
   { key: 'group', label: t('admin.usage.group') },
   { key: 'type', label: t('usage.type') },
   { key: 'platform', label: t('usage.errors.platform') },
