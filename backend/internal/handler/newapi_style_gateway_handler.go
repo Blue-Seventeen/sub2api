@@ -134,8 +134,8 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 			return
 		}
 	}
-	if decision := h.base.checkContentModeration(c, reqLog, apiKey, subject, contentModerationProtocolForNewAPIStyleRoute(route), model, body); decision != nil && decision.Blocked {
-		h.writeError(c, contentModerationStatus(decision), contentModerationErrorCode(decision), decision.Message)
+	if decision := h.base.checkSecurityAudit(c, reqLog, apiKey, subject, contentModerationProtocolForNewAPIStyleRoute(route), model, body); decision != nil && !decision.AllowNextStage {
+		h.writeError(c, securityAuditStatus(decision), securityAuditErrorCode(decision), securityAuditMessage(decision))
 		return
 	}
 	channelMapping, _ := h.base.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, model)

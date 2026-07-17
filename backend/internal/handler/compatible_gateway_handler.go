@@ -194,8 +194,8 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 		h.writeRouteError(c, route, http.StatusForbidden, "permission_error", groupModelsListDisallowedMessage(parsed.Model), false)
 		return
 	}
-	if decision := h.base.checkContentModeration(c, reqLog, apiKey, subject, contentModerationProtocolForCompatibleRoute(route), parsed.Model, body); decision != nil && decision.Blocked {
-		h.writeRouteError(c, route, contentModerationStatus(decision), contentModerationErrorCode(decision), decision.Message, false)
+	if decision := h.base.checkSecurityAudit(c, reqLog, apiKey, subject, contentModerationProtocolForCompatibleRoute(route), parsed.Model, body); decision != nil && !decision.AllowNextStage {
+		h.writeRouteError(c, route, securityAuditStatus(decision), securityAuditErrorCode(decision), securityAuditMessage(decision), false)
 		return
 	}
 
