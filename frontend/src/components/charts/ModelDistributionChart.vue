@@ -276,6 +276,7 @@ const props = withDefaults(defineProps<{
   showMetricToggle?: boolean
   enableBreakdown?: boolean
   showAccountCost?: boolean
+  costDisplayMode?: 'real' | 'display'
   rankingLoading?: boolean
   rankingError?: boolean
   startDate?: string
@@ -296,6 +297,7 @@ const props = withDefaults(defineProps<{
   showMetricToggle: false,
   enableBreakdown: true,
   showAccountCost: true,
+  costDisplayMode: 'real',
   rankingLoading: false,
   rankingError: false
 })
@@ -340,8 +342,10 @@ const showAccountCost = computed(() => props.showAccountCost)
 const distributionColspan = computed(() => showAccountCost.value ? 6 : 5)
 const activeView = ref<'model_distribution' | 'spending_ranking'>('model_distribution')
 
-const getModelActualCost = (item: ModelStat) => toFiniteNumber(item.real_actual_cost ?? item.actual_cost)
-const getRankingActualCost = (item: RankingDisplayItem) => toFiniteNumber(item.real_actual_cost ?? item.actual_cost)
+const getModelActualCost = (item: ModelStat) =>
+  toFiniteNumber(props.costDisplayMode === 'display' ? item.actual_cost : item.real_actual_cost ?? item.actual_cost)
+const getRankingActualCost = (item: RankingDisplayItem) =>
+  toFiniteNumber(props.costDisplayMode === 'display' ? item.actual_cost : item.real_actual_cost ?? item.actual_cost)
 
 const chartColors = [
   '#3b82f6',

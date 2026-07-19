@@ -100,9 +100,11 @@ const props = withDefaults(defineProps<{
   stats: (AdminUsageStatsResponse | UsageStatsResponse) | null
   showAccountCost?: boolean
   strikeStandardCost?: boolean
+  costDisplayMode?: 'real' | 'display'
 }>(), {
   showAccountCost: true,
   strikeStandardCost: false,
+  costDisplayMode: 'real',
 })
 
 const { t } = useI18n()
@@ -124,7 +126,10 @@ const formatTokens = (value: number) => {
   return value.toLocaleString()
 }
 
-const getTotalCost = () => props.stats?.real_total_actual_cost ?? props.stats?.total_actual_cost ?? 0
+const getTotalCost = () =>
+  props.costDisplayMode === 'display'
+    ? props.stats?.total_actual_cost ?? 0
+    : props.stats?.real_total_actual_cost ?? props.stats?.total_actual_cost ?? 0
 const cacheLabel = () => t('usage.cacheTotal')
 const cacheDetailLabel = () => t('usage.cacheBreakdown')
 </script>

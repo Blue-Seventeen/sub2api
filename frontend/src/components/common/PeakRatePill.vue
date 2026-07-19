@@ -76,6 +76,7 @@ import {
   type PeakRateDisplayMode,
   type PeakRateWindow,
 } from '@/utils/peak-rate'
+import { formatRateMultiplier } from '@/utils/formatters'
 
 interface Props {
   peakRateEnabled?: boolean
@@ -131,24 +132,19 @@ const fullText = computed(() => formatPeakRateWindow(fields.value, timezoneLabel
 const displayText = computed(() => {
   if (props.displayMode === 'full') return fullText.value
   if (windows.value.length === 1) {
-    return t('common.peakRateCompactSingle', { multiplier: windows.value[0].multiplier ?? 1 })
+    return t('common.peakRateCompactSingle', { multiplier: formatRateMultiplier(windows.value[0].multiplier ?? 1) })
   }
   return t('common.peakRateCompactMultiple', { count: windows.value.length })
 })
-
-const formatMultiplier = (value: number) => {
-  if (!Number.isFinite(value)) return '1'
-  return Number(value.toFixed(6)).toString()
-}
 
 const formatPeakRateLine = (window: PeakRateWindow) => {
   const base = props.baseMultiplier ?? 1
   const peak = window.multiplier ?? 1
   return t('common.peakRateFormula', {
     window: `${window.start}-${window.end}`,
-    base: formatMultiplier(base),
-    peak: formatMultiplier(peak),
-    final: formatMultiplier(base * peak),
+    base: formatRateMultiplier(base),
+    peak: formatRateMultiplier(peak),
+    final: formatRateMultiplier(base * peak),
   })
 }
 

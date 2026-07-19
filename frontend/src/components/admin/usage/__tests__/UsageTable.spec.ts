@@ -29,6 +29,7 @@ const messages: Record<string, string> = {
   'usage.rate': 'Rate',
   'usage.accountMultiplier': 'Account rate',
   'usage.original': 'Original',
+  'usage.actualCost': 'Actual',
   'usage.userBilled': 'User billed',
   'usage.accountBilled': 'Account billed',
   'usage.imageUnit': ' images',
@@ -200,6 +201,74 @@ describe('admin UsageTable tooltip', () => {
     expect(text).toContain('$5.0000 / 1M tokens')
     expect(text).toContain('$30.0000 / 1M tokens')
     expect(text).toContain('$0.069568')
+  })
+
+  it('uses real cost by default and display cost in user display mode', async () => {
+    const row = {
+      request_id: 'req-unified-rate-display',
+      actual_cost: 10,
+      real_actual_cost: 1,
+      total_cost: 1,
+      account_rate_multiplier: 1,
+      rate_multiplier: 10,
+      unified_rate_multiplier: 10,
+      service_tier: null,
+      input_cost: 0,
+      output_cost: 0,
+      cache_creation_cost: 0,
+      cache_read_cost: 0,
+      input_tokens: 1,
+      output_tokens: 1,
+    }
+
+    const adminWrapper = mount(UsageTable, {
+      props: {
+        data: [row],
+        loading: false,
+        columns: [],
+      },
+      global: {
+        stubs: {
+          DataTable: DataTableStub,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    expect(adminWrapper.text()).toContain('$1.000000')
+    expect(adminWrapper.text()).not.toContain('$10.000000')
+
+    const userWrapper = mount(UsageTable, {
+      props: {
+        data: [row],
+        loading: false,
+        columns: [],
+        costDisplayMode: 'display',
+        showAccountBilling: false,
+      },
+      global: {
+        stubs: {
+          DataTable: DataTableStub,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    expect(userWrapper.text()).toContain('$10.000000')
+    expect(userWrapper.text()).not.toContain('$1.000000')
+
+    const tooltipTriggers = userWrapper.findAll('.group.relative')
+    await tooltipTriggers[tooltipTriggers.length - 1].trigger('mouseenter')
+    await nextTick()
+
+    const tooltipText = userWrapper.text()
+    expect(tooltipText).toContain('User billed')
+    expect(tooltipText).toContain('$10.000000')
+    expect(tooltipText).not.toContain('Actual')
   })
 
   it('shows requested and upstream models separately for admin rows', () => {

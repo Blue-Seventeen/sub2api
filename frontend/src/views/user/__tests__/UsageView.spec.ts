@@ -96,7 +96,11 @@ vi.mock('vue-i18n', async () => {
 })
 
 const simpleStub = { template: '<div><slot /></div>' }
-const chartStub = { template: '<div />' }
+const namedStub = (name: string, props: string[] = []) => ({
+  name,
+  props,
+  template: `<div data-test="${name}" />`,
+})
 
 const usageLog = {
   id: 1,
@@ -142,12 +146,12 @@ function mountUsageView() {
         Select: true,
         DateRangePicker: true,
         Icon: true,
-        UsageStatsCards: chartStub,
-        UsageTable: chartStub,
-        ModelDistributionChart: chartStub,
-        GroupDistributionChart: chartStub,
-        EndpointDistributionChart: chartStub,
-        TokenUsageTrend: chartStub,
+        UsageStatsCards: namedStub('UsageStatsCards', ['costDisplayMode']),
+        UsageTable: namedStub('UsageTable', ['costDisplayMode']),
+        ModelDistributionChart: namedStub('ModelDistributionChart', ['costDisplayMode']),
+        GroupDistributionChart: namedStub('GroupDistributionChart', ['costDisplayMode']),
+        EndpointDistributionChart: namedStub('EndpointDistributionChart', ['costDisplayMode']),
+        TokenUsageTrend: namedStub('TokenUsageTrend', ['costDisplayMode']),
       },
     },
   })
@@ -239,6 +243,18 @@ describe('user UsageView', () => {
     expect(getAvailable).toHaveBeenCalled()
   })
 
+  it('passes display cost mode to user usage widgets', async () => {
+    const wrapper = mountUsageView()
+    await flushPromises()
+
+    expect(wrapper.findComponent({ name: 'UsageStatsCards' }).props('costDisplayMode')).toBe('display')
+    expect(wrapper.findComponent({ name: 'UsageTable' }).props('costDisplayMode')).toBe('display')
+    expect(wrapper.findComponent({ name: 'ModelDistributionChart' }).props('costDisplayMode')).toBe('display')
+    expect(wrapper.findComponent({ name: 'GroupDistributionChart' }).props('costDisplayMode')).toBe('display')
+    expect(wrapper.findComponent({ name: 'EndpointDistributionChart' }).props('costDisplayMode')).toBe('display')
+    expect(wrapper.findComponent({ name: 'TokenUsageTrend' }).props('costDisplayMode')).toBe('display')
+  })
+
   it('exports csv with user-safe fields and custom billing columns', async () => {
     const wrapper = mountUsageView()
     await flushPromises()
@@ -264,7 +280,8 @@ describe('user UsageView', () => {
     expect(csvContent).toContain('Image Output Cost')
     expect(csvContent).not.toContain('203.0.113.10')
     expect(csvContent).toContain(',4057,50,278272,4,150,12,345,')
-    expect(csvContent).toContain('0.08100000')
+    expect(csvContent).toContain('0.09288300')
+    expect(csvContent).not.toContain('0.08100000')
     expect(csvContent).not.toContain('Upstream Endpoint')
     expect(csvContent).not.toContain('account_cost')
     expect(csvContent).not.toContain('account_rate_multiplier')

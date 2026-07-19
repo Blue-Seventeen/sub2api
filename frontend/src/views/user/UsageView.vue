@@ -1,7 +1,12 @@
 <template>
   <AppLayout>
     <div class="space-y-6">
-      <UsageStatsCards :stats="usageStats" :show-account-cost="false" :strike-standard-cost="true" />
+      <UsageStatsCards
+        :stats="usageStats"
+        :show-account-cost="false"
+        :strike-standard-cost="true"
+        cost-display-mode="display"
+      />
 
       <div class="space-y-4">
         <div class="card p-4">
@@ -32,6 +37,7 @@
             :show-metric-toggle="true"
             :enable-breakdown="false"
             :show-account-cost="false"
+            cost-display-mode="display"
             :start-date="startDate"
             :end-date="endDate"
           />
@@ -42,6 +48,7 @@
             :show-metric-toggle="true"
             :enable-breakdown="false"
             :show-account-cost="false"
+            cost-display-mode="display"
             :start-date="startDate"
             :end-date="endDate"
           />
@@ -58,11 +65,12 @@
             :show-source-toggle="false"
             :show-metric-toggle="true"
             :enable-breakdown="false"
+            cost-display-mode="display"
             :title="t('usage.endpointDistribution')"
             :start-date="startDate"
             :end-date="endDate"
           />
-          <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
+          <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" cost-display-mode="display" />
         </div>
       </div>
 
@@ -178,6 +186,7 @@
           :server-side-sort="true"
           :show-account-billing="false"
           :show-upstream-endpoint="false"
+          cost-display-mode="display"
           default-sort-key="created_at"
           default-sort-order="desc"
           @sort="handleSort"
@@ -680,7 +689,7 @@ const exportToCSV = async () => {
       log.billable_duration_seconds ?? '',
       log.billable_character_count ?? '',
       log.rate_multiplier,
-      ((log as UsageLog & { real_actual_cost?: number }).real_actual_cost ?? log.actual_cost ?? 0).toFixed(8),
+      (log.actual_cost ?? 0).toFixed(8),
       (log.total_cost ?? 0).toFixed(8),
       (log.image_output_cost ?? 0).toFixed(8),
       log.first_token_ms ?? '',

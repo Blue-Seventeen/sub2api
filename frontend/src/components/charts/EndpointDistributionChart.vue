@@ -162,6 +162,7 @@ const props = withDefaults(
     showMetricToggle?: boolean
     showSourceToggle?: boolean
     enableBreakdown?: boolean
+    costDisplayMode?: 'real' | 'display'
     startDate?: string
     endDate?: string
     filters?: Record<string, any>
@@ -175,7 +176,8 @@ const props = withDefaults(
     source: 'inbound',
     showMetricToggle: false,
     showSourceToggle: false,
-    enableBreakdown: true
+    enableBreakdown: true,
+    costDisplayMode: 'real'
   }
 )
 
@@ -212,7 +214,10 @@ const toggleBreakdown = async (endpoint: string) => {
   }
 }
 
-const getEndpointActualCost = (item: EndpointStat) => item.real_actual_cost ?? item.actual_cost ?? 0
+const getEndpointActualCost = (item: EndpointStat) =>
+  props.costDisplayMode === 'display'
+    ? item.actual_cost ?? 0
+    : item.real_actual_cost ?? item.actual_cost ?? 0
 
 const chartColors = [
   '#3b82f6',

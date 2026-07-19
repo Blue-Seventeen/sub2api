@@ -54,6 +54,20 @@ describe('GroupBadge', () => {
     expect(text).toContain('1.8x')
   })
 
+  it('formats effective rate without floating point noise', () => {
+    const wrapper = mountBadge({
+      name: 'precision-group',
+      platform: 'zhipu',
+      rateMultiplier: 0.035,
+      effectiveRateMultiplier: 0.35000000000000003,
+    })
+
+    const text = wrapper.text()
+    expect(text).toContain('0.035x')
+    expect(text).toContain('0.35x')
+    expect(text).not.toContain('0.35000000000000003')
+  })
+
   it('shows only the default rate when effective rate matches default rate', () => {
     const wrapper = mountBadge({
       name: 'default-group',

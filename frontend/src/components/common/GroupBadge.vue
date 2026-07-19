@@ -14,8 +14,8 @@
     <span v-if="showLabel" :class="labelClass">
       <template v-if="hasEffectiveRate">
         <!-- 默认倍率删除线 + 最终倍率高亮 -->
-        <span class="line-through opacity-50 mr-0.5">{{ rateMultiplier }}x</span>
-        <span class="font-bold">{{ displayRateMultiplier }}x</span>
+        <span class="line-through opacity-50 mr-0.5">{{ formattedRateMultiplier }}x</span>
+        <span class="font-bold">{{ formattedDisplayRateMultiplier }}x</span>
       </template>
       <template v-else>
         {{ labelText }}
@@ -46,6 +46,7 @@ import {
   type PeakRateDisplayMode,
   type PeakRateWindow,
 } from '@/utils/peak-rate'
+import { formatRateMultiplier } from '@/utils/formatters'
 import PlatformIcon from './PlatformIcon.vue'
 import PeakRatePill from './PeakRatePill.vue'
 
@@ -88,6 +89,14 @@ const { t } = useI18n()
 const isSubscription = computed(() => props.subscriptionType === 'subscription')
 
 const displayRateMultiplier = computed(() => props.effectiveRateMultiplier ?? props.userRateMultiplier)
+const formattedRateMultiplier = computed(() =>
+  props.rateMultiplier !== undefined ? formatRateMultiplier(props.rateMultiplier) : ''
+)
+const formattedDisplayRateMultiplier = computed(() =>
+  displayRateMultiplier.value !== null && displayRateMultiplier.value !== undefined
+    ? formatRateMultiplier(displayRateMultiplier.value)
+    : ''
+)
 
 // 是否存在与默认倍率不同的最终倍率。
 const hasEffectiveRate = computed(() => {
@@ -124,7 +133,7 @@ const showLabel = computed(() => {
 
 // Label text
 const labelText = computed(() => {
-  const rateLabel = props.rateMultiplier !== undefined ? `${props.rateMultiplier}x` : ''
+  const rateLabel = props.rateMultiplier !== undefined ? `${formattedRateMultiplier.value}x` : ''
   if (isSubscription.value && !props.alwaysShowRate) {
     // 如果有剩余天数，显示天数
     if (props.daysRemaining !== null && props.daysRemaining !== undefined) {
