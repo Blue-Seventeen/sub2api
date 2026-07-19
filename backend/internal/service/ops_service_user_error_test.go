@@ -30,6 +30,16 @@ func (s *disabledOpsSettingRepo) GetValue(ctx context.Context, key string) (stri
 	return "", ErrSettingNotFound
 }
 
+func (s *disabledOpsSettingRepo) GetMultiple(ctx context.Context, keys []string) (map[string]string, error) {
+	out := make(map[string]string, len(keys))
+	for _, key := range keys {
+		if key == SettingKeyOpsMonitoringEnabled {
+			out[key] = "false"
+		}
+	}
+	return out, nil
+}
+
 func (s *stubOpsRepoForUserErr) ListErrorLogs(ctx context.Context, f *OpsErrorLogFilter) (*OpsErrorLogList, error) {
 	s.gotFilter = f
 	return &OpsErrorLogList{
@@ -92,6 +102,7 @@ func TestListUserErrorRequests_ForcesScopeAndRedacts(t *testing.T) {
 func TestListUserErrorRequests_RequiresOpsMonitoringEnabled(t *testing.T) {
 	stub := &stubOpsRepoForUserErr{}
 	svc := &OpsService{opsRepo: stub, settingRepo: &disabledOpsSettingRepo{}}
+	svc.SetMonitoringEnabled(false)
 
 	got, err := svc.ListUserErrorRequests(context.Background(), 42, &OpsErrorLogFilter{})
 	if !errors.Is(err, ErrOpsDisabled) {
@@ -173,6 +184,7 @@ func TestGetUserErrorRequestDetail_RequiresOpsMonitoringEnabled(t *testing.T) {
 		},
 	}}
 	svc := &OpsService{opsRepo: stub, settingRepo: &disabledOpsSettingRepo{}}
+	svc.SetMonitoringEnabled(false)
 
 	got, err := svc.GetUserErrorRequestDetail(context.Background(), ownerUID, 42)
 	if !errors.Is(err, ErrOpsDisabled) {
@@ -311,7 +323,6 @@ func TestGetUserErrorRequestDetail_InvalidID(t *testing.T) {
 		t.Fatal("expected error for id=-5")
 	}
 }
-
 func TestListUserErrorRequests_EnablesMatchDeletedKeyOwner(t *testing.T) {
 	stub := &stubOpsRepoForUserErr{}
 	svc := &OpsService{opsRepo: stub}

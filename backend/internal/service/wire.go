@@ -639,6 +639,8 @@ func ProvideOpsService(
 	antigravityGatewayService *AntigravityGatewayService,
 	systemLogSink *OpsSystemLogSink,
 	settingService *SettingService,
+	authCacheInvalidationWorker *AuthCacheInvalidationWorker,
+	apiKeyService *APIKeyService,
 ) *OpsService {
 	svc := NewOpsService(
 		opsRepo,
@@ -659,7 +661,23 @@ func ProvideOpsService(
 		// a populated cache rather than zero defaults. Best-effort, sync-bounded.
 		settingService.WarmOpenAIQuotaAutoPauseSettings(context.Background())
 	}
+	svc.authCacheInvalidationWorker = authCacheInvalidationWorker
+	svc.apiKeyService = apiKeyService
+	svc.StartRuntimeSettingsRefresh(context.Background())
 	return svc
+}
+
+// ProvideOpsIngressRejectAggregator starts the bounded security aggregation
+// runtime and attaches it to OpsService, which is the middleware recorder.
+func ProvideOpsIngressRejectAggregator(opsRepo OpsRepository, opsService *OpsService) *OpsIngressRejectAggregator {
+	repo, ok := opsRepo.(OpsIngressRejectRepository)
+	if !ok {
+		return nil
+	}
+	aggregator := NewOpsIngressRejectAggregator(repo)
+	aggregator.Start()
+	opsService.SetIngressRejectAggregator(aggregator)
+	return aggregator
 }
 
 // ProvideSettingService wires SettingService with group reader and proxy repo.
@@ -748,6 +766,7 @@ var ProviderSet = wire.NewSet(
 	NewUserService,
 	ProvideAPIKeyService,
 	ProvideAPIKeyAuthCacheInvalidator,
+	ProvideAuthCacheInvalidationWorker,
 	NewGroupService,
 	NewAccountService,
 	NewProxyService,
@@ -801,6 +820,7 @@ var ProviderSet = wire.NewSet(
 	ProvideBackupService,
 	ProvideOpsSystemLogSink,
 	ProvideOpsService,
+	ProvideOpsIngressRejectAggregator,
 	ProvideAuditLogService,
 	ProvideOpsMetricsCollector,
 	ProvideOpsAggregationService,

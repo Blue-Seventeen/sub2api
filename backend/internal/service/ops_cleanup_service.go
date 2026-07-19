@@ -284,6 +284,7 @@ func (s *OpsCleanupService) runScheduled() {
 
 type opsCleanupDeletedCounts struct {
 	errorLogs     int64
+	ingressRejects int64
 	alertEvents   int64
 	systemLogs    int64
 	logAudits     int64
@@ -294,8 +295,9 @@ type opsCleanupDeletedCounts struct {
 
 func (c opsCleanupDeletedCounts) String() string {
 	return fmt.Sprintf(
-		"error_logs=%d alert_events=%d system_logs=%d log_audits=%d system_metrics=%d hourly_preagg=%d daily_preagg=%d",
+		"error_logs=%d ingress_rejects=%d alert_events=%d system_logs=%d log_audits=%d system_metrics=%d hourly_preagg=%d daily_preagg=%d",
 		c.errorLogs,
+		c.ingressRejects,
 		c.alertEvents,
 		c.systemLogs,
 		c.logAudits,
@@ -351,6 +353,12 @@ func (s *OpsCleanupService) runCleanupOnce(ctx context.Context) (opsCleanupDelet
 			return out, err
 		}
 		out.errorLogs = n
+
+		n, err = runOne(truncate, cutoff, "ops_ingress_reject_aggregates", "bucket_start", false)
+		if err != nil {
+			return out, err
+		}
+		out.ingressRejects = n
 
 		n, err = runOne(truncate, cutoff, "ops_alert_events", "created_at", false)
 		if err != nil {
