@@ -397,7 +397,7 @@ describe('user KeysView column settings', () => {
     expect(wrapper.get('[data-test="current-concurrency"]').text()).toBe('3')
   })
 
-  it('prefers real batch usage cost values when available', async () => {
+  it('uses display batch usage cost values for user-facing API key totals', async () => {
     getDashboardApiKeysUsage.mockResolvedValueOnce({
       stats: {
         1: {
@@ -413,10 +413,10 @@ describe('user KeysView column settings', () => {
     const wrapper = await mountView()
 
     const usageText = wrapper.get('[data-test="usage"]').text()
-    expect(usageText).toContain('$0.1200')
-    expect(usageText).toContain('$0.3400')
-    expect(usageText).not.toContain('$8.0000')
-    expect(usageText).not.toContain('$9.0000')
+    expect(usageText).toContain('$8.0000')
+    expect(usageText).toContain('$9.0000')
+    expect(usageText).not.toContain('$0.1200')
+    expect(usageText).not.toContain('$0.3400')
   })
 
   it('marks current concurrency as sortable', async () => {

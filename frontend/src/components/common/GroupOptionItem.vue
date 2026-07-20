@@ -28,11 +28,11 @@
         <!-- Rate pill (platform color) -->
         <span v-if="rateMultiplier !== undefined" :class="['inline-flex items-center whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold', ratePillClass]">
           <template v-if="hasEffectiveRate">
-            <span class="mr-1 line-through opacity-50">{{ rateMultiplier }}x</span>
-            <span class="font-bold">{{ displayRateMultiplier }}x</span>
+            <span class="mr-1 line-through opacity-50">{{ formattedRateMultiplier }}x</span>
+            <span class="font-bold">{{ formattedDisplayRateMultiplier }}x</span>
           </template>
           <template v-else>
-            {{ rateMultiplier }}x {{ t('admin.groups.rateLabel') }}
+            {{ formattedRateMultiplier }}x {{ t('admin.groups.rateLabel') }}
           </template>
         </span>
         <PeakRatePill
@@ -76,6 +76,7 @@ import {
   type PeakRateDisplayMode,
   type PeakRateWindow,
 } from '@/utils/peak-rate'
+import { formatRateMultiplier } from '@/utils/formatters'
 
 const { t } = useI18n()
 
@@ -109,6 +110,14 @@ const props = withDefaults(defineProps<Props>(), {
 
 // Whether effective/final rate differs from the default group rate.
 const displayRateMultiplier = computed(() => props.effectiveRateMultiplier ?? props.userRateMultiplier)
+const formattedRateMultiplier = computed(() =>
+  props.rateMultiplier !== undefined ? formatRateMultiplier(props.rateMultiplier) : ''
+)
+const formattedDisplayRateMultiplier = computed(() =>
+  displayRateMultiplier.value !== null && displayRateMultiplier.value !== undefined
+    ? formatRateMultiplier(displayRateMultiplier.value)
+    : ''
+)
 
 const hasEffectiveRate = computed(() => {
   return (

@@ -43,6 +43,18 @@ describe('GroupOptionItem', () => {
     document.body.innerHTML = ''
   })
 
+  it('formats effective rate without floating point noise', () => {
+    const wrapper = mountOption({
+      rateMultiplier: 0.035,
+      effectiveRateMultiplier: 0.35000000000000003,
+    })
+
+    const text = wrapper.text()
+    expect(text).toContain('0.035x')
+    expect(text).toContain('0.35x')
+    expect(text).not.toContain('0.35000000000000003')
+  })
+
   it('summarizes multiple peak windows in compact mode and keeps full details in the tooltip', async () => {
     const wrapper = mountOption({
       peakRateEnabled: true,

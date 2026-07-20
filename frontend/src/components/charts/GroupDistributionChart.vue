@@ -131,6 +131,7 @@ const props = withDefaults(defineProps<{
   showMetricToggle?: boolean
   enableBreakdown?: boolean
   showAccountCost?: boolean
+  costDisplayMode?: 'real' | 'display'
   startDate?: string
   endDate?: string
   filters?: Record<string, any>
@@ -140,6 +141,7 @@ const props = withDefaults(defineProps<{
   showMetricToggle: false,
   enableBreakdown: true,
   showAccountCost: true,
+  costDisplayMode: 'real',
 })
 
 const emit = defineEmits<{
@@ -176,7 +178,8 @@ const toggleBreakdown = async (type: string, id: number | string) => {
   }
 }
 
-const getGroupActualCost = (item: GroupStat) => toFiniteNumber(item.real_actual_cost ?? item.actual_cost)
+const getGroupActualCost = (item: GroupStat) =>
+  toFiniteNumber(props.costDisplayMode === 'display' ? item.actual_cost : item.real_actual_cost ?? item.actual_cost)
 
 const chartColors = [
   '#3b82f6',

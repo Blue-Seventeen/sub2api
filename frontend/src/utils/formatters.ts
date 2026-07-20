@@ -16,3 +16,12 @@ export function formatMultiplier(val: number): string {
   if (val >= 0.0001) return val.toFixed(4)
   return val.toPrecision(2)
 }
+
+/**
+ * 格式化倍率展示，保留到 6 位小数并去掉浮点尾巴。
+ * 适合展示 0.035 / 0.35 这类分组倍率与专属倍率的最终值。
+ */
+export function formatRateMultiplier(val: number): string {
+  if (!Number.isFinite(val)) return '1'
+  return Number(val.toFixed(6)).toString()
+}

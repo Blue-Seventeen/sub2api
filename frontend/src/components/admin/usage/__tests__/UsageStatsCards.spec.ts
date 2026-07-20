@@ -64,4 +64,46 @@ describe('UsageStatsCards', () => {
     expect(text).toContain('Cache Read')
     expect(text).toContain('22')
   })
+
+  it('keeps real cost as the default admin display cost', () => {
+    const wrapper = mount(UsageStatsCards, {
+      props: {
+        stats: {
+          ...stats,
+          total_actual_cost: 10,
+          real_total_actual_cost: 1,
+        },
+      },
+      global: {
+        stubs: {
+          Icon: true,
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('$1.00')
+    expect(wrapper.text()).not.toContain('$10.00')
+  })
+
+  it('uses display actual cost when requested by user usage pages', () => {
+    const wrapper = mount(UsageStatsCards, {
+      props: {
+        stats: {
+          ...stats,
+          total_actual_cost: 10,
+          real_total_actual_cost: 1,
+        },
+        costDisplayMode: 'display',
+        showAccountCost: false,
+      },
+      global: {
+        stubs: {
+          Icon: true,
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('$10.00')
+    expect(wrapper.text()).not.toContain('$1.00')
+  })
 })

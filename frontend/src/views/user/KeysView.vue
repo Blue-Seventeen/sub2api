@@ -1289,10 +1289,10 @@ const usageStats = ref<Record<string, BatchApiKeyUsageStats>>({})
 const groupEffectiveRates = ref<Record<number, number>>({})
 
 const getApiKeyTodayCost = (keyId: number): number =>
-  usageStats.value[keyId]?.real_today_actual_cost ?? usageStats.value[keyId]?.today_actual_cost ?? 0
+  usageStats.value[keyId]?.today_actual_cost ?? 0
 
 const getApiKeyTotalCost = (keyId: number): number =>
-  usageStats.value[keyId]?.real_total_actual_cost ?? usageStats.value[keyId]?.total_actual_cost ?? 0
+  usageStats.value[keyId]?.total_actual_cost ?? 0
 
 const pagination = ref({
   page: 1,

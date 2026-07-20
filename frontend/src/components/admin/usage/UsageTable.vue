@@ -183,7 +183,7 @@
         <template #cell-cost="{ row }">
           <div class="text-sm">
             <div class="flex items-center gap-1.5">
-              <span class="font-medium text-green-600 dark:text-green-400">{{ formatCostAmount(getAdminActualCost(row), 6) }}</span>
+              <span class="font-medium text-green-600 dark:text-green-400">{{ formatCostAmount(getDisplayActualCost(row), 6) }}</span>
               <span
                 v-if="row.long_context_billing_applied"
                 data-testid="long-context-billing-marker"
@@ -471,11 +471,11 @@
             <span class="font-medium text-white">{{ formatCostAmount(tooltipData?.total_cost || 0, 6) }}</span>
           </div>
           <div class="flex items-center justify-between gap-6">
-            <span class="text-gray-400">真实扣费</span>
-            <span class="font-semibold text-green-400">{{ formatCostAmount(getAdminActualCost(tooltipData), 6) }}</span>
+            <span class="text-gray-400">{{ costDisplayMode === 'display' ? t('usage.userBilled') : t('usage.actualCost') }}</span>
+            <span class="font-semibold text-green-400">{{ formatCostAmount(getDisplayActualCost(tooltipData), 6) }}</span>
           </div>
-          <div v-if="tooltipData && tooltipData.real_actual_cost != null && Math.abs((tooltipData.real_actual_cost || 0) - (tooltipData.actual_cost || 0)) > 1e-9" class="flex items-center justify-between gap-6">
-            <span class="text-gray-400">显示扣费</span>
+          <div v-if="costDisplayMode === 'real' && tooltipData && tooltipData.real_actual_cost != null && Math.abs((tooltipData.real_actual_cost || 0) - (tooltipData.actual_cost || 0)) > 1e-9" class="flex items-center justify-between gap-6">
+            <span class="text-gray-400">{{ t('usage.userBilled') }}</span>
             <span class="font-medium text-white">{{ formatCostAmount(tooltipData?.actual_cost || 0, 6) }}</span>
           </div>
           <!-- Account billing (separated from user billing) -->
@@ -610,6 +610,7 @@ interface Props {
   defaultSortOrder?: 'asc' | 'desc'
   showAccountBilling?: boolean
   showUpstreamEndpoint?: boolean
+  costDisplayMode?: 'real' | 'display'
   /** 嵌入统一卡片内使用：去掉自身卡片外观 */
   flat?: boolean
 }
@@ -621,6 +622,7 @@ const props = withDefaults(defineProps<Props>(), {
   defaultSortOrder: 'asc',
   showAccountBilling: true,
   showUpstreamEndpoint: true,
+  costDisplayMode: 'real',
   flat: false
 })
 const emit = defineEmits<{
@@ -657,9 +659,14 @@ const handleBatchFetchIpGeo = async () => {
   }
 }
 
-const getAdminActualCost = (row: any) => row?.real_actual_cost ?? row?.actual_cost ?? 0
+const getDisplayActualCost = (row: any) =>
+  props.costDisplayMode === 'display'
+    ? row?.actual_cost ?? 0
+    : row?.real_actual_cost ?? row?.actual_cost ?? 0
 const formatAdminDisplayBaseRate = (row: AdminUsageLog | null | undefined) =>
-  formatAdminDisplayBaseRateMultiplier(row?.rate_multiplier, row?.unified_rate_multiplier)
+  props.costDisplayMode === 'display'
+    ? formatMultiplier(row?.rate_multiplier ?? 1)
+    : formatAdminDisplayBaseRateMultiplier(row?.rate_multiplier, row?.unified_rate_multiplier)
 
 // Tooltip state - cost
 const tooltipVisible = ref(false)

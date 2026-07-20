@@ -12,7 +12,7 @@
 
 services:
   sub2api:
-    image: ${SUB2API_IMAGE:-sub2api-custom:0.1.160}
+    image: ${SUB2API_IMAGE:-sub2api-custom:0.1.161}
     container_name: sub2api
     restart: unless-stopped
     ulimits:

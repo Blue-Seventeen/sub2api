@@ -50,10 +50,14 @@ ChartJS.register(
 
 const { t } = useI18n()
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   trendData: TrendDataPoint[]
   loading?: boolean
-}>()
+  costDisplayMode?: 'real' | 'display'
+}>(), {
+  loading: false,
+  costDisplayMode: 'real',
+})
 
 const isDarkMode = computed(() => {
   return document.documentElement.classList.contains('dark')
@@ -156,7 +160,11 @@ const lineOptions = computed(() => ({
           const dataIndex = tooltipItems[0]?.dataIndex
           if (dataIndex !== undefined && props.trendData[dataIndex]) {
             const data = props.trendData[dataIndex]
-            return `Real: ${formatDisplayCost(data.real_actual_cost ?? data.actual_cost)} | Standard: ${formatDisplayCost(data.cost)}`
+            const label = props.costDisplayMode === 'display' ? t('usage.userBilled') : t('usage.actualCost')
+            const actualCost = props.costDisplayMode === 'display'
+              ? data.actual_cost
+              : data.real_actual_cost ?? data.actual_cost
+            return `${label}: ${formatDisplayCost(actualCost)} | ${t('usage.standardCost')}: ${formatDisplayCost(data.cost)}`
           }
           return ''
         }

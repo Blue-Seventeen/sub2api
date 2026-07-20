@@ -30,7 +30,7 @@ func TestForwardGrokMediaAppliesChannelMappedModelBeforeNormalization(t *testing
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
-		Body:       io.NopCloser(strings.NewReader(`{"data":[]}`)),
+		Body:       io.NopCloser(strings.NewReader(`{"data":[{"url":"https://example.test/image.png"}]}`)),
 	}}
 	svc := &OpenAIGatewayService{httpUpstream: upstream}
 	account := grokMediaChannelMappingAccount()
@@ -66,7 +66,7 @@ func TestForwardGrokMediaAppliesChannelMappedModelAfterMultipartConversion(t *te
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
-		Body:       io.NopCloser(strings.NewReader(`{"data":[]}`)),
+		Body:       io.NopCloser(strings.NewReader(`{"data":[{"url":"https://example.test/edit.png"}]}`)),
 	}}
 	svc := &OpenAIGatewayService{httpUpstream: upstream}
 	account := grokMediaChannelMappingAccount()

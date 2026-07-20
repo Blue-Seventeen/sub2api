@@ -39,6 +39,7 @@ type SystemSettings struct {
 	TotpEnabled                      bool                     `json:"totp_enabled"`
 	TotpEncryptionKeyConfigured      bool                     `json:"totp_encryption_key_configured"`
 	SessionBindingEnabled            bool                     `json:"session_binding_enabled"`
+	StepUpEnabled                    bool                     `json:"step_up_enabled"`
 	AuditLogRetentionDays            int                      `json:"audit_log_retention_days"`
 	LoginAgreementEnabled            bool                     `json:"login_agreement_enabled"`
 	LoginAgreementMode               string                   `json:"login_agreement_mode"`
