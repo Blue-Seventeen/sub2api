@@ -18,14 +18,14 @@ func TestUserSubscriptionDaysRemainingAt(t *testing.T) {
 	}{
 		{name: "expired", expiresAt: now.Add(-time.Nanosecond), want: 0},
 		{name: "expires now", expiresAt: now, want: 0},
-		{name: "less than one day", expiresAt: now.Add(subscriptionDayDuration - time.Nanosecond), want: 1},
-		{name: "exactly one day", expiresAt: now.Add(subscriptionDayDuration), want: 1},
-		{name: "over one day", expiresAt: now.Add(subscriptionDayDuration + time.Nanosecond), want: 2},
-		{name: "less than two days", expiresAt: now.Add(2*subscriptionDayDuration - time.Nanosecond), want: 2},
-		{name: "exactly two days", expiresAt: now.Add(2 * subscriptionDayDuration), want: 2},
-		{name: "over two days", expiresAt: now.Add(2*subscriptionDayDuration + time.Nanosecond), want: 3},
-		{name: "exactly seven days", expiresAt: now.Add(7 * subscriptionDayDuration), want: 7},
-		{name: "over seven days", expiresAt: now.Add(7*subscriptionDayDuration + time.Nanosecond), want: 8},
+		{name: "less than one day", expiresAt: now.Add(subscriptionDailyWindow - time.Nanosecond), want: 1},
+		{name: "exactly one day", expiresAt: now.Add(subscriptionDailyWindow), want: 1},
+		{name: "over one day", expiresAt: now.Add(subscriptionDailyWindow + time.Nanosecond), want: 2},
+		{name: "less than two days", expiresAt: now.Add(2*subscriptionDailyWindow - time.Nanosecond), want: 2},
+		{name: "exactly two days", expiresAt: now.Add(2 * subscriptionDailyWindow), want: 2},
+		{name: "over two days", expiresAt: now.Add(2*subscriptionDailyWindow + time.Nanosecond), want: 3},
+		{name: "exactly seven days", expiresAt: now.Add(7 * subscriptionDailyWindow), want: 7},
+		{name: "over seven days", expiresAt: now.Add(7*subscriptionDailyWindow + time.Nanosecond), want: 8},
 	}
 
 	for _, tt := range tests {

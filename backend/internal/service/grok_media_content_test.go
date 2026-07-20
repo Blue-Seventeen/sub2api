@@ -93,7 +93,7 @@ func TestForwardGrokMediaContentUsesUpstreamCredentialAndStreamsRange(t *testing
 
 	result, err := svc.ForwardGrokMedia(
 		context.Background(), c, grokMediaContentTestAccount(),
-		GrokMediaEndpointVideoContent, "task-1", nil, "",
+		GrokMediaEndpointVideoContent, "task-1", nil, "", "",
 	)
 
 	require.NoError(t, err)
@@ -129,7 +129,7 @@ func TestForwardGrokMediaContentStreamsFullResponseWithSafeDefaults(t *testing.T
 
 	_, err := svc.ForwardGrokMedia(
 		context.Background(), c, grokMediaContentTestAccount(),
-		GrokMediaEndpointVideoContent, "task-1", nil, "",
+		GrokMediaEndpointVideoContent, "task-1", nil, "", "",
 	)
 
 	require.NoError(t, err)
@@ -164,7 +164,7 @@ func TestForwardGrokMediaContentPreservesRangeNotSatisfiable(t *testing.T) {
 
 	_, err := svc.ForwardGrokMedia(
 		context.Background(), c, grokMediaContentTestAccount(),
-		GrokMediaEndpointVideoContent, "task-1", nil, "",
+		GrokMediaEndpointVideoContent, "task-1", nil, "", "",
 	)
 
 	require.NoError(t, err)
@@ -202,7 +202,7 @@ func TestForwardGrokMediaContentFetchesValidatedSignedURLWithoutCredentials(t *t
 
 	_, err := svc.ForwardGrokMedia(
 		context.Background(), c, account,
-		GrokMediaEndpointVideoContent, "task-1", nil, "",
+		GrokMediaEndpointVideoContent, "task-1", nil, "", "",
 	)
 
 	require.NoError(t, err)
@@ -241,7 +241,7 @@ func TestForwardGrokMediaContentFollowsAuthenticatedSub2APIRelay(t *testing.T) {
 
 			_, err := svc.ForwardGrokMedia(
 				context.Background(), c, grokMediaContentTestAccount(),
-				GrokMediaEndpointVideoContent, "task-1", nil, "",
+				GrokMediaEndpointVideoContent, "task-1", nil, "", "",
 			)
 
 			require.NoError(t, err)
@@ -265,7 +265,7 @@ func TestForwardGrokMediaContentRejectsUntrustedSignedURL(t *testing.T) {
 
 	_, err := svc.ForwardGrokMedia(
 		context.Background(), c, grokMediaContentTestAccount(),
-		GrokMediaEndpointVideoContent, "task-1", nil, "",
+		GrokMediaEndpointVideoContent, "task-1", nil, "", "",
 	)
 
 	require.ErrorContains(t, err, "unsupported video content URL")
@@ -312,7 +312,7 @@ func TestForwardGrokVideoStatusRewritesOnlyProtectedContentURL(t *testing.T) {
 
 	_, err := svc.ForwardGrokMedia(
 		context.Background(), c, grokMediaContentTestAccount(),
-		GrokMediaEndpointVideoStatus, "task-1", nil, "",
+		GrokMediaEndpointVideoStatus, "task-1", nil, "", "",
 	)
 
 	require.NoError(t, err)

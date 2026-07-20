@@ -282,14 +282,23 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		if patchErr != nil {
 			return nil, fmt.Errorf("apply grok prompt cache identity: %w", patchErr)
 		}
+		responsesBody, patchErr = applyGrokFreeRequestToolCacheRoute(c, responsesBody, grokIntentBody, account, grokCacheIdentity)
+		if patchErr != nil {
+			return nil, fmt.Errorf("apply grok messages function-tool cache route: %w", patchErr)
+		}
 		if len(responsesBodyWithoutContinuation) > 0 {
+			grokRetryIntentBody := responsesBodyWithoutContinuation
 			responsesBodyWithoutContinuation, patchErr = patchGrokResponsesBody(responsesBodyWithoutContinuation, upstreamModel)
 			if patchErr != nil {
 				return nil, patchErr
 			}
-			responsesBodyWithoutContinuation, patchErr = applyGrokResponsesCacheIdentity(responsesBodyWithoutContinuation, responsesBodyWithoutContinuation, grokCacheIdentity, account.IsGrokOAuth())
+			responsesBodyWithoutContinuation, patchErr = applyGrokResponsesCacheIdentity(responsesBodyWithoutContinuation, grokRetryIntentBody, grokCacheIdentity, account.IsGrokOAuth())
 			if patchErr != nil {
 				return nil, fmt.Errorf("apply grok prompt cache identity to retry body: %w", patchErr)
+			}
+			responsesBodyWithoutContinuation, patchErr = applyGrokFreeRequestToolCacheRoute(c, responsesBodyWithoutContinuation, grokRetryIntentBody, account, grokCacheIdentity)
+			if patchErr != nil {
+				return nil, fmt.Errorf("apply grok messages function-tool cache route to retry body: %w", patchErr)
 			}
 		}
 	}

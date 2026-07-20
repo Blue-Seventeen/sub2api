@@ -856,7 +856,7 @@ func TestForwardGrokMediaAppliesAccountModelMappingAfterEndpointNormalization(t 
 			}}
 			svc := &OpenAIGatewayService{httpUpstream: upstream}
 
-			result, err := svc.ForwardGrokMedia(context.Background(), c, account, tt.endpoint, "", []byte(tt.body), "application/json")
+			result, err := svc.ForwardGrokMedia(context.Background(), c, account, tt.endpoint, "", []byte(tt.body), "application/json", "")
 
 			require.NoError(t, err)
 			require.JSONEq(t, tt.wantBody, string(upstream.lastBody))
@@ -895,7 +895,7 @@ func TestForwardGrokMediaImagesGenerationRejectsEmptySuccessfulResponse(t *testi
 	}}
 	svc := &OpenAIGatewayService{httpUpstream: upstream}
 
-	result, err := svc.ForwardGrokMedia(context.Background(), c, account, GrokMediaEndpointImagesGenerations, "", body, "application/json")
+	result, err := svc.ForwardGrokMedia(context.Background(), c, account, GrokMediaEndpointImagesGenerations, "", body, "application/json", "")
 	require.Nil(t, result)
 	var failoverErr *UpstreamFailoverError
 	require.ErrorAs(t, err, &failoverErr)
