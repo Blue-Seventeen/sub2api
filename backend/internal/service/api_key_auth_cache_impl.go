@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 17 // v17: include multi-window peak rate fields, video pricing, and web search per-call pricing.
+const apiKeyAuthSnapshotVersion = 18 // v18: include group reasoning policy plus custom multi-window peak rate/pricing fields.
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -420,6 +420,8 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			ModelsListConfig:                apiKey.Group.ModelsListConfig,
 			RPMLimit:                        apiKey.Group.RPMLimit,
 			NewAPIStyleInterfaceEnabled:     apiKey.Group.NewAPIStyleInterfaceEnabled,
+			MaxReasoningEffort:              apiKey.Group.MaxReasoningEffort,
+			ReasoningEffortMappings:         apiKey.Group.ReasoningEffortMappings,
 			PeakRateEnabled:                 apiKey.Group.PeakRateEnabled,
 			PeakStart:                       peakStart,
 			PeakEnd:                         peakEnd,
@@ -512,6 +514,8 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			ModelsListConfig:                snapshot.Group.ModelsListConfig,
 			RPMLimit:                        snapshot.Group.RPMLimit,
 			NewAPIStyleInterfaceEnabled:     snapshot.Group.NewAPIStyleInterfaceEnabled,
+			MaxReasoningEffort:              snapshot.Group.MaxReasoningEffort,
+			ReasoningEffortMappings:         snapshot.Group.ReasoningEffortMappings,
 			PeakRateEnabled:                 snapshot.Group.PeakRateEnabled,
 			PeakStart:                       peakStart,
 			PeakEnd:                         peakEnd,

@@ -79,10 +79,20 @@ func (s *UserSubscription) IsExpired() bool {
 }
 
 func (s *UserSubscription) DaysRemaining() int {
-	if s.IsExpired() {
+	return s.daysRemainingAt(time.Now())
+}
+
+func (s *UserSubscription) daysRemainingAt(now time.Time) int {
+	remaining := s.ExpiresAt.Sub(now)
+	if remaining <= 0 {
 		return 0
 	}
-	return int(time.Until(s.ExpiresAt).Hours() / 24)
+
+	days := int(remaining / subscriptionDailyWindow)
+	if remaining%subscriptionDailyWindow != 0 {
+		days++
+	}
+	return days
 }
 
 func (s *UserSubscription) IsWindowActivated() bool {

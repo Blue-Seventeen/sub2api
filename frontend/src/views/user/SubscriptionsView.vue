@@ -301,7 +301,7 @@ import subscriptionsAPI from '@/api/subscriptions'
 import type { UserSubscription } from '@/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
-import { formatCurrencyAmount } from '@/utils/format'
+import { formatCurrencyAmount, formatDateTimeToMinute } from '@/utils/format'
 import { hasPeakRate, formatPeakRateWindow, serverTimezoneLabel } from '@/utils/peak-rate'
 import { platformBorderClass, platformBadgeClass, platformButtonClass, platformDotClass, platformLabel } from '@/utils/platformColors'
 import {
@@ -378,20 +378,6 @@ function displayUsage(subscription: UserSubscription, window: SubscriptionWindow
   return typeof fallback === 'number' && Number.isFinite(fallback) ? fallback : 0
 }
 
-function padDatePart(value: number): string {
-  return String(value).padStart(2, '0')
-}
-
-function formatPreciseDateTime(date: Date): string {
-  const year = date.getFullYear()
-  const month = padDatePart(date.getMonth() + 1)
-  const day = padDatePart(date.getDate())
-  const hours = padDatePart(date.getHours())
-  const minutes = padDatePart(date.getMinutes())
-  const seconds = padDatePart(date.getSeconds())
-  return `${year}/${month}/${day} ${hours}:${minutes}:${seconds}`
-}
-
 function formatExpirationDate(expiresAt: string): string {
   const now = new Date()
   const expires = new Date(expiresAt)
@@ -403,7 +389,17 @@ function formatExpirationDate(expiresAt: string): string {
     return t('userSubscriptions.status.expired')
   }
 
-  return formatPreciseDateTime(expires)
+  const days = Math.ceil(diff / (1000 * 60 * 60 * 24))
+  const dateStr = formatDateTimeToMinute(expires)
+
+  if (days === 0) {
+    return `${dateStr} (${t('common.today')})`
+  }
+  if (days === 1) {
+    return `${dateStr} (${t('common.tomorrow')})`
+  }
+
+  return t('userSubscriptions.daysRemaining', { days }) + ` (${dateStr})`
 }
 
 function getExpirationClass(expiresAt: string): string {

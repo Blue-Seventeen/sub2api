@@ -149,7 +149,7 @@ func TestHandleMessagesResponse_RestoresClaudeKimiCollapsedToolUse_NonStreaming(
 			Type: "text",
 			Text: `我先看看目录。Previous assistant tool call: id=fc_tool_123; name=Bash; arguments={"command":"du -sh 百度网盘"}`,
 		}},
-		StopReason: "end_turn",
+		StopReason: apicompat.AnthropicStopReasonPtr("end_turn"),
 	})
 
 	result := svc.handleMessagesResponse(newCompatibleGatewayHTTPResponse(http.StatusOK, body), c, prepared, time.Now())
@@ -165,7 +165,8 @@ func TestHandleMessagesResponse_RestoresClaudeKimiCollapsedToolUse_NonStreaming(
 	require.Equal(t, "fc_tool_123", repaired.Content[1].ID)
 	require.Equal(t, "Bash", repaired.Content[1].Name)
 	require.JSONEq(t, `{"command":"du -sh 百度网盘"}`, string(repaired.Content[1].Input))
-	require.Equal(t, "tool_use", repaired.StopReason)
+	require.NotNil(t, repaired.StopReason)
+	require.Equal(t, "tool_use", *repaired.StopReason)
 	require.NotContains(t, rec.Body.String(), claudeKimiCollapsedToolUseMarker)
 
 	entry, err := cache.GetClaudeKimiToolRestoreEntry(context.Background(), restoreCtx.GroupID, restoreCtx.SessionHash, "fc_tool_123")
@@ -201,7 +202,7 @@ func TestHandleMessagesResponse_DoesNotRestoreDuplicateCollapsedToolUse_NonStrea
 			Type: "text",
 			Text: `Previous assistant tool call: id=fc_tool_dup; name=Bash; arguments={"command":"du -sh 百度网盘"}`,
 		}},
-		StopReason: "end_turn",
+		StopReason: apicompat.AnthropicStopReasonPtr("end_turn"),
 	})
 
 	result := svc.handleMessagesResponse(newCompatibleGatewayHTTPResponse(http.StatusOK, body), c, prepared, time.Now())
@@ -212,7 +213,8 @@ func TestHandleMessagesResponse_DoesNotRestoreDuplicateCollapsedToolUse_NonStrea
 	require.Len(t, passthrough.Content, 1)
 	require.Equal(t, "text", passthrough.Content[0].Type)
 	require.Contains(t, passthrough.Content[0].Text, claudeKimiCollapsedToolUseMarker)
-	require.Equal(t, "end_turn", passthrough.StopReason)
+	require.NotNil(t, passthrough.StopReason)
+	require.Equal(t, "end_turn", *passthrough.StopReason)
 }
 
 func TestHandleMessagesResponse_DoesNotRestoreWhenContextDisabledOrPlatformMismatch(t *testing.T) {
@@ -256,7 +258,7 @@ func TestHandleMessagesResponse_DoesNotRestoreWhenContextDisabledOrPlatformMisma
 					Type: "text",
 					Text: `Previous assistant tool call: id=fc_tool_0; name=Bash; arguments={"command":"du -sh 百度网盘"}`,
 				}},
-				StopReason: "end_turn",
+				StopReason: apicompat.AnthropicStopReasonPtr("end_turn"),
 			})
 
 			result := svc.handleMessagesResponse(newCompatibleGatewayHTTPResponse(http.StatusOK, body), c, prepared, time.Now())

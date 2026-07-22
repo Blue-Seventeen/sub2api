@@ -232,9 +232,13 @@ func (s *CompatibleGatewayService) repairClaudeKimiNonStreamingMessagesBody(
 
 	anthropicResp.Content = newContent
 	if lastBlockType == "tool_use" {
-		switch strings.TrimSpace(anthropicResp.StopReason) {
+		stopReason := ""
+		if anthropicResp.StopReason != nil {
+			stopReason = strings.TrimSpace(*anthropicResp.StopReason)
+		}
+		switch stopReason {
 		case "", "end_turn":
-			anthropicResp.StopReason = "tool_use"
+			anthropicResp.StopReason = apicompat.AnthropicStopReasonPtr("tool_use")
 		}
 	}
 	updated, err := json.Marshal(&anthropicResp)

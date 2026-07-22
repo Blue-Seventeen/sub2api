@@ -14,6 +14,7 @@ import (
 type OpenAIMessagesDispatchModelConfig = domain.OpenAIMessagesDispatchModelConfig
 type GroupModelsListConfig = domain.GroupModelsListConfig
 type PeakRateWindow = domain.PeakRateWindow
+type ReasoningEffortMapping = domain.ReasoningEffortMapping
 
 const MaxPeakRateWindows = 24
 
@@ -99,6 +100,12 @@ type Group struct {
 	RPMLimit int
 
 	NewAPIStyleInterfaceEnabled bool
+
+	// MaxReasoningEffort limits the effective OpenAI/Codex reasoning effort.
+	// Empty means unlimited; supported values are minimal/low/medium/high/xhigh/max.
+	MaxReasoningEffort string
+	// ReasoningEffortMappings rewrites explicit request values before applying the ceiling.
+	ReasoningEffortMappings []ReasoningEffortMapping
 
 	CreatedAt time.Time
 	UpdatedAt time.Time

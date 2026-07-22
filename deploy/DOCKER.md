@@ -14,7 +14,7 @@ docker build -t sub2api-custom:dev .
 或者使用你自己的版本号：
 
 ```bash
-docker build -t sub2api-custom:0.1.161 .
+docker build -t sub2api-custom:0.1.163 .
 ```
 
 ## Docker Compose 示例

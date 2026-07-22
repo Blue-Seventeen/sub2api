@@ -40,6 +40,7 @@ services:
       - DATABASE_USER_PLATFORM_QUOTA_FLUSH_BATCH_SIZE=${DATABASE_USER_PLATFORM_QUOTA_FLUSH_BATCH_SIZE:-1000}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - REDIS_USERNAME=${REDIS_USERNAME:-}
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       - REDIS_DB=${REDIS_DB:-0}
       - RATE_LIMIT_AUTH_REDIS_FAILURE_MODE=${RATE_LIMIT_AUTH_REDIS_FAILURE_MODE:-fail-close}
@@ -50,6 +51,8 @@ services:
       - TOTP_ENCRYPTION_KEY=${TOTP_ENCRYPTION_KEY:-}
       - MANAGED_PROXY_ENABLED=${MANAGED_PROXY_ENABLED:-false}
       - MANAGED_PROXY_MIHOMO_BINARY_PATH=${MANAGED_PROXY_MIHOMO_BINARY_PATH:-/app/bin/mihomo}
+      - MANAGED_PROXY_SUBSCRIPTION_USER_AGENT=${MANAGED_PROXY_SUBSCRIPTION_USER_AGENT:-sub2api-managed-proxy/1.0}
+      - MANAGED_PROXY_SUBSCRIPTION_APPEND_CLASH_FLAG=${MANAGED_PROXY_SUBSCRIPTION_APPEND_CLASH_FLAG:-false}
       - TZ=${TZ:-Asia/Shanghai}
       - UPDATE_PROXY_URL=${UPDATE_PROXY_URL:-}
       # Local mainland-China development proxy. Containers cannot use
@@ -122,12 +125,16 @@ services:
     restart: unless-stopped
     volumes:
       - redis_data:/data
+    # The command is one quoted script for the inner `sh -c`. Compose keeps
+    # the newlines inside the quoted string, so every line needs a trailing
+    # `\` — without it, `redis-server` on the first line runs with no flags
+    # at all, and the --save/--appendonly/--appendfsync lines are never read.
     command: >
         sh -c '
-          redis-server
-          --save 60 1
-          --appendonly yes
-          --appendfsync everysec
+          redis-server \
+          --save 60 1 \
+          --appendonly yes \
+          --appendfsync everysec \
           ${REDIS_PASSWORD:+--requirepass "$REDIS_PASSWORD"}'
     environment:
       - TZ=${TZ:-Asia/Shanghai}

@@ -241,6 +241,55 @@ func TestSettingHandler_UpdateSettings_PreservesOmittedDisplayCurrencySymbol(t *
 	require.Equal(t, "RMB", repo.values[service.SettingKeyDisplayCurrencySymbol])
 }
 
+func TestSettingHandler_UpdateSettings_PreservesOmittedDefaultUserValues(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("DATA_DIR", t.TempDir())
+	repo := &settingHandlerRepoStub{
+		values: map[string]string{
+			service.SettingKeyPromoCodeEnabled:     "true",
+			service.SettingKeyDefaultBalance:       "12.34000000",
+			service.SettingKeyDefaultConcurrency:   "9",
+			service.SettingKeyDefaultUserRPMLimit:  "123",
+			service.SettingKeyDefaultSubscriptions: `[{"group_id":21,"validity_days":14}]`,
+			service.SettingKeySiteName:             "Custom Sub2API",
+		},
+	}
+	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
+
+	body := map[string]any{
+		"promo_code_enabled": true,
+	}
+	rawBody, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "12.34000000", repo.values[service.SettingKeyDefaultBalance])
+	require.Equal(t, "9", repo.values[service.SettingKeyDefaultConcurrency])
+	require.Equal(t, "123", repo.values[service.SettingKeyDefaultUserRPMLimit])
+	require.Equal(t, `[{"group_id":21,"validity_days":14}]`, repo.values[service.SettingKeyDefaultSubscriptions])
+	require.Equal(t, "Custom Sub2API", repo.values[service.SettingKeySiteName])
+
+	var resp response.Response
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	data, ok := resp.Data.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, 12.34, data["default_balance"])
+	require.Equal(t, float64(9), data["default_concurrency"])
+	require.Equal(t, float64(123), data["default_user_rpm_limit"])
+	defaultSubscriptions, ok := data["default_subscriptions"].([]any)
+	require.True(t, ok)
+	require.Len(t, defaultSubscriptions, 1)
+	require.Equal(t, "Custom Sub2API", data["site_name"])
+}
+
 func TestSettingHandler_UpdateSettings_PersistsPaymentVisibleMethodsAndAdvancedScheduler(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := &settingHandlerRepoStub{
