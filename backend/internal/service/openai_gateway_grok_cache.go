@@ -195,6 +195,8 @@ func hasGrokResponsesToolIntent(body []byte) bool {
 // the cache-capable route so an intermediate sub2api does not need to preserve
 // client-specific opt-in headers. Operators can explicitly disable this per
 // account when native search tools would change the desired behavior (#4486).
+//
+//nolint:unused // Kept as a focused package-test entry point for the Messages bridge policy.
 func applyGrokFreeMessagesFunctionToolCacheRoute(body, intentSourceBody []byte, account *Account, cacheIdentity string) ([]byte, error) {
 	allowPureClientTools, _ := grokClientToolCacheAccountPolicy(account)
 	return applyGrokFreeToolCacheRoute(body, intentSourceBody, account, cacheIdentity, allowPureClientTools, true)

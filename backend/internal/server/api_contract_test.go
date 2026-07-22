@@ -502,6 +502,8 @@ func TestAPIContracts(t *testing.T) {
 							"require_oauth_only": false,
 							"require_privacy_set": false,
 							"newapi_style_interface_enabled": false,
+							"max_reasoning_effort": "",
+							"reasoning_effort_mappings": null,
 							"rpm_limit": 0,
 							"created_at": "0001-01-01T00:00:00Z",
 							"updated_at": "0001-01-01T00:00:00Z"
@@ -795,7 +797,7 @@ func TestAPIContracts(t *testing.T) {
 					"invitation_code_missing_prompt_html": "",
 					"totp_enabled": false,
 					"totp_encryption_key_configured": false,
-					"session_binding_enabled": true,
+					"session_binding_enabled": false,
 					"step_up_enabled": false,
 					"audit_log_retention_days": 180,
 					"login_agreement_enabled": false,
@@ -1131,7 +1133,7 @@ func TestAPIContracts(t *testing.T) {
 					"invitation_code_missing_prompt_html": "",
 					"totp_enabled": false,
 					"totp_encryption_key_configured": false,
-					"session_binding_enabled": true,
+					"session_binding_enabled": false,
 					"step_up_enabled": false,
 					"audit_log_retention_days": 180,
 					"login_agreement_enabled": false,
@@ -1939,6 +1941,10 @@ func (s *stubAccountRepo) ListOAuthRefreshCandidates(ctx context.Context) ([]ser
 
 func (s *stubAccountRepo) ListByPlatform(ctx context.Context, platform string) ([]service.Account, error) {
 	return nil, errors.New("not implemented")
+}
+
+func (s *stubAccountRepo) ListModelAvailabilityCandidates(ctx context.Context, groupID *int64, platforms []string, includeGrouped bool) ([]service.Account, error) {
+	return nil, nil
 }
 
 func (s *stubAccountRepo) UpdateLastUsed(ctx context.Context, id int64) error {

@@ -698,7 +698,11 @@ func (s *BillingCacheService) QueueUpdateSubscriptionUsage(userID, groupID int64
 	}) {
 		return
 	}
-	logger.LegacyPrintf("service.billing_cache", "Warning: dropped async subscription cache usage update for user %d group %d", userID, groupID)
+	ctx, cancel := context.WithTimeout(context.Background(), cacheWriteTimeout)
+	defer cancel()
+	if err := s.updateSubscriptionUsageRedis(ctx, userID, groupID, costUSD); err != nil {
+		logger.LegacyPrintf("service.billing_cache", "Warning: update subscription cache fallback failed for user %d group %d: %v", userID, groupID, err)
+	}
 }
 
 // InvalidateSubscription 失效指定订阅缓存

@@ -436,9 +436,14 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 
 	// 7. Send request
 	var resp *http.Response
-	resp, responsesBody, err = sendBridgeRequestWithGrokEncryptedRetry(responsesBody)
+	var sentResponsesBody []byte
+	resp, sentResponsesBody, err = sendBridgeRequestWithGrokEncryptedRetry(responsesBody)
 	if err != nil {
 		return handleBridgeRequestError(err)
+	}
+	if len(sentResponsesBody) > 0 {
+		responsesBody = sentResponsesBody
+		setOpsUpstreamRequestBody(c, responsesBody)
 	}
 	defer func() { _ = resp.Body.Close() }()
 

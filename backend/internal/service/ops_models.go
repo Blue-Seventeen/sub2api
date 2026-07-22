@@ -129,8 +129,8 @@ type OpsErrorLogFilter struct {
 	RequestID       string
 	ClientRequestID string
 
-	UserID   *int64
-	APIKeyID *int64
+	UserID               *int64
+	APIKeyID             *int64
 	MatchDeletedKeyOwner bool
 
 	Model      string
