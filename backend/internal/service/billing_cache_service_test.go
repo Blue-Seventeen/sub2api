@@ -553,14 +553,14 @@ func TestBillingCacheServiceFreshSubscriptionCheckRefreshesExpiredStackedCacheWi
 	require.Equal(t, 1, repo.calls)
 }
 
-func TestBillingCacheServiceQueueSubscriptionUsageDropsWhenWorkerUnavailable(t *testing.T) {
+func TestBillingCacheServiceQueueSubscriptionUsageFallsBackWhenWorkerUnavailable(t *testing.T) {
 	cache := &billingCacheWorkerStub{}
 	svc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, &config.Config{}, nil)
 	svc.Stop()
 
 	svc.QueueUpdateSubscriptionUsage(1, 2, 1.5)
 
-	require.Equal(t, int64(0), atomic.LoadInt64(&cache.subscriptionUpdates))
+	require.Equal(t, int64(1), atomic.LoadInt64(&cache.subscriptionUpdates))
 }
 
 func TestBillingCacheServiceRateLimitReset_DeduplicatesConcurrentExpiredWindow(t *testing.T) {

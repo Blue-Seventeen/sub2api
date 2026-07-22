@@ -538,7 +538,7 @@ func (c *openAIWSClientFrameConn) markTurnCompleted() {
 	select {
 	case c.interTurnStarted <- struct{}{}:
 	default:
-}
+	}
 }
 
 func (c *openAIWSClientFrameConn) WriteFrame(ctx context.Context, msgType coderws.MessageType, payload []byte) error {
