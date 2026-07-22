@@ -178,6 +178,14 @@ services:
       - GATEWAY_IMAGE_CONCURRENCY_OVERFLOW_MODE=${GATEWAY_IMAGE_CONCURRENCY_OVERFLOW_MODE:-reject}
       - GATEWAY_IMAGE_CONCURRENCY_WAIT_TIMEOUT_SECONDS=${GATEWAY_IMAGE_CONCURRENCY_WAIT_TIMEOUT_SECONDS:-30}
       - GATEWAY_IMAGE_CONCURRENCY_MAX_WAITING_REQUESTS=${GATEWAY_IMAGE_CONCURRENCY_MAX_WAITING_REQUESTS:-100}
+
+      # =======================================================================
+      # Managed Clash Subscription Proxy
+      # =======================================================================
+      - MANAGED_PROXY_ENABLED=${MANAGED_PROXY_ENABLED:-false}
+      - MANAGED_PROXY_MIHOMO_BINARY_PATH=${MANAGED_PROXY_MIHOMO_BINARY_PATH:-/app/bin/mihomo}
+      - MANAGED_PROXY_SUBSCRIPTION_USER_AGENT=${MANAGED_PROXY_SUBSCRIPTION_USER_AGENT:-sub2api-managed-proxy/1.0}
+      - MANAGED_PROXY_SUBSCRIPTION_APPEND_CLASH_FLAG=${MANAGED_PROXY_SUBSCRIPTION_APPEND_CLASH_FLAG:-false}
     depends_on:
       postgres:
         condition: service_healthy
@@ -206,6 +214,31 @@ services:
     volumes:
       # Local directory mapping for easy migration
       - ./postgres_data:/var/lib/postgresql/data
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -e
+        if [ ! -s "$$PGDATA/PG_VERSION" ] && [ -s "$$PGDATA/pgdata/PG_VERSION" ]; then
+          echo "Migrating PostgreSQL data directory from $$PGDATA/pgdata to $$PGDATA"
+          find "$$PGDATA/pgdata" -mindepth 1 -maxdepth 1 -exec mv {} "$$PGDATA"/ \;
+          rmdir "$$PGDATA/pgdata"
+        fi
+        if [ ! -s "$$PGDATA/PG_VERSION" ] && [ -d "$$PGDATA/pgdata" ] && [ -z "$$(find "$$PGDATA/pgdata" -mindepth 1 -print -quit)" ]; then
+          rmdir "$$PGDATA/pgdata"
+        fi
+        exec docker-entrypoint.sh "$@"
+      - docker-entrypoint-sh
+    command:
+      - postgres
+      - -c
+      - max_connections=${POSTGRES_MAX_CONNECTIONS:-100}
+      - -c
+      - shared_buffers=${POSTGRES_SHARED_BUFFERS:-128MB}
+      - -c
+      - effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-4GB}
+      - -c
+      - maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-64MB}
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-sub2api}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}

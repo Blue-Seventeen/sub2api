@@ -184,6 +184,8 @@ services:
       # without mounting an external mihomo binary.
       - MANAGED_PROXY_ENABLED=${MANAGED_PROXY_ENABLED:-false}
       - MANAGED_PROXY_MIHOMO_BINARY_PATH=${MANAGED_PROXY_MIHOMO_BINARY_PATH:-/app/bin/mihomo}
+      - MANAGED_PROXY_SUBSCRIPTION_USER_AGENT=${MANAGED_PROXY_SUBSCRIPTION_USER_AGENT:-sub2api-managed-proxy/1.0}
+      - MANAGED_PROXY_SUBSCRIPTION_APPEND_CLASH_FLAG=${MANAGED_PROXY_SUBSCRIPTION_APPEND_CLASH_FLAG:-false}
     depends_on:
       postgres:
         condition: service_healthy
@@ -229,6 +231,9 @@ services:
         if [ ! -s "$$PGDATA/PG_VERSION" ] && [ -s "$$PGDATA/pgdata/PG_VERSION" ]; then
           echo "Migrating PostgreSQL data directory from $$PGDATA/pgdata to $$PGDATA"
           find "$$PGDATA/pgdata" -mindepth 1 -maxdepth 1 -exec mv {} "$$PGDATA"/ \;
+          rmdir "$$PGDATA/pgdata"
+        fi
+        if [ ! -s "$$PGDATA/PG_VERSION" ] && [ -d "$$PGDATA/pgdata" ] && [ -z "$$(find "$$PGDATA/pgdata" -mindepth 1 -print -quit)" ]; then
           rmdir "$$PGDATA/pgdata"
         fi
         exec docker-entrypoint.sh "$@"
