@@ -5,7 +5,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-IMAGE_TAG="${SUB2API_IMAGE:-sub2api-custom:0.1.162}"
+IMAGE_TAG="${SUB2API_IMAGE:-sub2api-custom:0.1.163}"
 
 echo "Building ${IMAGE_TAG}"
 docker build -t "${IMAGE_TAG}" \

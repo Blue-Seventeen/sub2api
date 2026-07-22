@@ -11,10 +11,14 @@ vi.mock("vue-i18n", async () => {
     useI18n: () => ({
       t: (key: string, params?: Record<string, unknown>) => {
         if (key === "payment.days") return "days";
+        if (key === "payment.weeks") return "weeks";
+        if (key === "payment.months") return "months";
+        if (key === "payment.perMonth") return "month";
         if (key === "payment.planCard.peakRate") return "Peak rate";
         if (key === "payment.planCard.quota") return "Quota";
         if (key === "payment.planCard.rate") return "Rate";
         if (key === "payment.planCard.unlimited") return "Unlimited";
+        if (key === "payment.planCard.models") return "Models";
         if (key === "payment.subscribeNow") return "Subscribe now";
         if (key === "common.peakRateCompactSingle") return `Peak x${params?.multiplier}`;
         if (key === "common.peakRateCompactMultiple") return `Peak ${params?.count} windows`;
@@ -76,6 +80,16 @@ describe("SubscriptionPlanCard", () => {
     expect(wrapper.text()).not.toContain("09:00-12:00");
     expect(wrapper.find("[title*='09:00-12:00']").exists()).toBe(true);
     expect(wrapper.find("[title*='18:00-22:00']").exists()).toBe(true);
+  });
+
+  // #4607：管理端保存的单位是复数（months/weeks），此前用户侧只匹配单数
+  // 'month'，「1 个月」的套餐卡片被显示成「1天」。测试环境的 vue-i18n 为
+  // mocked t()，故按翻译后单位断言单位分支。
+  it("renders plural admin-form validity units instead of mislabeled days (#4607)", () => {
+    expect(mountPlanCard("openai", { validity_days: 1, validity_unit: "months" }).text()).toContain("/ month");
+    expect(mountPlanCard("openai", { validity_days: 3, validity_unit: "months" }).text()).toContain("/ 3months");
+    expect(mountPlanCard("openai", { validity_days: 2, validity_unit: "weeks" }).text()).toContain("/ 2weeks");
+    expect(mountPlanCard("openai", { validity_days: 30, validity_unit: "day" }).text()).toContain("/ 30days");
   });
 
   it("uses the configured currency symbol while preserving USD for legacy plans", () => {

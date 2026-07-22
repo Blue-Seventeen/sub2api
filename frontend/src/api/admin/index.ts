@@ -34,6 +34,7 @@ import adminPromotionAPI from './promotion'
 import riskControlAPI from './riskControl'
 import adminComplianceAPI from './compliance'
 import auditAPI from './audit'
+import affiliatesAPI from './affiliates'
 
 /**
  * Unified admin API object for convenient access
@@ -69,7 +70,8 @@ export const adminAPI = {
   promotion: adminPromotionAPI,
   riskControl: riskControlAPI,
   compliance: adminComplianceAPI,
-  audit: auditAPI
+  audit: auditAPI,
+  affiliates: affiliatesAPI
 }
 
 export {
@@ -103,7 +105,8 @@ export {
   adminPromotionAPI,
   riskControlAPI,
   adminComplianceAPI,
-  auditAPI
+  auditAPI,
+  affiliatesAPI
 }
 
 export default adminAPI
