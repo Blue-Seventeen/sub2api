@@ -752,6 +752,54 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(payload).not.toHaveProperty("payment_visible_method_wxpay_enabled");
   });
 
+  it("preserves default balance and concurrency when saving settings", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      default_balance: 12.34,
+      default_concurrency: 9,
+      default_user_rpm_limit: 123,
+      default_subscriptions: [{ group_id: 21, validity_days: 14 }],
+      site_name: "Custom Sub2API",
+      force_email_on_third_party_signup: true,
+      login_agreement_enabled: true,
+      login_agreement_mode: "checkbox",
+      login_agreement_updated_at: "2026-07-22",
+      login_agreement_documents: [
+        {
+          id: "terms",
+          title: "Terms",
+          content_md: "Terms body",
+        },
+      ],
+    });
+    const wrapper = mountView();
+
+    await flushPromises();
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        default_balance: 12.34,
+        default_concurrency: 9,
+        default_user_rpm_limit: 123,
+        default_subscriptions: [{ group_id: 21, validity_days: 14 }],
+        site_name: "Custom Sub2API",
+        force_email_on_third_party_signup: true,
+        login_agreement_enabled: true,
+        login_agreement_mode: "checkbox",
+        login_agreement_updated_at: "2026-07-22",
+        login_agreement_documents: [
+          {
+            id: "terms",
+            title: "Terms",
+            content_md: "Terms body",
+          },
+        ],
+      }),
+    );
+  });
+
   it("submits the admin recharge affiliate rebate setting", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,

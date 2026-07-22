@@ -132,7 +132,7 @@ type UpdateSettingsRequest struct {
 	GoogleOAuthFrontendRedirectURL string `json:"google_oauth_frontend_redirect_url"`
 
 	// OEM设置
-	SiteName                       string                `json:"site_name"`
+	SiteName                       *string               `json:"site_name"`
 	SiteLogo                       string                `json:"site_logo"`
 	SiteSubtitle                   string                `json:"site_subtitle"`
 	APIBaseURL                     string                `json:"api_base_url"`
@@ -150,15 +150,15 @@ type UpdateSettingsRequest struct {
 	CustomEndpoints                *[]dto.CustomEndpoint `json:"custom_endpoints"`
 
 	// 默认配置
-	DefaultConcurrency                        int                               `json:"default_concurrency"`
-	DefaultBalance                            float64                           `json:"default_balance"`
+	DefaultConcurrency                        *int                              `json:"default_concurrency"`
+	DefaultBalance                            *float64                          `json:"default_balance"`
 	AffiliateRebateRate                       *float64                          `json:"affiliate_rebate_rate"`
 	AffiliateRebateFreezeHours                *int                              `json:"affiliate_rebate_freeze_hours"`
 	AffiliateRebateDurationDays               *int                              `json:"affiliate_rebate_duration_days"`
 	AffiliateRebatePerInviteeCap              *float64                          `json:"affiliate_rebate_per_invitee_cap"`
 	AdminRechargeRebateEnabled                *bool                             `json:"affiliate_admin_recharge_enabled"`
-	DefaultUserRPMLimit                       int                               `json:"default_user_rpm_limit"`
-	DefaultSubscriptions                      []dto.DefaultSubscriptionSetting  `json:"default_subscriptions"`
+	DefaultUserRPMLimit                       *int                              `json:"default_user_rpm_limit"`
+	DefaultSubscriptions                      *[]dto.DefaultSubscriptionSetting `json:"default_subscriptions"`
 	AuthSourceDefaultEmailBalance             *float64                          `json:"auth_source_default_email_balance"`
 	AuthSourceDefaultEmailConcurrency         *int                              `json:"auth_source_default_email_concurrency"`
 	AuthSourceDefaultEmailSubscriptions       *[]dto.DefaultSubscriptionSetting `json:"auth_source_default_email_subscriptions"`
@@ -426,11 +426,30 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	}
 
 	// 验证参数
-	if req.DefaultConcurrency < 1 {
-		req.DefaultConcurrency = 1
+	defaultConcurrency := previousSettings.DefaultConcurrency
+	if req.DefaultConcurrency != nil {
+		defaultConcurrency = *req.DefaultConcurrency
 	}
-	if req.DefaultBalance < 0 {
-		req.DefaultBalance = 0
+	if defaultConcurrency < 1 {
+		defaultConcurrency = 1
+	}
+	defaultBalance := previousSettings.DefaultBalance
+	if req.DefaultBalance != nil {
+		defaultBalance = *req.DefaultBalance
+	}
+	if defaultBalance < 0 {
+		defaultBalance = 0
+	}
+	siteName := previousSettings.SiteName
+	if req.SiteName != nil {
+		siteName = *req.SiteName
+	}
+	defaultUserRPMLimit := previousSettings.DefaultUserRPMLimit
+	if req.DefaultUserRPMLimit != nil {
+		defaultUserRPMLimit = *req.DefaultUserRPMLimit
+	}
+	if defaultUserRPMLimit < 0 {
+		defaultUserRPMLimit = 0
 	}
 	affiliateRebateRate := previousSettings.AffiliateRebateRate
 	if req.AffiliateRebateRate != nil {
@@ -488,7 +507,17 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	if req.SMTPPort <= 0 {
 		req.SMTPPort = 587
 	}
-	req.DefaultSubscriptions = normalizeDefaultSubscriptions(req.DefaultSubscriptions)
+	defaultSubscriptionDTOs := make([]dto.DefaultSubscriptionSetting, 0, len(previousSettings.DefaultSubscriptions))
+	if req.DefaultSubscriptions != nil {
+		defaultSubscriptionDTOs = normalizeDefaultSubscriptions(*req.DefaultSubscriptions)
+	} else {
+		for _, sub := range previousSettings.DefaultSubscriptions {
+			defaultSubscriptionDTOs = append(defaultSubscriptionDTOs, dto.DefaultSubscriptionSetting{
+				GroupID:      sub.GroupID,
+				ValidityDays: sub.ValidityDays,
+			})
+		}
+	}
 	req.AuthSourceDefaultEmailSubscriptions = normalizeOptionalDefaultSubscriptions(req.AuthSourceDefaultEmailSubscriptions)
 	req.AuthSourceDefaultLinuxDoSubscriptions = normalizeOptionalDefaultSubscriptions(req.AuthSourceDefaultLinuxDoSubscriptions)
 	req.AuthSourceDefaultOIDCSubscriptions = normalizeOptionalDefaultSubscriptions(req.AuthSourceDefaultOIDCSubscriptions)
@@ -1158,8 +1187,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		}
 		req.OpsMetricsIntervalSeconds = &v
 	}
-	defaultSubscriptions := make([]service.DefaultSubscriptionSetting, 0, len(req.DefaultSubscriptions))
-	for _, sub := range req.DefaultSubscriptions {
+	defaultSubscriptions := make([]service.DefaultSubscriptionSetting, 0, len(defaultSubscriptionDTOs))
+	for _, sub := range defaultSubscriptionDTOs {
 		defaultSubscriptions = append(defaultSubscriptions, service.DefaultSubscriptionSetting{
 			GroupID:      sub.GroupID,
 			ValidityDays: sub.ValidityDays,
@@ -1345,7 +1374,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		GoogleOAuthClientSecret:                req.GoogleOAuthClientSecret,
 		GoogleOAuthRedirectURL:                 req.GoogleOAuthRedirectURL,
 		GoogleOAuthFrontendRedirectURL:         req.GoogleOAuthFrontendRedirectURL,
-		SiteName:                               req.SiteName,
+		SiteName:                               siteName,
 		SiteLogo:                               req.SiteLogo,
 		SiteSubtitle:                           req.SiteSubtitle,
 		APIBaseURL:                             req.APIBaseURL,
@@ -1361,14 +1390,14 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		TablePageSizeOptions:                   req.TablePageSizeOptions,
 		CustomMenuItems:                        customMenuJSON,
 		CustomEndpoints:                        customEndpointsJSON,
-		DefaultConcurrency:                     req.DefaultConcurrency,
-		DefaultBalance:                         req.DefaultBalance,
+		DefaultConcurrency:                     defaultConcurrency,
+		DefaultBalance:                         defaultBalance,
 		AffiliateRebateRate:                    affiliateRebateRate,
 		AffiliateRebateFreezeHours:             affiliateRebateFreezeHours,
 		AffiliateRebateDurationDays:            affiliateRebateDurationDays,
 		AffiliateRebatePerInviteeCap:           affiliateRebatePerInviteeCap,
 		AdminRechargeRebateEnabled:             adminRechargeRebateEnabled,
-		DefaultUserRPMLimit:                    req.DefaultUserRPMLimit,
+		DefaultUserRPMLimit:                    defaultUserRPMLimit,
 		DefaultSubscriptions:                   defaultSubscriptions,
 		EnableModelFallback:                    req.EnableModelFallback,
 		FallbackModelAnthropic:                 req.FallbackModelAnthropic,

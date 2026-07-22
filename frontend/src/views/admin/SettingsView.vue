@@ -9827,6 +9827,9 @@ async function saveSettings() {
         ? form.audit_log_retention_days
         : 180,
       login_agreement_enabled: form.login_agreement_enabled,
+      login_agreement_mode: form.login_agreement_mode,
+      login_agreement_updated_at: form.login_agreement_updated_at,
+      login_agreement_documents: normalizedLoginAgreementDocuments,
       affiliate_rebate_rate: Math.min(
         100,
         Math.max(0, Number(form.affiliate_rebate_rate) || 0),
@@ -9835,7 +9838,16 @@ async function saveSettings() {
       affiliate_rebate_duration_days: Math.max(0, Math.min(3650, Math.floor(Number(form.affiliate_rebate_duration_days) || 0))),
       affiliate_rebate_per_invitee_cap: Math.max(0, Number(form.affiliate_rebate_per_invitee_cap) || 0),
       affiliate_admin_recharge_enabled: form.affiliate_admin_recharge_enabled,
+      default_balance: Math.max(0, Number(form.default_balance) || 0),
+      default_concurrency: Math.max(
+        1,
+        Math.floor(Number(form.default_concurrency) || 1),
+      ),
       default_user_rpm_limit: form.default_user_rpm_limit,
+      default_subscriptions: normalizedDefaultSubscriptions,
+      force_email_on_third_party_signup:
+        form.force_email_on_third_party_signup,
+      site_name: form.site_name,
       site_logo: form.site_logo,
       site_subtitle: form.site_subtitle,
       api_base_url: form.api_base_url,
