@@ -97,10 +97,10 @@ const filteredGroups = computed(() => {
   if (props.platform) {
     if (props.platform === 'antigravity' && props.mixedScheduling) {
       result = result.filter(
-        (g) => g.platform === 'antigravity' || g.platform === 'anthropic' || g.platform === 'gemini'
+        (g) => g.platform === 'antigravity' || g.platform === 'anthropic' || g.platform === 'gemini' || g.platform === 'composite'
       )
     } else {
-      result = result.filter((g) => g.platform === props.platform)
+      result = result.filter((g) => g.platform === props.platform || g.platform === 'composite')
     }
   }
   if (isSearchable.value && searchText.value) {

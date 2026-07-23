@@ -34,7 +34,7 @@ func (h *NewAPIStyleGatewayHandler) Audio(c *gin.Context) {
 }
 func (h *NewAPIStyleGatewayHandler) QwenMultimodalGeneration(c *gin.Context) {
 	apiKey, _ := middleware2.GetAPIKeyFromContext(c)
-	if apiKey == nil || apiKey.Group == nil || apiKey.Group.Platform != service.PlatformAli {
+	if apiKey == nil || apiKey.Group == nil || effectiveAPIKeyPlatform(c, apiKey) != service.PlatformAli {
 		h.writeError(c, http.StatusForbidden, "permission_error", "The DashScope multimodal official path alias is only available for Qwen/DashScope groups")
 		return
 	}
@@ -129,8 +129,8 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 	setOpsRequestContext(c, model, stream)
 	setOpsEndpointContext(c, model, int16(service.RequestTypeFromLegacy(stream, false)))
 	if whitelistModel, ok := newAPIStyleGroupModelsListModel(route, model, c.Request.Method, c.Request.URL.Path); ok {
-		if !groupAllowsRequestedModel(apiKey.Group, whitelistModel) {
-			h.writeError(c, http.StatusForbidden, "permission_error", groupModelsListDisallowedMessage(whitelistModel))
+		if publicModel, allowed := groupAllowsClientRequestedModel(c, apiKey.Group, whitelistModel); !allowed {
+			h.writeError(c, http.StatusForbidden, "permission_error", groupModelsListDisallowedMessage(publicModel))
 			return
 		}
 	}
@@ -409,7 +409,7 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 				FallbackChain:         compat.FallbackChain,
 				UpstreamTransport:     compat.UpstreamTransport,
 				APIKeyService:         h.base.apiKeyService,
-				ChannelUsageFields:    channelMapping.ToUsageFields(model, result.UpstreamModel),
+				ChannelUsageFields:    clientRequestedUsageFields(c, channelMapping, model, result.UpstreamModel),
 			}); err != nil {
 				logger.L().With(
 					zap.String("component", "handler.newapi_style"),

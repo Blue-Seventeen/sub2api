@@ -35,6 +35,7 @@ const (
 	PlatformKling       = "kling"
 	PlatformMidjourney  = "midjourney"
 	PlatformGrok        = "grok"
+	PlatformComposite   = "composite"
 )
 
 // Account type constants

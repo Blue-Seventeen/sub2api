@@ -39,6 +39,7 @@ func newGatewayImageUsageRecordServiceForTest(usageRepo UsageLogRepository, user
 		nil,
 		nil,
 		nil,
+		nil, // balanceNotifyService
 		nil, // proxyStatsRepo
 		nil, // userPlatformQuotaRepo
 	)

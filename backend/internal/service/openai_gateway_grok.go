@@ -1358,6 +1358,8 @@ func (s *OpenAIGatewayService) handleGrokAccountUpstreamError(ctx context.Contex
 			reason = "grok oauth token unauthorized"
 		}
 		s.tempUnscheduleGrok(ctx, account, 10*time.Minute, reason)
+	case http.StatusPaymentRequired:
+		s.tempUnscheduleGrok(ctx, account, 30*time.Minute, "grok payment required")
 	case http.StatusForbidden:
 		if s.applyGrokForbiddenPolicy(ctx, account, responseBody) {
 			return

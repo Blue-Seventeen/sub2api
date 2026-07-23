@@ -30,7 +30,7 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 		h.errorResponse(c, http.StatusUnauthorized, "authentication_error", "Invalid API key")
 		return
 	}
-	if apiKey.Group.Platform != service.PlatformOpenAI {
+	if effectiveAPIKeyPlatform(c, apiKey) != service.PlatformOpenAI {
 		h.errorResponse(c, http.StatusNotFound, "not_found_error", "Codex alpha search is only available for OpenAI groups")
 		return
 	}
@@ -76,10 +76,10 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 	}
 	requestedModel := strings.TrimSpace(modelResult.String())
 	reqLog = reqLog.With(zap.String("model", requestedModel))
-	setOpsRequestContext(c, requestedModel, false)
+	setOpsRequestContext(c, clientRequestedModel(c, requestedModel), false)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeSync))
-	if !groupAllowsRequestedModel(apiKey.Group, requestedModel) {
-		h.errorResponse(c, http.StatusForbidden, "permission_error", groupModelsListDisallowedMessage(requestedModel))
+	if publicModel, allowed := groupAllowsClientRequestedModel(c, apiKey.Group, requestedModel); !allowed {
+		h.errorResponse(c, http.StatusForbidden, "permission_error", groupModelsListDisallowedMessage(publicModel))
 		return
 	}
 	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, "openai_alpha_search", requestedModel, body); decision != nil && !decision.AllowNextStage {
@@ -268,7 +268,7 @@ func (h *OpenAIGatewayHandler) recordAlphaSearchUsage(
 			RequestPayloadHash: requestPayloadHash,
 			APIKeyService:      h.apiKeyService,
 			QuotaPlatform:      quotaPlatform,
-			ChannelUsageFields: channelMapping.ToUsageFields(requestedModel, result.UpstreamModel),
+			ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, requestedModel, result.UpstreamModel),
 		}); err != nil {
 			logger.L().With(
 				zap.String("component", "handler.openai_gateway.alpha_search"),

@@ -51,7 +51,7 @@ func TestRecordGatewayProxyFailureStatSubmitsAsyncTask(t *testing.T) {
 	repo := &proxyStatsHandlerRepoStub{}
 	svc := service.NewGatewayService(
 		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
-		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, repo, nil,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, repo, nil,
 	)
 	pool := service.NewProxyStatsWorkerPoolWithOptions(service.ProxyStatsWorkerPoolOptions{
 		WorkerCount: 1,
@@ -115,7 +115,7 @@ func TestRecordGatewayProxyFailureStatQueueFullDoesNotRunSynchronously(t *testin
 	repo := &proxyStatsHandlerRepoStub{}
 	svc := service.NewGatewayService(
 		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
-		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, repo, nil,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, repo, nil,
 	)
 	pool := service.NewProxyStatsWorkerPoolWithOptions(service.ProxyStatsWorkerPoolOptions{
 		WorkerCount: 1,

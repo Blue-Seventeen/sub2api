@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/gin-gonic/gin"
 )
 
 func groupModelsListDisallowedMessage(model string) string {
@@ -18,6 +19,11 @@ func groupModelsListDisallowedMessage(model string) string {
 
 func groupAllowsRequestedModel(group *service.Group, model string) bool {
 	return service.GroupAllowsRequestedModel(group, model)
+}
+
+func groupAllowsClientRequestedModel(c *gin.Context, group *service.Group, fallbackModel string) (string, bool) {
+	model := clientRequestedModel(c, fallbackModel)
+	return model, groupAllowsRequestedModel(group, model)
 }
 
 func newAPIStyleGroupModelsListModel(route service.NewAPIStyleRoute, model, method, path string) (string, bool) {

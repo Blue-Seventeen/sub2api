@@ -20,6 +20,40 @@ type gatewayModelsAccountRepoStub struct {
 	byGroup map[int64][]service.Account
 }
 
+type compositeRouteRepoStubForGatewayModels struct {
+	routes []service.CompositeModelRoute
+}
+
+func (s compositeRouteRepoStubForGatewayModels) ListByGroup(_ context.Context, groupID int64, includeDisabled bool) ([]service.CompositeModelRoute, error) {
+	routes := make([]service.CompositeModelRoute, 0, len(s.routes))
+	for _, route := range s.routes {
+		if route.GroupID != groupID {
+			continue
+		}
+		if !includeDisabled && !route.Enabled {
+			continue
+		}
+		routes = append(routes, route)
+	}
+	return routes, nil
+}
+
+func (s compositeRouteRepoStubForGatewayModels) Create(context.Context, *service.CompositeModelRoute) error {
+	return nil
+}
+
+func (s compositeRouteRepoStubForGatewayModels) Update(context.Context, *service.CompositeModelRoute) error {
+	return nil
+}
+
+func (s compositeRouteRepoStubForGatewayModels) Delete(context.Context, int64) error {
+	return nil
+}
+
+func (s compositeRouteRepoStubForGatewayModels) DeleteByGroup(context.Context, int64) error {
+	return nil
+}
+
 type gatewayModelsResponseForTest struct {
 	Object string                    `json:"object"`
 	Data   []gatewayModelItemForTest `json:"data"`
@@ -53,13 +87,26 @@ func (s *gatewayModelsAccountRepoStub) ListSchedulableByGroupID(ctx context.Cont
 }
 
 func newGatewayModelsHandlerForTest(repo service.AccountRepository) *GatewayHandler {
+	return newGatewayModelsHandlerForTestWithCompositeResolver(repo, nil)
+}
+
+func newGatewayModelsHandlerForTestWithCompositeResolver(repo service.AccountRepository, compositeResolver *service.CompositeRouteResolver) *GatewayHandler {
 	return &GatewayHandler{
 		gatewayService: service.NewGatewayService(
 			repo,
-			nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
 			nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+			nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, compositeResolver, nil, nil, nil,
 		),
 	}
+}
+
+func TestDefaultModelIDsForCompositeIncludesAntigravityDefaults(t *testing.T) {
+	antigravityIDs := defaultModelIDsForPlatform(service.PlatformAntigravity)
+	require.NotEmpty(t, antigravityIDs)
+
+	compositeIDs := defaultModelIDsForPlatform(service.PlatformComposite)
+	require.Contains(t, compositeIDs, antigravityIDs[0])
+	require.Contains(t, compositeIDs, "kimi-k2.6")
 }
 
 func TestGatewayModels_GeminiGroupFallsBackToGeminiModels(t *testing.T) {
@@ -276,6 +323,106 @@ func TestGatewayModels_CustomModelsListFiltersAndOrdersMappedModels(t *testing.T
 	var got gatewayModelsResponseForTest
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
 	require.Equal(t, []string{"gpt-5.5", "missing-model", "gpt-5.4"}, modelIDsForTest(got.Data))
+}
+
+func TestGatewayModels_CompositeCustomModelsListFiltersAcrossConcretePlatforms(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	groupID := int64(33)
+	h := newGatewayModelsHandlerForTest(
+		&gatewayModelsAccountRepoStub{
+			byGroup: map[int64][]service.Account{
+				groupID: {
+					{
+						ID:       1,
+						Platform: service.PlatformOpenAI,
+						Credentials: map[string]any{
+							"model_mapping": map[string]any{
+								"gpt-5.4": "gpt-5.4",
+								"gpt-5.5": "gpt-5.5",
+							},
+						},
+					},
+					{
+						ID:       2,
+						Platform: service.PlatformGemini,
+						Credentials: map[string]any{
+							"model_mapping": map[string]any{
+								"gemini-2.5-flash": "gemini-2.5-flash",
+							},
+						},
+					},
+					{
+						ID:       3,
+						Platform: service.PlatformAntigravity,
+						Credentials: map[string]any{
+							"model_mapping": map[string]any{
+								"ag-custom-model": "ag-custom-model",
+							},
+						},
+					},
+				},
+			},
+		},
+	)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+		Group: &service.Group{
+			ID:       groupID,
+			Platform: service.PlatformComposite,
+			ModelsListConfig: service.GroupModelsListConfig{
+				Enabled: true,
+				Models:  []string{"gemini-2.5-flash", "missing-model", "ag-custom-model", "gpt-5.5"},
+			},
+		},
+	})
+
+	h.Models(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var got gatewayModelsResponseForTest
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.Equal(t, []string{"gemini-2.5-flash", "ag-custom-model", "gpt-5.5"}, modelIDsForTest(got.Data))
+}
+
+func TestGatewayModels_CompositeUnmappedAccountsFallbackToLinkedPlatformsOnly(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	groupID := int64(34)
+	h := newGatewayModelsHandlerForTest(
+		&gatewayModelsAccountRepoStub{
+			byGroup: map[int64][]service.Account{
+				groupID: {
+					{ID: 1, Platform: service.PlatformOpenAI},
+					{ID: 2, Platform: service.PlatformGrok},
+				},
+			},
+		},
+	)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+		Group: &service.Group{ID: groupID, Platform: service.PlatformComposite},
+	})
+
+	h.Models(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var got gatewayModelsResponseForTest
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+
+	ids := modelIDsForTest(got.Data)
+	require.Contains(t, ids, "gpt-5.5")
+	require.Contains(t, ids, "grok-4.3")
+	require.NotContains(t, ids, "claude-sonnet-4-6")
+	require.NotContains(t, ids, "gemini-2.5-flash")
 }
 
 func TestGatewayModels_CustomModelsListKeepsConcreteModelAllowedByWildcardMapping(t *testing.T) {
@@ -585,6 +732,62 @@ func TestGatewayModels_CustomModelsListEmptyWhenEnabledAndNoModels(t *testing.T)
 	require.Empty(t, modelIDsForTest(got.Data))
 }
 
+func TestGatewayModels_CompositeIncludesExplicitRoutePublicModels(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	groupID := int64(31)
+	h := newGatewayModelsHandlerForTestWithCompositeResolver(
+		&gatewayModelsAccountRepoStub{
+			byGroup: map[int64][]service.Account{
+				groupID: {
+					{ID: 1, Platform: service.PlatformOpenAI},
+				},
+			},
+		},
+		service.NewCompositeRouteResolver(compositeRouteRepoStubForGatewayModels{
+			routes: []service.CompositeModelRoute{
+				{
+					GroupID:        groupID,
+					PublicModel:    "all/kimi",
+					MatchType:      service.CompositeRouteMatchExact,
+					TargetPlatform: service.PlatformMoonshot,
+					UpstreamModel:  "kimi-k2.6",
+					Endpoint:       service.CompositeRouteEndpointAny,
+					Enabled:        true,
+				},
+				{
+					GroupID:        groupID,
+					PublicModel:    "all/router/",
+					MatchType:      service.CompositeRouteMatchPrefix,
+					TargetPlatform: service.PlatformOpenRouter,
+					UpstreamModel:  "openai/gpt-5",
+					Endpoint:       service.CompositeRouteEndpointAny,
+					Enabled:        true,
+				},
+			},
+		}),
+	)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+		GroupID: &groupID,
+		Group:   &service.Group{ID: groupID, Platform: service.PlatformComposite},
+	})
+
+	h.Models(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var got gatewayModelsResponseForTest
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	ids := modelIDsForTest(got.Data)
+	require.Contains(t, ids, "all/kimi")
+	require.NotContains(t, ids, "all/router/")
+	require.Contains(t, ids, "gpt-5.5")
+}
+
 func TestGatewayModels_CustomModelsListWildcardExpandsCaseInsensitiveCandidates(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -708,6 +911,46 @@ func TestCompatibleGatewayCountTokens_CustomModelsListRejectsDisallowedModel(t *
 
 	require.Equal(t, http.StatusForbidden, rec.Code)
 	require.Contains(t, rec.Body.String(), "gpt-5.5")
+}
+
+func TestCompatibleGatewayCountTokens_CompositeCompatibleRouteUsesResolvedPlatformAndPublicModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	base := newGatewayModelsHandlerForTest(&gatewayModelsAccountRepoStub{})
+	h := NewCompatibleGatewayHandler(service.NewCompatibleGatewayService(base.gatewayService, nil, nil, nil), base)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/messages/count_tokens",
+		strings.NewReader(`{"model":"kimi-k2.6","messages":[{"role":"user","content":"hello"}]}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(service.WithCompositeRouteDecision(req.Context(), service.CompositeRouteDecision{
+		Matched:        true,
+		Source:         service.CompositeRouteSourceExplicit,
+		PublicModel:    "all/kimi",
+		TargetPlatform: service.PlatformMoonshot,
+		UpstreamModel:  "kimi-k2.6",
+		Endpoint:       service.CompositeRouteEndpointCountTokens,
+	}))
+	c.Request = req
+	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+		Group: &service.Group{
+			ID:       32,
+			Platform: service.PlatformComposite,
+			ModelsListConfig: service.GroupModelsListConfig{
+				Enabled: true,
+				Models:  []string{"all/kimi"},
+			},
+		},
+	})
+
+	h.CountTokens(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), "input_tokens")
 }
 
 func TestGatewayModels_OpenAICustomModelsListKeepsOpenAIResponseShapeForDefaultFallback(t *testing.T) {

@@ -8,15 +8,15 @@ import {
   type UpdateSettingsRequest,
   type DefaultPlatformQuotasMap,
 } from "@/api/admin/settings";
+import { ALLOWED_QUOTA_PLATFORMS } from "@/api/admin/users";
 
 /** 全 null 的 5 平台 map，用于断言归一化默认值 */
-const allNullQuotas: DefaultPlatformQuotasMap = {
-  anthropic: { daily: null, weekly: null, monthly: null },
-  openai:    { daily: null, weekly: null, monthly: null },
-  gemini:    { daily: null, weekly: null, monthly: null },
-  antigravity: { daily: null, weekly: null, monthly: null },
-  grok: { daily: null, weekly: null, monthly: null },
-}
+const allNullQuotas: DefaultPlatformQuotasMap = Object.fromEntries(
+  ALLOWED_QUOTA_PLATFORMS.map((platform) => [
+    platform,
+    { daily: null, weekly: null, monthly: null },
+  ])
+) as DefaultPlatformQuotasMap
 
 describe("admin settings auth source defaults helpers", () => {
   it("builds auth source defaults state from flat settings fields", () => {
@@ -242,7 +242,7 @@ describe("normalizePlatformQuotasMap", () => {
 
   it("无参数时返回全 5 平台全 null", () => {
     const result = normalizePlatformQuotasMap();
-    expect(Object.keys(result)).toHaveLength(5);
+    expect(Object.keys(result)).toHaveLength(ALLOWED_QUOTA_PLATFORMS.length);
     for (const v of Object.values(result)) {
       expect(v).toEqual({ daily: null, weekly: null, monthly: null });
     }
@@ -290,7 +290,7 @@ describe("sanitizePlatformQuotasMap", () => {
 
   it("缺失平台填充为全 null", () => {
     const result = sanitizePlatformQuotasMap({});
-    expect(Object.keys(result)).toHaveLength(5);
+    expect(Object.keys(result)).toHaveLength(ALLOWED_QUOTA_PLATFORMS.length);
     for (const v of Object.values(result)) {
       expect(v).toEqual({ daily: null, weekly: null, monthly: null });
     }

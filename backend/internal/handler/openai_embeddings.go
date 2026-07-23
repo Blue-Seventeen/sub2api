@@ -72,11 +72,16 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 	}
 	reqModel := modelResult.String()
 	requestPayloadHash := service.HashUsageRequestPayload(body)
+	ensureCompositeTargetPlatform(c, apiKey, reqModel)
+	if !compositeTargetPlatformAllowed(c, apiKey, reqModel, service.PlatformOpenAI) {
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Model is not supported by this OpenAI-compatible endpoint for composite groups")
+		return
+	}
 	reqLog = reqLog.With(zap.String("model", reqModel))
-	setOpsRequestContext(c, reqModel, false)
+	setOpsRequestContext(c, clientRequestedModel(c, reqModel), false)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeSync))
-	if !groupAllowsRequestedModel(apiKey.Group, reqModel) {
-		h.errorResponse(c, http.StatusForbidden, "permission_error", groupModelsListDisallowedMessage(reqModel))
+	if publicModel, allowed := groupAllowsClientRequestedModel(c, apiKey.Group, reqModel); !allowed {
+		h.errorResponse(c, http.StatusForbidden, "permission_error", groupModelsListDisallowedMessage(publicModel))
 		return
 	}
 	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, "openai_embeddings", reqModel, body); decision != nil && !decision.AllowNextStage {
@@ -266,8 +271,8 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 				IPAddress:          clientIP,
 				APIKeyService:      h.apiKeyService,
 				QuotaPlatform:      quotaPlatform,
-				ChannelUsageFields: channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
 				RequestPayloadHash: requestPayloadHash,
+				ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel),
 			}); err != nil {
 				logger.L().With(
 					zap.String("component", "handler.openai_gateway.embeddings"),

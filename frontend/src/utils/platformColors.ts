@@ -22,7 +22,8 @@ export const PLATFORMS = [
   'openrouter',
   'suno',
   'kling',
-  'midjourney'
+  'midjourney',
+  'composite'
 ] as const
 
 export type Platform = (typeof PLATFORMS)[number]
@@ -44,7 +45,8 @@ const BADGE: Record<Platform, string> = {
   openrouter: 'bg-indigo-500/10 text-indigo-600 border-indigo-500/30 dark:text-indigo-400',
   suno: 'bg-yellow-500/10 text-yellow-700 border-yellow-500/30 dark:text-yellow-300',
   kling: 'bg-red-500/10 text-red-600 border-red-500/30 dark:text-red-400',
-  midjourney: 'bg-slate-500/10 text-slate-600 border-slate-500/30 dark:text-slate-300'
+  midjourney: 'bg-slate-500/10 text-slate-600 border-slate-500/30 dark:text-slate-300',
+  composite: 'bg-cyan-500/10 text-cyan-700 border-cyan-500/30 dark:text-cyan-300'
 }
 const BADGE_DEFAULT = 'bg-slate-500/10 text-slate-600 border-slate-500/30 dark:text-slate-400'
 
@@ -65,7 +67,8 @@ const BADGE_LIGHT: Record<Platform, string> = {
   openrouter: 'bg-indigo-500/10 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-300',
   suno: 'bg-yellow-500/10 text-yellow-700 dark:bg-yellow-500/10 dark:text-yellow-300',
   kling: 'bg-red-500/10 text-red-600 dark:bg-red-500/10 dark:text-red-300',
-  midjourney: 'bg-slate-500/10 text-slate-600 dark:bg-slate-500/10 dark:text-slate-300'
+  midjourney: 'bg-slate-500/10 text-slate-600 dark:bg-slate-500/10 dark:text-slate-300',
+  composite: 'bg-cyan-500/10 text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-300'
 }
 
 const BORDER: Record<Platform, string> = {
@@ -85,7 +88,8 @@ const BORDER: Record<Platform, string> = {
   openrouter: 'border-indigo-500/20 dark:border-indigo-500/20',
   suno: 'border-yellow-500/20 dark:border-yellow-500/20',
   kling: 'border-red-500/20 dark:border-red-500/20',
-  midjourney: 'border-slate-500/20 dark:border-slate-500/20'
+  midjourney: 'border-slate-500/20 dark:border-slate-500/20',
+  composite: 'border-cyan-500/20 dark:border-cyan-500/20'
 }
 const BORDER_DEFAULT = 'border-gray-200 dark:border-dark-700'
 
@@ -106,7 +110,8 @@ const ACCENT_BAR: Record<Platform, string> = {
   openrouter: 'bg-gradient-to-r from-indigo-400 to-indigo-500',
   suno: 'bg-gradient-to-r from-yellow-400 to-amber-500',
   kling: 'bg-gradient-to-r from-red-400 to-rose-500',
-  midjourney: 'bg-gradient-to-r from-slate-400 to-slate-600'
+  midjourney: 'bg-gradient-to-r from-slate-400 to-slate-600',
+  composite: 'bg-gradient-to-r from-slate-500 to-cyan-500'
 }
 const ACCENT_BAR_DEFAULT = 'bg-gradient-to-r from-primary-400 to-primary-500'
 
@@ -127,7 +132,8 @@ const TEXT: Record<Platform, string> = {
   openrouter: 'text-indigo-600 dark:text-indigo-400',
   suno: 'text-yellow-700 dark:text-yellow-300',
   kling: 'text-red-600 dark:text-red-400',
-  midjourney: 'text-slate-600 dark:text-slate-300'
+  midjourney: 'text-slate-600 dark:text-slate-300',
+  composite: 'text-cyan-700 dark:text-cyan-300'
 }
 const TEXT_DEFAULT = 'text-primary-600 dark:text-primary-400'
 
@@ -148,7 +154,8 @@ const ICON: Record<Platform, string> = {
   openrouter: 'text-indigo-500 dark:text-indigo-400',
   suno: 'text-yellow-500 dark:text-yellow-300',
   kling: 'text-red-500 dark:text-red-400',
-  midjourney: 'text-slate-500 dark:text-slate-300'
+  midjourney: 'text-slate-500 dark:text-slate-300',
+  composite: 'text-cyan-600 dark:text-cyan-300'
 }
 const ICON_DEFAULT = 'text-primary-500 dark:text-primary-400'
 
@@ -169,7 +176,8 @@ const DOT: Record<Platform, string> = {
   openrouter: 'bg-indigo-500',
   suno: 'bg-yellow-500',
   kling: 'bg-red-500',
-  midjourney: 'bg-slate-500'
+  midjourney: 'bg-slate-500',
+  composite: 'bg-cyan-500'
 }
 const DOT_DEFAULT = 'bg-gray-400'
 
@@ -190,7 +198,8 @@ const BUTTON: Record<Platform, string> = {
   openrouter: 'bg-indigo-500 text-white hover:bg-indigo-600 active:bg-indigo-700 dark:bg-indigo-500/80 dark:hover:bg-indigo-500',
   suno: 'bg-yellow-500 text-white hover:bg-yellow-600 active:bg-yellow-700 dark:bg-yellow-500/80 dark:hover:bg-yellow-500',
   kling: 'bg-red-500 text-white hover:bg-red-600 active:bg-red-700 dark:bg-red-500/80 dark:hover:bg-red-500',
-  midjourney: 'bg-slate-600 text-white hover:bg-slate-700 active:bg-slate-800 dark:bg-slate-600/80 dark:hover:bg-slate-600'
+  midjourney: 'bg-slate-600 text-white hover:bg-slate-700 active:bg-slate-800 dark:bg-slate-600/80 dark:hover:bg-slate-600',
+  composite: 'bg-cyan-700 text-white hover:bg-cyan-800 active:bg-cyan-900 dark:bg-cyan-600 dark:hover:bg-cyan-500'
 }
 const BUTTON_DEFAULT = 'bg-primary-500 text-white hover:bg-primary-600 dark:bg-primary-600 dark:hover:bg-primary-500'
 
@@ -211,7 +220,8 @@ const DISCOUNT: Record<Platform, string> = {
   openrouter: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300',
   suno: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300',
   kling: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
-  midjourney: 'bg-slate-100 text-slate-700 dark:bg-slate-900/40 dark:text-slate-300'
+  midjourney: 'bg-slate-100 text-slate-700 dark:bg-slate-900/40 dark:text-slate-300',
+  composite: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-300'
 }
 const DISCOUNT_DEFAULT = 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
 
@@ -232,7 +242,8 @@ const GRADIENT: Record<Platform, string> = {
   openrouter: 'from-indigo-500 to-indigo-600',
   suno: 'from-yellow-500 to-amber-600',
   kling: 'from-red-500 to-rose-600',
-  midjourney: 'from-slate-500 to-slate-700'
+  midjourney: 'from-slate-500 to-slate-700',
+  composite: 'from-slate-600 to-cyan-600'
 }
 const GRADIENT_DEFAULT = 'from-primary-500 to-primary-600'
 
@@ -253,7 +264,8 @@ const GRADIENT_TEXT: Record<Platform, string> = {
   openrouter: 'text-indigo-100',
   suno: 'text-yellow-100',
   kling: 'text-red-100',
-  midjourney: 'text-slate-100'
+  midjourney: 'text-slate-100',
+  composite: 'text-cyan-100'
 }
 const GRADIENT_TEXT_DEFAULT = 'text-primary-100'
 
@@ -274,7 +286,8 @@ const GRADIENT_SUBTEXT: Record<Platform, string> = {
   openrouter: 'text-indigo-200',
   suno: 'text-yellow-200',
   kling: 'text-red-200',
-  midjourney: 'text-slate-200'
+  midjourney: 'text-slate-200',
+  composite: 'text-cyan-200'
 }
 const GRADIENT_SUBTEXT_DEFAULT = 'text-primary-200'
 
@@ -359,6 +372,7 @@ function platformLabelFallback(p: string): string {
     case 'suno': return 'Suno'
     case 'kling': return 'Kling'
     case 'midjourney': return 'Midjourney'
+    case 'composite': return 'Composite'
     default: return p || 'API'
   }
 }

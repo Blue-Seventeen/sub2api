@@ -49,7 +49,7 @@ func (h *CompatibleGatewayHandler) ChatCompletions(c *gin.Context) {
 
 func (h *CompatibleGatewayHandler) QwenCompatibleModeChatCompletions(c *gin.Context) {
 	apiKey, _ := middleware2.GetAPIKeyFromContext(c)
-	if apiKey == nil || apiKey.Group == nil || apiKey.Group.Platform != service.PlatformAli {
+	if apiKey == nil || apiKey.Group == nil || effectiveAPIKeyPlatform(c, apiKey) != service.PlatformAli {
 		h.writeRouteError(c, service.CompatibleRouteChatCompletions, http.StatusForbidden, "permission_error", "The /compatible-mode/v1/chat/completions alias is only available for Qwen/DashScope groups", false)
 		return
 	}
@@ -62,7 +62,7 @@ func (h *CompatibleGatewayHandler) Models(c *gin.Context) {
 	platform := ""
 	if apiKey != nil && apiKey.Group != nil {
 		groupID = &apiKey.Group.ID
-		platform = apiKey.Group.Platform
+		platform = effectiveAPIKeyPlatform(c, apiKey)
 	}
 	if !service.IsCompatiblePlatform(platform) {
 		h.base.Models(c)
@@ -105,7 +105,8 @@ func (h *CompatibleGatewayHandler) CountTokens(c *gin.Context) {
 		})
 		return
 	}
-	if apiKey.Group == nil || !service.IsCompatiblePlatform(apiKey.Group.Platform) {
+	platform := effectiveAPIKeyPlatform(c, apiKey)
+	if apiKey.Group == nil || !service.IsCompatiblePlatform(platform) {
 		h.base.CountTokens(c)
 		return
 	}
@@ -133,13 +134,14 @@ func (h *CompatibleGatewayHandler) CountTokens(c *gin.Context) {
 		})
 		return
 	}
-	if !groupAllowsRequestedModel(apiKey.Group, parsed.Model) {
-		h.base.errorResponse(c, http.StatusForbidden, "permission_error", groupModelsListDisallowedMessage(parsed.Model))
+	publicModel := clientRequestedModel(c, parsed.Model)
+	if !groupAllowsRequestedModel(apiKey.Group, publicModel) {
+		h.base.errorResponse(c, http.StatusForbidden, "permission_error", groupModelsListDisallowedMessage(publicModel))
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"input_tokens": service.EstimateCompatibleInputTokensForPlatform(apiKey.Group.Platform, parsed),
+		"input_tokens": service.EstimateCompatibleInputTokensForPlatform(platform, parsed),
 	})
 }
 
@@ -154,7 +156,8 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 		h.writeRouteError(c, route, http.StatusInternalServerError, "api_error", "User context not found", false)
 		return
 	}
-	if apiKey.Group == nil || !service.IsCompatiblePlatform(apiKey.Group.Platform) {
+	platform := effectiveAPIKeyPlatform(c, apiKey)
+	if apiKey.Group == nil || !service.IsCompatiblePlatform(platform) {
 		h.writeRouteError(c, route, http.StatusBadRequest, "invalid_request_error", "Incompatible group platform", false)
 		return
 	}
@@ -164,7 +167,7 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 		"handler.compatible_gateway."+string(route),
 		zap.Int64("api_key_id", apiKey.ID),
 		zap.Any("group_id", apiKey.GroupID),
-		zap.String("platform", apiKey.Group.Platform),
+		zap.String("platform", platform),
 	)
 
 	body, err := readRequestBodyWithObservability(c, reqLog)
@@ -188,13 +191,14 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 	}
 	setCompatibilityForCompatibleRoute(c, route, body, parsed)
 
-	setOpsRequestContext(c, parsed.Model, parsed.Stream)
+	publicModel := clientRequestedModel(c, parsed.Model)
+	setOpsRequestContext(c, publicModel, parsed.Stream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(parsed.Stream, false)))
-	if !groupAllowsRequestedModel(apiKey.Group, parsed.Model) {
-		h.writeRouteError(c, route, http.StatusForbidden, "permission_error", groupModelsListDisallowedMessage(parsed.Model), false)
+	if !groupAllowsRequestedModel(apiKey.Group, publicModel) {
+		h.writeRouteError(c, route, http.StatusForbidden, "permission_error", groupModelsListDisallowedMessage(publicModel), false)
 		return
 	}
-	if decision := h.base.checkSecurityAudit(c, reqLog, apiKey, subject, contentModerationProtocolForCompatibleRoute(route), parsed.Model, body); decision != nil && !decision.AllowNextStage {
+	if decision := h.base.checkSecurityAudit(c, reqLog, apiKey, subject, contentModerationProtocolForCompatibleRoute(route), publicModel, body); decision != nil && !decision.AllowNextStage {
 		h.writeRouteError(c, route, securityAuditStatus(decision), securityAuditErrorCode(decision), securityAuditMessage(decision), false)
 		return
 	}
@@ -279,7 +283,7 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 			case FailoverCanceled:
 				return
 			default:
-				h.writeFailoverError(c, route, fs.LastFailoverErr, 502, streamStarted, apiKey.Group.Platform)
+				h.writeFailoverError(c, route, fs.LastFailoverErr, 502, streamStarted, platform)
 				return
 			}
 		}
@@ -473,7 +477,7 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 				UpstreamTransport:     compat.UpstreamTransport,
 				RequestPayloadHash:    requestPayloadHash,
 				APIKeyService:         h.base.apiKeyService,
-				ChannelUsageFields:    channelMapping.ToUsageFields(parsed.Model, result.UpstreamModel),
+				ChannelUsageFields:    clientRequestedUsageFields(c, channelMapping, parsed.Model, result.UpstreamModel),
 			}); err != nil {
 				reqLog.Error("compatible.record_usage_failed", zap.Error(err), zap.Int64("account_id", account.ID))
 			}

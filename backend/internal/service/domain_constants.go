@@ -42,6 +42,7 @@ const (
 	PlatformKling       = domain.PlatformKling
 	PlatformMidjourney  = domain.PlatformMidjourney
 	PlatformGrok        = domain.PlatformGrok
+	PlatformComposite   = domain.PlatformComposite
 )
 
 func groupRequireOAuthOnlyApplies(platform string) bool {
@@ -64,6 +65,18 @@ var AllowedQuotaPlatforms = []string{
 	PlatformGemini,
 	PlatformAntigravity,
 	PlatformGrok,
+	PlatformZhipu,
+	PlatformDeepSeek,
+	PlatformVolcEngine,
+	PlatformAli,
+	PlatformMoonshot,
+	PlatformPerplexity,
+	PlatformMistral,
+	PlatformSiliconFlow,
+	PlatformOpenRouter,
+	PlatformSuno,
+	PlatformKling,
+	PlatformMidjourney,
 }
 
 // IsAllowedQuotaPlatform 报告 s 是否为合法的 quota platform 标识。
@@ -417,6 +430,9 @@ const (
 	// SettingKeyUpstreamBillingProbeSettings stores the global enable switch and interval
 	// for probing remote Sub2API API-key billing metadata.
 	SettingKeyUpstreamBillingProbeSettings = "upstream_billing_probe_settings"
+
+	// SettingKeyOllamaCloudUsageSettings stores the opt-in global runner switch and interval.
+	SettingKeyOllamaCloudUsageSettings = "ollama_cloud_usage_settings"
 
 	// =========================
 	// Overload Cooldown (529)

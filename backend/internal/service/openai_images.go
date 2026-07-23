@@ -285,6 +285,9 @@ func (s *OpenAIGatewayService) ParseOpenAIImagesRequest(c *gin.Context, body []b
 	}
 
 	applyOpenAIImagesDefaults(req)
+	if resolvedModel, ok := ResolvedUpstreamModelFromContext(c.Request.Context()); ok {
+		req.Model = resolvedModel
+	}
 	if err := validateOpenAIImagesModel(req.Model); err != nil {
 		return nil, err
 	}

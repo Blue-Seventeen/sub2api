@@ -478,7 +478,13 @@ func recordGrokMediaUsage(
 	inboundEndpoint := GetInboundEndpoint(c)
 	upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 	quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
-	channelUsageFields := channelMapping.ToUsageFields(requestModel, result.UpstreamModel)
+	// OriginalModel 记录客户端请求的模型：composite 分组下 body 已被改写为具体模型，
+	// 公开别名需从 context 取回，与其他端点的用量归因口径一致（计费不受影响：
+	// BillingModelSource 为空不会触发来源覆盖）。
+	channelUsageFields := clientRequestedUsageFields(c, channelMapping, requestModel, result.UpstreamModel)
+	if originalModel := clientRequestedModel(c, requestModel); originalModel != requestModel && channelUsageFields.ChannelMappedModel == originalModel {
+		channelUsageFields.ChannelMappedModel = requestModel
+	}
 	h.submitOpenAIUsageRecordTask(c.Request.Context(), result, func(ctx context.Context) {
 		if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
 			Result:             result,
