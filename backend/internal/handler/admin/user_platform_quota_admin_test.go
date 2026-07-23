@@ -139,18 +139,36 @@ func putReq(t *testing.T, body string) (*gin.Context, *httptest.ResponseRecorder
 	return c, w
 }
 
+func allAllowedPlatformQuotasBody(t *testing.T) string {
+	t.Helper()
+	quotas := make([]PlatformQuotaInput, 0, len(service.AllowedQuotaPlatforms))
+	for _, platform := range service.AllowedQuotaPlatforms {
+		quota := PlatformQuotaInput{Platform: platform}
+		switch platform {
+		case service.PlatformAnthropic:
+			daily, monthly := 10.0, 100.0
+			quota.DailyLimitUSD = &daily
+			quota.MonthlyLimitUSD = &monthly
+		case service.PlatformOpenAI:
+			daily, weekly := 80.0, 300.0
+			quota.DailyLimitUSD = &daily
+			quota.WeeklyLimitUSD = &weekly
+		}
+		quotas = append(quotas, quota)
+	}
+	raw, err := json.Marshal(UpdateUserPlatformQuotasRequest{Quotas: quotas})
+	if err != nil {
+		t.Fatalf("marshal quotas: %v", err)
+	}
+	return string(raw)
+}
+
 func TestUpdateUserPlatformQuotas_Success(t *testing.T) {
 	repo := &upsertCapturingQuotaRepo{}
 	cache := &billingCacheStub{}
 	h := buildTestHandler(repo, cache)
 
-	body := `{"quotas":[
-		{"platform":"anthropic","daily_limit_usd":10.0,"weekly_limit_usd":null,"monthly_limit_usd":100.0},
-		{"platform":"openai","daily_limit_usd":80.0,"weekly_limit_usd":300.0,"monthly_limit_usd":null},
-		{"platform":"gemini","daily_limit_usd":null,"weekly_limit_usd":null,"monthly_limit_usd":null},
-		{"platform":"antigravity","daily_limit_usd":null,"weekly_limit_usd":null,"monthly_limit_usd":null},
-		{"platform":"grok","daily_limit_usd":null,"weekly_limit_usd":null,"monthly_limit_usd":null}
-	]}`
+	body := allAllowedPlatformQuotasBody(t)
 	c, w := putReq(t, body)
 	h.UpdateUserPlatformQuotas(c)
 
@@ -294,9 +312,16 @@ func TestUpdateUserPlatformQuotas_RejectsNegativeLimit(t *testing.T) {
 
 func TestUpdateUserPlatformQuotas_RejectsTooManyEntries(t *testing.T) {
 	h := buildTestHandler(&upsertCapturingQuotaRepo{}, &billingCacheStub{})
-	body := `{"quotas":[
-		{"platform":"anthropic"},{"platform":"openai"},{"platform":"gemini"},{"platform":"antigravity"},{"platform":"grok"},{"platform":"anthropic"}
-	]}`
+	quotas := make([]PlatformQuotaInput, 0, len(service.AllowedQuotaPlatforms)+1)
+	for _, platform := range service.AllowedQuotaPlatforms {
+		quotas = append(quotas, PlatformQuotaInput{Platform: platform})
+	}
+	quotas = append(quotas, PlatformQuotaInput{Platform: service.PlatformAnthropic})
+	raw, err := json.Marshal(UpdateUserPlatformQuotasRequest{Quotas: quotas})
+	if err != nil {
+		t.Fatalf("marshal quotas: %v", err)
+	}
+	body := string(raw)
 	c, w := putReq(t, body)
 	h.UpdateUserPlatformQuotas(c)
 	if w.Code != http.StatusBadRequest {

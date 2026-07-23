@@ -379,9 +379,13 @@ func (r *accountRepository) ListDueOllamaCloudUsageAccounts(ctx context.Context,
 				next_refresh_at ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$' AS rfc3339_shape,
 				jsonb_path_query_first_tz(
 					to_jsonb(regexp_replace(
-						next_refresh_at,
-						'(\.[0-9]{6})[0-9]+(Z|[+-][0-9]{2}:[0-9]{2})$',
-						'\1\2'
+						regexp_replace(
+							next_refresh_at,
+							'(\.[0-9]{6})[0-9]+(Z|[+-][0-9]{2}:[0-9]{2})$',
+							'\1\2'
+						),
+						'Z$',
+						'+00:00'
 					)),
 					'$.datetime()', '{}'::jsonb, true
 				) #>> '{}' AS parsed_next_refresh_at

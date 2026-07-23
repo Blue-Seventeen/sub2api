@@ -209,6 +209,8 @@ func TestListDueOllamaCloudUsageAccountsFiltersOrdersAndLimits(t *testing.T) {
 		ollamaCloudBaseURLMatchesSQL("credentials ->> 'base_url'"),
 		"jsonb_typeof(extra -> 'ollama_cloud_usage_session') = 'string'",
 		`extra @> '{"ollama_cloud_usage_auto_refresh": true}'::jsonb`,
+		"regexp_replace( regexp_replace( next_refresh_at",
+		"'Z$', '+00:00'",
 		"parsed_next_refresh_at::timestamptz <= $1",
 		"PARTITION BY api_key",
 		"WHERE group_rank = 1",

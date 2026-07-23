@@ -98,6 +98,18 @@ var AllowedQuotaPlatforms = []string{
 	PlatformGemini,
 	PlatformAntigravity,
 	PlatformGrok,
+	PlatformZhipu,
+	PlatformDeepSeek,
+	PlatformVolcEngine,
+	PlatformAli,
+	PlatformMoonshot,
+	PlatformPerplexity,
+	PlatformMistral,
+	PlatformSiliconFlow,
+	PlatformOpenRouter,
+	PlatformSuno,
+	PlatformKling,
+	PlatformMidjourney,
 }
 
 func IsAllowedQuotaPlatform(s string) bool {
