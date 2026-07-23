@@ -480,10 +480,7 @@ func TestCompatibleGatewayStreamWithoutTerminalSkipsBilling(t *testing.T) {
 	}
 
 	result := svc.handleChatPassthrough(resp, c, prepared, time.Now())
-	if result == nil {
-		t.Fatal("result is nil")
-	}
-	if !result.SkipUsageBilling {
+	if result == nil || !result.SkipUsageBilling {
 		t.Fatalf("SkipUsageBilling = false, want true when stream lacks terminal event")
 	}
 }
@@ -509,10 +506,7 @@ func TestCompatibleGatewayStreamWithDoneKeepsBilling(t *testing.T) {
 	}
 
 	result := svc.handleChatPassthrough(resp, c, prepared, time.Now())
-	if result == nil {
-		t.Fatal("result is nil")
-	}
-	if result.SkipUsageBilling {
+	if result == nil || result.SkipUsageBilling {
 		t.Fatalf("SkipUsageBilling = true, want false when stream has terminal event")
 	}
 }
