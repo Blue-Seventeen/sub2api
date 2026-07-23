@@ -24,7 +24,7 @@ services:
   # Sub2API Application
   # ===========================================================================
   sub2api:
-    image: ${SUB2API_IMAGE:-sub2api-custom:0.1.163}
+    image: ${SUB2API_IMAGE:-sub2api-custom:v0.1.163}
     container_name: sub2api
     restart: unless-stopped
     ulimits:
