@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -137,6 +138,12 @@ func TestPrepareUsageLogInsert_ArgCountMatchesTypes(t *testing.T) {
 	})
 
 	require.Len(t, prepared.args, len(usageLogInsertArgTypes))
+
+	valuesClause := usageLogInsertValuesClause()
+	require.Equal(t, len(usageLogInsertArgTypes), strings.Count(valuesClause, "$"),
+		"single insert VALUES placeholders must match prepared args")
+	require.Contains(t, valuesClause, fmt.Sprintf("$%d", len(usageLogInsertArgTypes)))
+	require.NotContains(t, valuesClause, fmt.Sprintf("$%d", len(usageLogInsertArgTypes)+1))
 }
 
 func TestUsageLogSuccessFilterIncludesZeroCostSuccessSignals(t *testing.T) {
