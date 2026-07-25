@@ -108,11 +108,13 @@ func classifyOpenAITransportError(err error) openAITransportErrorClass {
 func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Context, c *gin.Context, account *Account, err error, passthrough bool) error {
 	var accountRepo AccountRepository
 	var runtimeBlocker AccountRuntimeBlocker
+	var deferredService *DeferredService
 	if s != nil {
 		accountRepo = s.accountRepo
 		runtimeBlocker = s
+		deferredService = s.deferredService
 	}
-	return handleOpenAITransportError(ctx, c, account, err, passthrough, "", accountRepo, runtimeBlocker)
+	return handleOpenAITransportError(ctx, c, account, err, passthrough, "", accountRepo, runtimeBlocker, deferredService)
 }
 
 // handleOpenAIUpstreamTransportError mirrors OpenAIGatewayService's transport
@@ -120,13 +122,15 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 // repository and scheduler runtime state.
 func (s *GatewayService) handleOpenAIUpstreamTransportError(ctx context.Context, c *gin.Context, account *Account, err error, passthrough bool, upstreamURL string, runtimeBlocker AccountRuntimeBlocker) error {
 	var accountRepo AccountRepository
+	var deferredService *DeferredService
 	if s != nil {
 		accountRepo = s.accountRepo
+		deferredService = s.deferredService
 	}
-	return handleOpenAITransportError(ctx, c, account, err, passthrough, upstreamURL, accountRepo, runtimeBlocker)
+	return handleOpenAITransportError(ctx, c, account, err, passthrough, upstreamURL, accountRepo, runtimeBlocker, deferredService)
 }
 
-func handleOpenAITransportError(ctx context.Context, c *gin.Context, account *Account, err error, passthrough bool, upstreamURL string, accountRepo AccountRepository, runtimeBlocker AccountRuntimeBlocker) error {
+func handleOpenAITransportError(ctx context.Context, c *gin.Context, account *Account, err error, passthrough bool, upstreamURL string, accountRepo AccountRepository, runtimeBlocker AccountRuntimeBlocker, deferredService *DeferredService) error {
 	if err == nil {
 		err = errors.New("upstream transport error")
 	}
@@ -155,6 +159,9 @@ func handleOpenAITransportError(ctx context.Context, c *gin.Context, account *Ac
 	if errors.Is(err, context.Canceled) {
 		return err
 	}
+
+	// Transport attempt reached the network path; count as Ollama Cloud activity.
+	scheduleOllamaCloudUsageActivity(deferredService, account)
 
 	if classifyOpenAITransportError(err).Persistent {
 		tempUnscheduleOpenAITransportError(ctx, account, safeErr, accountRepo, runtimeBlocker)

@@ -382,6 +382,7 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
+		sessionID := service.ExtractClientSessionID(c)
 		requestPayloadHash := service.HashUsageRequestPayload(body)
 		inboundEndpoint := GetInboundEndpoint(c)
 		if upstreamEndpoint == "" {
@@ -403,6 +404,7 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 				UpstreamEndpoint:      upstreamEndpoint,
 				UserAgent:             userAgent,
 				IPAddress:             clientIP,
+				SessionID:             sessionID,
 				RequestPayloadHash:    requestPayloadHash,
 				ClientProfile:         compat.ClientProfile,
 				CompatibilityRoute:    compat.CompatibilityRoute,

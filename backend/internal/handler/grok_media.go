@@ -155,7 +155,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		defer userReleaseFunc()
 	}
 
-	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
+	if err := h.billingCacheService.CheckBillingEligibilityFreshSubscription(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
 		reqLog.Info("grok_media.billing_eligibility_check_failed", zap.Error(err))
 		status, code, message, retryAfter := billingErrorDetails(err)
 		if retryAfter > 0 {
@@ -471,6 +471,7 @@ func recordGrokMediaUsage(
 ) {
 	userAgent := c.GetHeader("User-Agent")
 	clientIP := ip.GetClientIP(c)
+	sessionID := service.ExtractClientSessionID(c)
 	payloadForHash := body
 	if len(payloadForHash) == 0 && strings.TrimSpace(requestID) != "" {
 		payloadForHash = []byte(requestID)
@@ -499,6 +500,7 @@ func recordGrokMediaUsage(
 			RequestPayloadHash: service.HashUsageRequestPayload(payloadForHash),
 			APIKeyService:      h.apiKeyService,
 			QuotaPlatform:      quotaPlatform,
+			SessionID:          sessionID,
 			ChannelUsageFields: channelUsageFields,
 		}); err != nil {
 			logger.L().With(

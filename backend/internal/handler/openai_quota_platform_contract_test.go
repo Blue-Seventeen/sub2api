@@ -58,6 +58,7 @@ func TestGatewayRecordUsageInputsCarryQuotaPlatform(t *testing.T) {
 
 			var missingQuotaPlatform []token.Position
 			var missingChannelUsageFields []token.Position
+			var missingSessionID []token.Position
 			ast.Inspect(file, func(node ast.Node) bool {
 				literal, ok := node.(*ast.CompositeLit)
 				if !ok || !isGatewayRecordUsageInputLiteral(literal.Type) {
@@ -69,11 +70,15 @@ func TestGatewayRecordUsageInputsCarryQuotaPlatform(t *testing.T) {
 				if !compositeLiteralHasKey(literal, "ChannelUsageFields") {
 					missingChannelUsageFields = append(missingChannelUsageFields, fset.Position(literal.Lbrace))
 				}
+				if !compositeLiteralHasKey(literal, "SessionID") {
+					missingSessionID = append(missingSessionID, fset.Position(literal.Lbrace))
+				}
 				return true
 			})
 
 			require.Empty(t, missingQuotaPlatform, "gateway usage post-billing must receive request-time QuotaPlatform")
 			require.Empty(t, missingChannelUsageFields, "gateway usage post-billing must receive channel mapping fields")
+			require.Empty(t, missingSessionID, "gateway usage rows must persist explicit client session identifiers")
 		})
 	}
 }

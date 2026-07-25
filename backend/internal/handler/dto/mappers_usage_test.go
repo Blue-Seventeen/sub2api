@@ -167,6 +167,7 @@ func TestUsageLogFromService_KeepsUserBillingWithoutAdminOnlyFields(t *testing.T
 	t.Parallel()
 
 	ipAddress := "203.0.113.10"
+	sessionID := "session-user-visible-only-to-admin"
 	accountRateMultiplier := 1.5
 	accountStatsCost := 0.21
 	log := &service.UsageLog{
@@ -180,6 +181,7 @@ func TestUsageLogFromService_KeepsUserBillingWithoutAdminOnlyFields(t *testing.T
 		ActualCost:            0.08,
 		RateMultiplier:        0.8,
 		IPAddress:             &ipAddress,
+		SessionID:             &sessionID,
 		AccountRateMultiplier: &accountRateMultiplier,
 		AccountStatsCost:      &accountStatsCost,
 	}
@@ -196,9 +198,14 @@ func TestUsageLogFromService_KeepsUserBillingWithoutAdminOnlyFields(t *testing.T
 	userJSON, err := json.Marshal(userDTO)
 	require.NoError(t, err)
 	require.NotContains(t, string(userJSON), "ip_address")
+	require.NotContains(t, string(userJSON), "session_id")
 	require.NotContains(t, string(userJSON), "account_rate_multiplier")
 	require.NotContains(t, string(userJSON), "account_stats_cost")
 	require.NotContains(t, string(userJSON), "account_cost")
+
+	adminDTO := UsageLogFromServiceAdmin(log)
+	require.Equal(t, &ipAddress, adminDTO.IPAddress)
+	require.Equal(t, &sessionID, adminDTO.SessionID)
 }
 
 func TestUsageLogFromService_FallsBackToLegacyModelWhenRequestedModelMissing(t *testing.T) {
@@ -219,14 +226,18 @@ func TestUsageLogFromService_FallsBackToLegacyModelWhenRequestedModelMissing(t *
 func TestUsageLogFromService_RedactsNestedAPIKeyForUser(t *testing.T) {
 	t.Parallel()
 
+	lastUsedIP := "198.51.100.10"
 	log := &service.UsageLog{
 		RequestID: "req_key_redact",
 		APIKey: &service.APIKey{
-			ID:     42,
-			UserID: 7,
-			Key:    "sk-sensitive-user-key",
-			Name:   "primary",
-			Status: "active",
+			ID:          42,
+			UserID:      7,
+			Key:         "sk-sensitive-user-key",
+			Name:        "primary",
+			Status:      "active",
+			IPWhitelist: []string{"203.0.113.10"},
+			IPBlacklist: []string{"192.0.2.10"},
+			LastUsedIP:  &lastUsedIP,
 		},
 	}
 
@@ -236,10 +247,23 @@ func TestUsageLogFromService_RedactsNestedAPIKeyForUser(t *testing.T) {
 	require.NotNil(t, userDTO.APIKey)
 	require.Equal(t, int64(42), userDTO.APIKey.ID)
 	require.Equal(t, "primary", userDTO.APIKey.Name)
-	require.Empty(t, userDTO.APIKey.Key)
+	userJSON, err := json.Marshal(userDTO)
+	require.NoError(t, err)
+	for _, forbidden := range []string{
+		"sk-sensitive-user-key",
+		"ip_whitelist",
+		"ip_blacklist",
+		"last_used_ip",
+		"203.0.113.10",
+		"192.0.2.10",
+		lastUsedIP,
+	} {
+		require.NotContains(t, string(userJSON), forbidden)
+	}
 
 	require.NotNil(t, adminDTO.APIKey)
-	require.Empty(t, adminDTO.APIKey.Key)
+	require.Equal(t, int64(42), adminDTO.APIKey.ID)
+	require.Equal(t, "primary", adminDTO.APIKey.Name)
 }
 
 func TestUsageLogFromService_IncludesImageBillingMetadataForUserAndAdmin(t *testing.T) {

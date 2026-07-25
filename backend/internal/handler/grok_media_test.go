@@ -95,6 +95,12 @@ func TestGrokMediaRequiredCapability(t *testing.T) {
 	}
 }
 
+func TestGrokMediaPostQueueBillingUsesFreshSubscription(t *testing.T) {
+	functionSource := stripGoComments(goFunctionSource(t, "grok_media.go", "handleGrokMedia"))
+	require.Contains(t, functionSource, "CheckBillingEligibilityFreshSubscription(")
+	require.NotContains(t, functionSource, "CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription")
+}
+
 func TestGrokMediaScheduleModelUsesNormalizedMappedUpstream(t *testing.T) {
 	account := &service.Account{
 		Platform: service.PlatformGrok,

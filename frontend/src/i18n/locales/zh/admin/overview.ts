@@ -1106,6 +1106,14 @@ export default {
         targetModelPlaceholder: '例如: gpt-5.4',
         removeExactMapping: '删除精确映射'
       },
+      openaiLive: {
+        title: 'OpenAI Live',
+        allow: '允许访问 Live',
+        hint: '启用后，此 OpenAI 分组的 API Key 可以创建并控制 Live 语音会话。默认关闭。运行 Sub2API 的服务端必须是 Apple Silicon Mac，并安装官方 ChatGPT App；客户端平台不受限制。',
+        unsupportedTitle: '当前服务端不支持 Live',
+        unsupportedMessage: '当前构建会在 Live 会话接入统一计费结算链路前保持不可用。为避免产生未计费使用，系统不会保存启用状态。',
+        acknowledge: '知道了'
+      },
       invalidRequestFallback: {
         title: '无效请求兜底分组',
         hint: '仅当上游明确返回 prompt too long 时才会触发，留空表示不兜底',

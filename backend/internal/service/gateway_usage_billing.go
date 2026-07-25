@@ -47,6 +47,7 @@ type RecordUsageInput struct {
 	UpstreamEndpoint      string             // 上游端点（标准化后的上游路径）
 	UserAgent             string             // 请求的 User-Agent
 	IPAddress             string             // 请求的客户端 IP 地址
+	SessionID             string             // 客户端显式会话标识，仅用于用量行会话关联
 	RequestPayloadHash    string             // 请求体语义哈希，用于降低 request_id 误复用时的静默误去重风险
 	ForceCacheBilling     bool               // 强制缓存计费：将 input_tokens 转为 cache_read 计费（用于粘性会话切换）
 	APIKeyService         APIKeyQuotaUpdater // 可选：用于更新API Key配额
@@ -629,6 +630,7 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 		UpstreamEndpoint:      input.UpstreamEndpoint,
 		UserAgent:             input.UserAgent,
 		IPAddress:             input.IPAddress,
+		SessionID:             input.SessionID,
 		RequestPayloadHash:    input.RequestPayloadHash,
 		ForceCacheBilling:     input.ForceCacheBilling,
 		APIKeyService:         input.APIKeyService,
@@ -653,6 +655,7 @@ type RecordUsageLongContextInput struct {
 	UpstreamEndpoint      string             // 上游端点（标准化后的上游路径）
 	UserAgent             string             // 请求的 User-Agent
 	IPAddress             string             // 请求的客户端 IP 地址
+	SessionID             string             // 客户端显式会话标识（session_id / X-Session-Id 等请求头），仅用于用量行会话关联
 	RequestPayloadHash    string             // 请求体语义哈希，用于降低 request_id 误复用时的静默误去重风险
 	LongContextThreshold  int                // 长上下文阈值（如 200000）
 	LongContextMultiplier float64            // 超出阈值部分的倍率（如 2.0）
@@ -685,6 +688,7 @@ func (s *GatewayService) RecordUsageWithLongContext(ctx context.Context, input *
 		UpstreamEndpoint:   input.UpstreamEndpoint,
 		UserAgent:          input.UserAgent,
 		IPAddress:          input.IPAddress,
+		SessionID:          input.SessionID,
 		RequestPayloadHash: input.RequestPayloadHash,
 		ForceCacheBilling:  input.ForceCacheBilling,
 		APIKeyService:      input.APIKeyService,
@@ -711,6 +715,7 @@ type recordUsageCoreInput struct {
 	UpstreamEndpoint      string
 	UserAgent             string
 	IPAddress             string
+	SessionID             string
 	RequestPayloadHash    string
 	ForceCacheBilling     bool
 	APIKeyService         APIKeyQuotaUpdater
@@ -1145,6 +1150,7 @@ func (s *GatewayService) buildRecordUsageLog(
 		ModelMappingChain:       optionalTrimmedStringPtr(input.ModelMappingChain),
 		UserAgent:               optionalTrimmedStringPtr(input.UserAgent),
 		IPAddress:               optionalTrimmedStringPtr(input.IPAddress),
+		SessionID:               optionalTrimmedStringPtr(input.SessionID),
 		GroupID:                 apiKey.GroupID,
 		SubscriptionID:          optionalSubscriptionID(subscription),
 		CreatedAt:               time.Now(),

@@ -162,6 +162,7 @@ func TestDuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState(t *testing
 		SupportedModelScopes:            []string{"claude", "gemini_text"},
 		SortOrder:                       9,
 		AllowMessagesDispatch:           true,
+		AllowLive:                       true,
 		RequireOAuthOnly:                true,
 		RequirePrivacySet:               true,
 		DefaultMappedModel:              "gpt-5.4",
@@ -211,6 +212,7 @@ func TestDuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState(t *testing
 	require.Equal(t, source.RPMLimit, duplicate.RPMLimit)
 	require.Equal(t, source.MaxReasoningEffort, duplicate.MaxReasoningEffort)
 	require.Equal(t, source.ReasoningEffortMappings, duplicate.ReasoningEffortMappings)
+	require.False(t, duplicate.AllowLive)
 	require.EqualValues(t, 2, duplicate.AccountCount)
 	require.EqualValues(t, 2, duplicate.ActiveAccountCount)
 	require.NotEmpty(t, duplicate.DuplicateOperationID)

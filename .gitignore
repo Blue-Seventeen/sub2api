@@ -161,6 +161,7 @@ artifacts/
 # ===================
 # Local release / migration bundles
 .tmp-migration/
+release-artifacts/
 sub2api-custom-*.tar.gz
 
 # Scraped / bundled external website artifacts accidentally produced during research

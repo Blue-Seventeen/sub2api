@@ -454,6 +454,7 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
+		sessionID := service.ExtractClientSessionID(c)
 		requestPayloadHash := service.HashUsageRequestPayload(body)
 		inboundEndpoint := GetInboundEndpoint(c)
 		compat := compatibilityLogFields(c)
@@ -471,6 +472,7 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 				UpstreamEndpoint:      upstreamEndpoint,
 				UserAgent:             userAgent,
 				IPAddress:             clientIP,
+				SessionID:             sessionID,
 				ClientProfile:         compat.ClientProfile,
 				CompatibilityRoute:    compat.CompatibilityRoute,
 				FallbackChain:         compat.FallbackChain,

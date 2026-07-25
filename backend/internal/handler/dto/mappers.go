@@ -127,12 +127,18 @@ func APIKeyFromService(k *service.APIKey) *APIKey {
 	return out
 }
 
-func APIKeyFromServiceForUsageUser(k *service.APIKey) *APIKey {
-	out := APIKeyFromService(k)
-	if out != nil {
-		out.Key = ""
+func APIKeyFromServiceForUsageUser(k *service.APIKey) *UsageLogAPIKey {
+	if k == nil {
+		return nil
 	}
-	return out
+	return &UsageLogAPIKey{
+		ID:      k.ID,
+		UserID:  k.UserID,
+		Name:    k.Name,
+		GroupID: k.GroupID,
+		Status:  k.Status,
+		Group:   GroupFromServiceShallow(k.Group),
+	}
 }
 
 func GroupFromServiceShallow(g *service.Group) *Group {
@@ -219,6 +225,7 @@ func groupFromServiceBase(g *service.Group) Group {
 		FallbackGroupID:                 g.FallbackGroupID,
 		FallbackGroupIDOnInvalidRequest: g.FallbackGroupIDOnInvalidRequest,
 		AllowMessagesDispatch:           g.AllowMessagesDispatch,
+		AllowLive:                       g.AllowLive && service.OpenAILiveFeatureEnabled,
 		RequireOAuthOnly:                g.RequireOAuthOnly,
 		RequirePrivacySet:               g.RequirePrivacySet,
 		RPMLimit:                        g.RPMLimit,
@@ -723,6 +730,7 @@ func UsageLogFromServiceAdmin(l *service.UsageLog) *AdminUsageLog {
 	}
 	accountID := l.AccountID
 	usageLog := usageLogFromServiceUser(l)
+	usageLog.SessionID = l.SessionID
 	out := &AdminUsageLog{
 		UsageLog:              usageLog,
 		UpstreamModel:         l.UpstreamModel,

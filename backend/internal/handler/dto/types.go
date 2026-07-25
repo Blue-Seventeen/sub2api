@@ -91,6 +91,19 @@ type APIKey struct {
 	Group *Group `json:"group,omitempty"`
 }
 
+// UsageLogAPIKey is the user/admin usage-log API key summary. It intentionally
+// excludes the key value, IP ACLs, and last-used IP because usage rows can be
+// exported or shared for diagnostics.
+type UsageLogAPIKey struct {
+	ID      int64  `json:"id"`
+	UserID  int64  `json:"user_id"`
+	Name    string `json:"name"`
+	GroupID *int64 `json:"group_id"`
+	Status  string `json:"status"`
+
+	Group *Group `json:"group,omitempty"`
+}
+
 type Group struct {
 	ID             int64   `json:"id"`
 	Name           string  `json:"name"`
@@ -139,6 +152,8 @@ type Group struct {
 
 	// OpenAI Messages 调度开关（用户侧需要此字段判断是否展示 Claude Code 教程）
 	AllowMessagesDispatch bool `json:"allow_messages_dispatch"`
+	// OpenAI Live 接口开关
+	AllowLive bool `json:"allow_live"`
 
 	// 账号过滤控制（仅 OpenAI/Antigravity 平台有效）
 	RequireOAuthOnly  bool `json:"require_oauth_only"`
@@ -538,6 +553,10 @@ type UsageLog struct {
 
 	// User-Agent
 	UserAgent *string `json:"user_agent"`
+	// IPAddress is populated only for administrator usage views.
+	IPAddress *string `json:"ip_address,omitempty"`
+	// SessionID is populated only for administrator usage views.
+	SessionID *string `json:"session_id,omitempty"`
 
 	// Cache TTL Override 标记
 	CacheTTLOverridden bool `json:"cache_ttl_overridden"`
@@ -548,7 +567,7 @@ type UsageLog struct {
 	CreatedAt time.Time `json:"created_at"`
 
 	User         *User             `json:"user,omitempty"`
-	APIKey       *APIKey           `json:"api_key,omitempty"`
+	APIKey       *UsageLogAPIKey   `json:"api_key,omitempty"`
 	Group        *Group            `json:"group,omitempty"`
 	Subscription *UserSubscription `json:"subscription,omitempty"`
 }
