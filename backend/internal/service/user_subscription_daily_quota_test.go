@@ -317,17 +317,18 @@ func TestCheckAndResetWindows_DailyCardDoesNotResetDailyUsage(t *testing.T) {
 }
 
 func TestCheckAndResetWindows_MultiDaySubscriptionStillResetsDailyUsage(t *testing.T) {
-	now := time.Now()
+	now := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
 	startsAt := now.Add(-48 * time.Hour)
 	dailyWindowStart := now.Add(-25 * time.Hour)
 	repo := &dailyResetTrackingUserSubRepo{}
 	svc := NewSubscriptionService(groupRepoNoop{}, repo, nil, nil, nil)
+	svc.now = func() time.Time { return now }
 	sub := &UserSubscription{
 		ID:               1,
 		UserID:           10,
 		GroupID:          20,
 		StartsAt:         startsAt,
-		ExpiresAt:        startsAt.AddDate(0, 0, 2),
+		ExpiresAt:        startsAt.AddDate(0, 0, 4),
 		DailyUsageUSD:    10,
 		DailyWindowStart: &dailyWindowStart,
 	}

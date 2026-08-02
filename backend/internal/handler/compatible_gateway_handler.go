@@ -194,6 +194,8 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 	publicModel := clientRequestedModel(c, parsed.Model)
 	setOpsRequestContext(c, publicModel, parsed.Stream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(parsed.Stream, false)))
+	pricingCtx, pricingAt := service.WithGatewayTokenRequestPricing(c.Request.Context())
+	c.Request = c.Request.WithContext(pricingCtx)
 	if !groupAllowsRequestedModel(apiKey.Group, publicModel) {
 		h.writeRouteError(c, route, http.StatusForbidden, "permission_error", groupModelsListDisallowedMessage(publicModel), false)
 		return
@@ -478,6 +480,7 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 				FallbackChain:         compat.FallbackChain,
 				UpstreamTransport:     compat.UpstreamTransport,
 				RequestPayloadHash:    requestPayloadHash,
+				PricingAt:             pricingAt,
 				APIKeyService:         h.base.apiKeyService,
 				ChannelUsageFields:    clientRequestedUsageFields(c, channelMapping, parsed.Model, result.UpstreamModel),
 			}); err != nil {

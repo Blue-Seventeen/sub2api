@@ -22,6 +22,7 @@ func RegisterAuthRoutes(
 	redisClient *redis.Client,
 	settingService *service.SettingService,
 	cfg *config.Config,
+	panelRateLimiter *servermiddleware.PanelRateLimiter,
 ) {
 	rateLimiter := middleware.NewRateLimiter(redisClient)
 	authFailureMode := middleware.RateLimitFailClose
@@ -46,6 +47,8 @@ func RegisterAuthRoutes(
 			h.Auth.Login,
 		)
 		auth.POST("/login/2fa", rateLimiter.LimitWithOptions("auth-login-2fa", 20, time.Minute, authRateLimitOptions), h.Auth.Login2FA)
+		auth.POST("/passkey/login/begin", rateLimiter.LimitWithOptions("passkey-login-begin", 20, time.Minute, authRateLimitOptions), h.Passkey.BeginLogin)
+		auth.POST("/passkey/login/finish", rateLimiter.LimitWithOptions("passkey-login-finish", 20, time.Minute, authRateLimitOptions), h.Passkey.FinishLogin)
 		auth.POST("/send-verify-code", rateLimiter.LimitWithOptions("auth-send-verify-code", 5, time.Minute, authRateLimitOptions), h.Auth.SendVerifyCode)
 		auth.POST("/refresh", rateLimiter.LimitWithOptions("refresh-token", 30, time.Minute, authRateLimitOptions), h.Auth.RefreshToken)
 		auth.POST("/logout", h.Auth.Logout)
@@ -178,6 +181,7 @@ func RegisterAuthRoutes(
 	}
 
 	settings := v1.Group("/settings")
+	settings.Use(panelRateLimiter.PublicIP())
 	{
 		settings.GET("/public", h.Setting.GetPublicSettings)
 		settings.GET("/email-unsubscribe", h.Setting.UnsubscribeNotificationEmail)
@@ -186,6 +190,8 @@ func RegisterAuthRoutes(
 	authenticated := v1.Group("")
 	authenticated.Use(gin.HandlerFunc(jwtAuth))
 	authenticated.Use(servermiddleware.BackendModeUserGuard(settingService))
+	// 面板全局按用户限流
+	authenticated.Use(panelRateLimiter.Global())
 	{
 		authenticated.GET("/auth/me", h.Auth.GetCurrentUser)
 		authenticated.POST("/auth/revoke-all-sessions", h.Auth.RevokeAllSessions)

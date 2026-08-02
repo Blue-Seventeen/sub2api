@@ -68,6 +68,7 @@ type SubscriptionService struct {
 	subCacheJitter   int // 抖动百分比
 
 	maintenanceQueue *SubscriptionMaintenanceQueue
+	now              func() time.Time
 }
 
 type userSubscriptionHistoryRepository interface {
@@ -92,6 +93,7 @@ func NewSubscriptionService(groupRepo GroupRepository, userSubRepo UserSubscript
 		userSubRepo:         userSubRepo,
 		billingCacheService: billingCacheService,
 		entClient:           entClient,
+		now:                 time.Now,
 	}
 	svc.initSubCache(cfg)
 	svc.initMaintenanceQueue(cfg)
@@ -2280,6 +2282,16 @@ func normalizeSubscriptionWindowsAt(sub *UserSubscription, now time.Time) {
 	}
 }
 
+func normalizeExpiredWindows(subs []UserSubscription) {
+	normalizeExpiredWindowsAt(subs, time.Now())
+}
+
+func normalizeExpiredWindowsAt(subs []UserSubscription, now time.Time) {
+	for i := range subs {
+		normalizeSubscriptionWindowsAt(&subs[i], now)
+	}
+}
+
 // normalizeSubscriptionStatus 根据实际过期时间修正状态（仅影响返回数据，不影响数据库）
 // 这确保前端显示正确的状态，即使定时任务尚未更新数据库
 func normalizeSubscriptionStatus(subs []UserSubscription) {
@@ -2319,11 +2331,14 @@ func currentSubscriptionWindowStart(start time.Time, period time.Duration, now t
 
 // CheckAndActivateWindow 检查并激活窗口（首次使用时）
 func (s *SubscriptionService) CheckAndActivateWindow(ctx context.Context, sub *UserSubscription) error {
+	return s.checkAndActivateWindowAt(ctx, sub, s.now())
+}
+
+func (s *SubscriptionService) checkAndActivateWindowAt(ctx context.Context, sub *UserSubscription, now time.Time) error {
 	if sub.IsWindowActivated() {
 		return nil
 	}
 
-	now := time.Now()
 	windowStart := subscriptionWindowAnchor(sub, now)
 	if err := s.userSubRepo.ActivateWindows(ctx, sub.ID, windowStart); err != nil {
 		return err
@@ -2350,7 +2365,7 @@ func (s *SubscriptionService) AdminResetQuota(ctx context.Context, subscriptionI
 	if err != nil {
 		return nil, err
 	}
-	windowStart := time.Now()
+	windowStart := s.now()
 	if err := s.userSubRepo.ResetUsageWindows(ctx, sub.ID, resetDaily, resetWeekly, resetMonthly, windowStart); err != nil {
 		return nil, err
 	}
@@ -2372,7 +2387,7 @@ func (s *SubscriptionService) AdminResetQuota(ctx context.Context, subscriptionI
 
 // CheckAndResetWindows 检查并重置过期的窗口
 func (s *SubscriptionService) CheckAndResetWindows(ctx context.Context, sub *UserSubscription) error {
-	now := time.Now()
+	now := s.now()
 	needsInvalidateCache := false
 
 	if sub.NeedsDailyResetAt(now) {
@@ -2513,6 +2528,7 @@ func (s *SubscriptionService) ValidateAndCheckLimits(sub *UserSubscription, grou
 		return false, ErrSubscriptionNotFound
 	}
 	group = sub.EffectiveGroup(group)
+	now := s.now()
 	// 1. 验证订阅状态
 	if sub.Status == SubscriptionStatusExpired {
 		return false, ErrSubscriptionExpired
@@ -2520,10 +2536,9 @@ func (s *SubscriptionService) ValidateAndCheckLimits(sub *UserSubscription, grou
 	if sub.Status == SubscriptionStatusSuspended {
 		return false, ErrSubscriptionSuspended
 	}
-	if sub.IsExpired() {
+	if !sub.ExpiresAt.After(now) {
 		return false, ErrSubscriptionExpired
 	}
-	now := time.Now()
 	if sub.IsAggregate {
 		if sub.StackedAvailableUSD != nil && *sub.StackedAvailableUSD <= 0 {
 			return false, ErrDailyLimitExceeded

@@ -24,9 +24,11 @@ services:
   # Sub2API Application
   # ===========================================================================
   sub2api:
-    image: ${SUB2API_IMAGE:-sub2api-custom:v0.1.165}
+    image: ${SUB2API_IMAGE:-sub2api-custom:v0.1.170}
     container_name: sub2api
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     ulimits:
       nofile:
         soft: 100000

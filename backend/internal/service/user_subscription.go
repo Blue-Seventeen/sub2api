@@ -9,6 +9,11 @@ const (
 	maxCustomLimitHours       = 24 * 365 * 10
 )
 
+func startOfDay(t time.Time) time.Time {
+	year, month, day := t.Date()
+	return time.Date(year, month, day, 0, 0, 0, 0, t.Location())
+}
+
 type UserSubscription struct {
 	ID      int64
 	UserID  int64
@@ -151,6 +156,47 @@ func (s *UserSubscription) NeedsCustomResetAt(group *Group, now time.Time) bool 
 		return false
 	}
 	return subscriptionWindowExpired(s.CustomWindowStart, period, now)
+}
+
+func (s *UserSubscription) canAutomaticallyResetDailyAt(now time.Time) bool {
+	_, ok := s.automaticWindowStartAt(s.DailyWindowStart, 24*time.Hour, now)
+	return !s.HasOneTimeDailyQuota() && ok
+}
+
+func (s *UserSubscription) canAutomaticallyResetWeeklyAt(now time.Time) bool {
+	_, ok := s.automaticWindowStartAt(s.WeeklyWindowStart, 7*24*time.Hour, now)
+	return ok
+}
+
+func (s *UserSubscription) canAutomaticallyResetMonthlyAt(now time.Time) bool {
+	_, ok := s.automaticWindowStartAt(s.MonthlyWindowStart, 30*24*time.Hour, now)
+	return ok
+}
+
+func (s *UserSubscription) automaticWindowStartAt(previous *time.Time, period time.Duration, now time.Time) (time.Time, bool) {
+	if previous == nil {
+		return time.Time{}, false
+	}
+
+	anchor := *previous
+	// Older subscriptions initialized their first windows at midnight on their
+	// start date. Only that initial value is unambiguous; later midnight anchors
+	// may be manual resets and must remain authoritative.
+	legacyAnchor := startOfDay(s.StartsAt)
+	if legacyAnchor.Before(s.StartsAt) && anchor.Equal(legacyAnchor) {
+		anchor = s.StartsAt
+	}
+	next := anchor.Add(period)
+	if now.Before(next) || !next.Before(s.ExpiresAt) {
+		return time.Time{}, false
+	}
+
+	periods := now.Sub(anchor) / period
+	lastPeriodBeforeExpiry := (s.ExpiresAt.Sub(anchor) - 1) / period
+	if periods > lastPeriodBeforeExpiry {
+		periods = lastPeriodBeforeExpiry
+	}
+	return anchor.Add(periods * period), true
 }
 
 func (s *UserSubscription) DailyResetTime() *time.Time {

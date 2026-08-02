@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { createPinia } from 'pinia'
 
 import GroupOptionItem from '../GroupOptionItem.vue'
 
@@ -22,6 +21,10 @@ vi.mock('vue-i18n', async () => {
   }
 })
 
+vi.mock('@/stores/app', () => ({
+  useAppStore: () => ({ cachedPublicSettings: null }),
+}))
+
 const mountOption = (props: Record<string, unknown> = {}) => mount(GroupOptionItem, {
   props: {
     name: 'peak-group',
@@ -30,7 +33,6 @@ const mountOption = (props: Record<string, unknown> = {}) => mount(GroupOptionIt
     ...props,
   },
   global: {
-    plugins: [createPinia()],
     stubs: {
       PlatformIcon: true,
       Teleport: true,
@@ -103,5 +105,24 @@ describe('GroupOptionItem', () => {
     expect(peakPill.classes()).not.toContain('whitespace-nowrap')
     expect(wrapper.classes()).toContain('flex-col')
     expect(wrapper.classes()).toContain('sm:flex-row')
+  })
+
+  it('applies multiline and overflow-safe text styles to descriptions', () => {
+    const description = 'First section\nvery-long-unbroken-description-value-that-must-not-overflow'
+    const wrapper = mountOption({
+      name: 'Example group',
+      description,
+      rateMultiplier: undefined,
+    })
+
+    const descriptionElement = wrapper
+      .findAll('span')
+      .find((element) => element.text() === description)
+
+    expect(descriptionElement).toBeDefined()
+    expect(descriptionElement?.classes()).toContain('whitespace-pre-line')
+    expect(descriptionElement?.classes()).toContain('[overflow-wrap:anywhere]')
+    expect(descriptionElement?.classes()).toContain('line-clamp-3')
+    expect(wrapper.find('[title]').attributes('title')).toBe(description)
   })
 })

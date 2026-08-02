@@ -21,6 +21,7 @@ type SystemSettings struct {
 	InvitationCodeEnabled            bool
 	InvitationCodeMissingPromptHTML  string
 	TotpEnabled                      bool // TOTP 双因素认证
+	PasskeyEnabled                   bool // Passkey 登录
 	SessionBindingEnabled            bool // 会话 IP/UA 绑定（变更即失效）
 	StepUpEnabled                    bool // 敏感操作 step-up 2FA 门控
 	AuditLogRetentionDays            int  // 审计日志保留天数（<=0 永久保留）
@@ -140,6 +141,7 @@ type SystemSettings struct {
 	ContactInfo                    string
 	DocURL                         string
 	HomeContent                    string
+	CompactHomeEnabled             bool
 	HideCcsImportButton            bool
 	PurchaseSubscriptionEnabled    bool
 	PurchaseSubscriptionURL        string
@@ -187,6 +189,11 @@ type SystemSettings struct {
 	AvailableChannelsEnabled bool `json:"available_channels_enabled"`
 
 	MarkdownPagesEnabled bool
+
+	// Model Plaza feature (public group/model pricing showcase)
+	ModelPlazaEnabled     bool   `json:"model_plaza_enabled"`
+	ModelPlazaRequireAuth bool   `json:"model_plaza_require_auth"`
+	ModelPlazaDescription string `json:"model_plaza_description"`
 
 	// Claude Code version check
 	MinClaudeCodeVersion string
@@ -289,6 +296,7 @@ type PublicSettings struct {
 	InvitationCodeEnabled            bool
 	InvitationCodeMissingPromptHTML  string
 	TotpEnabled                      bool // TOTP 双因素认证
+	PasskeyEnabled                   bool
 	LoginAgreementEnabled            bool
 	LoginAgreementMode               string
 	LoginAgreementUpdatedAt          string
@@ -304,6 +312,7 @@ type PublicSettings struct {
 	ContactInfo                      string
 	DocURL                           string
 	HomeContent                      string
+	CompactHomeEnabled               bool
 	HideCcsImportButton              bool
 
 	PurchaseSubscriptionEnabled bool
@@ -340,7 +349,13 @@ type PublicSettings struct {
 
 	// Available Channels feature (user-facing aggregate view)
 	AvailableChannelsEnabled bool `json:"available_channels_enabled"`
-	AffiliateEnabled         bool `json:"affiliate_enabled"`
+
+	// Model Plaza feature (public group/model pricing showcase)
+	ModelPlazaEnabled     bool `json:"model_plaza_enabled"`
+	ModelPlazaRequireAuth bool `json:"model_plaza_require_auth"`
+
+	// Affiliate (邀请返利) feature toggle
+	AffiliateEnabled bool `json:"affiliate_enabled"`
 
 	// 允许终端用户在用量页查看自己的失败请求
 	AllowUserViewErrorRequests bool `json:"allow_user_view_error_requests"`

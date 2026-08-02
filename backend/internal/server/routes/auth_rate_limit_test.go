@@ -38,6 +38,7 @@ func newAuthRoutesTestRouter(redisClient *redis.Client, cfg *config.Config) *gin
 		redisClient,
 		nil,
 		cfg,
+		nil,
 	)
 
 	return router

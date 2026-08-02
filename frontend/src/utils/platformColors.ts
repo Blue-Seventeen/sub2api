@@ -93,6 +93,54 @@ const BORDER: Record<Platform, string> = {
 }
 const BORDER_DEFAULT = 'border-gray-200 dark:border-dark-700'
 
+// ── Border strong (higher-contrast platform tint, e.g. plaza group cards) ──
+const BORDER_STRONG: Record<Platform, string> = {
+  anthropic: 'border-orange-500/35 dark:border-orange-500/30',
+  openai: 'border-green-500/35 dark:border-green-500/30',
+  antigravity: 'border-purple-500/35 dark:border-purple-500/30',
+  gemini: 'border-blue-500/35 dark:border-blue-500/30',
+  grok: 'border-zinc-800/35 dark:border-zinc-500/35',
+  zhipu: 'border-emerald-500/35 dark:border-emerald-500/30',
+  deepseek: 'border-cyan-500/35 dark:border-cyan-500/30',
+  volcengine: 'border-rose-500/35 dark:border-rose-500/30',
+  ali: 'border-amber-500/35 dark:border-amber-500/30',
+  moonshot: 'border-fuchsia-500/35 dark:border-fuchsia-500/30',
+  perplexity: 'border-sky-500/35 dark:border-sky-500/30',
+  mistral: 'border-violet-500/35 dark:border-violet-500/30',
+  siliconflow: 'border-teal-500/35 dark:border-teal-500/30',
+  openrouter: 'border-indigo-500/35 dark:border-indigo-500/30',
+  suno: 'border-yellow-500/35 dark:border-yellow-500/30',
+  kling: 'border-red-500/35 dark:border-red-500/30',
+  midjourney: 'border-slate-500/35 dark:border-slate-500/30',
+  composite: 'border-cyan-500/35 dark:border-cyan-500/30',
+}
+const BORDER_STRONG_DEFAULT = 'border-gray-300 dark:border-dark-600'
+
+// ── Accent (single raw color per platform; consumers derive washes/tints
+//    from it via CSS color-mix, e.g. plaza paid-price zone) ──
+const ACCENT: Record<Platform, string> = {
+  anthropic: '#f97316', // orange-500
+  openai: '#22c55e', // green-500
+  antigravity: '#a855f7', // purple-500
+  gemini: '#3b82f6', // blue-500
+  grok: '#71717a', // zinc-500
+  zhipu: '#10b981', // emerald-500
+  deepseek: '#06b6d4', // cyan-500
+  volcengine: '#f43f5e', // rose-500
+  ali: '#f59e0b', // amber-500
+  moonshot: '#d946ef', // fuchsia-500
+  perplexity: '#0ea5e9', // sky-500
+  mistral: '#8b5cf6', // violet-500
+  siliconflow: '#14b8a6', // teal-500
+  openrouter: '#6366f1', // indigo-500
+  suno: '#eab308', // yellow-500
+  kling: '#ef4444', // red-500
+  midjourney: '#64748b', // slate-500
+  composite: '#06b6d4', // cyan-500
+}
+const ACCENT_DEFAULT = '#14b8a6' // primary-500 (teal)
+
+// ── Accent bar (gradient) ───────────────────────────────────────────
 const ACCENT_BAR: Record<Platform, string> = {
   anthropic: 'bg-gradient-to-r from-orange-400 to-orange-500',
   openai: 'bg-gradient-to-r from-emerald-400 to-emerald-500',
@@ -305,6 +353,14 @@ export function platformBadgeLightClass(p: string): string {
 
 export function platformBorderClass(p: string): string {
   return isPlatform(p) ? BORDER[p] : BORDER_DEFAULT
+}
+
+export function platformBorderStrongClass(p: string): string {
+  return isPlatform(p) ? BORDER_STRONG[p] : BORDER_STRONG_DEFAULT
+}
+
+export function platformAccentColor(p: string): string {
+  return isPlatform(p) ? ACCENT[p] : ACCENT_DEFAULT
 }
 
 export function platformAccentBarClass(p: string): string {

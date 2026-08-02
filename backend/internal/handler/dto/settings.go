@@ -38,6 +38,10 @@ type SystemSettings struct {
 	InvitationCodeMissingPromptHTML  string                   `json:"invitation_code_missing_prompt_html"`
 	TotpEnabled                      bool                     `json:"totp_enabled"`
 	TotpEncryptionKeyConfigured      bool                     `json:"totp_encryption_key_configured"`
+	PasskeyEnabled                   bool                     `json:"passkey_enabled"`
+	PasskeyConfigured                bool                     `json:"passkey_configured"`
+	PasskeyRPID                      string                   `json:"passkey_rp_id"`
+	PasskeyRPOrigins                 []string                 `json:"passkey_rp_origins"`
 	SessionBindingEnabled            bool                     `json:"session_binding_enabled"`
 	StepUpEnabled                    bool                     `json:"step_up_enabled"`
 	AuditLogRetentionDays            int                      `json:"audit_log_retention_days"`
@@ -142,6 +146,7 @@ type SystemSettings struct {
 	ContactInfo                    string           `json:"contact_info"`
 	DocURL                         string           `json:"doc_url"`
 	HomeContent                    string           `json:"home_content"`
+	CompactHomeEnabled             bool             `json:"compact_home_enabled"`
 	HideCcsImportButton            bool             `json:"hide_ccs_import_button"`
 	PurchaseSubscriptionEnabled    bool             `json:"purchase_subscription_enabled"`
 	PurchaseSubscriptionURL        string           `json:"purchase_subscription_url"`
@@ -289,6 +294,11 @@ type SystemSettings struct {
 	RiskControlEnabled   bool `json:"risk_control_enabled"`
 	MarkdownPagesEnabled bool `json:"markdown_pages_enabled"`
 
+	// Model Plaza feature (public group/model pricing showcase)
+	ModelPlazaEnabled     bool   `json:"model_plaza_enabled"`
+	ModelPlazaRequireAuth bool   `json:"model_plaza_require_auth"`
+	ModelPlazaDescription string `json:"model_plaza_description"`
+
 	// cyber 会话屏蔽开关 + TTL
 	CyberSessionBlockEnabled    bool `json:"cyber_session_block_enabled"`
 	CyberSessionBlockTTLSeconds int  `json:"cyber_session_block_ttl_seconds"`
@@ -322,7 +332,8 @@ type PublicSettings struct {
 	PasswordResetEnabled             bool                     `json:"password_reset_enabled"`
 	InvitationCodeEnabled            bool                     `json:"invitation_code_enabled"`
 	InvitationCodeMissingPromptHTML  string                   `json:"invitation_code_missing_prompt_html"`
-	TotpEnabled                      bool                     `json:"totp_enabled"`
+	TotpEnabled                      bool                     `json:"totp_enabled"` // TOTP 双因素认证
+	PasskeyEnabled                   bool                     `json:"passkey_enabled"`
 	LoginAgreementEnabled            bool                     `json:"login_agreement_enabled"`
 	LoginAgreementMode               string                   `json:"login_agreement_mode"`
 	LoginAgreementUpdatedAt          string                   `json:"login_agreement_updated_at"`
@@ -338,6 +349,7 @@ type PublicSettings struct {
 	ContactInfo                      string                   `json:"contact_info"`
 	DocURL                           string                   `json:"doc_url"`
 	HomeContent                      string                   `json:"home_content"`
+	CompactHomeEnabled               bool                     `json:"compact_home_enabled"`
 	HideCcsImportButton              bool                     `json:"hide_ccs_import_button"`
 	PurchaseSubscriptionEnabled      bool                     `json:"purchase_subscription_enabled"`
 	PurchaseSubscriptionURL          string                   `json:"purchase_subscription_url"`
@@ -375,6 +387,11 @@ type PublicSettings struct {
 
 	AvailableChannelsEnabled bool `json:"available_channels_enabled"`
 
+	ModelPlazaEnabled     bool `json:"model_plaza_enabled"`
+	ModelPlazaRequireAuth bool `json:"model_plaza_require_auth"`
+
+	AffiliateEnabled bool `json:"affiliate_enabled"`
+
 	AllowUserViewErrorRequests bool `json:"allow_user_view_error_requests"`
 }
 
@@ -394,6 +411,15 @@ type OverloadCooldownSettings struct {
 type RateLimit429CooldownSettings struct {
 	Enabled         bool `json:"enabled"`
 	CooldownSeconds int  `json:"cooldown_seconds"`
+}
+
+// PanelRateLimitSettings 面板 API 限流配置 DTO
+type PanelRateLimitSettings struct {
+	Enabled     bool `json:"enabled"`
+	UserRPM     int  `json:"user_rpm"`
+	HeavyRPM    int  `json:"heavy_rpm"`
+	ExemptAdmin bool `json:"exempt_admin"`
+	PublicIPRPM int  `json:"public_ip_rpm"`
 }
 
 // StreamTimeoutSettings 流超时处理配置 DTO

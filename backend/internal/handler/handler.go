@@ -60,9 +60,11 @@ type Handlers struct {
 	CompatibleGateway  *CompatibleGatewayHandler
 	Setting            *SettingHandler
 	Totp               *TotpHandler
+	Passkey            *PasskeyHandler
 	Payment            *PaymentHandler
 	PaymentWebhook     *PaymentWebhookHandler
 	AvailableChannel   *AvailableChannelHandler
+	ModelPlaza         *ModelPlazaHandler
 	Promotion          *PromotionHandler
 	AsyncImage         *AsyncImageHandler
 	BatchImage         *BatchImageHandler

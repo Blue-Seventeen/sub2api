@@ -128,6 +128,8 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 	stream := gjson.GetBytes(body, "stream").Bool()
 	setOpsRequestContext(c, model, stream)
 	setOpsEndpointContext(c, model, int16(service.RequestTypeFromLegacy(stream, false)))
+	pricingCtx, pricingAt := service.WithGatewayTokenRequestPricing(c.Request.Context())
+	c.Request = c.Request.WithContext(pricingCtx)
 	if whitelistModel, ok := newAPIStyleGroupModelsListModel(route, model, c.Request.Method, c.Request.URL.Path); ok {
 		if publicModel, allowed := groupAllowsClientRequestedModel(c, apiKey.Group, whitelistModel); !allowed {
 			h.writeError(c, http.StatusForbidden, "permission_error", groupModelsListDisallowedMessage(publicModel))
@@ -410,6 +412,7 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 				CompatibilityRoute:    compat.CompatibilityRoute,
 				FallbackChain:         compat.FallbackChain,
 				UpstreamTransport:     compat.UpstreamTransport,
+				PricingAt:             pricingAt,
 				APIKeyService:         h.base.apiKeyService,
 				ChannelUsageFields:    clientRequestedUsageFields(c, channelMapping, model, result.UpstreamModel),
 			}); err != nil {

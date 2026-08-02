@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 19 // v19: include group Live gate plus custom reasoning and multi-window peak/pricing fields.
+const apiKeyAuthSnapshotVersion = 20 // v20: include custom peak/pricing fields plus group profit control snapshot fields.
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -428,6 +428,9 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			PeakEnd:                         peakEnd,
 			PeakRateMultiplier:              peakMultiplier,
 			PeakRateWindows:                 peakRateWindows,
+			ProfitControlEnabled:            apiKey.Group.ProfitControlEnabled,
+			ProfitMinMargin:                 apiKey.Group.ProfitMinMargin,
+			ProfitSafetyBuffer:              apiKey.Group.ProfitSafetyBuffer,
 		}
 	}
 	return snapshot
@@ -523,6 +526,9 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			PeakEnd:                         peakEnd,
 			PeakRateMultiplier:              peakMultiplier,
 			PeakRateWindows:                 peakRateWindows,
+			ProfitControlEnabled:            snapshot.Group.ProfitControlEnabled,
+			ProfitMinMargin:                 snapshot.Group.ProfitMinMargin,
+			ProfitSafetyBuffer:              snapshot.Group.ProfitSafetyBuffer,
 		}
 	}
 	s.compileAPIKeyIPRules(apiKey)

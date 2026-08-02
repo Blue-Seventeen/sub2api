@@ -65,9 +65,9 @@ RUN addgroup -g 1000 sub2api && \
 
 WORKDIR /app
 
-# Copy pre-built binary from GoReleaser
+# Copy the pre-built binary and runtime fallback resources from GoReleaser
 COPY sub2api /app/sub2api
-COPY backend/resources /app/resources
+COPY --chown=sub2api:sub2api backend/resources /app/resources
 COPY --from=mihomo-core /app/bin/mihomo /app/bin/mihomo
 
 # Create data directory
