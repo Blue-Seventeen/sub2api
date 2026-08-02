@@ -921,6 +921,13 @@ func (s *GatewayService) BindStickySession(ctx context.Context, groupID *int64, 
 	return s.cache.SetSessionAccountID(ctx, gid, sessionHash, accountID, stickySessionTTL)
 }
 
+func (s *GatewayService) bindStickySessionEager(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
+	if sessionHash == "" || accountID <= 0 || s.cache == nil {
+		return nil
+	}
+	return s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, accountID, stickySessionTTL)
+}
+
 // bindGatewayStickySessionDuringSelection preserves the normal eager sticky
 // behavior unless a profit gate is installed. Profit-controlled requests bind
 // only after the terminal post-slot check, otherwise a rejected candidate could
@@ -929,7 +936,7 @@ func (s *GatewayService) bindGatewayStickySessionDuringSelection(ctx context.Con
 	if gatewayProfitControlGateActive(ctx) {
 		return nil
 	}
-	return s.BindStickySession(ctx, groupID, sessionHash, accountID)
+	return s.bindStickySessionEager(ctx, groupID, sessionHash, accountID)
 }
 
 // BindStickySessionAfterProfitAdmission records a terminally admitted
@@ -943,7 +950,7 @@ func (s *GatewayService) BindStickySessionAfterProfitAdmission(ctx context.Conte
 		return nil
 	}
 	if !gatewayProfitControlGateActive(ctx) {
-		return s.BindStickySession(ctx, groupID, sessionHash, accountID)
+		return s.bindStickySessionEager(ctx, groupID, sessionHash, accountID)
 	}
 	existingAccountID, err := s.cache.GetSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
 	if err != nil && !errors.Is(err, ErrStickySessionNotFound) {

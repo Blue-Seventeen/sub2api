@@ -11,11 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type activateWindowUserSubRepo struct {
-	userSubRepoNoop
-	windowStart time.Time
-}
-
 type monthlyResetUserSubRepo struct {
 	userSubRepoNoop
 	resetCalled bool
@@ -25,11 +20,6 @@ type monthlyResetUserSubRepo struct {
 func (r *monthlyResetUserSubRepo) ResetMonthlyUsage(_ context.Context, _ int64, _ *time.Time, resetAt time.Time) error {
 	r.resetCalled = true
 	r.resetAt = resetAt
-	return nil
-}
-
-func (r *activateWindowUserSubRepo) ActivateWindows(_ context.Context, _ int64, start time.Time) error {
-	r.windowStart = start
 	return nil
 }
 
@@ -47,8 +37,8 @@ func TestDelayedFirstUseAnchorsMonthlyWindowAtActivation(t *testing.T) {
 
 	require.NoError(t, svc.CheckAndActivateWindow(context.Background(), sub))
 
-	require.Equal(t, activatedAt, repo.windowStart)
-	monthlyWindowStart := repo.windowStart
+	require.Equal(t, activatedAt, *repo.windowStart)
+	monthlyWindowStart := *repo.windowStart
 	resetAt, ok := sub.automaticWindowStartAt(&monthlyWindowStart, 30*24*time.Hour, activatedAt.Add(30*24*time.Hour))
 	require.True(t, ok)
 	require.Equal(t, activatedAt.Add(30*24*time.Hour), resetAt)
@@ -144,7 +134,8 @@ func TestNormalizeExpiredWindowsResetsMonthlyUsageWithPartialFinalPeriod(t *test
 	normalizeExpiredWindowsAt(subs, now)
 
 	require.Zero(t, subs[0].MonthlyUsageUSD)
-	require.Nil(t, subs[0].MonthlyWindowStart)
+	require.NotNil(t, subs[0].MonthlyWindowStart)
+	require.Equal(t, startsAt.Add(30*24*time.Hour), *subs[0].MonthlyWindowStart)
 }
 
 func TestValidateAndCheckLimitsKeepsLegacyMonthlyUsageBeforeExpiry(t *testing.T) {

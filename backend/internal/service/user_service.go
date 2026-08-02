@@ -106,9 +106,9 @@ type UserUpdateFields struct {
 	RPMLimit     bool
 	// UnifiedRateSettings 覆盖 unified_rate_enabled / unified_rate_multiplier。
 	UnifiedRateSettings bool
-	SignupSource bool
-	LastLoginAt  bool
-	LastActiveAt bool
+	SignupSource        bool
+	LastLoginAt         bool
+	LastActiveAt        bool
 	// BalanceNotifySettings 覆盖 balance_notify_enabled / _threshold_type / _threshold。
 	BalanceNotifySettings bool
 	// BalanceNotifyExtraEmails 与上一项分开，避免"改通知阈值"覆盖并发的"加通知邮箱"。

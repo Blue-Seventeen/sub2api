@@ -2197,6 +2197,7 @@ func (s *SubscriptionService) ListUserSubscriptions(ctx context.Context, userID 
 	if err != nil {
 		return nil, err
 	}
+	normalizeExpiredWindows(subs)
 	normalizeSubscriptionStatus(subs)
 	return aggregateUserVisibleByGroupForUserDisplay(subs), nil
 }
@@ -2207,6 +2208,7 @@ func (s *SubscriptionService) ListActiveUserSubscriptions(ctx context.Context, u
 	if err != nil {
 		return nil, err
 	}
+	normalizeExpiredWindows(subs)
 	return aggregateActiveByGroupForUserDisplay(subs), nil
 }
 
@@ -2217,6 +2219,7 @@ func (s *SubscriptionService) ListGroupSubscriptions(ctx context.Context, groupI
 	if err != nil {
 		return nil, nil, err
 	}
+	normalizeExpiredWindows(subs)
 	normalizeSubscriptionStatus(subs)
 	return subs, pag, nil
 }
@@ -2228,6 +2231,7 @@ func (s *SubscriptionService) List(ctx context.Context, page, pageSize int, user
 	if err != nil {
 		return nil, nil, err
 	}
+	normalizeExpiredWindows(subs)
 	normalizeSubscriptionStatus(subs)
 	return subs, pag, nil
 }
@@ -2257,20 +2261,17 @@ func normalizeSubscriptionWindowsAt(sub *UserSubscription, now time.Time) {
 		return
 	}
 	// 日窗口过期：清零展示数据
-	if sub.NeedsDailyResetAt(now) {
-		windowStart := currentSubscriptionWindowStart(*sub.DailyWindowStart, subscriptionDailyWindow, now)
+	if windowStart, ok := sub.automaticWindowStartAt(sub.DailyWindowStart, subscriptionDailyWindow, now); !sub.HasOneTimeDailyQuota() && ok {
 		sub.DailyWindowStart = &windowStart
 		sub.DailyUsageUSD = 0
 	}
 	// 周窗口过期：清零展示数据
-	if sub.NeedsWeeklyResetAt(now) {
-		windowStart := currentSubscriptionWindowStart(*sub.WeeklyWindowStart, subscriptionWeeklyWindow, now)
+	if windowStart, ok := sub.automaticWindowStartAt(sub.WeeklyWindowStart, subscriptionWeeklyWindow, now); ok {
 		sub.WeeklyWindowStart = &windowStart
 		sub.WeeklyUsageUSD = 0
 	}
 	// 月窗口过期：清零展示数据
-	if sub.NeedsMonthlyResetAt(now) {
-		windowStart := currentSubscriptionWindowStart(*sub.MonthlyWindowStart, subscriptionMonthlyWindow, now)
+	if windowStart, ok := sub.automaticWindowStartAt(sub.MonthlyWindowStart, subscriptionMonthlyWindow, now); ok {
 		sub.MonthlyWindowStart = &windowStart
 		sub.MonthlyUsageUSD = 0
 	}
@@ -2308,14 +2309,6 @@ func normalizeSubscriptionStatus(subs []UserSubscription) {
 	}
 }
 
-// subscriptionWindowAnchor returns the redemption-time anchor for a quota window.
-func subscriptionWindowAnchor(sub *UserSubscription, fallback time.Time) time.Time {
-	if sub != nil && !sub.StartsAt.IsZero() {
-		return sub.StartsAt
-	}
-	return fallback
-}
-
 // currentSubscriptionWindowStart advances a rolling window to the period containing now.
 func currentSubscriptionWindowStart(start time.Time, period time.Duration, now time.Time) time.Time {
 	if start.IsZero() || period <= 0 {
@@ -2339,7 +2332,7 @@ func (s *SubscriptionService) checkAndActivateWindowAt(ctx context.Context, sub 
 		return nil
 	}
 
-	windowStart := subscriptionWindowAnchor(sub, now)
+	windowStart := now
 	if err := s.userSubRepo.ActivateWindows(ctx, sub.ID, windowStart); err != nil {
 		return err
 	}
@@ -2390,14 +2383,13 @@ func (s *SubscriptionService) CheckAndResetWindows(ctx context.Context, sub *Use
 	now := s.now()
 	needsInvalidateCache := false
 
-	if sub.NeedsDailyResetAt(now) {
-		oldWindowStart := *sub.DailyWindowStart
-		windowStart := currentSubscriptionWindowStart(oldWindowStart, subscriptionDailyWindow, now)
+	if windowStart, ok := sub.automaticWindowStartAt(sub.DailyWindowStart, subscriptionDailyWindow, now); !sub.HasOneTimeDailyQuota() && ok {
+		expectedWindowStart := sub.DailyWindowStart
 		if roller, ok := s.userSubRepo.(dailyUsageWindowRoller); ok && !sub.UpdatedAt.IsZero() {
-			if _, err := roller.RollDailyUsageWindow(ctx, sub.ID, oldWindowStart, windowStart, sub.DailyUsageUSD, sub.UpdatedAt); err != nil {
+			if _, err := roller.RollDailyUsageWindow(ctx, sub.ID, *expectedWindowStart, windowStart, sub.DailyUsageUSD, sub.UpdatedAt); err != nil {
 				return err
 			}
-		} else if err := s.userSubRepo.ResetDailyUsage(ctx, sub.ID, &oldWindowStart, windowStart); err != nil {
+		} else if err := s.userSubRepo.ResetDailyUsage(ctx, sub.ID, expectedWindowStart, windowStart); err != nil {
 			return err
 		}
 		sub.DailyWindowStart = &windowStart
@@ -2405,14 +2397,13 @@ func (s *SubscriptionService) CheckAndResetWindows(ctx context.Context, sub *Use
 		needsInvalidateCache = true
 	}
 
-	if sub.NeedsWeeklyResetAt(now) {
-		oldWindowStart := *sub.WeeklyWindowStart
-		windowStart := currentSubscriptionWindowStart(oldWindowStart, subscriptionWeeklyWindow, now)
+	if windowStart, ok := sub.automaticWindowStartAt(sub.WeeklyWindowStart, subscriptionWeeklyWindow, now); ok {
+		expectedWindowStart := sub.WeeklyWindowStart
 		if roller, ok := s.userSubRepo.(weeklyUsageWindowRoller); ok && !sub.UpdatedAt.IsZero() {
-			if _, err := roller.RollWeeklyUsageWindow(ctx, sub.ID, oldWindowStart, windowStart, sub.WeeklyUsageUSD, sub.UpdatedAt); err != nil {
+			if _, err := roller.RollWeeklyUsageWindow(ctx, sub.ID, *expectedWindowStart, windowStart, sub.WeeklyUsageUSD, sub.UpdatedAt); err != nil {
 				return err
 			}
-		} else if err := s.userSubRepo.ResetWeeklyUsage(ctx, sub.ID, &oldWindowStart, windowStart); err != nil {
+		} else if err := s.userSubRepo.ResetWeeklyUsage(ctx, sub.ID, expectedWindowStart, windowStart); err != nil {
 			return err
 		}
 		sub.WeeklyWindowStart = &windowStart
@@ -2420,14 +2411,13 @@ func (s *SubscriptionService) CheckAndResetWindows(ctx context.Context, sub *Use
 		needsInvalidateCache = true
 	}
 
-	if sub.NeedsMonthlyResetAt(now) {
-		oldWindowStart := *sub.MonthlyWindowStart
-		windowStart := currentSubscriptionWindowStart(oldWindowStart, subscriptionMonthlyWindow, now)
+	if windowStart, ok := sub.automaticWindowStartAt(sub.MonthlyWindowStart, subscriptionMonthlyWindow, now); ok {
+		expectedWindowStart := sub.MonthlyWindowStart
 		if roller, ok := s.userSubRepo.(monthlyUsageWindowRoller); ok && !sub.UpdatedAt.IsZero() {
-			if _, err := roller.RollMonthlyUsageWindow(ctx, sub.ID, oldWindowStart, windowStart, sub.MonthlyUsageUSD, sub.UpdatedAt); err != nil {
+			if _, err := roller.RollMonthlyUsageWindow(ctx, sub.ID, *expectedWindowStart, windowStart, sub.MonthlyUsageUSD, sub.UpdatedAt); err != nil {
 				return err
 			}
-		} else if err := s.userSubRepo.ResetMonthlyUsage(ctx, sub.ID, &oldWindowStart, windowStart); err != nil {
+		} else if err := s.userSubRepo.ResetMonthlyUsage(ctx, sub.ID, expectedWindowStart, windowStart); err != nil {
 			return err
 		}
 		sub.MonthlyWindowStart = &windowStart
@@ -2560,15 +2550,15 @@ func (s *SubscriptionService) ValidateAndCheckLimits(sub *UserSubscription, grou
 
 	// 2. 内存中修正过期窗口的用量，确保预检查不会误拒绝用户。
 	//    调用方随后同步推进 DB 窗口，并用回读快照重新校验。
-	if sub.NeedsDailyResetAt(now) {
+	if sub.canAutomaticallyResetDailyAt(now) {
 		sub.DailyUsageUSD = 0
 		needsMaintenance = true
 	}
-	if sub.NeedsWeeklyResetAt(now) {
+	if sub.canAutomaticallyResetWeeklyAt(now) {
 		sub.WeeklyUsageUSD = 0
 		needsMaintenance = true
 	}
-	if sub.NeedsMonthlyResetAt(now) {
+	if sub.canAutomaticallyResetMonthlyAt(now) {
 		sub.MonthlyUsageUSD = 0
 		needsMaintenance = true
 	}

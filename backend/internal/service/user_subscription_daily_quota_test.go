@@ -259,23 +259,25 @@ func TestUserSubscriptionCustomLimitUsesConfiguredWindow(t *testing.T) {
 	require.False(t, sub.CheckCustomLimit(group, 5.01))
 }
 
-func TestCheckAndActivateWindow_UsesSubscriptionStartsAtAsAnchor(t *testing.T) {
+func TestCheckAndActivateWindow_UsesCurrentTimeAsAnchor(t *testing.T) {
 	start := time.Date(2026, 5, 18, 16, 0, 0, 0, time.UTC)
+	activatedAt := start.Add(6 * time.Hour)
 	repo := &activateWindowUserSubRepo{}
 	svc := NewSubscriptionService(groupRepoNoop{}, repo, nil, nil, nil)
+	svc.now = func() time.Time { return activatedAt }
 	sub := &UserSubscription{ID: 1, StartsAt: start}
 
 	err := svc.CheckAndActivateWindow(context.Background(), sub)
 
 	require.NoError(t, err)
 	require.NotNil(t, repo.windowStart)
-	require.Equal(t, start, *repo.windowStart)
+	require.Equal(t, activatedAt, *repo.windowStart)
 	require.NotNil(t, sub.DailyWindowStart)
-	require.Equal(t, start, *sub.DailyWindowStart)
+	require.Equal(t, activatedAt, *sub.DailyWindowStart)
 	require.NotNil(t, sub.WeeklyWindowStart)
-	require.Equal(t, start, *sub.WeeklyWindowStart)
+	require.Equal(t, activatedAt, *sub.WeeklyWindowStart)
 	require.NotNil(t, sub.MonthlyWindowStart)
-	require.Equal(t, start, *sub.MonthlyWindowStart)
+	require.Equal(t, activatedAt, *sub.MonthlyWindowStart)
 }
 
 func TestCheckAndActivateWindow_FallsBackToNowWhenStartsAtMissing(t *testing.T) {

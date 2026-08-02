@@ -288,8 +288,8 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 					QueryString:  c.Request.URL.RawQuery,
 					ContentType:  c.GetHeader("Content-Type"),
 					HeaderSource: c.Request.Header,
-					},
-				)
+				},
+			)
 		} else if account.Platform == service.PlatformGemini {
 			if h.geminiCompatService == nil {
 				h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "upstream_error", "Gemini compatibility service is not configured")
