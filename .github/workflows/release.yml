@@ -36,13 +36,14 @@ jobs:
       - name: Update VERSION file
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION=${{ github.event.inputs.tag }}
-            VERSION=${VERSION#v}
+            RELEASE_TAG=${{ github.event.inputs.tag }}
           else
-            VERSION=${GITHUB_REF#refs/tags/v}
+            RELEASE_TAG=${GITHUB_REF#refs/tags/}
           fi
-          echo "$VERSION" > backend/cmd/server/VERSION
-          echo "Updated VERSION file to: $VERSION"
+          RUNTIME_VERSION=${RELEASE_TAG#v}
+          RUNTIME_VERSION=${RUNTIME_VERSION%-custom}
+          echo "$RUNTIME_VERSION" > backend/cmd/server/VERSION
+          echo "Updated VERSION file to runtime version: $RUNTIME_VERSION (release tag: $RELEASE_TAG)"
 
       - name: Upload VERSION artifact
         uses: actions/upload-artifact@v7
@@ -285,22 +286,23 @@ jobs:
       - name: Sync VERSION file to released tag
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION=${{ github.event.inputs.tag }}
-            VERSION=${VERSION#v}
+            RELEASE_TAG=${{ github.event.inputs.tag }}
           else
-            VERSION=${GITHUB_REF#refs/tags/v}
+            RELEASE_TAG=${GITHUB_REF#refs/tags/}
           fi
+          RUNTIME_VERSION=${RELEASE_TAG#v}
+          RUNTIME_VERSION=${RUNTIME_VERSION%-custom}
 
           CURRENT_VERSION=$(tr -d '\r\n' < backend/cmd/server/VERSION || true)
-          if [ "$CURRENT_VERSION" = "$VERSION" ]; then
-            echo "VERSION file already matches $VERSION"
+          if [ "$CURRENT_VERSION" = "$RUNTIME_VERSION" ]; then
+            echo "VERSION file already matches runtime version $RUNTIME_VERSION"
             exit 0
           fi
 
-          echo "$VERSION" > backend/cmd/server/VERSION
+          echo "$RUNTIME_VERSION" > backend/cmd/server/VERSION
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add backend/cmd/server/VERSION
-          git commit -m "chore: sync VERSION to ${VERSION} [skip ci]"
+          git commit -m "chore: sync VERSION to ${RUNTIME_VERSION} [skip ci]"
           git push origin HEAD:${{ github.event.repository.default_branch }}

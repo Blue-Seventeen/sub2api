@@ -163,6 +163,7 @@ type UserUsageTrendPoint struct {
 type UserSpendingRankingItem struct {
 	UserID     int64   `json:"user_id"`
 	Email      string  `json:"email"`
+	Username   string  `json:"username"`
 	ActualCost float64 `json:"actual_cost"` // 实际扣除
 	// RealActualCost is the admin-facing real cost metric.
 	RealActualCost float64 `json:"real_actual_cost"`

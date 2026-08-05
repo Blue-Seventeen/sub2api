@@ -515,7 +515,7 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		errMsg = "Upstream request failed"
 	}
 	if isOpenAIContextWindowError(upstreamMsg, body) && upstreamMsg != "" {
-		errMsg = upstreamMsg
+		errMsg = sanitizeUserVisibleErrorText(upstreamMsg)
 	}
 
 	c.JSON(statusCode, gin.H{

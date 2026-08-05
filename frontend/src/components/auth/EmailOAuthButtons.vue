@@ -23,14 +23,23 @@ import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import GitHubMark from './GitHubMark.vue'
 import GoogleMark from './GoogleMark.vue'
+import type { OAuthLoginStart } from '@/api/auth'
+import { resolveAffiliateReferralCode, storeOAuthAffiliateCode } from '@/utils/oauthAffiliate'
 
 type EmailOAuthProvider = 'github' | 'google'
 const EMAIL_OAUTH_PENDING_PROVIDER_KEY = 'email_oauth_pending_provider'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   disabled?: boolean
   githubEnabled?: boolean
   googleEnabled?: boolean
+  affCode?: string
+  showDivider?: boolean
+}>(), {
+  showDivider: true
+})
+const emit = defineEmits<{
+  start: [request: OAuthLoginStart]
 }>()
 
 const route = useRoute()
@@ -60,16 +69,12 @@ function providerLabel(provider: EmailOAuthProvider): string {
 function startLogin(provider: EmailOAuthProvider): void {
   const redirectTo = (route.query.redirect as string) || '/dashboard'
   window.sessionStorage.setItem(EMAIL_OAUTH_PENDING_PROVIDER_KEY, provider)
-  const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined) || '/api/v1'
-  const normalized = apiBase.replace(/\/$/, '')
-  const params = new URLSearchParams({ redirect: redirectTo })
-  const affiliateCode = [route.query.aff, route.query.aff_code]
-    .find((value): value is string => typeof value === 'string' && value.trim() !== '')
-    ?.trim()
+  const affiliateCode = resolveAffiliateReferralCode(props.affCode, route.query.aff, route.query.aff_code)
+  storeOAuthAffiliateCode(affiliateCode)
+  const params: Record<string, string> = { redirect: redirectTo }
   if (affiliateCode) {
-    params.set('aff_code', affiliateCode)
-    window.sessionStorage.setItem('oauth_aff_code', affiliateCode)
+    params.aff_code = affiliateCode
   }
-  window.location.href = `${normalized}/auth/oauth/${provider}/start?${params.toString()}`
+  emit('start', { provider, params })
 }
 </script>

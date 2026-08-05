@@ -118,6 +118,53 @@ func TestOpenAIHandleErrorResponse_ContextWindow502KeepsMessageWithoutFailover(t
 	assert.Equal(t, "Your input exceeds the context window of this model. Please adjust your input and try again.", errField["message"])
 }
 
+func TestOpenAIHandleErrorResponse_ContextWindowRedactsNetworkFromClientMessage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+
+	svc := &OpenAIGatewayService{}
+	respBody := []byte(`{"error":{"message":"Your input exceeds the context window of this model at https://api.internal.example/v1 from 10.0.0.8 and 169.254.169.254. Please adjust your input and try again.","type":"upstream_error","code":null}}`)
+	resp := &http.Response{
+		StatusCode: http.StatusBadGateway,
+		Body:       io.NopCloser(bytes.NewReader(respBody)),
+		Header:     http.Header{},
+	}
+	account := &Account{ID: 140, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+
+	_, err := svc.handleErrorResponse(context.Background(), resp, c, account, nil)
+	require.Error(t, err)
+	assert.Equal(t, http.StatusBadGateway, rec.Code)
+
+	message := responseErrorMessage(t, rec.Body.Bytes())
+	assert.Contains(t, message, "context window")
+	assertUserVisibleMessageRedacted(t, message)
+}
+
+func TestOpenAIPassthroughContextWindowRedactsNetworkFromClientMessage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+
+	svc := &OpenAIGatewayService{}
+	respBody := []byte(`{"error":{"message":"Your input exceeds the context window of this model at https://api.internal.example/v1 from 10.0.0.8 and 169.254.169.254. Please adjust your input and try again.","type":"upstream_error","code":null}}`)
+	resp := &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header:     http.Header{},
+	}
+	account := &Account{ID: 141, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+
+	err := svc.handleErrorResponsePassthrough(context.Background(), resp, c, account, nil, respBody)
+	require.Error(t, err)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+
+	message := responseErrorMessage(t, rec.Body.Bytes())
+	assert.Contains(t, message, "context window")
+	assertUserVisibleMessageRedacted(t, message)
+}
+
 func TestGeminiWriteGeminiMappedError_NoRuleKeepsDefault(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
@@ -137,6 +184,41 @@ func TestGeminiWriteGeminiMappedError_NoRuleKeepsDefault(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "invalid_request_error", errField["type"])
 	assert.Equal(t, "Upstream request failed", errField["message"])
+}
+
+func TestGeminiChatCompletionsMappedErrorRedactsNetworkFromClientMessage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	svc := &GeminiMessagesCompatService{}
+	respBody := []byte(`{"error":{"code":499,"message":"Gemini upstream api.internal.example failed from 10.0.0.8 via http://169.254.169.254/token","status":"UNKNOWN"}}`)
+	account := &Account{ID: 142, Platform: PlatformGemini, Type: AccountTypeAPIKey}
+
+	err := svc.writeGeminiChatCompletionsMappedError(c, account, 499, "req-142", respBody)
+	require.Error(t, err)
+	assert.Equal(t, http.StatusBadGateway, rec.Code)
+
+	message := responseErrorMessage(t, rec.Body.Bytes())
+	assert.Contains(t, message, "Gemini upstream")
+	assertUserVisibleMessageRedacted(t, message)
+}
+
+func TestGeminiMessagesMappedErrorRedactsNetworkFromClientMessage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	svc := &GeminiMessagesCompatService{}
+	respBody := []byte(`{"error":{"code":499,"message":"Gemini upstream api.internal.example failed from 10.0.0.8 via http://169.254.169.254/token","status":"UNKNOWN"}}`)
+	account := &Account{ID: 143, Platform: PlatformGemini, Type: AccountTypeAPIKey}
+
+	err := svc.writeGeminiMappedError(c, account, 499, "req-143", respBody)
+	require.Error(t, err)
+	assert.Equal(t, http.StatusBadGateway, rec.Code)
+
+	message := responseErrorMessage(t, rec.Body.Bytes())
+	assertUserVisibleMessageRedacted(t, message)
 }
 
 func TestGatewayHandleErrorResponse_AppliesRuleFor422(t *testing.T) {
@@ -417,5 +499,31 @@ func newNonFailoverPassthroughRule(statusCode int, keyword string, respCode int,
 		ResponseCode:    &respCode,
 		PassthroughBody: false,
 		CustomMessage:   &customMessage,
+	}
+}
+
+func responseErrorMessage(t *testing.T, body []byte) string {
+	t.Helper()
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(body, &payload))
+	errField, ok := payload["error"].(map[string]any)
+	require.True(t, ok)
+	message, ok := errField["message"].(string)
+	require.True(t, ok)
+	return message
+}
+
+func assertUserVisibleMessageRedacted(t *testing.T, message string) {
+	t.Helper()
+
+	for _, leaked := range []string{
+		"api.internal.example",
+		"https://api.internal.example",
+		"10.0.0.8",
+		"169.254.169.254",
+		"http://169.254.169.254",
+	} {
+		assert.NotContains(t, message, leaked)
 	}
 }
