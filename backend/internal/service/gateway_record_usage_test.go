@@ -810,9 +810,10 @@ func TestGatewayServiceRecordUsage_BestEffortPersistenceErrorUsesSyncFallback(t 
 	require.Equal(t, 1, usageRepo.createCalls)
 }
 
-func TestGatewayServiceRecordUsage_BillingErrorStillWritesUsageLog(t *testing.T) {
+func TestGatewayServiceRecordUsage_BillingErrorWritesIsolatedZeroCostUsageLog(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{}
-	billingRepo := &openAIRecordUsageBillingRepoStub{err: context.DeadlineExceeded}
+	billingErr := errors.New("billing tx failed")
+	billingRepo := &openAIRecordUsageBillingRepoStub{err: billingErr}
 	userRepo := &openAIRecordUsageUserRepoStub{}
 	subRepo := &openAIRecordUsageSubRepoStub{}
 	svc := newGatewayRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, userRepo, subRepo)
@@ -832,15 +833,18 @@ func TestGatewayServiceRecordUsage_BillingErrorStillWritesUsageLog(t *testing.T)
 		Account: &Account{ID: 705},
 	})
 
-	require.Error(t, err)
+	require.ErrorIs(t, err, billingErr)
 	require.Equal(t, 1, billingRepo.calls)
 	require.Equal(t, 1, usageRepo.calls)
 	require.NotNil(t, usageRepo.lastLog)
 	require.Equal(t, "gateway_billing_fail:billing_failed", usageRepo.lastLog.RequestID)
 	require.Zero(t, usageRepo.lastLog.InputTokens)
 	require.Zero(t, usageRepo.lastLog.OutputTokens)
+	require.Zero(t, usageRepo.lastLog.InputCost)
+	require.Zero(t, usageRepo.lastLog.OutputCost)
 	require.Zero(t, usageRepo.lastLog.TotalCost)
 	require.Zero(t, usageRepo.lastLog.ActualCost)
+	require.Zero(t, usageRepo.lastLog.RealActualCost)
 }
 
 func TestGatewayServiceRecordUsage_ReasoningEffortPersisted(t *testing.T) {

@@ -886,6 +886,7 @@ func (s *GeminiMessagesCompatService) writeGeminiChatCompletionsMappedError(
 	if upstreamMsg != "" && errMsg == "Upstream request failed" {
 		errMsg = upstreamMsg
 	}
+	errMsg = sanitizeUserVisibleErrorText(sanitizeUpstreamErrorMessage(errMsg))
 	return s.writeChatCompletionsError(c, statusCode, errType, errMsg)
 }
 

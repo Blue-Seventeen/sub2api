@@ -90,6 +90,7 @@ func provideCleanup(
 	accountExpiry *service.AccountExpiryService,
 	proxyAutoProbe *service.ProxyAutoProbeService,
 	managedProxyRuntime *service.ManagedProxyRuntime,
+	codexVersionSync *service.OpenAICodexVersionSyncService,
 	proxyExpiry *service.ProxyExpiryService,
 	subscriptionExpiry *service.SubscriptionExpiryService,
 	usageCleanup *service.UsageCleanupService,
@@ -251,6 +252,12 @@ func provideCleanup(
 			{"ManagedProxyRuntime", func() error {
 				if managedProxyRuntime != nil {
 					managedProxyRuntime.Stop()
+				}
+				return nil
+			}},
+			{"OpenAICodexVersionSyncService", func() error {
+				if codexVersionSync != nil {
+					codexVersionSync.Stop()
 				}
 				return nil
 			}},

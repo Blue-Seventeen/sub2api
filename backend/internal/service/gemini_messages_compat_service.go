@@ -1901,6 +1901,7 @@ func (s *GeminiMessagesCompatService) writeGeminiMappedError(c *gin.Context, acc
 			errMsg = "Upstream request failed"
 		}
 	}
+	errMsg = sanitizeUserVisibleErrorText(sanitizeUpstreamErrorMessage(errMsg))
 
 	c.JSON(statusCode, gin.H{
 		"type":  "error",

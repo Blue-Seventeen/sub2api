@@ -194,6 +194,7 @@ func TestSecurityHeaders(t *testing.T) {
 		// Default policy should contain these elements
 		assert.Contains(t, csp, "default-src 'self'")
 		assert.Contains(t, csp, "media-src 'self' data: blob:")
+		assert.Contains(t, csp, TencentCaptchaDomain)
 	})
 
 	t.Run("uses_default_policy_when_whitespace_only", func(t *testing.T) {
@@ -289,6 +290,22 @@ func TestNonceTemplate(t *testing.T) {
 	})
 }
 
+func countDirectiveValue(policy, directive, value string) int {
+	count := 0
+	for _, rawDirective := range strings.Split(policy, ";") {
+		fields := strings.Fields(strings.TrimSpace(rawDirective))
+		if len(fields) == 0 || fields[0] != directive {
+			continue
+		}
+		for _, field := range fields[1:] {
+			if field == value {
+				count++
+			}
+		}
+	}
+	return count
+}
+
 func TestEnhanceCSPPolicy(t *testing.T) {
 	t.Run("adds_nonce_placeholder_if_missing", func(t *testing.T) {
 		policy := "default-src 'self'; script-src 'self'"
@@ -313,6 +330,16 @@ func TestEnhanceCSPPolicy(t *testing.T) {
 
 		count := strings.Count(enhanced, CloudflareInsightsDomain)
 		assert.Equal(t, 1, count)
+	})
+
+	t.Run("adds_tencent_captcha_domain_for_web_sdk", func(t *testing.T) {
+		policy := "default-src 'self'; script-src 'self' __CSP_NONCE__"
+		enhanced := enhanceCSPPolicy(policy)
+
+		assert.Equal(t, 1, countDirectiveValue(enhanced, "script-src", TencentCaptchaDomain))
+		assert.Equal(t, 1, countDirectiveValue(enhanced, "frame-src", TencentCaptchaDomain))
+		assert.Equal(t, 1, countDirectiveValue(enhanced, "style-src", TencentCaptchaStaticDomain))
+		assert.Contains(t, config.DefaultCSPPolicy, "style-src 'self' 'unsafe-inline' https://*.captcha.gtimg.com")
 	})
 
 	t.Run("handles_policy_without_script_src", func(t *testing.T) {

@@ -8,13 +8,19 @@
 在仓库根目录执行：
 
 ```bash
-docker build -t sub2api-custom:dev .
+docker build \
+  --build-arg VERSION=0.1.171 \
+  --build-arg COMMIT="$(git rev-parse --short HEAD)" \
+  -t sub2api-custom:v0.1.171 .
 ```
 
 或者使用你自己的版本号：
 
 ```bash
-docker build -t sub2api-custom:v0.1.170 .
+docker build \
+  --build-arg VERSION=0.1.171 \
+  --build-arg COMMIT="$(git rev-parse --short HEAD)" \
+  -t sub2api-custom:v0.1.171 .
 ```
 
 ## Docker Compose 示例
