@@ -12,7 +12,7 @@
 
 services:
   sub2api:
-    image: ${SUB2API_IMAGE:-sub2api-custom:v0.1.171}
+    image: ${SUB2API_IMAGE:-sub2api-custom:v0.1.172}
     container_name: sub2api
     restart: unless-stopped
     security_opt:

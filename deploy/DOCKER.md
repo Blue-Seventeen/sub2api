@@ -9,18 +9,18 @@
 
 ```bash
 docker build \
-  --build-arg VERSION=0.1.171 \
+  --build-arg VERSION=0.1.172 \
   --build-arg COMMIT="$(git rev-parse --short HEAD)" \
-  -t sub2api-custom:v0.1.171 .
+  -t sub2api-custom:v0.1.172 .
 ```
 
 或者使用你自己的版本号：
 
 ```bash
 docker build \
-  --build-arg VERSION=0.1.171 \
+  --build-arg VERSION=0.1.172 \
   --build-arg COMMIT="$(git rev-parse --short HEAD)" \
-  -t sub2api-custom:v0.1.171 .
+  -t sub2api-custom:v0.1.172 .
 ```
 
 ## Docker Compose 示例

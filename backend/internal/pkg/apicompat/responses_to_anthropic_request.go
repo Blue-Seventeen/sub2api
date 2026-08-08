@@ -169,6 +169,9 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 			if err != nil {
 				return nil, nil, err
 			}
+			if anthropicContentIsEmpty(content) {
+				continue
+			}
 			messages = append(messages, AnthropicMessage{
 				Role:    "user",
 				Content: content,
@@ -179,6 +182,9 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 			if err != nil {
 				return nil, nil, err
 			}
+			if anthropicContentIsEmpty(content) {
+				continue
+			}
 			messages = append(messages, AnthropicMessage{
 				Role:    "assistant",
 				Content: content,
@@ -187,9 +193,16 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 		default:
 			// Unknown role/type — attempt as user message
 			if item.Content != nil {
+				content, err := convertResponsesUserToAnthropicContent(item.Content)
+				if err != nil {
+					return nil, nil, err
+				}
+				if anthropicContentIsEmpty(content) {
+					continue
+				}
 				messages = append(messages, AnthropicMessage{
 					Role:    "user",
-					Content: item.Content,
+					Content: content,
 				})
 			}
 		}
@@ -295,6 +308,9 @@ func normalizeAnthropicToolPairing(messages []AnthropicMessage) []AnthropicMessa
 
 	out := make([]AnthropicMessage, 0, len(messages))
 	for _, m := range messages {
+		if anthropicContentIsEmpty(m.Content) {
+			continue
+		}
 		blocks := parseContentBlocks(m.Content)
 		switch m.Role {
 		case "assistant":
@@ -319,7 +335,10 @@ func normalizeAnthropicToolPairing(messages []AnthropicMessage) []AnthropicMessa
 			if len(kept) == 0 {
 				// No answered calls: keep any non-tool content, else drop.
 				if len(others) > 0 {
-					out = append(out, anthropicMessageFromBlocks("assistant", others))
+					msg := anthropicMessageFromBlocks("assistant", others)
+					if !anthropicContentIsEmpty(msg.Content) {
+						out = append(out, msg)
+					}
 				}
 				continue
 			}
@@ -351,7 +370,10 @@ func normalizeAnthropicToolPairing(messages []AnthropicMessage) []AnthropicMessa
 			// The tool_result blocks are re-emitted next to their call; keep any
 			// other content of this user turn in place, drop it if there is none.
 			if len(nonResult) > 0 {
-				out = append(out, anthropicMessageFromBlocks("user", nonResult))
+				msg := anthropicMessageFromBlocks("user", nonResult)
+				if !anthropicContentIsEmpty(msg.Content) {
+					out = append(out, msg)
+				}
 			}
 
 		default:
@@ -407,8 +429,7 @@ func convertResponsesUserToAnthropicContent(raw json.RawMessage) (json.RawMessag
 	// Array of content parts → Anthropic content blocks.
 	var parts []ResponsesContentPart
 	if err := json.Unmarshal(raw, &parts); err != nil {
-		// Pass through as-is if we can't parse
-		return raw, nil
+		return json.Marshal("")
 	}
 
 	var blocks []AnthropicContentBlock
@@ -442,7 +463,7 @@ func convertResponsesUserToAnthropicContent(raw json.RawMessage) (json.RawMessag
 // message content field into Anthropic content blocks JSON.
 func convertResponsesAssistantToAnthropicContent(raw json.RawMessage) (json.RawMessage, error) {
 	if len(raw) == 0 {
-		return json.Marshal([]AnthropicContentBlock{{Type: "text", Text: ""}})
+		return json.Marshal("")
 	}
 
 	// Try plain string.
@@ -454,7 +475,7 @@ func convertResponsesAssistantToAnthropicContent(raw json.RawMessage) (json.RawM
 	// Array of content parts → Anthropic content blocks.
 	var parts []ResponsesContentPart
 	if err := json.Unmarshal(raw, &parts); err != nil {
-		return raw, nil
+		return json.Marshal("")
 	}
 
 	var blocks []AnthropicContentBlock
@@ -471,7 +492,7 @@ func convertResponsesAssistantToAnthropicContent(raw json.RawMessage) (json.RawM
 	}
 
 	if len(blocks) == 0 {
-		blocks = append(blocks, AnthropicContentBlock{Type: "text", Text: ""})
+		return json.Marshal("")
 	}
 	return json.Marshal(blocks)
 }
@@ -552,6 +573,43 @@ func parseContentBlocks(raw json.RawMessage) []AnthropicContentBlock {
 		return []AnthropicContentBlock{{Type: "text", Text: s}}
 	}
 	return nil
+}
+
+func anthropicContentIsEmpty(raw json.RawMessage) bool {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return true
+	}
+	if anthropicContentIsOnlyBlankText(raw) {
+		return true
+	}
+	blocks := parseContentBlocks(raw)
+	if len(blocks) == 0 {
+		var s string
+		if err := json.Unmarshal(raw, &s); err == nil {
+			return strings.TrimSpace(s) == ""
+		}
+		return true
+	}
+	return false
+}
+
+func anthropicContentIsOnlyBlankText(raw json.RawMessage) bool {
+	blocks := parseContentBlocks(raw)
+	if len(blocks) == 0 {
+		return false
+	}
+	sawText := false
+	for _, block := range blocks {
+		if block.Type != "text" {
+			return false
+		}
+		sawText = true
+		if strings.TrimSpace(block.Text) != "" {
+			return false
+		}
+	}
+	return sawText
 }
 
 // convertResponsesToAnthropicTools maps Responses API tools to Anthropic format.

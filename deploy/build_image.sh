@@ -5,7 +5,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-IMAGE_TAG="${SUB2API_IMAGE:-sub2api-custom:v0.1.171}"
+IMAGE_TAG="${SUB2API_IMAGE:-sub2api-custom:v0.1.172}"
 RUNTIME_VERSION="${VERSION:-$(tr -d '\r\n' < "${REPO_ROOT}/backend/cmd/server/VERSION")}"
 COMMIT_SHA="${COMMIT:-$(git -C "${REPO_ROOT}" rev-parse --short HEAD 2>/dev/null || echo docker)}"
 
