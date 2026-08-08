@@ -6,7 +6,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
+
+	"github.com/shopspring/decimal"
 )
 
 var ErrUsageBillingRequestIDRequired = errors.New("usage billing request_id is required")
@@ -53,6 +56,7 @@ func (c *UsageBillingCommand) Normalize() {
 	if strings.TrimSpace(c.RequestFingerprint) == "" {
 		c.RequestFingerprint = buildUsageBillingFingerprint(c)
 	}
+	c.quantizeMonetaryFields()
 }
 
 func (c *UsageBillingCommand) MatchesRequestFingerprint(candidate string) bool {
@@ -65,6 +69,26 @@ func (c *UsageBillingCommand) MatchesRequestFingerprint(candidate string) bool {
 	}
 	legacy := buildUsageBillingLegacyFingerprint(c)
 	return legacy != "" && normalizedCandidate == legacy
+}
+
+const UsageBillingMonetaryScale = 8
+
+func (c *UsageBillingCommand) quantizeMonetaryFields() {
+	c.BalanceCost = QuantizeUsageBillingAmount(c.BalanceCost)
+	c.SubscriptionCost = QuantizeUsageBillingAmount(c.SubscriptionCost)
+	c.APIKeyQuotaCost = QuantizeUsageBillingAmount(c.APIKeyQuotaCost)
+	c.APIKeyRateLimitCost = QuantizeUsageBillingAmount(c.APIKeyRateLimitCost)
+	c.AccountQuotaCost = QuantizeUsageBillingAmount(c.AccountQuotaCost)
+}
+
+// QuantizeUsageBillingAmount rounds monetary values to the precision used by
+// the billing tables.
+func QuantizeUsageBillingAmount(v float64) float64 {
+	if v == 0 || math.IsNaN(v) || math.IsInf(v, 0) {
+		return v
+	}
+	quantized, _ := decimal.NewFromFloat(v).Round(UsageBillingMonetaryScale).Float64()
+	return quantized
 }
 
 func buildUsageBillingFingerprint(c *UsageBillingCommand) string {

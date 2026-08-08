@@ -15,7 +15,7 @@ import (
 // 广场路由挂 OptionalJWT 中间件：匿名可访问（除非 require_auth 开启），带 token 则
 // 识别用户。可见性规则（橱窗语义，与「可用渠道」的可绑定语义不同）：
 //   - 匿名：仅非专属分组（订阅型照常展示）；
-//   - 登录：非专属分组 + user_allowed_groups 授权的专属分组（不检查订阅有效性）。
+//   - 登录：非专属分组 + user_allowed_groups 授权或有效订阅覆盖的专属分组。
 type ModelPlazaHandler struct {
 	channelService *service.ChannelService
 	apiKeyService  *service.APIKeyService
@@ -35,16 +35,17 @@ func NewModelPlazaHandler(
 	}
 }
 
-// modelPlazaOfficialPricing LiteLLM 官方参考价（USD per token）。
+// modelPlazaOfficialPricing 渠道配置官方价（USD per token）。
 type modelPlazaOfficialPricing struct {
-	InputPrice        *float64 `json:"input_price"`
-	OutputPrice       *float64 `json:"output_price"`
-	CacheWritePrice   *float64 `json:"cache_write_price"`
-	CacheWrite1hPrice *float64 `json:"cache_write_1h_price,omitempty"`
-	CacheReadPrice    *float64 `json:"cache_read_price"`
+	InputPrice        *float64                 `json:"input_price"`
+	OutputPrice       *float64                 `json:"output_price"`
+	CacheWritePrice   *float64                 `json:"cache_write_price"`
+	CacheWrite1hPrice *float64                 `json:"cache_write_1h_price,omitempty"`
+	CacheReadPrice    *float64                 `json:"cache_read_price"`
+	Intervals         []userPricingIntervalDTO `json:"intervals"`
 }
 
-// modelPlazaModel 广场模型条目：渠道定价（白名单形态）+ 官方参考价。
+// modelPlazaModel 广场模型条目：渠道定价（白名单形态）+ 官方基准价。
 type modelPlazaModel struct {
 	Name            string                     `json:"name"`
 	Platform        string                     `json:"platform"`
@@ -108,7 +109,7 @@ func (h *ModelPlazaHandler) Get(c *gin.Context) {
 	var allowedExclusive map[int64]struct{}
 	var userRates map[int64]float64
 	if authed {
-		allowedExclusive, err = h.apiKeyService.GetUserAllowedGroupIDSet(c.Request.Context(), subject.UserID)
+		allowedExclusive, err = h.apiKeyService.GetUserModelPlazaVisibleGroupIDSet(c.Request.Context(), subject.UserID)
 		if err != nil {
 			// 可见性数据拿不到时不能静默降级成匿名视图（会错漏专属分组），直接报错。
 			response.ErrorFrom(c, err)
@@ -189,10 +190,23 @@ func toModelPlazaGroupDTO(g *service.PlazaGroup, userRates map[int64]float64) mo
 	return dto
 }
 
-// toModelPlazaOfficialPricing 转换官方参考价；nil 透传（前端显示 "-"）。
+// toModelPlazaOfficialPricing 转换官方基准价；nil 透传（前端显示 "-"）。
 func toModelPlazaOfficialPricing(p *service.PlazaOfficialPricing) *modelPlazaOfficialPricing {
 	if p == nil {
 		return nil
+	}
+	intervals := make([]userPricingIntervalDTO, 0, len(p.Intervals))
+	for _, iv := range p.Intervals {
+		intervals = append(intervals, userPricingIntervalDTO{
+			MinTokens:       iv.MinTokens,
+			MaxTokens:       iv.MaxTokens,
+			TierLabel:       iv.TierLabel,
+			InputPrice:      iv.InputPrice,
+			OutputPrice:     iv.OutputPrice,
+			CacheWritePrice: iv.CacheWritePrice,
+			CacheReadPrice:  iv.CacheReadPrice,
+			PerRequestPrice: iv.PerRequestPrice,
+		})
 	}
 	return &modelPlazaOfficialPricing{
 		InputPrice:        p.InputPrice,
@@ -200,5 +214,6 @@ func toModelPlazaOfficialPricing(p *service.PlazaOfficialPricing) *modelPlazaOff
 		CacheWritePrice:   p.CacheWritePrice,
 		CacheWrite1hPrice: p.CacheWrite1hPrice,
 		CacheReadPrice:    p.CacheReadPrice,
+		Intervals:         intervals,
 	}
 }

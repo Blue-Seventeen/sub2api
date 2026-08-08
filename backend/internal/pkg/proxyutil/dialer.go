@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"golang.org/x/net/proxy"
 )
@@ -33,6 +34,16 @@ import (
 //
 // 返回：
 //   - error: 代理配置错误（协议不支持或 dialer 创建失败）
+const (
+	socks5DialTimeout   = 10 * time.Second
+	socks5DialKeepAlive = 30 * time.Second
+)
+
+var socks5ForwardDialer = &net.Dialer{
+	Timeout:   socks5DialTimeout,
+	KeepAlive: socks5DialKeepAlive,
+}
+
 func ConfigureTransportProxy(transport *http.Transport, proxyURL *url.URL) error {
 	if proxyURL == nil {
 		return nil
@@ -45,7 +56,7 @@ func ConfigureTransportProxy(transport *http.Transport, proxyURL *url.URL) error
 		return nil
 
 	case "socks5", "socks5h":
-		dialer, err := proxy.FromURL(proxyURL, proxy.Direct)
+		dialer, err := proxy.FromURL(proxyURL, socks5ForwardDialer)
 		if err != nil {
 			return fmt.Errorf("create socks5 dialer: %w", err)
 		}

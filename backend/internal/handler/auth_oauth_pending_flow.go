@@ -1362,7 +1362,7 @@ func applyPendingOAuthAdoption(
 		decision,
 		overrideUserID,
 		false,
-		strings.EqualFold(strings.TrimSpace(session.Intent), "bind_current_user"),
+		strings.EqualFold(strings.TrimSpace(session.Intent), oauthIntentBindCurrentUser),
 	)
 }
 
@@ -1998,6 +1998,10 @@ func (h *AuthHandler) ExchangePendingOAuthCompletion(c *gin.Context) {
 		return
 	}
 	if pendingSessionRequiresBindLogin(payload) {
+		response.Success(c, payload)
+		return
+	}
+	if !canIssueTokenPair && !strings.EqualFold(strings.TrimSpace(session.Intent), oauthIntentBindCurrentUser) {
 		response.Success(c, payload)
 		return
 	}

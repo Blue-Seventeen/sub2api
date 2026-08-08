@@ -4,7 +4,9 @@ import App from './App.vue'
 import router from './router'
 import i18n, { initI18n, registerLocaleChangeHandler } from './i18n'
 import { useAppStore } from '@/stores/app'
-import { resolveDocumentTitle } from '@/router/title'
+import { useAuthStore } from '@/stores/auth'
+import { useAdminSettingsStore } from '@/stores/adminSettings'
+import { resolveRouteDocumentTitle } from '@/router/title'
 import { updateFavicon } from '@/utils/branding'
 import { isIOSDevice } from '@/utils/device'
 import './style.css'
@@ -47,7 +49,13 @@ async function bootstrap() {
 
   registerLocaleChangeHandler(() => {
     const route = router.currentRoute.value
-    document.title = resolveDocumentTitle(route.meta.title, appStore.siteName, route.meta.titleKey as string)
+    const authStore = useAuthStore()
+    const adminSettingsStore = useAdminSettingsStore()
+    const customMenuItems = [
+      ...(appStore.cachedPublicSettings?.custom_menu_items ?? []),
+      ...(authStore.isAdmin ? adminSettingsStore.customMenuItems : []),
+    ]
+    document.title = resolveRouteDocumentTitle(route, appStore.siteName, customMenuItems)
   })
 
   // Set document title immediately after config is loaded

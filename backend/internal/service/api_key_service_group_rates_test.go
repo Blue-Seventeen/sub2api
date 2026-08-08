@@ -71,6 +71,32 @@ func (s *groupRatesAPIKeyRepoStub) ListGroupIDsByUserID(context.Context, int64) 
 	return s.groupIDs, s.err
 }
 
+func TestAPIKeyService_GetUserModelPlazaVisibleGroupIDSet_MergesAllowedAndActiveSubscriptions(t *testing.T) {
+	userRepo := &groupRatesUserRepoStub{
+		user: &User{
+			ID:            7,
+			AllowedGroups: []int64{2, 4},
+		},
+	}
+	userSubRepo := &groupRatesUserSubRepoStub{
+		subs: []UserSubscription{
+			{GroupID: 4},
+			{GroupID: 5},
+			{GroupID: 0},
+		},
+	}
+
+	svc := NewAPIKeyService(nil, userRepo, nil, userSubRepo, nil, nil, nil)
+
+	visible, err := svc.GetUserModelPlazaVisibleGroupIDSet(context.Background(), 7)
+	require.NoError(t, err)
+	require.Len(t, visible, 3)
+	require.Contains(t, visible, int64(2))
+	require.Contains(t, visible, int64(4))
+	require.Contains(t, visible, int64(5))
+	require.NotContains(t, visible, int64(0))
+}
+
 func TestAPIKeyService_GetUserGroupRates_ReturnsDenseFinalRateMap(t *testing.T) {
 	userRepo := &groupRatesUserRepoStub{
 		user: &User{
