@@ -23,19 +23,23 @@ import (
 
 // openaiStreamingResult streaming response result
 type openaiStreamingResult struct {
-	usage            *OpenAIUsage
-	firstTokenMs     *int
-	responseID       string
-	imageCount       int
-	imageOutputSizes []string
+	usage                         *OpenAIUsage
+	firstTokenMs                  *int
+	responseID                    string
+	imageCount                    int
+	imageOutputSizes              []string
+	upstreamResponseModel         string
+	upstreamResponseModelConflict bool
 }
 
 type openaiNonStreamingResult struct {
 	*OpenAIUsage
-	usage            *OpenAIUsage
-	responseID       string
-	imageCount       int
-	imageOutputSizes []string
+	usage                         *OpenAIUsage
+	responseID                    string
+	imageCount                    int
+	imageOutputSizes              []string
+	upstreamResponseModel         string
+	upstreamResponseModelConflict bool
 }
 
 func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel string) (*openaiStreamingResult, error) {
@@ -43,6 +47,8 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 }
 
 func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel, reasoningEffort string) (*openaiStreamingResult, error) {
+	beginUpstreamResponseModelObservation(c)
+	observer := upstreamResponseModelObserverFromContext(c)
 	firstOutputTimeout := time.Duration(0)
 	if account != nil && account.Platform == PlatformOpenAI {
 		firstOutputTimeout = s.openAIFirstOutputTimeout(reasoningEffort)
@@ -295,11 +301,13 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	streamSeenImages := make(map[string]struct{})
 	resultWithUsage := func() *openaiStreamingResult {
 		return &openaiStreamingResult{
-			usage:            usage,
-			firstTokenMs:     firstTokenMs,
-			responseID:       responseID,
-			imageCount:       imageCounter.Count(),
-			imageOutputSizes: imageCounter.Sizes(),
+			usage:                         usage,
+			firstTokenMs:                  firstTokenMs,
+			responseID:                    responseID,
+			imageCount:                    imageCounter.Count(),
+			imageOutputSizes:              imageCounter.Sizes(),
+			upstreamResponseModel:         observedUpstreamResponseModel(c),
+			upstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
 		}
 	}
 	ensureCompactSSETerminator := func() bool {
@@ -545,6 +553,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				line = "data: " + data
 				eventType = strings.TrimSpace(gjson.GetBytes(dataBytes, "type").String())
 			}
+			observer.ObserveOpenAI(dataBytes, eventType)
 			if sanitizedData, sanitized := sanitizeOpenAIResponseFailedEventForClient(
 				dataBytes,
 				eventType,
@@ -1161,6 +1170,8 @@ func openAICacheCreationTokensFromUsage(value gjson.Result) int {
 }
 
 func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, originalModel, mappedModel string) (*openaiNonStreamingResult, error) {
+	beginUpstreamResponseModelObservation(c)
+	observer := upstreamResponseModelObserverFromContext(c)
 	body, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
 	if err != nil {
 		return nil, err
@@ -1203,6 +1214,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		return nil, fmt.Errorf("parse response: invalid json response")
 	}
 	usage := &usageValue
+	observer.ObserveOpenAI(body, "")
 
 	// Replace model in response if needed
 	if originalModel != mappedModel {
@@ -1230,11 +1242,13 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 	}
 
 	return &openaiNonStreamingResult{
-		OpenAIUsage:      usage,
-		usage:            usage,
-		responseID:       extractOpenAIResponseIDFromJSONBytes(body),
-		imageCount:       countOpenAIResponseImageOutputsFromJSONBytes(body),
-		imageOutputSizes: collectOpenAIResponseImageOutputSizesFromJSONBytes(body),
+		OpenAIUsage:                   usage,
+		usage:                         usage,
+		responseID:                    extractOpenAIResponseIDFromJSONBytes(body),
+		imageCount:                    countOpenAIResponseImageOutputsFromJSONBytes(body),
+		imageOutputSizes:              collectOpenAIResponseImageOutputSizesFromJSONBytes(body),
+		upstreamResponseModel:         observedUpstreamResponseModel(c),
+		upstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
 	}, nil
 }
 
@@ -1261,6 +1275,7 @@ func bodyHasSSEFraming(body []byte) bool {
 
 func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Context, body []byte, originalModel, mappedModel string) (*openaiNonStreamingResult, error) {
 	bodyText := string(body)
+	observeOpenAISSEBody(upstreamResponseModelObserverFromContext(c), bodyText)
 	finalResponse, ok := extractCodexFinalResponse(bodyText)
 
 	usage := &OpenAIUsage{}
@@ -1309,7 +1324,6 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 		}
 		body = []byte(bodyText)
 	}
-
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 
 	contentType := "application/json; charset=utf-8"
@@ -1324,11 +1338,13 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 	}
 
 	return &openaiNonStreamingResult{
-		OpenAIUsage:      usage,
-		usage:            usage,
-		responseID:       extractOpenAIResponseIDFromJSONBytes(body),
-		imageCount:       countOpenAIImageOutputsFromSSEBody(bodyText),
-		imageOutputSizes: collectOpenAIImageOutputSizesFromSSEBody(bodyText),
+		OpenAIUsage:                   usage,
+		usage:                         usage,
+		responseID:                    extractOpenAIResponseIDFromJSONBytes(body),
+		imageCount:                    countOpenAIImageOutputsFromSSEBody(bodyText),
+		imageOutputSizes:              collectOpenAIImageOutputSizesFromSSEBody(bodyText),
+		upstreamResponseModel:         observedUpstreamResponseModel(c),
+		upstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
 	}, nil
 }
 

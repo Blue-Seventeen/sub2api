@@ -1746,6 +1746,8 @@ export interface AdminUsageLog extends UsageLog {
   fallback_chain?: string | null
   upstream_transport?: string | null
   upstream_model?: string | null
+  upstream_response_model?: string | null
+  upstream_model_mismatch?: boolean | null
   model_mapping_chain?: string | null
 
   // 账号计费倍率（仅管理员可见）

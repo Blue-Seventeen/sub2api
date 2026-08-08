@@ -99,8 +99,8 @@ func TestBuildUsageLogBestEffortInsertQuery_IncludesRequestedModelColumn(t *test
 	query, args := buildUsageLogBestEffortInsertQuery([]usageLogInsertPrepared{prepared})
 
 	require.Contains(t, query, "INSERT INTO usage_logs (")
-	require.Contains(t, query, "\n\t\t\tmodel,\n\t\t\trequested_model,\n\t\t\tupstream_model,")
-	require.Contains(t, query, "\n\t\t\trequest_id,\n\t\t\tmodel,\n\t\t\trequested_model,\n\t\t\tupstream_model,")
+	require.Contains(t, query, "\n\t\t\tmodel,\n\t\t\trequested_model,\n\t\t\tupstream_model,\n\t\t\tupstream_response_model,\n\t\t\tupstream_model_mismatch,")
+	require.Contains(t, query, "\n\t\t\trequest_id,\n\t\t\tmodel,\n\t\t\trequested_model,\n\t\t\tupstream_model,\n\t\t\tupstream_response_model,\n\t\t\tupstream_model_mismatch,")
 	require.Len(t, args, len(prepared.args))
 	require.Equal(t, prepared.args[5], args[5])
 }
@@ -186,11 +186,11 @@ func TestPrepareUsageLogInsert_PersistsImageSizeMetadata(t *testing.T) {
 		CreatedAt:          time.Date(2025, 1, 6, 12, 0, 0, 0, time.UTC),
 	})
 
-	require.Equal(t, sql.NullString{String: imageSize, Valid: true}, prepared.args[38])
-	require.Equal(t, sql.NullString{String: inputSize, Valid: true}, prepared.args[39])
-	require.Equal(t, sql.NullString{String: outputSize, Valid: true}, prepared.args[40])
-	require.Equal(t, sql.NullString{String: source, Valid: true}, prepared.args[41])
-	breakdownJSON, ok := prepared.args[42].(string)
+	require.Equal(t, sql.NullString{String: imageSize, Valid: true}, prepared.args[40])
+	require.Equal(t, sql.NullString{String: inputSize, Valid: true}, prepared.args[41])
+	require.Equal(t, sql.NullString{String: outputSize, Valid: true}, prepared.args[42])
+	require.Equal(t, sql.NullString{String: source, Valid: true}, prepared.args[43])
+	breakdownJSON, ok := prepared.args[44].(string)
 	require.True(t, ok)
 	require.JSONEq(t, `{"1K":1,"4K":1}`, breakdownJSON)
 }
@@ -213,11 +213,11 @@ func TestPrepareUsageLogInsert_PersistsBillableQuantityMetadata(t *testing.T) {
 		CreatedAt:               time.Date(2025, 1, 7, 12, 0, 0, 0, time.UTC),
 	})
 
-	require.Equal(t, 1, prepared.args[43])
-	require.Equal(t, 7, prepared.args[45])
-	require.Equal(t, 1234, prepared.args[46])
-	require.Equal(t, sql.NullString{String: unitType, Valid: true}, prepared.args[48])
-	require.Equal(t, sql.NullString{String: billingMode, Valid: true}, prepared.args[65])
+	require.Equal(t, 1, prepared.args[45])
+	require.Equal(t, 7, prepared.args[47])
+	require.Equal(t, 1234, prepared.args[48])
+	require.Equal(t, sql.NullString{String: unitType, Valid: true}, prepared.args[50])
+	require.Equal(t, sql.NullString{String: billingMode, Valid: true}, prepared.args[67])
 }
 
 func TestCoalesceTrimmedString(t *testing.T) {
@@ -788,6 +788,8 @@ func buildUsageLogScanValues(opts usageLogScanRowOptions) []any {
 		opts.Model,
 		nullString(&requestedModel),
 		sql.NullString{},  // upstream_model
+		sql.NullString{},  // upstream_response_model
+		sql.NullBool{},    // upstream_model_mismatch
 		sql.NullInt64{},   // group_id
 		sql.NullInt64{},   // subscription_id
 		1,                 // input_tokens

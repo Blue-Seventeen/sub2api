@@ -594,6 +594,11 @@ type AdminUsageLog struct {
 	// UpstreamModel is the actual model sent to the upstream provider after mapping.
 	// Omitted when no mapping was applied (requested model was used as-is).
 	UpstreamModel *string `json:"upstream_model,omitempty"`
+	// UpstreamResponseModel is the model declared by the upstream response payload.
+	UpstreamResponseModel *string `json:"upstream_response_model,omitempty"`
+	// UpstreamModelMismatch marks whether the observed upstream response model differs
+	// from the model sent upstream. Nil means the upstream response did not declare a model.
+	UpstreamModelMismatch *bool `json:"upstream_model_mismatch,omitempty"`
 
 	// ChannelID 渠道 ID
 	ChannelID *int64 `json:"channel_id,omitempty"`

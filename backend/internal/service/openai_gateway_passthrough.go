@@ -258,6 +258,8 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	responseID := ""
 	imageCount := 0
 	var imageOutputSizes []string
+	upstreamResponseModel := ""
+	upstreamResponseModelConflict := false
 	if reqStream {
 		result, err := s.handleStreamingResponsePassthrough(ctx, resp, c, account, startTime, reqModel, upstreamPassthroughModel)
 		if err != nil {
@@ -268,6 +270,8 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		responseID = strings.TrimSpace(result.responseID)
 		imageCount = result.imageCount
 		imageOutputSizes = result.imageOutputSizes
+		upstreamResponseModel = result.upstreamResponseModel
+		upstreamResponseModelConflict = result.upstreamResponseModelConflict
 	} else {
 		result, err := s.handleNonStreamingResponsePassthrough(ctx, resp, c, reqModel, upstreamPassthroughModel)
 		if err != nil {
@@ -277,6 +281,8 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		responseID = strings.TrimSpace(result.responseID)
 		imageCount = result.imageCount
 		imageOutputSizes = result.imageOutputSizes
+		upstreamResponseModel = result.upstreamResponseModel
+		upstreamResponseModelConflict = result.upstreamResponseModelConflict
 	}
 	s.bindHTTPResponseAccount(ctx, c, account, responseID)
 
@@ -292,17 +298,19 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	}
 
 	forwardResult := &OpenAIForwardResult{
-		RequestID:       resp.Header.Get("x-request-id"),
-		ResponseID:      responseID,
-		Usage:           *usage,
-		Model:           reqModel,
-		UpstreamModel:   upstreamPassthroughModel,
-		ServiceTier:     serviceTier,
-		ReasoningEffort: reasoningEffort,
-		Stream:          reqStream,
-		OpenAIWSMode:    false,
-		Duration:        time.Since(startTime),
-		FirstTokenMs:    firstTokenMs,
+		RequestID:                     resp.Header.Get("x-request-id"),
+		ResponseID:                    responseID,
+		Usage:                         *usage,
+		Model:                         reqModel,
+		UpstreamModel:                 upstreamPassthroughModel,
+		UpstreamResponseModel:         upstreamResponseModel,
+		UpstreamResponseModelConflict: upstreamResponseModelConflict,
+		ServiceTier:                   serviceTier,
+		ReasoningEffort:               reasoningEffort,
+		Stream:                        reqStream,
+		OpenAIWSMode:                  false,
+		Duration:                      time.Since(startTime),
+		FirstTokenMs:                  firstTokenMs,
 	}
 	if imageCount > 0 {
 		forwardResult.ImageCount = imageCount
@@ -728,19 +736,23 @@ func collectOpenAIPassthroughTimeoutHeaders(h http.Header) []string {
 }
 
 type openaiStreamingResultPassthrough struct {
-	usage            *OpenAIUsage
-	firstTokenMs     *int
-	responseID       string
-	imageCount       int
-	imageOutputSizes []string
+	usage                         *OpenAIUsage
+	firstTokenMs                  *int
+	responseID                    string
+	imageCount                    int
+	imageOutputSizes              []string
+	upstreamResponseModel         string
+	upstreamResponseModelConflict bool
 }
 
 type openaiNonStreamingResultPassthrough struct {
 	*OpenAIUsage
-	usage            *OpenAIUsage
-	responseID       string
-	imageCount       int
-	imageOutputSizes []string
+	usage                         *OpenAIUsage
+	responseID                    string
+	imageCount                    int
+	imageOutputSizes              []string
+	upstreamResponseModel         string
+	upstreamResponseModelConflict bool
 }
 
 func openAIStreamClientOutputStarted(c *gin.Context, localStarted bool) bool {
@@ -1081,6 +1093,8 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 		return nil, errors.New("streaming not supported")
 	}
 
+	beginUpstreamResponseModelObservation(c)
+	observer := upstreamResponseModelObserverFromContext(c)
 	usage := &OpenAIUsage{}
 	imageCounter := newOpenAIImageOutputCounter()
 	var firstTokenMs *int
@@ -1134,11 +1148,13 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	needModelReplace := strings.TrimSpace(originalModel) != "" && strings.TrimSpace(mappedModel) != "" && strings.TrimSpace(originalModel) != strings.TrimSpace(mappedModel)
 	resultWithUsage := func() *openaiStreamingResultPassthrough {
 		return &openaiStreamingResultPassthrough{
-			usage:            usage,
-			firstTokenMs:     firstTokenMs,
-			responseID:       responseID,
-			imageCount:       imageCounter.Count(),
-			imageOutputSizes: imageCounter.Sizes(),
+			usage:                         usage,
+			firstTokenMs:                  firstTokenMs,
+			responseID:                    responseID,
+			imageCount:                    imageCounter.Count(),
+			imageOutputSizes:              imageCounter.Sizes(),
+			upstreamResponseModel:         observedUpstreamResponseModel(c),
+			upstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
 		}
 	}
 	ensureCompactSSETerminator := func() {
@@ -1190,6 +1206,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				}
 			}
 			eventType := strings.TrimSpace(gjson.Get(trimmedData, "type").String())
+			observer.ObserveOpenAI(dataBytes, eventType)
 			if eventType == "response.failed" {
 				failedMessage = extractOpenAISSEErrorMessage(dataBytes)
 				// response.failed 自带上游已消耗的 usage（input token 通常已扣）；必须先解析
@@ -1348,6 +1365,8 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 	originalModel string,
 	mappedModel string,
 ) (*openaiNonStreamingResultPassthrough, error) {
+	beginUpstreamResponseModelObservation(c)
+	observer := upstreamResponseModelObserverFromContext(c)
 	body, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
 	if err != nil {
 		return nil, err
@@ -1374,6 +1393,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 		usage = s.parseSSEUsageFromBody(string(body))
 	}
 
+	observeOpenAISSEBody(observer, string(body))
 	writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 
 	contentType := resp.Header.Get("Content-Type")
@@ -1391,11 +1411,13 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 		c.Data(resp.StatusCode, contentType, body)
 	}
 	return &openaiNonStreamingResultPassthrough{
-		OpenAIUsage:      usage,
-		usage:            usage,
-		responseID:       extractOpenAIResponseIDFromJSONBytes(body),
-		imageCount:       countOpenAIResponseImageOutputsFromJSONBytes(body),
-		imageOutputSizes: collectOpenAIResponseImageOutputSizesFromJSONBytes(body),
+		OpenAIUsage:                   usage,
+		usage:                         usage,
+		responseID:                    extractOpenAIResponseIDFromJSONBytes(body),
+		imageCount:                    countOpenAIResponseImageOutputsFromJSONBytes(body),
+		imageOutputSizes:              collectOpenAIResponseImageOutputSizesFromJSONBytes(body),
+		upstreamResponseModel:         observedUpstreamResponseModel(c),
+		upstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
 	}, nil
 }
 

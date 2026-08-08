@@ -577,14 +577,20 @@ type ForwardResult struct {
 	Model     string
 	// UpstreamModel is the actual upstream model after mapping.
 	// Prefer empty when it is identical to Model; persistence normalizes equal values away as no-op mappings.
-	UpstreamModel    string
-	BillingModel     string
-	Stream           bool
-	Duration         time.Duration
-	FirstTokenMs     *int // 首字时间（流式请求）
-	ClientDisconnect bool // 客户端是否在流式传输过程中断开
-	SkipUsageBilling bool // Internal guard: stream ended abnormally after headers were sent.
-	ReasoningEffort  *string
+	UpstreamModel string
+	// UpstreamResponseModel is the model declared by the upstream response payload.
+	// Empty when the upstream response did not declare a model.
+	UpstreamResponseModel string
+	// UpstreamResponseModelConflict marks whether the observed upstream response
+	// model conflicts with the upstream model that was sent.
+	UpstreamResponseModelConflict bool
+	BillingModel                  string
+	Stream                        bool
+	Duration                      time.Duration
+	FirstTokenMs                  *int // 首字时间（流式请求）
+	ClientDisconnect              bool // 客户端是否在流式传输过程中断开
+	SkipUsageBilling              bool // Internal guard: stream ended abnormally after headers were sent.
+	ReasoningEffort               *string
 
 	// Image generation billing metadata.
 	ImageCount         int

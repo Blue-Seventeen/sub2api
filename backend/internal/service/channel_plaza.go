@@ -51,12 +51,11 @@ type PlazaGroup struct {
 
 // ListPlazaGroups 返回模型广场数据：每个活跃分组附带其可用模型与定价。
 //
-// 聚合口径与 ListAvailable 一致（Active 渠道、SupportedModels、平台隔离），
-// 平台隔离），仅把顶层从渠道换成分组：
+// 聚合口径与 ListAvailable 一致（Active 渠道、SupportedModels、平台隔离），仅把顶层从渠道换成分组：
 //   - 渠道按 lower(name) 排序后遍历，保证同名模型去重结果确定；
 //   - 同分组同名模型「先见者胜」，仅当已存条目无定价而新条目有定价时升级替换；
-//   - 图片计费模型的档位价按实收口径合成（分组图片价 > 渠道档位价 > 渠道默认按次价，
-//     见 plazaImageDisplayPricing）；
+//   - 图片计费模型的展示价按实收口径合成（分组图片价 > 渠道档位价 > 渠道默认按次价，
+//     见 plazaImageDisplayPricing），官方价仍取原渠道定价；
 //   - 每个模型附带渠道配置官方价（查不到为 nil）；
 //   - 只返回 Models 非空的分组；分组按 RateMultiplier 升序（同倍率按名称），
 //     组内模型按名称排序。

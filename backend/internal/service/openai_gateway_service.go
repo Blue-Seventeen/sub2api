@@ -245,6 +245,12 @@ type OpenAIForwardResult struct {
 	// UpstreamModel is the actual model sent to the upstream provider after mapping.
 	// Empty when no mapping was applied (requested model was used as-is).
 	UpstreamModel string
+	// UpstreamResponseModel is the model declared by the upstream response payload.
+	// Empty when the upstream response did not declare a model.
+	UpstreamResponseModel string
+	// UpstreamResponseModelConflict marks whether the observed upstream response
+	// model conflicts with the upstream model that was sent.
+	UpstreamResponseModelConflict bool
 	// UpstreamEndpoint is the actual upstream API path used for this request.
 	// It avoids guessing when one downstream protocol can use multiple upstream endpoints.
 	UpstreamEndpoint string
