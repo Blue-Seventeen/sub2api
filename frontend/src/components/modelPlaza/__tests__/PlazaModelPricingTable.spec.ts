@@ -43,7 +43,7 @@ function mountTable(
   models: PlazaModel[],
   rateMultiplier: number,
   userRateMultiplier?: number | null,
-  extraProps?: { imageRateIndependent?: boolean; imageRateMultiplier?: number | null }
+  extraProps?: { platform?: string; imageRateIndependent?: boolean; imageRateMultiplier?: number | null }
 ) {
   return mount(PlazaModelPricingTable, {
     props: { models, rateMultiplier, userRateMultiplier: userRateMultiplier ?? null, ...extraProps }
@@ -86,6 +86,50 @@ describe('PlazaModelPricingTable', () => {
     expect(struck.exists()).toBe(true)
     expect(struck.text()).toBe('1x')
     expect(text).toContain('0.8x')
+  })
+
+  it('行级倍率字段可覆盖分组倍率并格式化浮点噪声', () => {
+    const wrapper = mountTable([
+      tokenModel({
+        rate_multiplier: 0.035,
+        user_rate_multiplier: 0.35000000000000003
+      })
+    ], 1)
+
+    const text = wrapper.text()
+    expect(text).toContain('$1.05')
+    expect(text).toContain('0.035x')
+    expect(text).toContain('0.35x')
+  })
+
+  it('renders source group badges for platform-aggregated rows', () => {
+    const wrapper = mountTable([
+      tokenModel({
+        source_group_name: 'openai-low',
+        source_group_subscription_type: 'subscription',
+        source_group_is_exclusive: true,
+        source_group_peak_rate_enabled: true,
+        source_group_peak_start: '13:00',
+        source_group_peak_end: '14:00',
+        source_group_peak_rate_multiplier: 2
+      })
+    ], 0.1)
+
+    const text = wrapper.text()
+    expect(text).toContain('openai-low')
+    expect(text).toContain('modelPlaza.badges.subscription')
+    expect(text).toContain('modelPlaza.badges.exclusive')
+    expect(text).toContain('common.peakRateTooltip')
+  })
+
+  it('renders concrete platform badge when a composite group contains cross-platform rows', () => {
+    const wrapper = mountTable([
+      tokenModel({
+        platform: 'openai'
+      })
+    ], 0.1, null, { platform: 'composite' })
+
+    expect(wrapper.text()).toContain('OpenAI')
   })
 
   it('模型按官方输出价从高到低排序,无官方价的排最后', () => {
@@ -197,6 +241,52 @@ describe('PlazaModelPricingTable', () => {
     expect(cells[4].text().trim()).toBe('-')
     expect(cells[5].text().trim()).toBe('-')
     expect(cells[6].text().trim()).toBe('-')
+  })
+
+  it('官方价展示渠道配置中的阶梯 token 单价,且不乘折扣倍率', () => {
+    const wrapper = mountTable([
+      tokenModel({
+        official_pricing: {
+          input_price: null,
+          output_price: null,
+          cache_write_price: null,
+          cache_write_1h_price: null,
+          cache_read_price: null,
+          intervals: [
+            {
+              min_tokens: 0,
+              max_tokens: 100000,
+              tier_label: '',
+              input_price: 4e-6,
+              output_price: 8e-6,
+              cache_write_price: 1e-6,
+              cache_read_price: 1e-7,
+              per_request_price: null
+            },
+            {
+              min_tokens: 100000,
+              max_tokens: null,
+              tier_label: '',
+              input_price: 1e-5,
+              output_price: 2e-5,
+              cache_write_price: null,
+              cache_read_price: null,
+              per_request_price: null
+            }
+          ]
+        }
+      })
+    ], 0.5)
+
+    const text = wrapper.text()
+    expect(text).toContain('≤100K')
+    expect(text).toContain('>100K')
+    expect(text).toContain('$4.00')
+    expect(text).toContain('$8.00')
+    expect(text).toContain('$10.00')
+    expect(text).toContain('$20.00')
+    expect(text).toContain('$1.00')
+    expect(text).toContain('$0.10')
   })
 
   it('per_request 模型按单次价 × 倍率展示,官方价列显示 -', () => {

@@ -1058,6 +1058,30 @@ func (s *APIKeyService) GetUserAllowedGroupIDSet(ctx context.Context, userID int
 	return allowed, nil
 }
 
+// GetUserModelPlazaVisibleGroupIDSet 返回模型广场对该用户可见的专属分组 ID 集合。
+// 包含显式 user_allowed_groups 授权，以及当前有效的订阅分组；过期订阅由仓储层过滤。
+func (s *APIKeyService) GetUserModelPlazaVisibleGroupIDSet(ctx context.Context, userID int64) (map[int64]struct{}, error) {
+	allowed, err := s.GetUserAllowedGroupIDSet(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if s.userSubRepo == nil {
+		return allowed, nil
+	}
+
+	activeSubscriptions, err := s.userSubRepo.ListActiveByUserID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list active subscriptions: %w", err)
+	}
+	for _, sub := range activeSubscriptions {
+		if sub.GroupID <= 0 {
+			continue
+		}
+		allowed[sub.GroupID] = struct{}{}
+	}
+	return allowed, nil
+}
+
 // GetUserGroupRates 获取当前用户所有可绑定分组的最终倍率。
 // 返回密集 map[groupID]finalRateMultiplier。
 func (s *APIKeyService) GetUserGroupRates(ctx context.Context, userID int64) (map[int64]float64, error) {

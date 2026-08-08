@@ -106,9 +106,21 @@ if (typeof window !== 'undefined' && typeof window.matchMedia === 'undefined') {
   })
 }
 
+const RouterLinkTestStub = {
+  props: ['to'],
+  template: '<a><slot /></a>'
+}
+
+const RouterViewTestStub = {
+  template: '<div><slot /></div>'
+}
+
 // Vue Test Utils 全局配置
 config.global.stubs = {
-  // 可以在这里添加全局 stub
+  RouterLink: RouterLinkTestStub,
+  'router-link': RouterLinkTestStub,
+  RouterView: RouterViewTestStub,
+  'router-view': RouterViewTestStub
 }
 
 // 设置全局测试超时

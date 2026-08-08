@@ -1,28 +1,21 @@
 <template>
   <div class="space-y-5">
-    <!-- 页头(独立形态下展示标题;后台形态 AppHeader 已有页面标题) -->
     <div v-if="!embedded">
       <h1 class="text-2xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-3xl">{{ t('modelPlaza.title') }}</h1>
       <p class="mt-1.5 text-sm text-gray-500 dark:text-dark-400">{{ t('modelPlaza.description') }}</p>
     </div>
 
-    <!-- 全局价格说明(管理员配置,Markdown) -->
     <div
       v-if="descriptionHtml"
       class="plaza-description rounded-2xl border border-gray-100 bg-white px-5 py-4 text-sm shadow-card dark:border-dark-700/50 dark:bg-dark-800/50"
       v-html="descriptionHtml"
     ></div>
 
-    <!-- 未登录提示 -->
-    <p
-      v-if="!isAuthenticated"
-      class="flex items-center gap-1.5 text-xs text-gray-400 dark:text-dark-500"
-    >
+    <p v-if="!isAuthenticated" class="flex items-center gap-1.5 text-xs text-gray-400 dark:text-dark-500">
       <Icon name="infoCircle" size="xs" class="h-3.5 w-3.5" />
       {{ t('modelPlaza.anonymousHint') }}
     </p>
 
-    <!-- 加载/错误/空 -->
     <div v-if="loading" class="flex min-h-[240px] items-center justify-center">
       <div class="h-8 w-8 animate-spin rounded-full border-2 border-primary-600/25 border-t-primary-600 dark:border-primary-400/25 dark:border-t-primary-400"></div>
     </div>
@@ -33,7 +26,6 @@
       {{ t('modelPlaza.loadFailed') }}
     </div>
     <template v-else>
-      <!-- 筛选区:平台 → 分组 → 倍率 -->
       <PlazaFilterBar
         :platforms="platforms"
         :groups="groupOptions"
@@ -48,9 +40,8 @@
         @update:search="searchQuery = $event"
       />
 
-      <!-- 分组分节的模型清单(默认按生效倍率升序) -->
-      <div v-if="filteredGroups.length > 0" class="space-y-5">
-        <PlazaGroupSection v-for="g in filteredGroups" :key="g.id" :group="g" />
+      <div v-if="displayedGroups.length > 0" class="space-y-5">
+        <PlazaGroupSection v-for="g in displayedGroups" :key="g.id" :group="g" />
       </div>
       <div
         v-else
@@ -70,14 +61,13 @@ import DOMPurify from 'dompurify'
 import Icon from '@/components/icons/Icon.vue'
 import PlazaFilterBar from './PlazaFilterBar.vue'
 import PlazaGroupSection from './PlazaGroupSection.vue'
-import type { ModelPlazaGroup, ModelPlazaResponse } from '@/api/modelPlaza'
+import type { ModelPlazaGroup, ModelPlazaResponse, PlazaModel } from '@/api/modelPlaza'
 import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps<{
   response: ModelPlazaResponse | null
   loading: boolean
   error?: boolean
-  /** 后台内嵌形态(AppLayout 内):隐藏页头。 */
   embedded?: boolean
 }>()
 
@@ -98,9 +88,19 @@ const descriptionHtml = computed(() => {
   return DOMPurify.sanitize(marked.parse(md) as string)
 })
 
-/** 生效倍率 = 用户专属倍率 ?? 分组默认倍率。 */
-function effectiveRate(g: ModelPlazaGroup): number {
+function groupEffectiveRate(g: ModelPlazaGroup): number {
   return g.user_rate_multiplier ?? g.rate_multiplier
+}
+
+function modelBillingMode(m: PlazaModel): string {
+  return m.pricing?.billing_mode || 'token'
+}
+
+function modelEffectiveRate(g: ModelPlazaGroup, m: PlazaModel): number {
+  if (modelBillingMode(m) === 'image' && g.image_rate_independent) {
+    return g.image_rate_multiplier ?? 1
+  }
+  return groupEffectiveRate(g)
 }
 
 const platforms = computed(() =>
@@ -112,23 +112,21 @@ const groupOptions = computed(() =>
     id: g.id,
     name: g.name,
     platform: g.platform,
-    rate: effectiveRate(g)
+    rate: groupEffectiveRate(g)
   }))
 )
 
-/** 全量生效倍率;当前组合下不可用的项由 FilterBar 置灰而非隐藏。 */
 const rates = computed(() =>
-  [...new Set((props.response?.groups ?? []).map(effectiveRate))].sort((a, b) => a - b)
+  [...new Set((props.response?.groups ?? []).map(groupEffectiveRate))].sort((a, b) => a - b)
 )
 
-/** 数据刷新后选中的倍率可能不复存在,重置为全部。 */
 watch(rates, (list) => {
   if (selectedRate.value !== 'all' && !list.includes(selectedRate.value)) {
     selectedRate.value = 'all'
   }
 })
 
-const filteredGroups = computed(() => {
+const visibleGroups = computed(() => {
   let groups = props.response?.groups ?? []
   if (selectedPlatform.value !== 'all') {
     groups = groups.filter((g) => g.platform === selectedPlatform.value)
@@ -137,19 +135,129 @@ const filteredGroups = computed(() => {
     groups = groups.filter((g) => g.id === selectedGroupId.value)
   }
   if (selectedRate.value !== 'all') {
-    groups = groups.filter((g) => effectiveRate(g) === selectedRate.value)
+    groups = groups.filter((g) => groupEffectiveRate(g) === selectedRate.value)
   }
-  // 模型名搜索:分组内只留命中的模型,整组无命中则隐藏该分组。
+
   const q = searchQuery.value.trim().toLowerCase()
   if (q) {
     groups = groups
       .map((g) => ({ ...g, models: g.models.filter((m) => m.name.toLowerCase().includes(q)) }))
       .filter((g) => g.models.length > 0)
   }
-  // 专属倍率会改变生效值,不能只依赖后端按默认倍率的排序。
-  return [...groups].sort(
-    (a, b) => effectiveRate(a) - effectiveRate(b) || a.name.localeCompare(b.name)
-  )
+
+  return [...groups].sort((a, b) => groupEffectiveRate(a) - groupEffectiveRate(b) || a.name.localeCompare(b.name))
+})
+
+const shouldAggregateByPlatform = computed(
+  () => selectedPlatform.value === 'all' && selectedGroupId.value === 'all'
+)
+
+function cloneAggregateModel(source: PlazaModel, group: ModelPlazaGroup): PlazaModel {
+  return {
+    ...source,
+    rate_multiplier: group.rate_multiplier,
+    user_rate_multiplier: group.user_rate_multiplier ?? null,
+    image_rate_independent: group.image_rate_independent,
+    image_rate_multiplier: group.image_rate_multiplier,
+    source_group_id: group.id,
+    source_group_name: group.name,
+    source_group_subscription_type: group.subscription_type,
+    source_group_is_exclusive: group.is_exclusive,
+    source_group_peak_rate_enabled: group.peak_rate_enabled,
+    source_group_peak_start: group.peak_start,
+    source_group_peak_end: group.peak_end,
+    source_group_peak_rate_multiplier: group.peak_rate_multiplier
+  }
+}
+
+function aggregateModelKey(model: PlazaModel): string {
+  return `${model.platform}:${model.name}`
+}
+
+function aggregateByPlatform(groups: ModelPlazaGroup[]): ModelPlazaGroup[] {
+  const platformMap = new Map<
+    string,
+    {
+      group: ModelPlazaGroup
+      models: Map<
+        string,
+        {
+          model: PlazaModel
+          sourceGroup: ModelPlazaGroup
+          rate: number
+        }
+      >
+    }
+  >()
+
+  for (const group of groups) {
+    let entry = platformMap.get(group.platform)
+    if (!entry) {
+      entry = {
+        group: {
+          id: -1,
+          name: group.platform,
+          description: '',
+          platform: group.platform,
+          subscription_type: 'standard',
+          rate_multiplier: groupEffectiveRate(group),
+          peak_rate_enabled: false,
+          peak_start: '',
+          peak_end: '',
+          peak_rate_multiplier: 1,
+          is_exclusive: false,
+          image_rate_independent: false,
+          image_rate_multiplier: 1,
+          models: []
+        },
+        models: new Map()
+      }
+      platformMap.set(group.platform, entry)
+    }
+
+    for (const model of group.models) {
+      const rate = modelEffectiveRate(group, model)
+      const key = aggregateModelKey(model)
+      const existing = entry.models.get(key)
+      const better =
+        !existing ||
+        rate < existing.rate ||
+        (rate === existing.rate &&
+          (group.name.localeCompare(existing.sourceGroup.name) < 0 ||
+            (group.name === existing.sourceGroup.name && group.id < existing.sourceGroup.id)))
+
+      if (better) {
+        entry.models.set(key, {
+          model: cloneAggregateModel(model, group),
+          sourceGroup: group,
+          rate
+        })
+      }
+    }
+  }
+
+  return [...platformMap.values()]
+    .filter((entry) => entry.models.size > 0)
+    .map((entry, index) => {
+      const models = [...entry.models.values()]
+        .sort((a, b) => a.model.name.localeCompare(b.model.name) || a.model.platform.localeCompare(b.model.platform))
+        .map((item) => item.model)
+      const minRate = Math.min(...[...entry.models.values()].map((item) => item.rate))
+      return {
+        ...entry.group,
+        id: -(index + 1),
+        rate_multiplier: minRate,
+        models
+      }
+    })
+    .sort((a, b) => a.platform.localeCompare(b.platform))
+}
+
+const displayedGroups = computed(() => {
+  if (shouldAggregateByPlatform.value) {
+    return aggregateByPlatform(visibleGroups.value)
+  }
+  return visibleGroups.value
 })
 </script>
 
