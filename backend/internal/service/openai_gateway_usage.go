@@ -42,7 +42,8 @@ type OpenAIRecordUsageInput struct {
 	//（既有行为），供未装配的路径（图片/异步/cyber 等）沿用。
 	PricingAt time.Time
 	// CyberBlocked 为 true 时把该用量行标记为 cyber（request_type=cyber），计费逻辑不变。
-	CyberBlocked bool
+	CyberBlocked       bool
+	NativeCompactionV2 bool
 	ChannelUsageFields
 }
 
@@ -50,14 +51,15 @@ type OpenAIRecordUsageInput struct {
 // 用量按上游真实 token 计费，与 WS cyber 及正常请求口径一致（InputTokens/OutputTokens
 // 取自上游 response.failed 报告的 usage，即 mark.UpstreamInTok/OutTok）。
 type CyberPolicyUsageInput struct {
-	APIKey       *APIKey
-	Account      *Account
-	Subscription *UserSubscription
-	RequestID    string
-	Model        string
-	Stream       bool
-	InputTokens  int
-	OutputTokens int
+	NativeCompactionV2 bool
+	APIKey             *APIKey
+	Account            *Account
+	Subscription       *UserSubscription
+	RequestID          string
+	Model              string
+	Stream             bool
+	InputTokens        int
+	OutputTokens       int
 	// 渠道归因与请求级 meta，使 cyber 计费行与正常 RecordUsage 行口径一致
 	// （否则 cyber 行 channel_id 等为空，渠道维度统计会遗漏 cyber 命中）。
 	InboundEndpoint    string
@@ -104,6 +106,7 @@ func (s *OpenAIGatewayService) RecordCyberPolicyUsageLog(ctx context.Context, in
 		APIKeyService:      in.APIKeyService,
 		ChannelUsageFields: in.ChannelUsageFields,
 		CyberBlocked:       true,
+		NativeCompactionV2: in.NativeCompactionV2,
 	}); err != nil {
 		logger.LegacyPrintf("service.openai_gateway", "cyber usage record failed: request_id=%s err=%v", in.RequestID, err)
 	}
@@ -292,43 +295,45 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}
 
 	usageLog := &UsageLog{
-		UserID:                  user.ID,
-		APIKeyID:                apiKey.ID,
-		AccountID:               account.ID,
-		RequestID:               requestID,
-		Model:                   result.Model,
-		RequestedModel:          requestedModel,
-		UpstreamModel:           optionalUpstreamModelPtr(result.UpstreamModel, result.Model, requestedModel),
-		UpstreamResponseModel:   optionalTrimmedStringPtr(result.UpstreamResponseModel),
-		UpstreamModelMismatch:   upstreamModelMismatch(sentModel, result.UpstreamResponseModel),
-		ServiceTier:             result.ServiceTier,
-		ReasoningEffort:         result.ReasoningEffort,
-		InboundEndpoint:         optionalTrimmedStringPtr(input.InboundEndpoint),
-		UpstreamEndpoint:        optionalTrimmedStringPtr(input.UpstreamEndpoint),
-		ClientProfile:           optionalTrimmedStringPtr(input.ClientProfile),
-		CompatibilityRoute:      optionalTrimmedStringPtr(input.CompatibilityRoute),
-		FallbackChain:           optionalTrimmedStringPtr(input.FallbackChain),
-		UpstreamTransport:       optionalTrimmedStringPtr(input.UpstreamTransport),
-		InputTokens:             actualInputTokens,
-		OutputTokens:            result.Usage.OutputTokens,
-		CacheCreationTokens:     result.Usage.CacheCreationInputTokens,
-		CacheCreation5mTokens:   result.Usage.CacheCreation5mTokens,
-		CacheCreation1hTokens:   result.Usage.CacheCreation1hTokens,
-		CacheReadTokens:         result.Usage.CacheReadInputTokens,
-		ImageInputTokens:        result.Usage.ImageInputTokens,
-		ImageOutputTokens:       result.Usage.ImageOutputTokens,
-		ImageCount:              result.ImageCount,
-		ImageSize:               optionalTrimmedStringPtr(result.ImageSize),
-		ImageInputSize:          optionalTrimmedStringPtr(result.ImageInputSize),
-		ImageOutputSize:         optionalTrimmedStringPtr(result.ImageOutputSize),
-		ImageSizeSource:         optionalTrimmedStringPtr(result.ImageSizeSource),
-		ImageSizeBreakdown:      result.ImageSizeBreakdown,
-		RequestCount:            result.RequestCount,
-		TaskCount:               result.TaskCount,
-		BillableDurationSeconds: result.BillableDurationSeconds,
-		BillableCharacterCount:  result.BillableCharacterCount,
-		UsageEstimated:          result.UsageEstimated,
-		BillableUnitType:        optionalTrimmedStringPtr(result.BillableUnitType),
+		UserID:                   user.ID,
+		APIKeyID:                 apiKey.ID,
+		AccountID:                account.ID,
+		RequestID:                requestID,
+		Model:                    result.Model,
+		RequestedModel:           requestedModel,
+		UpstreamModel:            optionalUpstreamModelPtr(result.UpstreamModel, result.Model, requestedModel),
+		UpstreamResponseModel:    optionalTrimmedStringPtr(result.UpstreamResponseModel),
+		UpstreamModelMismatch:    upstreamModelMismatch(sentModel, result.UpstreamResponseModel),
+		ServiceTier:              result.ServiceTier,
+		ReasoningEffort:          result.ReasoningEffort,
+		RequestedReasoningEffort: result.RequestedReasoningEffort,
+		InboundEndpoint:          optionalTrimmedStringPtr(input.InboundEndpoint),
+		UpstreamEndpoint:         optionalTrimmedStringPtr(input.UpstreamEndpoint),
+		ClientProfile:            optionalTrimmedStringPtr(input.ClientProfile),
+		CompatibilityRoute:       optionalTrimmedStringPtr(input.CompatibilityRoute),
+		FallbackChain:            optionalTrimmedStringPtr(input.FallbackChain),
+		UpstreamTransport:        optionalTrimmedStringPtr(input.UpstreamTransport),
+		InputTokens:              actualInputTokens,
+		OutputTokens:             result.Usage.OutputTokens,
+		CacheCreationTokens:      result.Usage.CacheCreationInputTokens,
+		CacheCreation5mTokens:    result.Usage.CacheCreation5mTokens,
+		CacheCreation1hTokens:    result.Usage.CacheCreation1hTokens,
+		CacheReadTokens:          result.Usage.CacheReadInputTokens,
+		ImageInputTokens:         result.Usage.ImageInputTokens,
+		ImageOutputTokens:        result.Usage.ImageOutputTokens,
+		ImageCount:               result.ImageCount,
+		ImageSize:                optionalTrimmedStringPtr(result.ImageSize),
+		ImageInputSize:           optionalTrimmedStringPtr(result.ImageInputSize),
+		ImageOutputSize:          optionalTrimmedStringPtr(result.ImageOutputSize),
+		ImageSizeSource:          optionalTrimmedStringPtr(result.ImageSizeSource),
+		ImageSizeBreakdown:       result.ImageSizeBreakdown,
+		RequestCount:             result.RequestCount,
+		TaskCount:                result.TaskCount,
+		BillableDurationSeconds:  result.BillableDurationSeconds,
+		BillableCharacterCount:   result.BillableCharacterCount,
+		UsageEstimated:           result.UsageEstimated,
+		BillableUnitType:         optionalTrimmedStringPtr(result.BillableUnitType),
+		NativeCompactionV2:       input.NativeCompactionV2,
 	}
 	isVideoUsage := isGrokVideoUsageResult(result, billingModels)
 	if isVideoUsage {
@@ -748,13 +753,13 @@ func (s *OpenAIGatewayService) calculateOpenAIVideoCost(
 	resolution := NormalizeVideoBillingResolutionOrDefault(result.VideoResolution)
 	durationSeconds := NormalizeVideoBillingDurationSecondsOrDefault(result.VideoDurationSeconds)
 	groupConfig := videoPriceConfigFromAPIKey(apiKey)
-	if apiKeyHasConfiguredVideoPrice(apiKey, resolution) {
+	if apiKeyHasConfiguredVideoPrice(apiKey, billingModel, resolution) {
 		return s.billingService.CalculateVideoCost(billingModel, resolution, videoCount, durationSeconds, groupConfig, multiplier)
 	}
 	if refreshed := s.apiKeyWithFreshGroupMediaPricing(ctx, apiKey); refreshed != apiKey {
 		apiKey = refreshed
 		groupConfig = videoPriceConfigFromAPIKey(apiKey)
-		if apiKeyHasConfiguredVideoPrice(apiKey, resolution) {
+		if apiKeyHasConfiguredVideoPrice(apiKey, billingModel, resolution) {
 			return s.billingService.CalculateVideoCost(billingModel, resolution, videoCount, durationSeconds, groupConfig, multiplier)
 		}
 	}

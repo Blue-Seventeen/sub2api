@@ -28,6 +28,27 @@ func TestUsageLogFromService_IncludesOpenAIWSMode(t *testing.T) {
 	require.False(t, UsageLogFromServiceAdmin(httpLog).OpenAIWSMode)
 }
 
+func TestUsageLogFromService_PreservesNativeCompactionAndStream(t *testing.T) {
+	t.Parallel()
+
+	log := &service.UsageLog{
+		RequestID:          "resp_compaction",
+		Model:              "gpt-5.6-sol",
+		RequestType:        service.RequestTypeStream,
+		Stream:             true,
+		NativeCompactionV2: true,
+	}
+
+	userDTO := UsageLogFromService(log)
+	adminDTO := UsageLogFromServiceAdmin(log)
+	require.Equal(t, "stream", userDTO.RequestType)
+	require.True(t, userDTO.Stream)
+	require.True(t, userDTO.NativeCompactionV2)
+	require.Equal(t, "stream", adminDTO.RequestType)
+	require.True(t, adminDTO.Stream)
+	require.True(t, adminDTO.NativeCompactionV2)
+}
+
 func TestUsageLogFromService_PrefersRequestTypeForLegacyFields(t *testing.T) {
 	t.Parallel()
 
@@ -216,6 +237,61 @@ func TestUsageLogFromService_KeepsUserBillingWithoutAdminOnlyFields(t *testing.T
 	require.Equal(t, &sessionID, adminDTO.SessionID)
 }
 
+func TestUsageLogFromService_UsersSeeRequestedReasoningEffortOnly(t *testing.T) {
+	t.Parallel()
+
+	requested := "max"
+	forwarded := "xhigh"
+	log := &service.UsageLog{
+		RequestID:                "req_effort",
+		Model:                    "gpt-5.4",
+		ReasoningEffort:          &forwarded,
+		RequestedReasoningEffort: &requested,
+	}
+
+	userDTO := UsageLogFromService(log)
+	adminDTO := UsageLogFromServiceAdmin(log)
+
+	require.NotNil(t, userDTO.ReasoningEffort)
+	require.Equal(t, requested, *userDTO.ReasoningEffort)
+	require.NotNil(t, adminDTO.ReasoningEffort)
+	require.Equal(t, requested, *adminDTO.ReasoningEffort)
+	require.NotNil(t, adminDTO.UpstreamReasoningEffort)
+	require.Equal(t, forwarded, *adminDTO.UpstreamReasoningEffort)
+
+	userJSON, err := json.Marshal(userDTO)
+	require.NoError(t, err)
+	require.Contains(t, string(userJSON), `"reasoning_effort":"max"`)
+	require.NotContains(t, string(userJSON), "upstream_reasoning_effort")
+	require.NotContains(t, string(userJSON), "requested_reasoning_effort")
+
+	adminJSON, err := json.Marshal(adminDTO)
+	require.NoError(t, err)
+	require.Contains(t, string(adminJSON), `"reasoning_effort":"max"`)
+	require.Contains(t, string(adminJSON), `"upstream_reasoning_effort":"xhigh"`)
+}
+
+func TestUsageLogFromService_OmitsUpstreamReasoningEffortWhenUnmapped(t *testing.T) {
+	t.Parallel()
+
+	effort := "high"
+	log := &service.UsageLog{
+		RequestID:                "req_effort_same",
+		Model:                    "gpt-5.4",
+		ReasoningEffort:          &effort,
+		RequestedReasoningEffort: &effort,
+	}
+
+	adminDTO := UsageLogFromServiceAdmin(log)
+	require.NotNil(t, adminDTO.ReasoningEffort)
+	require.Equal(t, effort, *adminDTO.ReasoningEffort)
+	require.Nil(t, adminDTO.UpstreamReasoningEffort)
+
+	adminJSON, err := json.Marshal(adminDTO)
+	require.NoError(t, err)
+	require.NotContains(t, string(adminJSON), "upstream_reasoning_effort")
+}
+
 func TestUsageLogFromService_FallsBackToLegacyModelWhenRequestedModelMissing(t *testing.T) {
 	t.Parallel()
 
@@ -235,8 +311,10 @@ func TestUsageLogFromService_RedactsNestedAPIKeyForUser(t *testing.T) {
 	t.Parallel()
 
 	lastUsedIP := "198.51.100.10"
+	upstreamRequestID := "internal-provider-request"
 	log := &service.UsageLog{
-		RequestID: "req_key_redact",
+		RequestID:         "req_key_redact",
+		UpstreamRequestID: &upstreamRequestID,
 		APIKey: &service.APIKey{
 			ID:          42,
 			UserID:      7,
@@ -265,6 +343,8 @@ func TestUsageLogFromService_RedactsNestedAPIKeyForUser(t *testing.T) {
 		"203.0.113.10",
 		"192.0.2.10",
 		lastUsedIP,
+		"upstream_request_id",
+		upstreamRequestID,
 	} {
 		require.NotContains(t, string(userJSON), forbidden)
 	}
@@ -272,6 +352,26 @@ func TestUsageLogFromService_RedactsNestedAPIKeyForUser(t *testing.T) {
 	require.NotNil(t, adminDTO.APIKey)
 	require.Equal(t, int64(42), adminDTO.APIKey.ID)
 	require.Equal(t, "primary", adminDTO.APIKey.Name)
+	require.Equal(t, &upstreamRequestID, adminDTO.UpstreamRequestID)
+}
+
+func TestUsageLogFromServiceAdminUpstreamRequestIDJSON(t *testing.T) {
+	id := "upstream-diagnostic-id"
+	for _, value := range []*string{nil, &id} {
+		log := &service.UsageLog{RequestID: "client-visible-id", UpstreamRequestID: value}
+		adminJSON, err := json.Marshal(UsageLogFromServiceAdmin(log))
+		require.NoError(t, err)
+		if value == nil {
+			require.NotContains(t, string(adminJSON), "upstream_request_id")
+		} else {
+			require.Contains(t, string(adminJSON), `"upstream_request_id":"upstream-diagnostic-id"`)
+		}
+		userJSON, err := json.Marshal(UsageLogFromService(log))
+		require.NoError(t, err)
+		require.Contains(t, string(userJSON), `"request_id":"client-visible-id"`)
+		require.NotContains(t, string(userJSON), "upstream_request_id")
+		require.NotContains(t, string(userJSON), id)
+	}
 }
 
 func TestUsageLogFromService_IncludesImageBillingMetadataForUserAndAdmin(t *testing.T) {

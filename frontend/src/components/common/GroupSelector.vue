@@ -66,13 +66,13 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import GroupBadge from './GroupBadge.vue'
-import type { AdminGroup, GroupPlatform } from '@/types'
+import type { Group, GroupPlatform } from '@/types'
 
 const { t } = useI18n()
 
 interface Props {
   modelValue: number[]
-  groups: AdminGroup[]
+  groups: (Group & { account_count?: number })[]
   platform?: GroupPlatform
   mixedScheduling?: boolean
   searchable?: boolean | 'auto'
@@ -93,7 +93,7 @@ const isSearchable = computed(() => {
 })
 
 const filteredGroups = computed(() => {
-  let result: AdminGroup[] = props.groups
+  let result = props.groups
   if (props.platform) {
     if (props.platform === 'antigravity' && props.mixedScheduling) {
       result = result.filter(

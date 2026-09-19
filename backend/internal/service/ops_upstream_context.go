@@ -2,21 +2,30 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 // Gin context keys used by Ops error logger for capturing upstream error details.
 // These keys are set by gateway services and consumed by handler/ops_error_logger.go.
 const (
+	opsProxyNameDirect         = "direct/no_proxy"
+	opsProxyNameUnknown        = "unknown"
+	opsProxyNameUnnamed        = "proxy"
 	OpsUpstreamStatusCodeKey   = "ops_upstream_status_code"
 	OpsUpstreamErrorMessageKey = "ops_upstream_error_message"
 	OpsUpstreamErrorDetailKey  = "ops_upstream_error_detail"
 	OpsUpstreamErrorsKey       = "ops_upstream_errors"
 	OpsUpstreamRequestBodyKey  = "ops_upstream_request_body"
+	OpsUpstreamModelKey        = "ops_upstream_model"
 
 	// Optional stage latencies (milliseconds) for troubleshooting and alerting.
 	OpsAuthLatencyMsKey      = "ops_auth_latency_ms"
@@ -38,7 +47,9 @@ const (
 	// 上就地(in-band)补发错误帧时记录的 OpsStreamError。因为 wire 状态码停留在 200，
 	// ops_error_logger 的 status>=400 采集路径永远不会触发，这类流内失败
 	//（例如等待并发槽位超时后回退的限流、Wait 后二次计费校验失败）本会在错误看板里隐形。
-	OpsStreamErrorKey = "ops_stream_error"
+	OpsStreamErrorKey  = "ops_stream_error"
+	OpsStreamErrorsKey = "ops_stream_errors"
+	OpsStreamTurnKey   = "ops_stream_turn"
 
 	// Client-side configuration denials should remain visible in ops_error_logs,
 	// but should be excluded from SLA/error-rate calculations.
@@ -46,13 +57,14 @@ const (
 	// ensureForwardErrorResponse 检查此 key，为 true 时跳过兜底写入，避免在已完成的 JSON 后追加 SSE。
 	ResponseCommittedKey = "response_committed"
 
-	OpsClientBusinessLimitedKey                          = "ops_client_business_limited"
-	OpsClientBusinessLimitedReasonKey                    = "ops_client_business_limited_reason"
-	OpsClientBusinessLimitedReasonIPRestriction          = "api_key_ip_restriction"
-	OpsClientBusinessLimitedReasonAPIKeyGroupUnavailable = "api_key_group_unavailable"
-	OpsClientBusinessLimitedReasonAPIKeyGroupUnassigned  = "api_key_group_unassigned"
-	OpsClientBusinessLimitedReasonLocalFeatureGate       = "local_feature_gate"
-	OpsClientBusinessLimitedReasonLocalPolicyDenied      = "local_policy_denied"
+	OpsClientBusinessLimitedKey                           = "ops_client_business_limited"
+	OpsClientBusinessLimitedReasonKey                     = "ops_client_business_limited_reason"
+	OpsClientBusinessLimitedReasonIPRestriction           = "api_key_ip_restriction"
+	OpsClientBusinessLimitedReasonAPIKeyGroupUnavailable  = "api_key_group_unavailable"
+	OpsClientBusinessLimitedReasonAPIKeyGroupUnassigned   = "api_key_group_unassigned"
+	OpsClientBusinessLimitedReasonLocalFeatureGate        = "local_feature_gate"
+	OpsClientBusinessLimitedReasonLocalPolicyDenied       = "local_policy_denied"
+	OpsClientBusinessLimitedReasonLocalModelConfiguration = "local_model_configuration"
 )
 
 func MarkResponseCommitted(c *gin.Context) { c.Set(ResponseCommittedKey, true) }
@@ -71,6 +83,25 @@ func SetOpsLatencyMs(c *gin.Context, key string, value int64) {
 		return
 	}
 	c.Set(key, value)
+}
+
+// SetOpsUpstreamModel stores the effective model slug for final Ops attribution.
+func SetOpsUpstreamModel(c *gin.Context, model string) {
+	if c == nil {
+		return
+	}
+	if model = strings.TrimSpace(model); model != "" {
+		c.Set(OpsUpstreamModelKey, model)
+	}
+}
+
+// ClearOpsUpstreamModel invalidates attempt-scoped model attribution before a
+// newly selected account starts credential resolution or upstream dispatch.
+func ClearOpsUpstreamModel(c *gin.Context) {
+	if c == nil {
+		return
+	}
+	c.Set(OpsUpstreamModelKey, "")
 }
 
 func MarkOpsClientBusinessLimited(c *gin.Context, reason string) {
@@ -95,6 +126,18 @@ func HasOpsClientBusinessLimited(c *gin.Context) bool {
 	return marked
 }
 
+func OpsClientBusinessLimitedReason(c *gin.Context) string {
+	if c == nil {
+		return ""
+	}
+	v, ok := c.Get(OpsClientBusinessLimitedReasonKey)
+	if !ok {
+		return ""
+	}
+	reason, _ := v.(string)
+	return strings.TrimSpace(reason)
+}
+
 // OpsStreamError 描述网关在「响应状态已固化为 200」之后（keepalive ping 或部分数据
 // 已 flush）就地以 SSE error 帧形式返回的错误。由于 HTTP 状态码停留在 200，
 // 而 ops_error_logger 以 status>=400 为采集触发条件，这类流内失败
@@ -115,6 +158,31 @@ type OpsStreamError struct {
 	// CountTowardsSLA 表示虽然 wire 状态已固化为 200，请求在应用语义上仍然失败，
 	// Ops 应使用 IntendedStatus 计入错误率/SLA。
 	CountTowardsSLA bool
+	// Turn identifies a WebSocket turn. HTTP/SSE requests leave it at zero.
+	Turn int
+	// SkipMonitoring snapshots the rule decision for this visible failure.
+	SkipMonitoring  bool
+	AccountID       int64
+	UpstreamModel   string
+	UpstreamStatus  int
+	UpstreamMessage string
+	UpstreamDetail  string
+	UpstreamErrors  []*OpsUpstreamErrorEvent
+}
+
+const maxOpsStreamErrorsPerRequest = 64
+
+// BeginOpsStreamTurn scopes first-wins deduplication to one WebSocket turn.
+func BeginOpsStreamTurn(c *gin.Context, turn int) {
+	if c == nil || turn <= 0 {
+		return
+	}
+	c.Set(OpsStreamTurnKey, turn)
+	c.Set(OpsSkipPassthroughKey, false)
+	c.Set(OpsUpstreamErrorsKey, []*OpsUpstreamErrorEvent{})
+	c.Set(OpsUpstreamStatusCodeKey, 0)
+	c.Set(OpsUpstreamErrorMessageKey, "")
+	c.Set(OpsUpstreamErrorDetailKey, "")
 }
 
 // MarkOpsStreamError 记录一次就地 SSE 错误，供 ops 日志采集。
@@ -145,13 +213,94 @@ func markOpsStreamError(c *gin.Context, streamErr OpsStreamError) {
 	if c == nil {
 		return
 	}
-	if _, exists := c.Get(OpsStreamErrorKey); exists {
-		return
-	}
 	streamErr.ErrType = strings.TrimSpace(streamErr.ErrType)
 	streamErr.Code = strings.TrimSpace(streamErr.Code)
 	streamErr.Message = strings.TrimSpace(streamErr.Message)
+	snapshotOpsStreamErrorContext(c, &streamErr)
+	if GetOpenAIClientTransport(c) == OpenAIClientTransportWS {
+		if value, ok := c.Get(OpsStreamTurnKey); ok {
+			streamErr.Turn, _ = value.(int)
+		}
+		var errorsForRequest []OpsStreamError
+		if value, ok := c.Get(OpsStreamErrorsKey); ok {
+			errorsForRequest, _ = value.([]OpsStreamError)
+		}
+		if len(errorsForRequest) > 0 && errorsForRequest[len(errorsForRequest)-1].Turn == streamErr.Turn {
+			return
+		}
+		errorsForRequest = append(errorsForRequest, streamErr)
+		if len(errorsForRequest) > maxOpsStreamErrorsPerRequest {
+			errorsForRequest = append([]OpsStreamError(nil), errorsForRequest[len(errorsForRequest)-maxOpsStreamErrorsPerRequest:]...)
+		}
+		c.Set(OpsStreamErrorsKey, errorsForRequest)
+		c.Set(OpsStreamErrorKey, streamErr)
+		return
+	}
+	if _, exists := c.Get(OpsStreamErrorKey); exists {
+		return
+	}
 	c.Set(OpsStreamErrorKey, streamErr)
+}
+
+func snapshotOpsStreamErrorContext(c *gin.Context, streamErr *OpsStreamError) {
+	if c == nil || streamErr == nil {
+		return
+	}
+	if c.Request != nil {
+		if accountID, ok := c.Request.Context().Value(ctxkey.AccountID).(int64); ok && accountID > 0 {
+			streamErr.AccountID = accountID
+		}
+	}
+	if value, ok := c.Get(OpsUpstreamModelKey); ok {
+		streamErr.UpstreamModel, _ = value.(string)
+		streamErr.UpstreamModel = strings.TrimSpace(streamErr.UpstreamModel)
+	}
+	if value, ok := c.Get(OpsUpstreamStatusCodeKey); ok {
+		switch status := value.(type) {
+		case int:
+			streamErr.UpstreamStatus = status
+		case int64:
+			streamErr.UpstreamStatus = int(status)
+		}
+	}
+	if value, ok := c.Get(OpsUpstreamErrorMessageKey); ok {
+		streamErr.UpstreamMessage, _ = value.(string)
+		streamErr.UpstreamMessage = strings.TrimSpace(streamErr.UpstreamMessage)
+	}
+	if value, ok := c.Get(OpsUpstreamErrorDetailKey); ok {
+		streamErr.UpstreamDetail, _ = value.(string)
+		streamErr.UpstreamDetail = strings.TrimSpace(streamErr.UpstreamDetail)
+	}
+	if value, ok := c.Get(OpsUpstreamErrorsKey); ok {
+		if events, ok := value.([]*OpsUpstreamErrorEvent); ok {
+			streamErr.UpstreamErrors = make([]*OpsUpstreamErrorEvent, 0, len(events))
+			for _, event := range events {
+				if event == nil {
+					streamErr.UpstreamErrors = append(streamErr.UpstreamErrors, nil)
+					continue
+				}
+				copyOfEvent := *event
+				streamErr.UpstreamErrors = append(streamErr.UpstreamErrors, &copyOfEvent)
+			}
+		}
+	}
+}
+
+// GetOpsStreamErrors returns one snapshot per WebSocket turn, or the ordinary
+// single stream error for HTTP/SSE requests.
+func GetOpsStreamErrors(c *gin.Context) []OpsStreamError {
+	if c == nil {
+		return nil
+	}
+	if value, ok := c.Get(OpsStreamErrorsKey); ok {
+		if errorsForRequest, ok := value.([]OpsStreamError); ok && len(errorsForRequest) > 0 {
+			return append([]OpsStreamError(nil), errorsForRequest...)
+		}
+	}
+	if streamErr, ok := GetOpsStreamError(c); ok {
+		return []OpsStreamError{streamErr}
+	}
+	return nil
 }
 
 // GetOpsStreamError 返回本请求记录的就地 SSE 错误（若有）。
@@ -211,6 +360,12 @@ type OpsUpstreamErrorEvent struct {
 	Platform    string `json:"platform,omitempty"`
 	AccountID   int64  `json:"account_id,omitempty"`
 	AccountName string `json:"account_name,omitempty"`
+	ProxyID     *int64 `json:"proxy_id"`
+	ProxyName   string `json:"proxy_name"`
+
+	// DroppedEarlierAttempts is set on the oldest retained event when queue
+	// bounds forced earlier attempts of the same request to be discarded.
+	DroppedEarlierAttempts int `json:"dropped_earlier_attempts,omitempty"`
 
 	// Outcome
 	UpstreamStatusCode int    `json:"upstream_status_code,omitempty"`
@@ -235,6 +390,77 @@ type OpsUpstreamErrorEvent struct {
 
 	Message string `json:"message,omitempty"`
 	Detail  string `json:"detail,omitempty"`
+
+	// SkipMonitoring is request-local rule state and is intentionally excluded
+	// from persisted attempt JSON. Only the final visible failure may use it.
+	SkipMonitoring bool `json:"-"`
+}
+
+func opsUpstreamProxyAttribution(account *Account) (*int64, string) {
+	if account == nil {
+		return nil, opsProxyNameUnknown
+	}
+	if account.ProxyID == nil || account.Proxy == nil {
+		return nil, opsProxyNameDirect
+	}
+	if account.Proxy.ID <= 0 {
+		return nil, opsProxyNameUnknown
+	}
+	id := account.Proxy.ID
+	name := strings.TrimSpace(account.Proxy.Name)
+	if name == "" {
+		name = opsProxyNameUnnamed
+	}
+	return &id, name
+}
+
+func opsUpstreamProxyID(account *Account) *int64 {
+	id, _ := opsUpstreamProxyAttribution(account)
+	return id
+}
+
+func opsUpstreamProxyName(account *Account) string {
+	_, name := opsUpstreamProxyAttribution(account)
+	return name
+}
+
+// opsUpstreamWSProxyAttribution treats an unconfigured managed proxy as
+// unknown because the websocket dialer may inherit process-level proxy env.
+func opsUpstreamWSProxyAttribution(account *Account) (*int64, string) {
+	proxyID, name := opsUpstreamProxyAttribution(account)
+	if proxyID == nil {
+		return nil, opsProxyNameUnknown
+	}
+	return proxyID, name
+}
+
+func setUnknownOpsUpstreamProxy(ev *OpsUpstreamErrorEvent) {
+	if ev == nil {
+		return
+	}
+	ev.ProxyID = nil
+	ev.ProxyName = opsProxyNameUnknown
+}
+
+// normalizeOpsUpstreamProxyAttribution makes legacy events explicit without
+// claiming a managed route when no durable proxy ID was stored.
+func normalizeOpsUpstreamProxyAttribution(ev *OpsUpstreamErrorEvent) {
+	if ev == nil {
+		return
+	}
+	if ev.ProxyID != nil && *ev.ProxyID <= 0 {
+		ev.ProxyID = nil
+	}
+	ev.ProxyName = strings.TrimSpace(ev.ProxyName)
+	if ev.ProxyID != nil {
+		if ev.ProxyName == "" {
+			ev.ProxyName = opsProxyNameUnnamed
+		}
+		return
+	}
+	if ev.ProxyName != opsProxyNameDirect {
+		setUnknownOpsUpstreamProxy(ev)
+	}
 }
 
 func appendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) {
@@ -245,10 +471,14 @@ func appendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) {
 		ev.AtUnixMs = time.Now().UnixMilli()
 	}
 	ev.Platform = strings.TrimSpace(ev.Platform)
+	normalizeOpsUpstreamProxyAttribution(&ev)
 	ev.UpstreamRequestID = strings.TrimSpace(ev.UpstreamRequestID)
 	ev.UpstreamResponseBody = strings.TrimSpace(ev.UpstreamResponseBody)
 	ev.UpstreamRequestBody = strings.TrimSpace(ev.UpstreamRequestBody)
 	ev.Kind = strings.TrimSpace(ev.Kind)
+	ev.Stage = strings.TrimSpace(ev.Stage)
+	ev.Scope = strings.TrimSpace(ev.Scope)
+	ev.Reason = strings.TrimSpace(ev.Reason)
 	ev.UpstreamURL = safeUpstreamURL(strings.TrimSpace(ev.UpstreamURL))
 	ev.Message = strings.TrimSpace(ev.Message)
 	ev.Detail = strings.TrimSpace(ev.Detail)
@@ -305,7 +535,7 @@ func checkSkipMonitoringForUpstreamEvent(c *gin.Context, ev *OpsUpstreamErrorEve
 
 	rule := svc.MatchRule(ev.Platform, ev.UpstreamStatusCode, []byte(body))
 	if rule != nil && rule.SkipMonitoring {
-		c.Set(OpsSkipPassthroughKey, true)
+		ev.SkipMonitoring = true
 	}
 }
 
@@ -330,6 +560,54 @@ func ParseOpsUpstreamErrors(raw string) ([]*OpsUpstreamErrorEvent, error) {
 	var out []*OpsUpstreamErrorEvent
 	if err := json.Unmarshal([]byte(raw), &out); err != nil {
 		return nil, err
+	}
+	for _, ev := range out {
+		normalizeOpsUpstreamProxyAttribution(ev)
+	}
+	return out, nil
+}
+
+// normalizeOpsUpstreamErrorsJSON materializes missing proxy attribution while
+// preserving legacy JSON keys and their original order for detail views.
+func normalizeOpsUpstreamErrorsJSON(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return raw, nil
+	}
+	if !gjson.Valid(raw) {
+		return "", errors.New("upstream_errors is not valid JSON")
+	}
+	parsed := gjson.Parse(raw)
+	if !parsed.IsArray() {
+		return "", errors.New("upstream_errors is not a JSON array")
+	}
+	out := raw
+	for i, ev := range parsed.Array() {
+		if !ev.IsObject() {
+			continue
+		}
+		prefix := strconv.Itoa(i) + "."
+		proxyID := ev.Get("proxy_id")
+		proxyName := strings.TrimSpace(ev.Get("proxy_name").String())
+		hasValidID := proxyID.Exists() && proxyID.Type == gjson.Number && proxyID.Int() > 0
+		var err error
+		switch {
+		case hasValidID:
+			if proxyName == "" {
+				out, err = sjson.Set(out, prefix+"proxy_name", opsProxyNameUnnamed)
+			}
+		case proxyName == opsProxyNameDirect:
+			if !proxyID.Exists() || proxyID.Type != gjson.Null {
+				out, err = sjson.Set(out, prefix+"proxy_id", nil)
+			}
+		default:
+			if out, err = sjson.Set(out, prefix+"proxy_id", nil); err == nil {
+				out, err = sjson.Set(out, prefix+"proxy_name", opsProxyNameUnknown)
+			}
+		}
+		if err != nil {
+			return "", err
+		}
 	}
 	return out, nil
 }

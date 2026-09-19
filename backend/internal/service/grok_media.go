@@ -55,12 +55,94 @@ type GrokMediaRequestInfo struct {
 	N               int
 	Size            string
 	SizeTier        string
+	ImageResolution string
+	AspectRatio     string
 	Resolution      string
 	DurationSeconds int
 	InputImageURLs  []string
 	MaskImageURL    string
 	Uploads         []OpenAIImagesUpload
 	MaskUpload      *OpenAIImagesUpload
+}
+
+type GrokVideoPendingBilling struct {
+	Model                string `json:"model"`
+	BillingModel         string `json:"billing_model,omitempty"`
+	UpstreamModel        string `json:"upstream_model,omitempty"`
+	VideoResolution      string `json:"video_resolution,omitempty"`
+	VideoDurationSeconds int    `json:"video_duration_seconds,omitempty"`
+	OriginalModel        string `json:"original_model,omitempty"`
+	CreatedAt            string `json:"created_at,omitempty"`
+}
+
+func GrokVideoPendingCreatedAtNow() string { return time.Now().UTC().Format(time.RFC3339Nano) }
+
+func GrokVideoE2EDuration(createdAt string, discoveredAt time.Time) time.Duration {
+	createdAt = strings.TrimSpace(createdAt)
+	if createdAt == "" {
+		return 0
+	}
+	if discoveredAt.IsZero() {
+		discoveredAt = time.Now()
+	}
+	created, err := time.Parse(time.RFC3339Nano, createdAt)
+	if err != nil {
+		created, err = time.Parse(time.RFC3339, createdAt)
+	}
+	if err != nil {
+		return 0
+	}
+	d := discoveredAt.Sub(created)
+	if d < 0 {
+		return 0
+	}
+	return d
+}
+
+func IsGrokVideoStatusBillable(statusBody []byte) bool {
+	return len(statusBody) > 0 && gjson.ValidBytes(statusBody) &&
+		strings.EqualFold(strings.TrimSpace(gjson.GetBytes(statusBody, "status").String()), "done") &&
+		strings.TrimSpace(gjson.GetBytes(statusBody, "video.url").String()) != ""
+}
+
+func ExtractGrokVideoBillingFromStatusBody(statusBody []byte, pending *GrokVideoPendingBilling, requestID string) *OpenAIForwardResult {
+	if !IsGrokVideoStatusBillable(statusBody) {
+		return nil
+	}
+	model, duration := "", 0
+	if gjson.ValidBytes(statusBody) {
+		model = strings.TrimSpace(gjson.GetBytes(statusBody, "model").String())
+		duration = int(gjson.GetBytes(statusBody, "video.duration").Int())
+	}
+	resolution, billingModel, upstreamModel := "", "", ""
+	if pending != nil {
+		if model == "" {
+			model = firstNonEmpty(pending.BillingModel, pending.Model, pending.OriginalModel)
+		}
+		billingModel = firstNonEmpty(pending.BillingModel, pending.Model)
+		upstreamModel = pending.UpstreamModel
+		resolution = pending.VideoResolution
+		if duration <= 0 {
+			duration = pending.VideoDurationSeconds
+		}
+	}
+	if model == "" {
+		model = "grok-imagine-video"
+	}
+	if billingModel == "" {
+		billingModel = model
+	}
+	if resolution != "" {
+		resolution = NormalizeVideoBillingResolutionOrDefault(resolution)
+	}
+	if duration > 0 {
+		duration = NormalizeVideoBillingDurationSecondsOrDefault(duration)
+	}
+	return &OpenAIForwardResult{ResponseID: strings.TrimSpace(requestID), Model: model, BillingModel: billingModel, UpstreamModel: upstreamModel, VideoCount: 1, VideoResolution: resolution, VideoDurationSeconds: duration}
+}
+
+func grokMediaImageObject(imageURL string) map[string]string {
+	return map[string]string{"url": imageURL, "type": "image_url"}
 }
 
 func (r GrokMediaRequestInfo) ModerationBody() []byte {
@@ -123,6 +205,8 @@ func ParseGrokMediaRequest(contentType string, body []byte) GrokMediaRequestInfo
 	info.Prompt = strings.TrimSpace(info.Prompt)
 	info.Size = strings.TrimSpace(info.Size)
 	info.SizeTier = NormalizeImageBillingTierOrDefault(info.Size)
+	info.AspectRatio = strings.TrimSpace(info.AspectRatio)
+	info.ImageResolution = grokImagineImageResolution(info.ImageResolution)
 	info.Resolution = NormalizeVideoBillingResolutionOrDefault(info.Resolution)
 	info.DurationSeconds = NormalizeVideoBillingDurationSecondsOrDefault(info.DurationSeconds)
 	if info.N <= 0 {
@@ -138,7 +222,8 @@ func parseGrokMediaJSONRequest(body []byte, info *GrokMediaRequestInfo) {
 	info.Model = strings.TrimSpace(gjson.GetBytes(body, "model").String())
 	info.Prompt = strings.TrimSpace(gjson.GetBytes(body, "prompt").String())
 	info.Size = strings.TrimSpace(gjson.GetBytes(body, "size").String())
-	info.Resolution = strings.TrimSpace(gjson.GetBytes(body, "resolution").String())
+	info.AspectRatio = strings.TrimSpace(gjson.GetBytes(body, "aspect_ratio").String())
+	assignGrokMediaResolution(gjson.GetBytes(body, "resolution").String(), info)
 	if duration := gjson.GetBytes(body, "duration"); duration.Exists() && duration.Type == gjson.Number {
 		info.DurationSeconds = int(duration.Int())
 	}
@@ -250,7 +335,9 @@ func parseGrokMediaMultipartRequest(contentType string, body []byte, info *GrokM
 		case "size":
 			info.Size = value
 		case "resolution":
-			info.Resolution = value
+			assignGrokMediaResolution(value, info)
+		case "aspect_ratio":
+			info.AspectRatio = value
 		case "duration":
 			if duration, err := strconv.Atoi(value); err == nil {
 				info.DurationSeconds = duration
@@ -292,9 +379,11 @@ func (s *OpenAIGatewayService) BindGrokMediaVideoRequestAccount(
 	if cacheKey == "" || accountID <= 0 {
 		return fmt.Errorf("grok video request binding is invalid")
 	}
-	ttl := openaiStickySessionTTL
+	ttl := grokVideoPendingBillingTTL
 	if s.cfg != nil && s.cfg.Gateway.OpenAIWS.StickySessionTTLSeconds > 0 {
-		ttl = time.Duration(s.cfg.Gateway.OpenAIWS.StickySessionTTLSeconds) * time.Second
+		if sticky := time.Duration(s.cfg.Gateway.OpenAIWS.StickySessionTTLSeconds) * time.Second; sticky > ttl {
+			ttl = sticky
+		}
 	}
 	return s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), cacheKey, accountID, ttl)
 }
@@ -444,10 +533,10 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 	usage := grokMediaUsageFromResponse(endpoint, requestInfo, respBody)
 	return &OpenAIForwardResult{
 		RequestID:            requestIDHeader,
-		ResponseID:           usage.ResponseID,
+		ResponseID:           firstNonEmpty(usage.ResponseID, requestID),
 		Usage:                usage.Usage,
-		Model:                requestModel,
-		BillingModel:         requestModel,
+		Model:                firstNonEmpty(usage.Model, requestModel),
+		BillingModel:         firstNonEmpty(usage.BillingModel, requestModel),
 		UpstreamModel:        upstreamModel,
 		ResponseHeaders:      resp.Header.Clone(),
 		Duration:             time.Since(startTime),
@@ -573,11 +662,20 @@ func (s *OpenAIGatewayService) forwardGrokMediaVideoContent(
 	if err := writeGrokMediaContentResponse(c, contentResp); err != nil {
 		return nil, err
 	}
-	return &OpenAIForwardResult{
+	result := &OpenAIForwardResult{
 		RequestID:       contentRequestID,
 		ResponseHeaders: contentResp.Header.Clone(),
 		Duration:        time.Since(startTime),
-	}, nil
+	}
+	if billed := ExtractGrokVideoBillingFromStatusBody(statusBody, nil, requestID); billed != nil {
+		result.ResponseID = billed.ResponseID
+		result.Model = billed.Model
+		result.BillingModel = billed.BillingModel
+		result.VideoCount = billed.VideoCount
+		result.VideoResolution = billed.VideoResolution
+		result.VideoDurationSeconds = billed.VideoDurationSeconds
+	}
+	return result, nil
 }
 
 func grokMediaSignedVideoContentURL(body []byte, requestID string) (string, error) {
@@ -763,10 +861,7 @@ func sanitizeGrokMediaForwardBody(endpoint GrokMediaEndpoint, body []byte, conte
 	}
 	switch endpoint {
 	case GrokMediaEndpointImagesGenerations, GrokMediaEndpointImagesEdits:
-		if !gjson.GetBytes(body, "size").Exists() {
-			return body, contentType, nil
-		}
-		out, err := sjson.DeleteBytes(body, "size")
+		out, err := applyGrokImagineImageGeometry(body)
 		if err != nil {
 			return nil, "", fmt.Errorf("sanitize grok media size: %w", err)
 		}
@@ -800,6 +895,8 @@ func NormalizeGrokMediaModelForEndpoint(endpoint GrokMediaEndpoint, model string
 type grokMediaUsageMetadata struct {
 	ResponseID           string
 	Usage                OpenAIUsage
+	Model                string
+	BillingModel         string
 	ImageCount           int
 	ImageSize            string
 	ImageInputSize       string
@@ -811,7 +908,7 @@ type grokMediaUsageMetadata struct {
 
 func grokMediaUsageFromResponse(endpoint GrokMediaEndpoint, requestInfo GrokMediaRequestInfo, responseBody []byte) grokMediaUsageMetadata {
 	usage, _ := extractOpenAIUsageFromJSONBytes(responseBody)
-	meta := grokMediaUsageMetadata{Usage: usage}
+	meta := grokMediaUsageMetadata{Usage: usage, Model: requestInfo.Model}
 	switch endpoint {
 	case GrokMediaEndpointImagesGenerations, GrokMediaEndpointImagesEdits:
 		meta.ImageCount = countOpenAIResponseImageOutputsFromJSONBytes(responseBody)
@@ -820,11 +917,16 @@ func grokMediaUsageFromResponse(endpoint GrokMediaEndpoint, requestInfo GrokMedi
 		meta.ImageOutputSizes = collectOpenAIResponseImageOutputSizesFromJSONBytes(responseBody)
 	case GrokMediaEndpointVideosGenerations, GrokMediaEndpointVideosEdits, GrokMediaEndpointVideosExtensions:
 		meta.ResponseID = extractGrokMediaVideoRequestID(responseBody)
-		meta.VideoCount = 1
 		meta.VideoResolution = requestInfo.Resolution
 		meta.VideoDurationSeconds = requestInfo.DurationSeconds
-		// Keep the legacy media-unit counter populated for existing usage displays.
-		meta.ImageCount = 1
+	case GrokMediaEndpointVideoStatus:
+		if billed := ExtractGrokVideoBillingFromStatusBody(responseBody, nil, ""); billed != nil {
+			meta.Model = billed.Model
+			meta.BillingModel = billed.BillingModel
+			meta.VideoCount = billed.VideoCount
+			meta.VideoResolution = billed.VideoResolution
+			meta.VideoDurationSeconds = billed.VideoDurationSeconds
+		}
 	}
 	return meta
 }

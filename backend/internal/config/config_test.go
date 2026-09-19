@@ -25,6 +25,78 @@ func resetViperWithJWTSecret(t *testing.T) {
 	t.Setenv("JWT_SECRET", strings.Repeat("x", 32))
 }
 
+func TestLoadDefaultModelsListReadMaxBytes(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, DefaultModelsListReadMaxBytes, cfg.Gateway.ModelsListReadMaxBytes)
+}
+
+func TestLoadTimezonePrecedence(t *testing.T) {
+	tests := []struct {
+		name         string
+		fileTimezone string
+		timezoneEnv  string
+		tzEnv        string
+		want         string
+	}{
+		{name: "default", want: "Asia/Shanghai"},
+		{name: "config_file", fileTimezone: "Europe/London", want: "Europe/London"},
+		{name: "timezone_env", fileTimezone: "Europe/London", timezoneEnv: "UTC", want: "UTC"},
+		{name: "timezone_env_over_tz_and_file", fileTimezone: "Europe/London", timezoneEnv: "UTC", tzEnv: "America/New_York", want: "UTC"},
+		{name: "timezone_env_over_tz", timezoneEnv: "UTC", tzEnv: "America/New_York", want: "UTC"},
+		{name: "config_file_over_tz", fileTimezone: "Europe/London", tzEnv: "Asia/Shanghai", want: "Europe/London"},
+		{name: "tz_fallback", tzEnv: "America/New_York", want: "America/New_York"},
+		{name: "tz_fallback_trimmed", tzEnv: "  UTC  ", want: "UTC"},
+		{name: "blank_tz_ignored", tzEnv: " \t ", want: "Asia/Shanghai"},
+	}
+
+	for _, loader := range []struct {
+		name string
+		load func() (*Config, error)
+	}{
+		{name: "runtime", load: Load},
+		{name: "bootstrap", load: LoadForBootstrap},
+	} {
+		t.Run(loader.name, func(t *testing.T) {
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					resetViperWithJWTSecret(t)
+					t.Setenv("TIMEZONE", tt.timezoneEnv)
+					t.Setenv("TZ", tt.tzEnv)
+					if tt.fileTimezone != "" {
+						configFile := filepath.Join(t.TempDir(), "config.yaml")
+						require.NoError(t, os.WriteFile(configFile, []byte("timezone: "+tt.fileTimezone+"\n"), 0o600))
+						t.Setenv("CONFIG_FILE", configFile)
+					}
+
+					cfg, err := loader.load()
+					require.NoError(t, err)
+					require.Equal(t, tt.want, cfg.Timezone)
+					require.Contains(t, cfg.Database.DSNWithTimezone(cfg.Timezone), "TimeZone="+tt.want)
+				})
+			}
+		})
+	}
+}
+
+func TestLoadTimezoneFallbackDoesNotStickAcrossLoads(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	t.Setenv("TIMEZONE", "")
+	t.Setenv("TZ", "America/New_York")
+	cfg, err := LoadForBootstrap()
+	require.NoError(t, err)
+	require.Equal(t, "America/New_York", cfg.Timezone)
+
+	configFile := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(configFile, []byte("timezone: Europe/London\n"), 0o600))
+	t.Setenv("CONFIG_FILE", configFile)
+	t.Setenv("TZ", "")
+	cfg, err = Load()
+	require.NoError(t, err)
+	require.Equal(t, "Europe/London", cfg.Timezone)
+}
+
 func TestLoadServerTimingConfig(t *testing.T) {
 	t.Run("disabled by default", func(t *testing.T) {
 		resetViperWithJWTSecret(t)
@@ -525,6 +597,15 @@ func TestLoadOpenAIWSClientFirstMessageTimeoutFromEnv(t *testing.T) {
 	require.Equal(t, 120, cfg.Gateway.OpenAIWS.ClientFirstMessageTimeoutSeconds)
 }
 
+func TestLoadOpenAIWSForceHTTPFromEnv(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	t.Setenv("GATEWAY_OPENAI_WS_FORCE_HTTP", "true")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.True(t, cfg.Gateway.OpenAIWS.ForceHTTP)
+}
+
 func TestLoadDefaultOpenAICompactModel(t *testing.T) {
 	resetViperWithJWTSecret(t)
 
@@ -540,6 +621,19 @@ func TestLoadOpenAICompactModelFromEnv(t *testing.T) {
 	cfg, err := Load()
 	require.NoError(t, err)
 	require.Equal(t, "gpt-5.3-codex", cfg.Gateway.OpenAICompactModel)
+}
+
+func TestLoadDefaultGrokFreeQuotaSoftGate(t *testing.T) {
+	resetViperWithJWTSecret(t)
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.False(t, cfg.Gateway.Grok.PasswordAuthEnabled)
+	require.True(t, cfg.Gateway.Grok.FreeQuotaSoftGateEnabled)
+	require.Equal(t, int64(500_000), cfg.Gateway.Grok.FreeQuotaTokenLimit)
+	require.Equal(t, 95, cfg.Gateway.Grok.FreeQuotaSoftGatePercent)
+	require.Equal(t, 24, cfg.Gateway.Grok.FreeQuotaWindowHours)
+	require.Equal(t, 60, cfg.Gateway.Grok.FreeQuotaStatsCacheSeconds)
 }
 
 func TestLoadDefaultOpenAIHTTP2Enabled(t *testing.T) {
@@ -1131,6 +1225,21 @@ func TestLoadDefaultUsageCleanupConfig(t *testing.T) {
 	}
 	if cfg.UsageCleanup.TaskTimeoutSeconds != 1800 {
 		t.Fatalf("UsageCleanup.TaskTimeoutSeconds = %d, want 1800", cfg.UsageCleanup.TaskTimeoutSeconds)
+	}
+}
+
+func TestLoadDefaultOpsCleanupConfig(t *testing.T) {
+	resetViperWithJWTSecret(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if !cfg.Ops.Cleanup.Enabled {
+		t.Fatal("Ops.Cleanup.Enabled = false, want true")
+	}
+	if cfg.Ops.Cleanup.SystemLogRetentionDays != 30 {
+		t.Fatalf("Ops.Cleanup.SystemLogRetentionDays = %d, want 30", cfg.Ops.Cleanup.SystemLogRetentionDays)
 	}
 }
 
@@ -1784,6 +1893,11 @@ func TestValidateConfigErrors(t *testing.T) {
 			wantErr: "gateway.text_max_body_size",
 		},
 		{
+			name:    "gateway models list read limit",
+			mutate:  func(c *Config) { c.Gateway.ModelsListReadMaxBytes = 0 },
+			wantErr: "gateway.models_list_read_max_bytes",
+		},
+		{
 			name:    "gateway response header timeout",
 			mutate:  func(c *Config) { c.Gateway.ResponseHeaderTimeout = -1 },
 			wantErr: "gateway.response_header_timeout",
@@ -2104,6 +2218,11 @@ func TestValidateConfigErrors(t *testing.T) {
 			name:    "ops cleanup retention",
 			mutate:  func(c *Config) { c.Ops.Cleanup.ErrorLogRetentionDays = -1 },
 			wantErr: "ops.cleanup.error_log_retention_days",
+		},
+		{
+			name:    "ops cleanup system log retention",
+			mutate:  func(c *Config) { c.Ops.Cleanup.SystemLogRetentionDays = 0 },
+			wantErr: "ops.cleanup.system_log_retention_days",
 		},
 		{
 			name:    "ops cleanup minute retention",

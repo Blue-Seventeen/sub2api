@@ -10,6 +10,7 @@ import (
 )
 
 type stickyBindingCache struct {
+	stubGatewayCache
 	bindings map[string]int64
 }
 

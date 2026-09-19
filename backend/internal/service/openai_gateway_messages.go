@@ -114,7 +114,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	// OAuth/Plus relies on session_id + x-codex-turn-state; trimming to a
 	// sliding 12-message window makes the cached prefix stall at system/tools.
 	// Keep full replay there so upstream prompt caching can grow turn by turn.
-	if compatReplayGuardEnabled && account.Type != AccountTypeOAuth && previousResponseID == "" && !compatContinuationDisabled {
+	if compatReplayGuardEnabled && !account.IsOpenAIOAuthLike() && previousResponseID == "" && !compatContinuationDisabled {
 		compatReplayTrimmed = applyAnthropicCompatFullReplayGuard(&anthropicReq)
 	}
 
@@ -143,7 +143,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		noContinuationReq := *responsesReq
 		noContinuationReq.PreviousResponseID = ""
 		noContinuationReq.Input = append([]byte(nil), responsesReq.Input...)
-		if compatReplayGuardEnabled && account.Type != AccountTypeOAuth {
+		if compatReplayGuardEnabled && !account.IsOpenAIOAuthLike() {
 			appendOpenAICompatClaudeCodeTodoGuard(&noContinuationReq)
 		}
 		responsesBodyWithoutContinuation, err = json.Marshal(&noContinuationReq)
@@ -153,7 +153,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		responsesReq.PreviousResponseID = previousResponseID
 		trimAnthropicCompatResponsesInputToLatestTurn(responsesReq)
 	}
-	if compatReplayGuardEnabled && account.Type != AccountTypeOAuth {
+	if compatReplayGuardEnabled && !account.IsOpenAIOAuthLike() {
 		appendOpenAICompatClaudeCodeTodoGuard(responsesReq)
 	}
 
@@ -182,7 +182,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	if err != nil {
 		return nil, fmt.Errorf("marshal responses request: %w", err)
 	}
-	if account.Type == AccountTypeOAuth && account.Platform != PlatformGrok {
+	if account.IsOpenAIOAuthLike() && account.Platform != PlatformGrok {
 		var reqBody map[string]any
 		if err := json.Unmarshal(responsesBody, &reqBody); err != nil {
 			return nil, fmt.Errorf("unmarshal for codex transform: %w", err)
@@ -256,7 +256,15 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	}
 	var serviceTier *string
 	if account.Platform == PlatformOpenAI {
-		if policyBody, changed := ApplyOpenAIReasoningEffortPolicyFromContext(ctx, responsesBody); changed {
+		policyBody, changed, policyErr := ApplyOpenAIReasoningEffortPolicyFromContext(ctx, responsesBody)
+		if policyErr != nil {
+			if IsReasoningEffortPolicyDenied(policyErr) {
+				MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
+				writeAnthropicError(c, http.StatusForbidden, "forbidden_error", policyErr.Error())
+			}
+			return nil, policyErr
+		}
+		if changed {
 			responsesBody = policyBody
 			if responsesReq.Reasoning != nil {
 				responsesReq.Reasoning.Effort = gjson.GetBytes(responsesBody, "reasoning.effort").String()
@@ -331,7 +339,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		return nil, fmt.Errorf("get access token: %w", err)
 	}
 
-	if account.Type == AccountTypeOAuth && account.Platform != PlatformGrok {
+	if account.IsOpenAIOAuthLike() && account.Platform != PlatformGrok {
 		setOpenAICompatMessagesBridgeContext(c, true)
 	}
 	proxyURL := ""
@@ -355,13 +363,13 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		// Override session_id with a deterministic UUID derived from the isolated
 		// session key, ensuring different API keys produce different upstream sessions.
 		if promptCacheKey != "" {
-			isolatedSessionID := generateSessionUUID(isolateOpenAISessionID(apiKeyID, promptCacheKey))
+			isolatedSessionID := generateSessionUUID(isolateOpenAIUpstreamSessionID(apiKeyID, codexAccountIdentitySource(c, account), promptCacheKey))
 			upstreamReq.Header.Set("session_id", isolatedSessionID)
 			if upstreamReq.Header.Get("conversation_id") != "" {
 				upstreamReq.Header.Set("conversation_id", isolatedSessionID)
 			}
 		}
-		if account.Type == AccountTypeOAuth && account.Platform != PlatformGrok {
+		if account.IsOpenAIOAuthLike() && account.Platform != PlatformGrok {
 			ensureCodexIdentityHeaders(upstreamReq.Header)
 			enforceCodexIdentityHeaders(upstreamReq.Header)
 			logger.L().Debug("openai messages: upstream identity restored",
@@ -370,7 +378,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 				zap.Bool("compat_identity_restored", true),
 			)
 		}
-		if account.Type == AccountTypeOAuth && promptCacheKey != "" && strings.TrimSpace(c.GetHeader("conversation_id")) == "" {
+		if account.IsOpenAIOAuthLike() && promptCacheKey != "" && strings.TrimSpace(c.GetHeader("conversation_id")) == "" {
 			upstreamReq.Header.Del("conversation_id")
 		}
 		if compatTurnState != "" && upstreamReq.Header.Get("x-codex-turn-state") == "" {
@@ -488,12 +496,12 @@ handleBridgeResponse:
 		if !retriedWithoutContinuation && previousResponseID != "" && len(responsesBodyWithoutContinuation) > 0 {
 			retryReason := ""
 			switch {
-			case isOpenAICompatPreviousResponseNotFound(resp.StatusCode, upstreamMsg, respBody):
-				retryReason = "previous_response_not_found"
-				s.deleteOpenAICompatSessionResponseID(ctx, c, account, promptCacheKey)
 			case isOpenAICompatPreviousResponseUnsupported(resp.StatusCode, upstreamMsg, respBody):
 				retryReason = "previous_response_unsupported"
 				s.disableOpenAICompatSessionContinuation(ctx, c, account, promptCacheKey)
+			case isOpenAICompatPreviousResponseNotFound(resp.StatusCode, upstreamMsg, respBody):
+				retryReason = "previous_response_not_found"
+				s.deleteOpenAICompatSessionResponseID(ctx, c, account, promptCacheKey)
 			}
 			if retryReason != "" {
 				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -550,7 +558,7 @@ handleBridgeResponse:
 		return s.handleAnthropicErrorResponse(resp, c, account, billingModel)
 	}
 
-	if account.Type == AccountTypeOAuth && promptCacheKey != "" {
+	if account.IsOpenAIOAuthLike() && promptCacheKey != "" {
 		if turnState := strings.TrimSpace(resp.Header.Get("x-codex-turn-state")); turnState != "" {
 			s.bindOpenAICompatSessionTurnState(ctx, c, account, promptCacheKey, turnState)
 		}

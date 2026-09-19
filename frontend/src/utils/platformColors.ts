@@ -50,7 +50,9 @@ const BADGE: Record<Platform, string> = {
 }
 const BADGE_DEFAULT = 'bg-slate-500/10 text-slate-600 border-slate-500/30 dark:text-slate-400'
 
-const BADGE_LIGHT: Record<Platform, string> = {
+const BADGE_LIGHT: Record<Platform | 'kimi' | 'minimax', string> = {
+  kimi: 'bg-pink-100 text-pink-600 dark:bg-pink-900/30 dark:text-pink-300',
+  minimax: 'bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-300',
   anthropic: 'bg-orange-500/10 text-orange-600 dark:bg-orange-500/10 dark:text-orange-300',
   openai: 'bg-green-500/10 text-green-600 dark:bg-green-500/10 dark:text-green-300',
   antigravity: 'bg-purple-500/10 text-purple-600 dark:bg-purple-500/10 dark:text-purple-300',
@@ -348,7 +350,7 @@ export function platformBadgeClass(p: string): string {
 }
 
 export function platformBadgeLightClass(p: string): string {
-  return isPlatform(p) ? BADGE_LIGHT[p] : BADGE_DEFAULT
+  return isPlatform(p) || p === 'kimi' || p === 'minimax' ? BADGE_LIGHT[p] : BADGE_DEFAULT
 }
 
 export function platformBorderClass(p: string): string {
@@ -406,7 +408,9 @@ export function platformLabel(p: string, t?: PlatformTranslate): string {
   if (!t || !p) {
     return fallback
   }
-  return t(`admin.accounts.platforms.${p}`, fallback)
+  const key = `admin.accounts.platforms.${p}`
+  const translated = t(key, fallback)
+  return translated === key ? fallback : translated
 }
 
 function platformLabelFallback(p: string): string {
@@ -416,6 +420,8 @@ function platformLabelFallback(p: string): string {
     case 'antigravity': return 'Antigravity'
     case 'gemini': return 'Gemini'
     case 'grok': return 'Grok'
+    case 'kimi': return 'Kimi'
+    case 'minimax': return 'MiniMax'
     case 'zhipu': return 'GLM/Zhipu'
     case 'deepseek': return 'DeepSeek'
     case 'volcengine': return 'VolcEngine/Doubao'

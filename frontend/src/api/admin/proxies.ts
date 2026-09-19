@@ -21,6 +21,12 @@ import type {
   AdminDataImportResult
 } from '@/types'
 
+function assertProxyArray(value: unknown): asserts value is Proxy[] {
+  if (!Array.isArray(value)) {
+    throw new Error('Invalid proxy list response')
+  }
+}
+
 /**
  * List all proxies with pagination
  * @param page - Page number (default: 1)
@@ -50,6 +56,7 @@ export async function list(
     },
     signal: options?.signal
   })
+  assertProxyArray(data?.items)
   return data
 }
 
@@ -59,6 +66,7 @@ export async function list(
  */
 export async function getAll(): Promise<Proxy[]> {
   const { data } = await apiClient.get<Proxy[]>('/admin/proxies/all')
+  assertProxyArray(data)
   return data
 }
 
@@ -70,6 +78,7 @@ export async function getAllWithCount(): Promise<Proxy[]> {
   const { data } = await apiClient.get<Proxy[]>('/admin/proxies/all', {
     params: { with_count: 'true' }
   })
+  assertProxyArray(data)
   return data
 }
 

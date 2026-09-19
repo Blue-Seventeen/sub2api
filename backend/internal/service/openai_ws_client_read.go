@@ -88,6 +88,7 @@ func readOpenAIWSClientMessageWithTimeoutStart(
 	}()
 
 	closeAndJoin := func(status coderws.StatusCode, reason string, cause error) (coderws.MessageType, []byte, error) {
+		reason = normalizeOpenAIWSClientCloseReason(reason)
 		_ = conn.Close(status, reason)
 		_ = conn.CloseNow()
 		<-readDone

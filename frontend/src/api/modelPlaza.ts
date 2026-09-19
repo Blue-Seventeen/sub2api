@@ -5,6 +5,7 @@
  */
 
 import { apiClient } from './client'
+import type { PeakRateWindow } from '@/types'
 import type { UserPricingInterval, UserSupportedModelPricing } from './channels'
 
 /** 渠道配置官方价（USD per token，字段缺失 = 渠道未配置该项价格）。 */
@@ -39,6 +40,7 @@ export interface PlazaModel {
 }
 
 export interface ModelPlazaGroup {
+  long_context_pricing_enabled?: boolean
   id: number
   name: string
   description: string
@@ -52,6 +54,7 @@ export interface ModelPlazaGroup {
   peak_start: string
   peak_end: string
   peak_rate_multiplier: number
+  peak_rate_windows?: PeakRateWindow[]
   is_exclusive: boolean
   /** 生图独立倍率：true 时图片计费模型的实付倍率取 image_rate_multiplier，不取分组/专属倍率。 */
   image_rate_independent: boolean

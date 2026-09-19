@@ -26,3 +26,16 @@ func TestUsageStatsCacheKey_StableAndDistinct(t *testing.T) {
 	withUser.UserID = 7
 	require.NotEqual(t, k1, usageStatsCacheKey(withUser), "different user must change key")
 }
+
+func TestUsageStatsCacheKey_NativeCompactionFilter(t *testing.T) {
+	base := usagestats.UsageLogFilters{}
+	withCompaction := base
+	enabled := true
+	withCompaction.NativeCompactionV2 = &enabled
+	withoutCompaction := base
+	disabled := false
+	withoutCompaction.NativeCompactionV2 = &disabled
+	require.NotEqual(t, usageStatsCacheKey(base), usageStatsCacheKey(withCompaction))
+	require.NotEqual(t, usageStatsCacheKey(base), usageStatsCacheKey(withoutCompaction))
+	require.NotEqual(t, usageStatsCacheKey(withCompaction), usageStatsCacheKey(withoutCompaction))
+}

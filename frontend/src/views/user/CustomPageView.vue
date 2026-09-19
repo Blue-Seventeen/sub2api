@@ -142,13 +142,21 @@
           </div>
         </div>
 
-        <div v-else class="custom-embed-shell">
+        <div v-else ref="embedShellRef" class="custom-embed-shell">
           <a
             ref="openLinkRef"
             :href="embeddedUrl"
             target="_blank"
             rel="noopener noreferrer"
             class="btn btn-secondary btn-sm custom-open-fab"
+            :style="openButtonStyle"
+            @pointerdown="startOpenButtonDrag"
+            @pointermove="moveOpenButton"
+            @pointerup="finishOpenButtonDrag"
+            @pointercancel="cancelOpenButtonDrag"
+            @lostpointercapture="cancelOpenButtonDrag"
+            @click="handleOpenButtonClick"
+            @dragstart.prevent
           >
             <Icon name="externalLink" size="sm" class="mr-1.5" :stroke-width="2" />
             {{ t('customPage.openInNewTab') }}
@@ -194,6 +202,75 @@ const adminSettingsStore = useAdminSettingsStore()
 const loading = ref(false)
 const pageTheme = ref<'light' | 'dark'>('light')
 const openLinkRef = ref<HTMLAnchorElement | null>(null)
+const embedShellRef = ref<HTMLElement | null>(null)
+const openButtonPosition = ref<{ left: number; top: number } | null>(null)
+const openButtonStyle = computed(() => openButtonPosition.value ? {
+  left: `${openButtonPosition.value.left}px`,
+  top: `${openButtonPosition.value.top}px`,
+  right: 'auto',
+} : {})
+let embedResizeObserver: ResizeObserver | null = null
+let openButtonDrag: { id: number; x: number; y: number; left: number; top: number; moved: boolean } | null = null
+let suppressOpenButtonClick = false
+
+function clampOpenButton(left: number, top: number) {
+  const shell = embedShellRef.value
+  const button = openLinkRef.value
+  if (!shell || !button) return
+  openButtonPosition.value = {
+    left: Math.max(0, Math.min(left, shell.clientWidth - button.offsetWidth)),
+    top: Math.max(0, Math.min(top, shell.clientHeight - button.offsetHeight)),
+  }
+}
+
+function startOpenButtonDrag(event: PointerEvent) {
+  if (event.button !== 0 || !event.isPrimary || !openLinkRef.value) return
+  suppressOpenButtonClick = false
+  const button = openLinkRef.value
+  openButtonDrag = { id: event.pointerId, x: event.clientX, y: event.clientY, left: button.offsetLeft, top: button.offsetTop, moved: false }
+  button.setPointerCapture(event.pointerId)
+}
+
+function moveOpenButton(event: PointerEvent) {
+  const drag = openButtonDrag
+  if (!drag || event.pointerId !== drag.id) return
+  const dx = event.clientX - drag.x
+  const dy = event.clientY - drag.y
+  if (!drag.moved && Math.hypot(dx, dy) < 5) return
+  drag.moved = true
+  clampOpenButton(drag.left + dx, drag.top + dy)
+}
+
+function finishOpenButtonDrag(event: PointerEvent) {
+  if (!openButtonDrag || event.pointerId !== openButtonDrag.id) return
+  suppressOpenButtonClick = openButtonDrag.moved
+  openButtonDrag = null
+  const button = openLinkRef.value
+  if (button?.hasPointerCapture(event.pointerId)) button.releasePointerCapture(event.pointerId)
+}
+
+function cancelOpenButtonDrag(event: PointerEvent) {
+  if (!openButtonDrag || event.pointerId !== openButtonDrag.id) return
+  openButtonDrag = null
+  suppressOpenButtonClick = false
+  const button = openLinkRef.value
+  if (button?.hasPointerCapture(event.pointerId)) button.releasePointerCapture(event.pointerId)
+}
+
+function handleOpenButtonClick(event: MouseEvent) {
+  if (suppressOpenButtonClick && event.detail !== 0) event.preventDefault()
+  suppressOpenButtonClick = false
+}
+
+watch(embedShellRef, (shell) => {
+  embedResizeObserver?.disconnect()
+  openButtonPosition.value = null
+  if (!shell) return
+  embedResizeObserver = new ResizeObserver(() => {
+    if (openButtonPosition.value) clampOpenButton(openButtonPosition.value.left, openButtonPosition.value.top)
+  })
+  embedResizeObserver.observe(shell)
+}, { flush: 'post' })
 const lastAutoOpenedId = ref<string | null>(null)
 const markdownLoading = ref(false)
 const markdownHtml = ref('')
@@ -464,6 +541,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  embedResizeObserver?.disconnect()
   if (scrollRafId) {
     cancelAnimationFrame(scrollRafId)
     scrollRafId = 0
@@ -547,6 +625,7 @@ onUnmounted(() => {
 }
 
 .custom-open-fab {
+  touch-action: none;
   @apply absolute right-3 top-3 z-10;
   @apply shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/80 dark:supports-[backdrop-filter]:bg-dark-800/80;
 }

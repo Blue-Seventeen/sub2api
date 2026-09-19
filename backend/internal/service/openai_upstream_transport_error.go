@@ -91,6 +91,12 @@ func classifyOpenAITransportError(err error) openAITransportErrorClass {
 	return openAITransportErrorClass{}
 }
 
+type upstreamTransportErrorClass = openAITransportErrorClass
+
+func classifyUpstreamTransportError(err error) upstreamTransportErrorClass {
+	return classifyOpenAITransportError(err)
+}
+
 // handleOpenAIUpstreamTransportError handles a transport-level upstream failure
 // (Do/DoWithTLS returned a non-HTTP error: proxy/DNS/TCP/TLS). It:
 //  1. records the failure in Ops error logs (status 0, kind=request_error);
@@ -162,6 +168,15 @@ func handleOpenAITransportError(ctx context.Context, c *gin.Context, account *Ac
 
 	// Transport attempt reached the network path; count as Ollama Cloud activity.
 	scheduleOllamaCloudUsageActivity(deferredService, account)
+
+	// A plugin may have delivered the request metadata or body before its RPC
+	// stream failed. Replaying that request on another account can duplicate an
+	// upstream operation, so preserve the typed error and let the caller handle
+	// the ambiguous outcome without failover.
+	var pluginErr *PluginTransportError
+	if errors.As(err, &pluginErr) && pluginErr.RequestSent {
+		return err
+	}
 
 	if classifyOpenAITransportError(err).Persistent {
 		tempUnscheduleOpenAITransportError(ctx, account, safeErr, accountRepo, runtimeBlocker)

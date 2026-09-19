@@ -584,7 +584,15 @@ func (s *NewAPIStyleGatewayService) buildTargetURL(account *Account, opts NewAPI
 	path := newAPIStyleRoutePath(account.Platform, opts)
 	if opts.Route == NewAPIStyleRouteChatCompletions && account.Platform == PlatformZhipu {
 		if isZhipuOfficialBaseURL(baseURL) {
-			path = zhipuCompatibleChatPath
+			// Older Zhipu accounts may inherit the group New-API switch before
+			// their account capability probe has populated the account marker.
+			// Keep those accounts on the OpenAI-compatible provider path; a
+			// probed/explicitly enabled account retains the official PaaS path.
+			if account.GetExtraBool(AccountExtraNewAPIStyleInterfaceEnabled) {
+				path = zhipuCompatibleChatPath
+			} else {
+				path = "/v1/chat/completions"
+			}
 		} else {
 			path = "/v1/chat/completions"
 		}

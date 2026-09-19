@@ -311,7 +311,7 @@ func (s *UserPlatformQuotaUsageFlusher) flushWithReleasableLeaderLock() {
 	defer cancel()
 
 	if s.lockCache != nil {
-		ok, err := s.lockCache.TryAcquireOrRenewLeaderLock(ctx, userPlatformQuotaFlusherLeaderLockKey, s.instanceID, s.periodicLeaderLeaseTTL())
+		ok, err := tryAcquireOrRenewLeaderLock(ctx, s.lockCache, userPlatformQuotaFlusherLeaderLockKey, s.instanceID, s.periodicLeaderLeaseTTL())
 		if err != nil || !ok {
 			return
 		}

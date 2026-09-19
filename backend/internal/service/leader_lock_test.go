@@ -129,10 +129,10 @@ func TestSubscriptionExpiryService_ReminderSkipsScanWhenNotLeader(t *testing.T) 
 	_, _ = cache.TryAcquireOrRenewLeaderLock(context.Background(), subscriptionExpiryReminderLeaderLockKey, "peer", time.Minute)
 
 	repo := &subscriptionExpiryRepoStub{}
-	settingRepo := &subscriptionExpirySettingRepoStub{values: map[string]string{}}
+	settingRepo := &subscriptionExpirySettingRepoStub{values: map[string]string{SettingKeySMTPHost: "smtp.example.com"}}
 	svc := NewSubscriptionExpiryService(repo, time.Minute)
 	svc.SetSettingRepository(settingRepo)
-	svc.SetNotificationEmailService(NewNotificationEmailService(settingRepo, nil))
+	svc.SetNotificationEmailService(NewNotificationEmailService(settingRepo, NewEmailService(settingRepo, nil)))
 	svc.SetLeaderLock(cache, nil)
 
 	svc.sendExpiryReminders(context.Background())
@@ -142,10 +142,10 @@ func TestSubscriptionExpiryService_ReminderSkipsScanWhenNotLeader(t *testing.T) 
 
 func TestSubscriptionExpiryService_ReminderScansWhenLeader(t *testing.T) {
 	repo := &subscriptionExpiryRepoStub{}
-	settingRepo := &subscriptionExpirySettingRepoStub{values: map[string]string{}}
+	settingRepo := &subscriptionExpirySettingRepoStub{values: map[string]string{SettingKeySMTPHost: "smtp.example.com"}}
 	svc := NewSubscriptionExpiryService(repo, time.Minute)
 	svc.SetSettingRepository(settingRepo)
-	svc.SetNotificationEmailService(NewNotificationEmailService(settingRepo, nil))
+	svc.SetNotificationEmailService(NewNotificationEmailService(settingRepo, NewEmailService(settingRepo, nil)))
 	svc.SetLeaderLock(&fakeLeaderLockCache{}, nil)
 
 	svc.sendExpiryReminders(context.Background())
@@ -164,10 +164,10 @@ func TestSubscriptionExpiryService_ReminderRunsEveryCycleSingleInstance(t *testi
 	for name, cache := range cases {
 		t.Run(name, func(t *testing.T) {
 			repo := &subscriptionExpiryRepoStub{}
-			settingRepo := &subscriptionExpirySettingRepoStub{values: map[string]string{}}
+			settingRepo := &subscriptionExpirySettingRepoStub{values: map[string]string{SettingKeySMTPHost: "smtp.example.com"}}
 			svc := NewSubscriptionExpiryService(repo, time.Minute)
 			svc.SetSettingRepository(settingRepo)
-			svc.SetNotificationEmailService(NewNotificationEmailService(settingRepo, nil))
+			svc.SetNotificationEmailService(NewNotificationEmailService(settingRepo, NewEmailService(settingRepo, nil)))
 			svc.SetLeaderLock(cache, nil)
 
 			// Three consecutive cycles, mimicking the ticker loop.

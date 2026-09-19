@@ -16,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/dgraph-io/ristretto"
 	"golang.org/x/sync/singleflight"
 )
@@ -594,16 +595,15 @@ func (s *SubscriptionService) withSubscriptionUpdateTx(ctx context.Context, fn f
 
 func renewedSubscriptionTerm(existingSub *UserSubscription, notes string, startsAt, expiresAt time.Time) *UserSubscription {
 	renewed := *existingSub
-	dailyWindowStart := startsAt
-	weeklyWindowStart := startsAt
-	monthlyWindowStart := startsAt
+	dailyWindowStart := timezone.StartOfDay(startsAt)
+	periodicWindowStart := startsAt
 	customWindowStart := startsAt
 	renewed.StartsAt = startsAt
 	renewed.ExpiresAt = expiresAt
 	renewed.Status = SubscriptionStatusActive
 	renewed.DailyWindowStart = &dailyWindowStart
-	renewed.WeeklyWindowStart = &weeklyWindowStart
-	renewed.MonthlyWindowStart = &monthlyWindowStart
+	renewed.WeeklyWindowStart = &periodicWindowStart
+	renewed.MonthlyWindowStart = &periodicWindowStart
 	renewed.CustomWindowStart = &customWindowStart
 	renewed.DailyUsageUSD = 0
 	renewed.WeeklyUsageUSD = 0
@@ -2263,8 +2263,8 @@ func normalizeSubscriptionWindowsAt(sub *UserSubscription, now time.Time) {
 		return
 	}
 	// 日窗口过期：清零展示数据
-	if windowStart, ok := sub.automaticWindowStartAt(sub.DailyWindowStart, subscriptionDailyWindow, now); !sub.HasOneTimeDailyQuota() && ok {
-		sub.DailyWindowStart = &windowStart
+	if sub.canAutomaticallyResetDailyAt(now) {
+		sub.DailyWindowStart = nil
 		sub.DailyUsageUSD = 0
 	}
 	// 周窗口过期：清零展示数据
@@ -2334,18 +2334,15 @@ func (s *SubscriptionService) checkAndActivateWindowAt(ctx context.Context, sub 
 		return nil
 	}
 
-	windowStart := now
-	if err := s.userSubRepo.ActivateWindows(ctx, sub.ID, windowStart); err != nil {
+	dailyWindowStart := timezone.StartOfDay(now)
+	periodicWindowStart := now
+	if err := s.userSubRepo.ActivateWindows(ctx, sub.ID, dailyWindowStart, periodicWindowStart); err != nil {
 		return err
 	}
-	dailyWindowStart := windowStart
-	weeklyWindowStart := windowStart
-	monthlyWindowStart := windowStart
-	customWindowStart := windowStart
 	sub.DailyWindowStart = &dailyWindowStart
-	sub.WeeklyWindowStart = &weeklyWindowStart
-	sub.MonthlyWindowStart = &monthlyWindowStart
-	sub.CustomWindowStart = &customWindowStart
+	sub.WeeklyWindowStart = &periodicWindowStart
+	sub.MonthlyWindowStart = &periodicWindowStart
+	sub.CustomWindowStart = &periodicWindowStart
 	return nil
 }
 
@@ -2360,12 +2357,14 @@ func (s *SubscriptionService) AdminResetQuota(ctx context.Context, subscriptionI
 	if err != nil {
 		return nil, err
 	}
-	windowStart := s.now()
-	if err := s.userSubRepo.ResetUsageWindows(ctx, sub.ID, resetDaily, resetWeekly, resetMonthly, windowStart); err != nil {
+	now := s.now()
+	dailyWindowStart := timezone.StartOfDay(now)
+	periodicWindowStart := now
+	if err := s.userSubRepo.ResetUsageWindows(ctx, sub.ID, resetDaily, resetWeekly, resetMonthly, dailyWindowStart, periodicWindowStart); err != nil {
 		return nil, err
 	}
 	if custom {
-		if err := s.userSubRepo.ResetCustomUsage(ctx, sub.ID, windowStart); err != nil {
+		if err := s.userSubRepo.ResetCustomUsage(ctx, sub.ID, periodicWindowStart); err != nil {
 			return nil, err
 		}
 	}
@@ -2385,7 +2384,7 @@ func (s *SubscriptionService) CheckAndResetWindows(ctx context.Context, sub *Use
 	now := s.now()
 	needsInvalidateCache := false
 
-	if windowStart, ok := sub.automaticWindowStartAt(sub.DailyWindowStart, subscriptionDailyWindow, now); !sub.HasOneTimeDailyQuota() && ok {
+	if windowStart, ok := sub.automaticDailyWindowStartAt(now); ok {
 		expectedWindowStart := sub.DailyWindowStart
 		if roller, ok := s.userSubRepo.(dailyUsageWindowRoller); ok && !sub.UpdatedAt.IsZero() {
 			if _, err := roller.RollDailyUsageWindow(ctx, sub.ID, *expectedWindowStart, windowStart, sub.DailyUsageUSD, sub.UpdatedAt); err != nil {
@@ -2753,6 +2752,9 @@ func (s *SubscriptionService) calculateProgress(sub *UserSubscription, group *Gr
 		limit := *group.WeeklyLimitUSD
 		used := subscriptionDisplayUsageForWindow(sub, "weekly")
 		resetsAt := sub.WeeklyWindowStart.Add(subscriptionWeeklyWindow)
+		if weeklyResetTime := sub.WeeklyResetTime(); weeklyResetTime != nil {
+			resetsAt = *weeklyResetTime
+		}
 		if sub.EffectiveWeeklyResetsAt != nil {
 			resetsAt = *sub.EffectiveWeeklyResetsAt
 		}
@@ -2781,6 +2783,9 @@ func (s *SubscriptionService) calculateProgress(sub *UserSubscription, group *Gr
 		limit := *group.MonthlyLimitUSD
 		used := subscriptionDisplayUsageForWindow(sub, "monthly")
 		resetsAt := sub.MonthlyWindowStart.Add(subscriptionMonthlyWindow)
+		if monthlyResetTime := sub.MonthlyResetTime(); monthlyResetTime != nil {
+			resetsAt = *monthlyResetTime
+		}
 		if sub.EffectiveMonthlyResetsAt != nil {
 			resetsAt = *sub.EffectiveMonthlyResetsAt
 		}

@@ -820,7 +820,7 @@ export default {
       accountsAvailable: 'Avail:',
       accountsRateLimited: 'Limited:',
       accountsTotal: 'Total:',
-      accountsUnit: '',
+      accountsUnit: 'accounts',
       rateAndAccounts: '{rate}x rate · {count} accounts',
       accountsCount: '{count} accounts',
       rateLabel: 'rate',
@@ -887,7 +887,7 @@ export default {
       groupCreatedSuccess: 'Group created successfully',
       groupUpdatedSuccess: 'Group updated successfully',
       groupDeletedSuccess: 'Group deleted successfully',
-      rateMultiplierHint: 'Cost multiplier for this group (e.g., 1.5 = 150% of base cost)',
+      rateMultiplierHint: '0 = free, 1.0 = base price, 0.5 = half price, 2.0 = double price',
       exclusiveHint: 'Exclusive group, manually assign to specific users',
       exclusiveTooltip: {
         title: 'What is an exclusive group?',
@@ -1017,7 +1017,7 @@ export default {
         peakStart: 'Peak start',
         peakEnd: 'Peak end',
         peakMultiplier: 'Peak multiplier',
-        multiplierHint: 'Applies to token billing multiplier; image tokens in token billing are also affected. 0 means peak token requests are billed at 0x.'
+        multiplierHint: 'Applies to token, per-request, image, duration, and character billing. 0 means matching peak-window requests are billed at 0x.'
       },
       profitControl: {
         enable: 'Enable profit control',
@@ -1121,6 +1121,13 @@ export default {
         targetModelPlaceholder: 'e.g., gpt-5.4',
         removeExactMapping: 'Remove Exact Mapping'
       },
+      openaiFast: {
+        title: 'OpenAI Fast mode',
+        force: 'Force Fast (priority)',
+        hint: 'Forces service_tier=priority on OpenAI requests in this group. The global Fast/Flex policy can still filter or block it. New requests update immediately after saving; existing WebSocket sessions must reconnect.',
+        free: 'Free Fast',
+        freeHint: 'Fast requests in this group still use the priority tier, but customers are charged the equivalent Standard price.'
+      },
       openaiLive: {
         title: 'OpenAI Live',
         allow: 'Allow Live access',
@@ -1144,6 +1151,13 @@ export default {
       },
       modelRouting: {
         title: 'Model Routing',
+        claudeMaxSimulation: {
+          title: 'Claude Max Usage Simulation',
+          tooltip: 'When enabled, for Claude models without upstream cache-write usage, the system deterministically maps tokens to a small input plus 1h cache creation while keeping total tokens unchanged.',
+          enabled: 'Enabled (simulate 1h cache)',
+          disabled: 'Disabled',
+          hint: 'Only token categories in usage billing logs are adjusted. No per-request mapping state is persisted.'
+        },
         tooltip: 'Configure specific model requests to be routed to designated accounts. Supports wildcard matching, e.g., claude-opus-* matches all opus models.',
         enabled: 'Enabled',
         disabled: 'Disabled',

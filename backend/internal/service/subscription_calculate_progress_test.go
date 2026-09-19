@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -65,7 +66,7 @@ func TestCalculateProgress_DailyUsage(t *testing.T) {
 	assert.Equal(t, 7.0, progress.Daily.RemainingUSD)
 	assert.Equal(t, 30.0, progress.Daily.Percentage)
 	assert.Equal(t, dailyStart, progress.Daily.WindowStart)
-	assert.Equal(t, dailyStart.Add(subscriptionDailyWindow), progress.Daily.ResetsAt)
+	assert.Equal(t, timezone.StartOfDay(dailyStart).AddDate(0, 0, 1), progress.Daily.ResetsAt)
 }
 
 func TestCalculateProgress_DailyCardUsesExpiryAsDailyResetTime(t *testing.T) {
@@ -118,7 +119,7 @@ func TestGetByID_NormalizesExpiredWindowSnapshot(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, 0.0, sub.DailyUsageUSD)
-	require.WithinDuration(t, dailyStart.Add(subscriptionDailyWindow), *sub.DailyWindowStart, time.Second)
+	require.Nil(t, sub.DailyWindowStart)
 	require.Equal(t, 0.0, sub.WeeklyUsageUSD)
 	require.WithinDuration(t, weeklyStart.Add(subscriptionWeeklyWindow), *sub.WeeklyWindowStart, time.Second)
 	require.Equal(t, 0.0, sub.MonthlyUsageUSD)
@@ -152,10 +153,7 @@ func TestGetSubscriptionProgress_NormalizesExpiredWindowSnapshot(t *testing.T) {
 	progress, err := svc.GetSubscriptionProgress(context.Background(), 3002)
 
 	require.NoError(t, err)
-	require.NotNil(t, progress.Daily)
-	require.Equal(t, 0.0, progress.Daily.UsedUSD)
-	require.WithinDuration(t, dailyStart.Add(subscriptionDailyWindow), progress.Daily.WindowStart, time.Second)
-	require.Equal(t, dailyStart.Add(2*subscriptionDailyWindow), progress.Daily.ResetsAt)
+	require.Nil(t, progress.Daily, "跨午夜后的展示快照应标记日窗口未激活，避免显示过期窗口")
 }
 
 func TestCalculateProgress_WeeklyUsage(t *testing.T) {
@@ -182,6 +180,32 @@ func TestCalculateProgress_WeeklyUsage(t *testing.T) {
 	assert.Equal(t, 25.0, progress.Weekly.RemainingUSD)
 	assert.Equal(t, 50.0, progress.Weekly.Percentage)
 	assert.Equal(t, weeklyStart.Add(subscriptionWeeklyWindow), progress.Weekly.ResetsAt)
+}
+
+// 周窗口初始化在开通日零点（legacy anchor）时，展示的 ResetsAt 应与
+// automaticWindowStartAt 的实际推进时间一致（StartsAt+7d），而非窗口起点+7d。
+func TestCalculateProgress_WeeklyResetsAt_LegacyMidnightAnchor(t *testing.T) {
+	svc := newTestSubscriptionService()
+	startsAt := time.Date(2026, 7, 31, 13, 37, 6, 0, time.FixedZone("UTC+8", 8*3600))
+	weeklyStart := time.Date(startsAt.Year(), startsAt.Month(), startsAt.Day(), 0, 0, 0, 0, startsAt.Location())
+
+	sub := &UserSubscription{
+		ID:                1,
+		StartsAt:          startsAt,
+		ExpiresAt:         startsAt.AddDate(0, 0, 30),
+		WeeklyUsageUSD:    2000.18,
+		WeeklyWindowStart: ptrTime(weeklyStart),
+	}
+	group := &Group{
+		Name:           "Pro",
+		WeeklyLimitUSD: ptrFloat64(2000.0),
+	}
+
+	progress := svc.calculateProgress(sub, group)
+
+	require.NotNil(t, progress.Weekly)
+	assert.True(t, startsAt.Add(7*24*time.Hour).Equal(progress.Weekly.ResetsAt),
+		"legacy 午夜锚点的周窗口 ResetsAt 应为 StartsAt+7d，与实际推进时间一致")
 }
 
 func TestCalculateProgress_MonthlyUsage(t *testing.T) {

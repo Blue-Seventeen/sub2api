@@ -37,6 +37,8 @@ const (
 	PlatformGemini      = "gemini"
 	PlatformAntigravity = "antigravity"
 	PlatformGrok        = "grok"
+	PlatformKimi        = "kimi"
+	PlatformMiniMax     = "minimax"
 	PlatformZhipu       = "zhipu"
 	PlatformDeepSeek    = "deepseek"
 	PlatformVolcEngine  = "volcengine"
@@ -59,6 +61,8 @@ func AllPlatforms() []string {
 		PlatformGemini,
 		PlatformAntigravity,
 		PlatformGrok,
+		PlatformKimi,
+		PlatformMiniMax,
 		PlatformZhipu,
 		PlatformDeepSeek,
 		PlatformVolcEngine,

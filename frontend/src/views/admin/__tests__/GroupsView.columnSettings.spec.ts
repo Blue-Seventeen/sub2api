@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia } from 'pinia'
 
 import type { AdminGroup } from '@/types'
 import GroupsView from '../GroupsView.vue'
@@ -208,6 +209,7 @@ const IconStub = {
 const mountView = async () => {
   const wrapper = mount(GroupsView, {
     global: {
+      plugins: [createPinia()],
       stubs: {
         AppLayout: AppLayoutStub,
         TablePageLayout: TablePageLayoutStub,

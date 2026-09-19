@@ -79,7 +79,7 @@
             </label>
             <Select
               :modelValue="entry.billing_mode"
-              @update:modelValue="emit('update', { ...entry, billing_mode: $event as BillingMode, intervals: [] })"
+              @update:modelValue="emit('update', { ...entry, billing_mode: $event as BillingMode, intervals: [], time_pricing: { timezone: entry.time_pricing?.timezone || 'Asia/Shanghai', periods: [] } })"
               :options="billingModeOptions"
               class="mt-1"
             />
@@ -145,6 +145,18 @@
               />
             </div>
           </div>
+          <div v-if="props.enableTierMultipliers" class="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <div v-for="field in tierMultiplierFields" :key="field.key">
+              <label class="text-xs text-gray-400">{{ t(field.label) }}</label>
+              <input :value="entry[field.key]" type="number" min="0" step="0.01" class="input mt-0.5 text-sm"
+                @input="emitField(field.key, ($event.target as HTMLInputElement).value)" />
+            </div>
+          </div>
+          <TimePricingSection
+            v-if="props.enableTimePricing"
+            :model-value="entry.time_pricing"
+            @update:model-value="emit('update', { ...entry, time_pricing: $event })"
+          />
         </div>
 
         <div v-else-if="entry.billing_mode === 'per_request'">
@@ -249,6 +261,7 @@ import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
 import IntervalRow from './IntervalRow.vue'
 import ModelTagInput from './ModelTagInput.vue'
+import TimePricingSection from './TimePricingSection.vue'
 import type { PricingFormEntry, IntervalFormEntry } from './types'
 import { perTokenToMTok, getPlatformTagClass } from './types'
 import type { BillingMode } from '@/api/admin/channels'
@@ -260,6 +273,8 @@ const { t } = useI18n()
 const props = defineProps<{
   entry: PricingFormEntry
   platform?: string
+  enableTimePricing?: boolean
+  enableTierMultipliers?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -282,6 +297,12 @@ const billingModeLabel = computed(() => {
   return opt ? opt.label : props.entry.billing_mode
 })
 
+const tierMultiplierFields = [
+  { key: 'fast_multiplier' as const, label: 'admin.channels.form.fastMultiplier' },
+  { key: 'flex_multiplier' as const, label: 'admin.channels.form.flexMultiplier' },
+  { key: 'max_reasoning_effort_multiplier' as const, label: 'admin.channels.form.maxReasoningEffortMultiplier' },
+]
+
 function emitField(field: keyof PricingFormEntry, value: string) {
   emit('update', { ...props.entry, [field]: value === '' ? null : value })
 }
@@ -292,7 +313,8 @@ function addInterval() {
     min_tokens: 0, max_tokens: null, tier_label: '',
     input_price: null, output_price: null, cache_write_price: null,
     cache_read_price: null, per_request_price: null,
-    sort_order: intervals.length
+    sort_order: intervals.length,
+    input_multiplier: null, output_multiplier: null, cache_write_multiplier: null, cache_read_multiplier: null
   })
   emit('update', { ...props.entry, intervals })
 }
@@ -304,7 +326,8 @@ function addImageTier() {
     min_tokens: 0, max_tokens: null, tier_label: labels[intervals.length] || '',
     input_price: null, output_price: null, cache_write_price: null,
     cache_read_price: null, per_request_price: null,
-    sort_order: intervals.length
+    sort_order: intervals.length,
+    input_multiplier: null, output_multiplier: null, cache_write_multiplier: null, cache_read_multiplier: null
   })
   emit('update', { ...props.entry, intervals })
 }

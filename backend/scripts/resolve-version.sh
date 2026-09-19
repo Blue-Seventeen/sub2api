@@ -15,7 +15,9 @@ if command -v git >/dev/null 2>&1; then
     true
   )"
   if [ -n "$TAG" ]; then
-    printf '%s\n' "${TAG#v}"
+    VERSION_VALUE="${TAG#v}"
+    VERSION_VALUE="${VERSION_VALUE%-custom}"
+    printf '%s\n' "$VERSION_VALUE"
     exit 0
   fi
 fi

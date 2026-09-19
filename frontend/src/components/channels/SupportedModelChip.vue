@@ -183,7 +183,7 @@
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import PricingRow from './PricingRow.vue'
-import { formatScaled } from '@/utils/pricing'
+import { formatScaled, resolveIntervalPrices } from '@/utils/pricing'
 import {
   BILLING_MODE_TOKEN,
   BILLING_MODE_PER_REQUEST,
@@ -268,6 +268,9 @@ function formatRange(min: number, max: number | null): string {
 }
 
 function formatInterval(iv: UserPricingInterval, mode: BillingMode): string {
+  if (mode === BILLING_MODE_TOKEN && props.model.pricing) {
+    iv = resolveIntervalPrices(iv, props.model.pricing)
+  }
   if (
     mode === BILLING_MODE_PER_REQUEST ||
     mode === BILLING_MODE_IMAGE ||

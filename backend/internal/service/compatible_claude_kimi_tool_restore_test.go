@@ -16,6 +16,7 @@ import (
 )
 
 type stubClaudeKimiToolRestoreCache struct {
+	stubGatewayCache
 	entries map[string]ClaudeKimiToolRestoreLedgerEntry
 }
 

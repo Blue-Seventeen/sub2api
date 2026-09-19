@@ -102,6 +102,7 @@ export interface User {
 }
 
 export interface AdminUser extends User {
+  restrict_public_groups?: boolean
   // 管理员备注（普通用户接口不返回�?
   notes: string
   real_balance?: number
@@ -188,6 +189,7 @@ export interface PublicSettings {
   email_verify_enabled: boolean
   force_email_on_third_party_signup: boolean
   registration_email_suffix_whitelist: string[]
+  registration_email_domain_quota_enabled?: boolean
   promo_code_enabled: boolean
   password_reset_enabled: boolean
   invitation_code_enabled: boolean
@@ -200,6 +202,7 @@ export interface PublicSettings {
   turnstile_enabled: boolean
   tencent_captcha_enabled?: boolean
   tencent_captcha_app_id?: string
+  tencent_captcha_region?: string
   passkey_enabled?: boolean
   turnstile_site_key: string
   aliyun_captcha_enabled?: boolean
@@ -241,6 +244,11 @@ export interface PublicSettings {
   account_quota_notify_enabled: boolean
   balance_low_notify_threshold: number
   channel_monitor_enabled: boolean
+  channel_monitor_mode?: 'v1' | 'v2'
+  channel_monitor_hide_throughput?: boolean
+  channel_monitor_show_quota?: boolean
+  channel_monitor_hide_user_ranking?: boolean
+  plugin_management_enabled?: boolean
   channel_monitor_default_interval_seconds: number
   available_channels_enabled: boolean
   markdown_pages_enabled: boolean
@@ -500,7 +508,10 @@ export interface PaginationConfig {
 
 // ==================== API Key & Group Types ====================
 
-export type GroupPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok' | 'zhipu' | 'deepseek' | 'volcengine' | 'ali' | 'moonshot' | 'perplexity' | 'mistral' | 'siliconflow' | 'openrouter' | 'suno' | 'kling' | 'midjourney' | 'composite'
+export type GroupPlatform = AccountPlatform | 'composite'
+
+export type VideoModelPrices = Record<string, Record<string, number>>
+export type ReasoningEffortMatchType = 'exact' | 'prefix' | 'suffix'
 
 export type SubscriptionType = 'standard' | 'subscription'
 
@@ -514,9 +525,18 @@ export interface OpenAIMessagesDispatchModelConfig {
 export interface ReasoningEffortMapping {
   from: string
   to: string
+  match_type?: ReasoningEffortMatchType
+  model?: string
 }
 
 export interface Group {
+  long_context_pricing_enabled?: boolean
+  max_reasoning_effort_over_limit?: string
+  video_model_prices?: VideoModelPrices
+  search_price_per_1k?: number | null
+  audio_realtime_price_per_min?: number | null
+  audio_tts_price_per_million_chars?: number | null
+  audio_stt_price_per_hour?: number | null
   id: number
   name: string
   description: string | null
@@ -580,6 +600,11 @@ export interface PeakRateWindow {
 }
 
 export interface AdminGroup extends Group {
+  force_openai_fast?: boolean
+  free_openai_fast?: boolean
+  model_pricing?: import('@/api/admin/channels').ChannelModelPricing[]
+  model_allowlist?: ModelAllowlist
+  codex_models_manifest_config?: CodexModelsManifestConfig
   // 模型路由配置（仅管理员可见，内部信息�?
   // 分组利润控制（openai/anthropic/gemini/grok/antigravity 分组可启用；margin/buffer 为小数存储）。
   // 仅管理员可见：与 rate_multiplier 相乘即可反推上游成本上限，不得下放到 Group。
@@ -614,6 +639,14 @@ export interface AdminGroup extends Group {
 export interface ModelsListConfig {
   enabled: boolean
   models: string[]
+}
+
+export type ModelAllowlist = ModelsListConfig
+
+export interface CodexModelsManifestConfig {
+  enabled: boolean
+  account_ids: number[]
+  fallback_to_scheduler: boolean
 }
 
 export type CompositeRouteMatchType = 'exact' | 'prefix'
@@ -743,6 +776,18 @@ export interface UpdateApiKeyRequest {
 }
 
 export interface CreateGroupRequest {
+  long_context_pricing_enabled?: boolean
+  max_reasoning_effort_over_limit?: string
+  force_openai_fast?: boolean
+  free_openai_fast?: boolean
+  model_pricing?: import('@/api/admin/channels').ChannelModelPricing[]
+  model_allowlist?: ModelAllowlist
+  codex_models_manifest_config?: CodexModelsManifestConfig
+  video_model_prices?: VideoModelPrices
+  search_price_per_1k?: number | null
+  audio_realtime_price_per_min?: number | null
+  audio_tts_price_per_million_chars?: number | null
+  audio_stt_price_per_hour?: number | null
   name: string
   description?: string | null
   platform?: GroupPlatform
@@ -800,6 +845,18 @@ export interface CreateGroupRequest {
 }
 
 export interface UpdateGroupRequest {
+  long_context_pricing_enabled?: boolean
+  max_reasoning_effort_over_limit?: string
+  force_openai_fast?: boolean
+  free_openai_fast?: boolean
+  model_pricing?: import('@/api/admin/channels').ChannelModelPricing[]
+  model_allowlist?: ModelAllowlist
+  codex_models_manifest_config?: CodexModelsManifestConfig
+  video_model_prices?: VideoModelPrices
+  search_price_per_1k?: number | null
+  audio_realtime_price_per_min?: number | null
+  audio_tts_price_per_million_chars?: number | null
+  audio_stt_price_per_hour?: number | null
   name?: string
   description?: string | null
   platform?: GroupPlatform
@@ -858,7 +915,7 @@ export interface UpdateGroupRequest {
 
 // ==================== Account & Proxy Types ====================
 
-export type AccountPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok' | 'zhipu' | 'deepseek' | 'volcengine' | 'ali' | 'moonshot' | 'perplexity' | 'mistral' | 'siliconflow' | 'openrouter' | 'suno' | 'kling' | 'midjourney'
+export type AccountPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok' | 'zhipu' | 'deepseek' | 'volcengine' | 'ali' | 'moonshot' | 'perplexity' | 'mistral' | 'siliconflow' | 'openrouter' | 'suno' | 'kling' | 'midjourney' | 'kimi' | 'minimax'
 export type AccountType = 'oauth' | 'setup-token' | 'apikey' | 'upstream' | 'bedrock' | 'service_account'
 export type OAuthAddMethod = 'oauth' | 'setup-token'
 export type ProxyProtocol = 'http' | 'https' | 'socks5' | 'socks5h'
@@ -1058,6 +1115,9 @@ export interface TempUnschedulableRule {
 }
 
 export interface TempUnschedulableState {
+  trigger_count?: number
+  trigger_threshold?: number
+  trigger_window_minutes?: number
   until_unix: number
   triggered_at_unix: number
   status_code: number
@@ -1114,6 +1174,18 @@ export interface UpstreamBillingProbeResult {
   account_id: number
   snapshot?: UpstreamBillingProbeSnapshot
   error?: string
+}
+
+export interface UpstreamBillingRateSnapshotItem {
+  account_id: number
+  snapshot?: UpstreamBillingProbeSnapshot | null
+}
+
+export interface UpstreamBillingRatesResponse {
+  items: UpstreamBillingRateSnapshotItem[]
+  total: number
+  page: number
+  page_size: number
 }
 
 export type OllamaCloudUsageStatus = 'ok' | 'unauthorized' | 'failed'
@@ -1188,6 +1260,17 @@ export interface Account {
     codex_reset_credit_snapshot?: {
       available_count?: number
       credits?: { expires_at?: string }[]
+    }
+    auto_reset_credit_enabled?: boolean
+    auto_reset_credit_5h_threshold?: number
+    auto_reset_credit_7d_threshold?: number
+    codex_auto_reset_credit_state?: {
+      status?: 'checking' | 'available' | 'resetting' | 'success' | 'no_credit' | 'failed'
+      trigger_window?: string
+      available_count?: number
+      checked_at?: string
+      last_result_at?: string
+      error_code?: string
     }
   } & Record<string, unknown>)
   proxy_id: number | null
@@ -1293,6 +1376,17 @@ export interface Account {
   parent_chatgpt_account_id?: string
 }
 
+export type AccountListItem = Omit<Account, 'groups'>
+
+export type GrokMediaEligibilityMode = 'auto' | 'enabled' | 'disabled'
+
+export interface GrokMediaEligibilityState {
+  account_id: number
+  mode: GrokMediaEligibilityMode
+  eligible: boolean
+  reason: string
+}
+
 export interface AccountSchedulerGroupScore {
   group_id?: number | null
   group_name?: string
@@ -1340,6 +1434,13 @@ export interface GrokBillingProductUsage {
 }
 
 export interface GrokBillingSummary {
+  prepaid_balance?: number | null
+  monthly_limit?: number | null
+  monthly_used?: number | null
+  on_demand_cap?: number | null
+  on_demand_used?: number | null
+  top_up_method?: string
+  is_unified_billing_user?: boolean
   period_type?: string
   usage_percent?: number | null
   period_start?: string
@@ -1369,6 +1470,7 @@ export interface AccountUsageInfo {
   seven_day: UsageProgress | null
   seven_day_sonnet: UsageProgress | null
   seven_day_fable?: UsageProgress | null
+  thirty_day?: UsageProgress | null
   gemini_shared_daily?: UsageProgress | null
   gemini_pro_daily?: UsageProgress | null
   gemini_flash_daily?: UsageProgress | null
@@ -1665,6 +1767,7 @@ export type ImageSizeSource = 'output' | 'input' | 'default' | 'legacy'
 export type ImageSizeBreakdown = Record<string, number>
 
 export interface UsageLog {
+  native_compaction_v2?: boolean
   id: number
   user_id: number
   api_key_id: number
@@ -1740,6 +1843,8 @@ export interface UsageLogAccountSummary {
 }
 
 export interface AdminUsageLog extends UsageLog {
+  upstream_reasoning_effort?: string | null
+  upstream_request_id?: string | null
   account_id?: number | null
   upstream_endpoint?: string | null
   compatibility_route?: string | null
@@ -2027,6 +2132,7 @@ export interface ApiKeyUsageTrendPoint {
 // ==================== Admin User Management ====================
 
 export interface UpdateUserRequest {
+  restrict_public_groups?: boolean
   email?: string
   password?: string
   username?: string
@@ -2179,6 +2285,7 @@ export interface UserErrorListParams {
 }
 
 export interface UsageQueryParams {
+  native_compaction_v2?: boolean | null
   page?: number
   page_size?: number
   api_key_id?: number

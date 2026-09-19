@@ -36,3 +36,28 @@ func TestOpsErrorLoggerMiddleware_PreservesWrappedCaptureWriterForOuterMiddlewar
 	require.Equal(t, http.StatusNoContent, rec.Code)
 	require.Equal(t, http.StatusNoContent, outerStatus)
 }
+
+func TestOpsErrorLoggerMiddleware_PreservesWrappedWriterForOuterWrites(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var capture *opsCaptureWriter
+	var written int
+	var writeErr error
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Next()
+		written, writeErr = c.Writer.WriteString("outer")
+		c.Writer.Flush()
+	})
+	r.GET("/responses", OpsErrorLoggerMiddleware(nil), func(c *gin.Context) {
+		capture = c.Writer.(*opsCaptureWriter)
+		c.Writer = &testOuterResponseWriterWrapper{ResponseWriter: c.Writer}
+		_, _ = c.Writer.WriteString("inner:")
+	})
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/responses", nil))
+	defer releaseOpsCaptureWriter(capture)
+	require.NoError(t, writeErr)
+	require.Equal(t, len("outer"), written)
+	require.Equal(t, "inner:outer", rec.Body.String())
+	require.True(t, rec.Flushed)
+}

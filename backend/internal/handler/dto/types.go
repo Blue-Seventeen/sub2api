@@ -24,7 +24,7 @@ type User struct {
 	UpdatedAt     time.Time  `json:"updated_at"`
 	DeletedAt     *time.Time `json:"deleted_at,omitempty"`
 
-	// ??????
+	// Balance notification settings.
 	BalanceNotifyEnabled       bool               `json:"balance_notify_enabled"`
 	BalanceNotifyThresholdType string             `json:"balance_notify_threshold_type"`
 	BalanceNotifyThreshold     *float64           `json:"balance_notify_threshold"`
@@ -130,19 +130,25 @@ type Group struct {
 	VideoRateIndependent         bool    `json:"video_rate_independent"`
 	VideoRateMultiplier          float64 `json:"video_rate_multiplier"`
 	// 高峰时段倍率配置
-	PeakRateEnabled    bool                    `json:"peak_rate_enabled"`
-	PeakStart          string                  `json:"peak_start"`
-	PeakEnd            string                  `json:"peak_end"`
-	PeakRateMultiplier float64                 `json:"peak_rate_multiplier"`
-	PeakRateWindows    []domain.PeakRateWindow `json:"peak_rate_windows"`
-	ImagePrice1K       *float64                `json:"image_price_1k"`
-	ImagePrice2K       *float64                `json:"image_price_2k"`
-	ImagePrice4K       *float64                `json:"image_price_4k"`
-	VideoPrice480P     *float64                `json:"video_price_480p"`
-	VideoPrice720P     *float64                `json:"video_price_720p"`
-	VideoPrice1080P    *float64                `json:"video_price_1080p"`
+	PeakRateEnabled           bool                          `json:"peak_rate_enabled"`
+	PeakStart                 string                        `json:"peak_start"`
+	PeakEnd                   string                        `json:"peak_end"`
+	PeakRateMultiplier        float64                       `json:"peak_rate_multiplier"`
+	PeakRateWindows           []domain.PeakRateWindow       `json:"peak_rate_windows"`
+	ImagePrice1K              *float64                      `json:"image_price_1k"`
+	ImagePrice2K              *float64                      `json:"image_price_2k"`
+	ImagePrice4K              *float64                      `json:"image_price_4k"`
+	VideoPrice480P            *float64                      `json:"video_price_480p"`
+	VideoPrice720P            *float64                      `json:"video_price_720p"`
+	VideoPrice1080P           *float64                      `json:"video_price_1080p"`
+	VideoModelPrices          map[string]map[string]float64 `json:"video_model_prices,omitempty"`
+	LongContextPricingEnabled bool                          `json:"long_context_pricing_enabled"`
 	// Codex alpha/search 网页搜索单次价格（USD/次）；null 表示使用默认价 0.01
-	WebSearchPricePerCall *float64 `json:"web_search_price_per_call"`
+	WebSearchPricePerCall        *float64 `json:"web_search_price_per_call"`
+	SearchPricePer1k             *float64 `json:"search_price_per_1k"`
+	AudioRealtimePricePerMin     *float64 `json:"audio_realtime_price_per_min"`
+	AudioTtsPricePerMillionChars *float64 `json:"audio_tts_price_per_million_chars"`
+	AudioSttPricePerHour         *float64 `json:"audio_stt_price_per_hour"`
 
 	// Claude Code 客户端限制
 	ClaudeCodeOnly  bool   `json:"claude_code_only"`
@@ -162,7 +168,8 @@ type Group struct {
 	// RPMLimit 分组级每分钟请求数上限（0 = 不限制），设置后覆盖用户级 rpm_limit。
 	RPMLimit int `json:"rpm_limit"`
 	// MaxReasoningEffort OpenAI/Codex 请求的推理强度上限，空字符串表示不限制。
-	MaxReasoningEffort string `json:"max_reasoning_effort"`
+	MaxReasoningEffort          string `json:"max_reasoning_effort"`
+	MaxReasoningEffortOverLimit string `json:"max_reasoning_effort_over_limit"`
 	// ReasoningEffortMappings OpenAI/Codex 推理强度精确映射。
 	ReasoningEffortMappings []domain.ReasoningEffortMapping `json:"reasoning_effort_mappings"`
 
@@ -195,6 +202,11 @@ type AdminGroup struct {
 	DefaultMappedModel          string                                   `json:"default_mapped_model"`
 	MessagesDispatchModelConfig domain.OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config"`
 	ModelsListConfig            domain.GroupModelsListConfig             `json:"models_list_config"`
+	ModelAllowlist              service.GroupModelAllowlist              `json:"model_allowlist"`
+	CodexModelsManifestConfig   domain.GroupCodexModelsManifestConfig    `json:"codex_models_manifest_config"`
+	ModelPricing                []service.ChannelModelPricing            `json:"model_pricing"`
+	ForceOpenAIFast             bool                                     `json:"force_openai_fast"`
+	FreeOpenAIFast              bool                                     `json:"free_openai_fast"`
 
 	// 支持的模型系列（仅 antigravity 平台使用）
 	SupportedModelScopes    []string       `json:"supported_model_scopes"`
@@ -326,6 +338,66 @@ type Account struct {
 
 	GroupIDs []int64  `json:"group_ids,omitempty"`
 	Groups   []*Group `json:"groups,omitempty"`
+}
+
+// AccountListItem is the compact admin-list projection. It deliberately omits
+// account_groups and groups so paginated list responses stay bounded.
+type AccountListItem struct {
+	ID                      int64                          `json:"id"`
+	Name                    string                         `json:"name"`
+	Notes                   *string                        `json:"notes"`
+	Platform                string                         `json:"platform"`
+	Type                    string                         `json:"type"`
+	Credentials             map[string]any                 `json:"credentials,omitempty"`
+	CredentialsStatus       map[string]bool                `json:"credentials_status,omitempty"`
+	Extra                   map[string]any                 `json:"extra,omitempty"`
+	OllamaCloudUsage        *service.OllamaCloudUsageState `json:"ollama_cloud_usage,omitempty"`
+	ProxyID                 *int64                         `json:"proxy_id"`
+	ProxyAutoSelectBest     bool                           `json:"proxy_auto_select_best"`
+	ProxyFallbackOriginID   *int64                         `json:"proxy_fallback_origin_id"`
+	ProxyFallbackOriginName *string                        `json:"proxy_fallback_origin_name,omitempty"`
+	Concurrency             int                            `json:"concurrency"`
+	LoadFactor              *int                           `json:"load_factor,omitempty"`
+	Priority                int                            `json:"priority"`
+	RateMultiplier          float64                        `json:"rate_multiplier"`
+	Status                  string                         `json:"status"`
+	ErrorMessage            string                         `json:"error_message"`
+	LastUsedAt              *time.Time                     `json:"last_used_at"`
+	ExpiresAt               *int64                         `json:"expires_at"`
+	AutoPauseOnExpired      bool                           `json:"auto_pause_on_expired"`
+	CreatedAt               time.Time                      `json:"created_at"`
+	UpdatedAt               time.Time                      `json:"updated_at"`
+	Schedulable             bool                           `json:"schedulable"`
+	RateLimitedAt           *time.Time                     `json:"rate_limited_at"`
+	RateLimitResetAt        *time.Time                     `json:"rate_limit_reset_at"`
+	OverloadUntil           *time.Time                     `json:"overload_until"`
+	TempUnschedulableUntil  *time.Time                     `json:"temp_unschedulable_until"`
+	TempUnschedulableReason string                         `json:"temp_unschedulable_reason"`
+	SessionWindowStart      *time.Time                     `json:"session_window_start"`
+	SessionWindowEnd        *time.Time                     `json:"session_window_end"`
+	SessionWindowStatus     string                         `json:"session_window_status"`
+	WindowCostLimit         *float64                       `json:"window_cost_limit,omitempty"`
+	WindowCostStickyReserve *float64                       `json:"window_cost_sticky_reserve,omitempty"`
+	MaxSessions             *int                           `json:"max_sessions,omitempty"`
+	SessionIdleTimeoutMin   *int                           `json:"session_idle_timeout_minutes,omitempty"`
+	BaseRPM                 *int                           `json:"base_rpm,omitempty"`
+	RPMStrategy             *string                        `json:"rpm_strategy,omitempty"`
+	RPMStickyBuffer         *int                           `json:"rpm_sticky_buffer,omitempty"`
+	UserMsgQueueMode        *string                        `json:"user_msg_queue_mode,omitempty"`
+	EnableTLSFingerprint    *bool                          `json:"enable_tls_fingerprint,omitempty"`
+	TLSFingerprintProfileID *int64                         `json:"tls_fingerprint_profile_id,omitempty"`
+	EnableSessionIDMasking  *bool                          `json:"session_id_masking_enabled,omitempty"`
+	CacheTTLOverrideEnabled *bool                          `json:"cache_ttl_override_enabled,omitempty"`
+	CacheTTLOverrideTarget  *string                        `json:"cache_ttl_override_target,omitempty"`
+	CustomBaseURLEnabled    *bool                          `json:"custom_base_url_enabled,omitempty"`
+	CustomBaseURL           *string                        `json:"custom_base_url,omitempty"`
+	QuotaLimit              *float64                       `json:"quota_limit,omitempty"`
+	QuotaUsed               *float64                       `json:"quota_used,omitempty"`
+	QuotaDailyLimit         *float64                       `json:"quota_daily_limit,omitempty"`
+	QuotaDailyUsed          *float64                       `json:"quota_daily_used,omitempty"`
+	QuotaWeeklyLimit        *float64                       `json:"quota_weekly_limit,omitempty"`
+	QuotaWeeklyUsed         *float64                       `json:"quota_weekly_used,omitempty"`
+	Proxy                   *Proxy                         `json:"proxy,omitempty"`
 }
 
 type AccountGroup struct {
@@ -531,12 +603,13 @@ type UsageLog struct {
 	RateMultiplier            float64 `json:"rate_multiplier"`
 	LongContextBillingApplied bool    `json:"long_context_billing_applied"`
 
-	BillingType  int8   `json:"billing_type"`
-	RequestType  string `json:"request_type"`
-	Stream       bool   `json:"stream"`
-	OpenAIWSMode bool   `json:"openai_ws_mode"`
-	DurationMs   *int   `json:"duration_ms"`
-	FirstTokenMs *int   `json:"first_token_ms"`
+	BillingType        int8   `json:"billing_type"`
+	RequestType        string `json:"request_type"`
+	Stream             bool   `json:"stream"`
+	OpenAIWSMode       bool   `json:"openai_ws_mode"`
+	NativeCompactionV2 bool   `json:"native_compaction_v2"`
+	DurationMs         *int   `json:"duration_ms"`
+	FirstTokenMs       *int   `json:"first_token_ms"`
 
 	// 图片生成字段
 	ImageCount         int            `json:"image_count"`
@@ -595,7 +668,8 @@ type AdminUsageLog struct {
 	// Omitted when no mapping was applied (requested model was used as-is).
 	UpstreamModel *string `json:"upstream_model,omitempty"`
 	// UpstreamResponseModel is the model declared by the upstream response payload.
-	UpstreamResponseModel *string `json:"upstream_response_model,omitempty"`
+	UpstreamResponseModel   *string `json:"upstream_response_model,omitempty"`
+	UpstreamReasoningEffort *string `json:"upstream_reasoning_effort,omitempty"`
 	// UpstreamModelMismatch marks whether the observed upstream response model differs
 	// from the model sent upstream. Nil means the upstream response did not declare a model.
 	UpstreamModelMismatch *bool `json:"upstream_model_mismatch,omitempty"`
@@ -604,6 +678,7 @@ type AdminUsageLog struct {
 	ChannelID *int64 `json:"channel_id,omitempty"`
 	// ModelMappingChain 模型映射链，如 "a→b→c"
 	ModelMappingChain *string `json:"model_mapping_chain,omitempty"`
+	UpstreamRequestID *string `json:"upstream_request_id,omitempty"`
 	// BillingTier 计费层级标签（per_request/image 模式）
 	BillingTier *string `json:"billing_tier,omitempty"`
 

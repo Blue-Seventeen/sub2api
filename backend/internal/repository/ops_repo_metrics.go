@@ -114,37 +114,37 @@ INSERT INTO ops_system_metrics (
 		opsNullFloat64(input.QPS),
 		opsNullFloat64(input.TPS),
 
-		opsNullInt(input.DurationP50Ms),
-		opsNullInt(input.DurationP90Ms),
-		opsNullInt(input.DurationP95Ms),
-		opsNullInt(input.DurationP99Ms),
+		opsNullableIntPointer(input.DurationP50Ms),
+		opsNullableIntPointer(input.DurationP90Ms),
+		opsNullableIntPointer(input.DurationP95Ms),
+		opsNullableIntPointer(input.DurationP99Ms),
 		opsNullFloat64(input.DurationAvgMs),
-		opsNullInt(input.DurationMaxMs),
+		opsNullableIntPointer(input.DurationMaxMs),
 
-		opsNullInt(input.TTFTP50Ms),
-		opsNullInt(input.TTFTP90Ms),
-		opsNullInt(input.TTFTP95Ms),
-		opsNullInt(input.TTFTP99Ms),
+		opsNullableIntPointer(input.TTFTP50Ms),
+		opsNullableIntPointer(input.TTFTP90Ms),
+		opsNullableIntPointer(input.TTFTP95Ms),
+		opsNullableIntPointer(input.TTFTP99Ms),
 		opsNullFloat64(input.TTFTAvgMs),
-		opsNullInt(input.TTFTMaxMs),
+		opsNullableIntPointer(input.TTFTMaxMs),
 
 		opsNullFloat64(input.CPUUsagePercent),
-		opsNullInt(input.MemoryUsedMB),
-		opsNullInt(input.MemoryTotalMB),
+		opsNullableInt64Pointer(input.MemoryUsedMB),
+		opsNullableInt64Pointer(input.MemoryTotalMB),
 		opsNullFloat64(input.MemoryUsagePercent),
 
 		opsNullBool(input.DBOK),
 		opsNullBool(input.RedisOK),
 
-		opsNullInt(input.RedisConnTotal),
-		opsNullInt(input.RedisConnIdle),
+		opsNullableIntPointer(input.RedisConnTotal),
+		opsNullableIntPointer(input.RedisConnIdle),
 
-		opsNullInt(input.DBConnActive),
-		opsNullInt(input.DBConnIdle),
-		opsNullInt(input.DBConnWaiting),
+		opsNullableIntPointer(input.DBConnActive),
+		opsNullableIntPointer(input.DBConnIdle),
+		opsNullableIntPointer(input.DBConnWaiting),
 
-		opsNullInt(input.GoroutineCount),
-		opsNullInt(input.ConcurrencyQueueDepth),
+		opsNullableIntPointer(input.GoroutineCount),
+		opsNullableIntPointer(input.ConcurrencyQueueDepth),
 	)
 	return err
 }

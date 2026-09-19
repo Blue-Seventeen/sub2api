@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	coderws "github.com/coder/websocket"
@@ -96,6 +97,42 @@ type openAIWSIngressTurnError struct {
 	wroteDownstream bool
 }
 
+type openAIWSCurrentTurnFailoverError struct {
+	cause        error
+	retryPayload []byte
+}
+
+func (e *openAIWSCurrentTurnFailoverError) Error() string {
+	if e == nil || e.cause == nil {
+		return "openai websocket current-turn failover"
+	}
+	return e.cause.Error()
+}
+
+func (e *openAIWSCurrentTurnFailoverError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
+
+func newOpenAIWSCurrentTurnFailoverError(cause error, retryPayload []byte) error {
+	return &openAIWSCurrentTurnFailoverError{
+		cause:        cause,
+		retryPayload: append([]byte(nil), retryPayload...),
+	}
+}
+
+// OpenAIWSCurrentTurnRetryPayload returns an isolated copy of the payload that
+// may be retried on a replacement account without replaying the first turn.
+func OpenAIWSCurrentTurnRetryPayload(err error) ([]byte, bool) {
+	var retryErr *openAIWSCurrentTurnFailoverError
+	if !errors.As(err, &retryErr) || retryErr == nil {
+		return nil, false
+	}
+	return append([]byte(nil), retryErr.retryPayload...), true
+}
+
 func (e *openAIWSIngressTurnError) Error() string {
 	if e == nil {
 		return ""
@@ -169,9 +206,30 @@ func isOpenAIWSIngressPreviousResponseNotFound(err error) bool {
 func NewOpenAIWSClientCloseError(statusCode coderws.StatusCode, reason string, err error) error {
 	return &OpenAIWSClientCloseError{
 		statusCode: statusCode,
-		reason:     strings.TrimSpace(reason),
+		reason:     normalizeOpenAIWSClientCloseReason(reason),
 		err:        err,
 	}
+}
+
+// NormalizeOpenAIWSClientCloseReason keeps close frames within the protocol's
+// byte budget without trimming protocol-allowed whitespace, cutting a
+// multi-byte UTF-8 sequence, or adding suffixes.
+func NormalizeOpenAIWSClientCloseReason(reason string) string {
+	return normalizeOpenAIWSClientCloseReason(reason)
+}
+
+func normalizeOpenAIWSClientCloseReason(reason string) string {
+	if !utf8.ValidString(reason) {
+		reason = strings.ToValidUTF8(reason, "")
+	}
+	if len(reason) <= openAIWSHeaderValueMaxLen {
+		return reason
+	}
+	reason = reason[:openAIWSHeaderValueMaxLen]
+	for len(reason) > 0 && !utf8.ValidString(reason) {
+		reason = reason[:len(reason)-1]
+	}
+	return reason
 }
 
 func (e *OpenAIWSClientCloseError) Error() string {
@@ -202,7 +260,7 @@ func (e *OpenAIWSClientCloseError) Reason() string {
 	if e == nil {
 		return ""
 	}
-	return strings.TrimSpace(e.reason)
+	return e.reason
 }
 
 // OpenAIWSIngressHooks 定义入站 WS 每个 turn 的生命周期回调。
@@ -215,10 +273,16 @@ type OpenAIWSIngressHooks struct {
 	// before channel or account mapping. Ingress modes preserve it for usage
 	// attribution while MapRequestModel determines the upstream model.
 	InitialRequestModel string
+	// InitialTurnStartedAt freezes when the first response.create was accepted.
+	InitialTurnStartedAt time.Time
 	// MaxReasoningEffort limits explicit reasoning effort values for this WS session.
 	MaxReasoningEffort string
+	// MaxReasoningEffortOverLimit is the access control when an explicit effort
+	// exceeds the ceiling: downgrade (default) or deny.
+	MaxReasoningEffortOverLimit string
 	// ReasoningEffortMappings rewrites explicit effort values for this WS session.
 	ReasoningEffortMappings []ReasoningEffortMapping
+	TurnStarted             func(turn int, startedAt time.Time)
 	BeforeTurn              func(turn int) error
 	BeforeRequest           func(turn int, payload []byte, originalModel string) error
 	// MapRequestModel resolves the current turn's client model to the model

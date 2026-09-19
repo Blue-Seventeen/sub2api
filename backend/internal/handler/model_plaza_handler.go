@@ -17,21 +17,21 @@ import (
 //   - 匿名：仅非专属分组（订阅型照常展示）；
 //   - 登录：非专属分组 + user_allowed_groups 授权或有效订阅覆盖的专属分组。
 type ModelPlazaHandler struct {
-	channelService *service.ChannelService
-	apiKeyService  *service.APIKeyService
-	settingService *service.SettingService
+	modelPlazaService *service.ModelPlazaService
+	apiKeyService     *service.APIKeyService
+	settingService    *service.SettingService
 }
 
 // NewModelPlazaHandler 创建模型广场 handler。
 func NewModelPlazaHandler(
-	channelService *service.ChannelService,
+	modelPlazaService *service.ModelPlazaService,
 	apiKeyService *service.APIKeyService,
 	settingService *service.SettingService,
 ) *ModelPlazaHandler {
 	return &ModelPlazaHandler{
-		channelService: channelService,
-		apiKeyService:  apiKeyService,
-		settingService: settingService,
+		modelPlazaService: modelPlazaService,
+		apiKeyService:     apiKeyService,
+		settingService:    settingService,
 	}
 }
 
@@ -99,7 +99,7 @@ func (h *ModelPlazaHandler) Get(c *gin.Context) {
 		return
 	}
 
-	groups, err := h.channelService.ListPlazaGroups(c.Request.Context())
+	groups, err := h.modelPlazaService.ListGroups(c.Request.Context())
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

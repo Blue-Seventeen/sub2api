@@ -38,7 +38,7 @@ export function parseProxyUrl(line: string): ParsedProxyInput | null {
 
   return {
     protocol: protocol as ProxyProtocol,
-    host: parsed.hostname.trim(),
+    host: parsed.hostname.replace(/^\[|\]$/g, '').trim(),
     port,
     username: decodeURLPart(parsed.username),
     password: decodeURLPart(parsed.password)

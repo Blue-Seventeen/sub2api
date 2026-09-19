@@ -232,6 +232,7 @@
 
           <td
             class="border-l border-gray-100 py-2.5 pl-3 pr-5 text-center align-middle font-mono text-xs dark:border-dark-700/60"
+            :title="peakWindow ? t('common.peakRateTooltip', { window: peakWindow }) : undefined"
           >
             <span
               v-if="usesIndependentImageRate(m)"
@@ -268,6 +269,8 @@ const props = defineProps<{
   userRateMultiplier?: number | null
   imageRateIndependent?: boolean
   imageRateMultiplier?: number | null
+  peakWindow?: string
+  peakRateMultiplier?: number
 }>()
 
 const { t } = useI18n()

@@ -638,14 +638,6 @@ func subscriptionCacheSchemaStale(data *subscriptionCacheData) bool {
 	return false
 }
 
-func cloneTimePtr(t *time.Time) *time.Time {
-	if t == nil {
-		return nil
-	}
-	v := *t
-	return &v
-}
-
 func normalizeSubscriptionsForCache(subs []UserSubscription) []UserSubscription {
 	if len(subs) == 0 {
 		return nil

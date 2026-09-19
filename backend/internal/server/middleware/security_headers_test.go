@@ -366,8 +366,9 @@ func TestEnhanceCSPPolicy(t *testing.T) {
 		enhanced := enhanceCSPPolicy(policy)
 
 		assert.Contains(t, enhanced, "media-src 'self' data: blob:")
-		assert.Equal(t, 1, strings.Count(enhanced, "data:"))
-		assert.Equal(t, 1, strings.Count(enhanced, "blob:"))
+		assert.Equal(t, 1, countDirectiveValue(enhanced, "media-src", "data:"))
+		assert.Equal(t, 1, countDirectiveValue(enhanced, "media-src", "blob:"))
+		assert.Equal(t, 1, countDirectiveValue(enhanced, "worker-src", "blob:"))
 	})
 }
 

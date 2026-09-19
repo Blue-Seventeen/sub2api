@@ -127,6 +127,7 @@ func TestRunUpstreamToClient_ErrorAndDropPaths(t *testing.T) {
 			nil,
 			nil,
 			nil,
+			nil,
 			drop,
 			nil,
 			nil,
@@ -154,6 +155,7 @@ func TestRunUpstreamToClient_ErrorAndDropPaths(t *testing.T) {
 			time.Now(),
 			time.Now,
 			&relayState{},
+			nil,
 			nil,
 			nil,
 			nil,
@@ -190,6 +192,7 @@ func TestRunUpstreamToClient_ErrorAndDropPaths(t *testing.T) {
 			time.Now(),
 			time.Now,
 			&relayState{},
+			nil,
 			nil,
 			nil,
 			nil,
@@ -246,7 +249,7 @@ func TestHelperFunctionsCoverage(t *testing.T) {
 
 	require.True(t, isTokenEvent("response.output_text.delta"))
 	require.True(t, isTokenEvent("response.output_audio.delta"))
-	require.True(t, isTokenEvent("response.completed"))
+	require.False(t, isTokenEvent("response.completed"))
 	require.False(t, isTokenEvent(""))
 	require.False(t, isTokenEvent("response.created"))
 
@@ -420,8 +423,10 @@ func TestIsTokenEventCoverageBranches(t *testing.T) {
 	require.False(t, isTokenEvent("response.in_progress"))
 	require.False(t, isTokenEvent("response.output_item.added"))
 	require.True(t, isTokenEvent("response.output_audio.delta"))
-	require.True(t, isTokenEvent("response.output"))
-	require.True(t, isTokenEvent("response.done"))
+	require.False(t, isTokenEvent("response.output"))
+	require.False(t, isTokenEvent("response.done"))
+	require.True(t, isTokenEvent("response.output_text.done"))
+	require.True(t, isTokenEvent("response.function_call_arguments.done"))
 }
 
 func TestShouldParseUsageTerminalEvents(t *testing.T) {
@@ -468,6 +473,55 @@ func TestRelayTurnTimingHelpersCoverage(t *testing.T) {
 	// 删除不存在键
 	_, ok = openAIWSRelayDeleteTurnTiming(state, "resp_a")
 	require.False(t, ok)
+}
+
+func TestObserveUpstreamMessage_LaterTurnDeltaWithoutResponseID(t *testing.T) {
+	t.Parallel()
+	start := time.Unix(100, 0)
+	firstToken := 5
+	state := &relayState{firstTokenMs: &firstToken}
+	turnStart := start.Add(time.Minute)
+	state.setPendingTurnStartedAt(turnStart)
+	observeUpstreamMessage(state, []byte(`{"type":"response.created","response":{"id":"resp_second"}}`), start,
+		func() time.Time { return turnStart.Add(20 * time.Millisecond) }, nil)
+	observeUpstreamMessage(state, []byte(`{"type":"response.output_text.delta","delta":"hello"}`), start,
+		func() time.Time { return turnStart.Add(80 * time.Millisecond) }, nil)
+	terminal := observeUpstreamMessage(state, []byte(`{"type":"response.completed","response":{"id":"resp_second","usage":{"input_tokens":2,"output_tokens":1}}}`), start,
+		func() time.Time { return turnStart.Add(150 * time.Millisecond) }, nil)
+	require.Equal(t, turnStart, terminal.startedAt)
+	require.Equal(t, 150*time.Millisecond, terminal.duration)
+	require.NotNil(t, terminal.firstToken)
+	require.Equal(t, 80, *terminal.firstToken)
+	require.Equal(t, 5, *state.firstTokenMs, "session first token stays unchanged")
+}
+
+func TestRelay_BareErrorUsageSettledOnceWithFailedTerminal(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name     string
+		terminal string
+		want     Usage
+	}{
+		{"authoritative_usage", `{"type":"response.failed","response":{"id":"resp_failed","usage":{"input_tokens":7,"output_tokens":2}}}`, Usage{InputTokens: 7, OutputTokens: 2}},
+		{"missing_usage", `{"type":"response.failed","response":{"id":"resp_failed"}}`, Usage{InputTokens: 5, OutputTokens: 1, CacheCreationInputTokens: 7, CacheCreation5mTokens: 3, CacheCreation1hTokens: 4}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := newPassthroughTestFrameConn([]passthroughTestFrame{
+				{msgType: coderws.MessageText, payload: []byte(`{"type":"error","usage":{"input_tokens":5,"output_tokens":1,"cache_creation":{"ephemeral_5m_input_tokens":3,"ephemeral_1h_input_tokens":4}}}`)},
+				{msgType: coderws.MessageText, payload: []byte(tc.terminal)},
+			}, true)
+			var turns []RelayTurnResult
+			result, relayExit := Relay(t.Context(), newPassthroughTestFrameConn(nil, false), upstream,
+				[]byte(`{"type":"response.create","model":"gpt-5","input":[]}`), RelayOptions{
+					OnTurnComplete: func(turn RelayTurnResult) { turns = append(turns, turn) },
+				})
+			require.Nil(t, relayExit)
+			require.Len(t, turns, 1)
+			require.Equal(t, "response.failed", turns[0].TerminalEventType)
+			require.Equal(t, tc.want, turns[0].Usage)
+			require.Equal(t, tc.want, result.Usage)
+		})
+	}
 }
 
 func TestObserveUpstreamMessage_ResponseIDFallbackPolicy(t *testing.T) {

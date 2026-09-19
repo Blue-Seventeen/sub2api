@@ -1,4 +1,16 @@
-export default {
+import landing from './zh/landing'
+import common from './zh/common'
+import dashboard from './zh/dashboard'
+import channelMonitorV2 from './zh/channelMonitorV2'
+import batchImage from './zh/batchImage'
+import admin from './zh/admin'
+import misc from './zh/misc'
+import carryover from './zh/carryover'
+import upstreamAdditions from './zh/upstreamAdditions'
+import { mergeLocaleMessages } from './merge'
+import { compatibilityLabel, createCompatibilityLocale } from './compatibility'
+
+export const legacyLocale = {
   // Home Page
   home: {
     viewOnGithub: '在 GitHub 上查看',
@@ -8105,3 +8117,14 @@ export default {
   },
 
 }
+
+// Generated compatibility labels must never overwrite translated custom messages.
+export default mergeLocaleMessages(createCompatibilityLocale(compatibilityLabel), legacyLocale, carryover, {
+  ...landing,
+  ...common,
+  ...dashboard,
+  ...channelMonitorV2,
+  ...batchImage,
+  admin,
+  ...misc,
+}, upstreamAdditions)

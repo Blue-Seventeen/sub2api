@@ -217,7 +217,7 @@ func TestPrepareUsageLogInsert_PersistsBillableQuantityMetadata(t *testing.T) {
 	require.Equal(t, 7, prepared.args[47])
 	require.Equal(t, 1234, prepared.args[48])
 	require.Equal(t, sql.NullString{String: unitType, Valid: true}, prepared.args[50])
-	require.Equal(t, sql.NullString{String: billingMode, Valid: true}, prepared.args[67])
+	require.Equal(t, sql.NullString{String: billingMode, Valid: true}, prepared.args[68])
 }
 
 func TestCoalesceTrimmedString(t *testing.T) {
@@ -741,30 +741,34 @@ func (s usageLogScannerStub) Scan(dest ...any) error {
 }
 
 type usageLogScanRowOptions struct {
-	ID                 int64
-	UserID             int64
-	APIKeyID           int64
-	AccountID          int64
-	RequestID          string
-	Model              string
-	RequestedModel     string
-	BillingType        int16
-	RequestType        int16
-	LegacyStream       bool
-	LegacyWS           bool
-	ImageCount         int
-	ImageSize          *string
-	ImageInputSize     *string
-	ImageOutputSize    *string
-	ImageSizeSource    *string
-	ImageSizeBreakdown map[string]int
-	DurationSeconds    int
-	CharacterCount     int
-	VideoCount         int
-	VideoResolution    *string
-	VideoDuration      *int
-	ServiceTier        *string
-	CreatedAt          time.Time
+	ID                       int64
+	UserID                   int64
+	APIKeyID                 int64
+	AccountID                int64
+	RequestID                string
+	Model                    string
+	RequestedModel           string
+	BillingType              int16
+	RequestType              int16
+	LegacyStream             bool
+	LegacyWS                 bool
+	ImageCount               int
+	ImageSize                *string
+	ImageInputSize           *string
+	ImageOutputSize          *string
+	ImageSizeSource          *string
+	ImageSizeBreakdown       map[string]int
+	DurationSeconds          int
+	CharacterCount           int
+	VideoCount               int
+	VideoResolution          *string
+	VideoDuration            *int
+	ServiceTier              *string
+	ReasoningEffort          *string
+	RequestedReasoningEffort *string
+	UpstreamRequestID        *string
+	NativeCompactionV2       bool
+	CreatedAt                time.Time
 }
 
 func usageLogInsertExpectationArgs(log *service.UsageLog) []driver.Value {
@@ -836,7 +840,8 @@ func buildUsageLogScanValues(opts usageLogScanRowOptions) []any {
 		nullString(opts.VideoResolution),
 		nullInt(opts.VideoDuration),
 		nullString(opts.ServiceTier),
-		sql.NullString{},  // reasoning_effort
+		nullString(opts.ReasoningEffort),
+		nullString(opts.RequestedReasoningEffort),
 		sql.NullString{},  // inbound_endpoint
 		sql.NullString{},  // upstream_endpoint
 		sql.NullString{},  // client_profile
@@ -850,7 +855,9 @@ func buildUsageLogScanValues(opts usageLogScanRowOptions) []any {
 		sql.NullString{},  // billing_tier
 		sql.NullString{},  // billing_mode
 		sql.NullFloat64{}, // account_stats_cost
-		sql.NullString{},  // session_id
+		nullString(opts.UpstreamRequestID),
+		sql.NullString{}, // session_id
+		opts.NativeCompactionV2,
 		opts.CreatedAt,
 	}
 }

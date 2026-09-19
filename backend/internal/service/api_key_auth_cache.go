@@ -37,6 +37,7 @@ type APIKeyAuthUserSnapshot struct {
 	Concurrency           int     `json:"concurrency"`
 	UnifiedRateEnabled    bool    `json:"unified_rate_enabled"`
 	UnifiedRateMultiplier float64 `json:"unified_rate_multiplier"`
+	RestrictPublicGroups  bool    `json:"restrict_public_groups"`
 	AllowedGroups         []int64 `json:"allowed_groups,omitempty"`
 
 	// Balance notification fields (required for CheckBalanceAfterDeduction)
@@ -58,34 +59,41 @@ type APIKeyAuthUserSnapshot struct {
 
 // APIKeyAuthGroupSnapshot 分组快照
 type APIKeyAuthGroupSnapshot struct {
-	ID                              int64    `json:"id"`
-	Name                            string   `json:"name"`
-	Platform                        string   `json:"platform"`
-	IsExclusive                     bool     `json:"is_exclusive"`
-	Status                          string   `json:"status"`
-	SubscriptionType                string   `json:"subscription_type"`
-	RateMultiplier                  float64  `json:"rate_multiplier"`
-	DailyLimitUSD                   *float64 `json:"daily_limit_usd,omitempty"`
-	WeeklyLimitUSD                  *float64 `json:"weekly_limit_usd,omitempty"`
-	MonthlyLimitUSD                 *float64 `json:"monthly_limit_usd,omitempty"`
-	CustomLimitHours                int      `json:"custom_limit_hours"`
-	CustomLimitUSD                  *float64 `json:"custom_limit_usd,omitempty"`
-	AllowImageGeneration            bool     `json:"allow_image_generation"`
-	AllowBatchImageGeneration       bool     `json:"allow_batch_image_generation"`
-	ImageRateIndependent            bool     `json:"image_rate_independent"`
-	ImageRateMultiplier             float64  `json:"image_rate_multiplier"`
-	ImagePrice1K                    *float64 `json:"image_price_1k,omitempty"`
-	ImagePrice2K                    *float64 `json:"image_price_2k,omitempty"`
-	ImagePrice4K                    *float64 `json:"image_price_4k,omitempty"`
-	VideoRateIndependent            bool     `json:"video_rate_independent"`
-	VideoRateMultiplier             float64  `json:"video_rate_multiplier"`
-	VideoPrice480P                  *float64 `json:"video_price_480p,omitempty"`
-	VideoPrice720P                  *float64 `json:"video_price_720p,omitempty"`
-	VideoPrice1080P                 *float64 `json:"video_price_1080p,omitempty"`
-	WebSearchPricePerCall           *float64 `json:"web_search_price_per_call,omitempty"`
-	ClaudeCodeOnly                  bool     `json:"claude_code_only"`
-	FallbackGroupID                 *int64   `json:"fallback_group_id,omitempty"`
-	FallbackGroupIDOnInvalidRequest *int64   `json:"fallback_group_id_on_invalid_request,omitempty"`
+	ID                              int64                         `json:"id"`
+	Name                            string                        `json:"name"`
+	Platform                        string                        `json:"platform"`
+	IsExclusive                     bool                          `json:"is_exclusive"`
+	Status                          string                        `json:"status"`
+	SubscriptionType                string                        `json:"subscription_type"`
+	RateMultiplier                  float64                       `json:"rate_multiplier"`
+	DailyLimitUSD                   *float64                      `json:"daily_limit_usd,omitempty"`
+	WeeklyLimitUSD                  *float64                      `json:"weekly_limit_usd,omitempty"`
+	MonthlyLimitUSD                 *float64                      `json:"monthly_limit_usd,omitempty"`
+	CustomLimitHours                int                           `json:"custom_limit_hours"`
+	CustomLimitUSD                  *float64                      `json:"custom_limit_usd,omitempty"`
+	AllowImageGeneration            bool                          `json:"allow_image_generation"`
+	AllowBatchImageGeneration       bool                          `json:"allow_batch_image_generation"`
+	ImageRateIndependent            bool                          `json:"image_rate_independent"`
+	ImageRateMultiplier             float64                       `json:"image_rate_multiplier"`
+	ImagePrice1K                    *float64                      `json:"image_price_1k,omitempty"`
+	ImagePrice2K                    *float64                      `json:"image_price_2k,omitempty"`
+	ImagePrice4K                    *float64                      `json:"image_price_4k,omitempty"`
+	VideoRateIndependent            bool                          `json:"video_rate_independent"`
+	VideoRateMultiplier             float64                       `json:"video_rate_multiplier"`
+	VideoPrice480P                  *float64                      `json:"video_price_480p,omitempty"`
+	VideoPrice720P                  *float64                      `json:"video_price_720p,omitempty"`
+	VideoPrice1080P                 *float64                      `json:"video_price_1080p,omitempty"`
+	VideoModelPrices                map[string]map[string]float64 `json:"video_model_prices,omitempty"`
+	WebSearchPricePerCall           *float64                      `json:"web_search_price_per_call,omitempty"`
+	SearchPricePer1k                *float64                      `json:"search_price_per_1k,omitempty"`
+	AudioRealtimePricePerMin        *float64                      `json:"audio_realtime_price_per_min,omitempty"`
+	AudioTTSPricePerMillionChars    *float64                      `json:"audio_tts_price_per_million_chars,omitempty"`
+	AudioSTTPricePerHour            *float64                      `json:"audio_stt_price_per_hour,omitempty"`
+	LongContextPricingEnabled       bool                          `json:"long_context_pricing_enabled"`
+	ModelPricing                    []ChannelModelPricing         `json:"model_pricing,omitempty"`
+	ClaudeCodeOnly                  bool                          `json:"claude_code_only"`
+	FallbackGroupID                 *int64                        `json:"fallback_group_id,omitempty"`
+	FallbackGroupIDOnInvalidRequest *int64                        `json:"fallback_group_id_on_invalid_request,omitempty"`
 
 	// Model routing is used by gateway account selection, so it must be part of auth cache snapshot.
 	// Only anthropic groups use these fields; others may leave them empty.
@@ -99,16 +107,23 @@ type APIKeyAuthGroupSnapshot struct {
 	// OpenAI Messages 调度配置（仅 openai 平台使用）
 	AllowMessagesDispatch       bool                              `json:"allow_messages_dispatch"`
 	AllowLive                   bool                              `json:"allow_live"`
+	ForceOpenAIFast             bool                              `json:"force_openai_fast"`
+	FreeOpenAIFast              bool                              `json:"free_openai_fast"`
 	DefaultMappedModel          string                            `json:"default_mapped_model,omitempty"`
 	MessagesDispatchModelConfig OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config,omitempty"`
 	ModelsListConfig            GroupModelsListConfig             `json:"models_list_config,omitempty"`
+	ModelAllowlist              GroupModelAllowlist               `json:"model_allowlist,omitempty"`
+	CodexModelsManifestConfig   GroupCodexModelsManifestConfig    `json:"codex_models_manifest_config,omitempty"`
+	RequireOAuthOnly            bool                              `json:"require_oauth_only"`
+	RequirePrivacySet           bool                              `json:"require_privacy_set"`
 	NewAPIStyleInterfaceEnabled bool                              `json:"newapi_style_interface_enabled"`
 
 	// RPMLimit 分组级每分钟请求数上限（0 = 不限制）；用于 billing_cache_service.checkRPM 级联判断。
 	RPMLimit int `json:"rpm_limit"`
 
 	// MaxReasoningEffort OpenAI/Codex 请求的推理强度上限，空字符串表示不限制。
-	MaxReasoningEffort string `json:"max_reasoning_effort,omitempty"`
+	MaxReasoningEffort          string `json:"max_reasoning_effort,omitempty"`
+	MaxReasoningEffortOverLimit string `json:"max_reasoning_effort_over_limit,omitempty"`
 	// ReasoningEffortMappings rewrites explicit effort values before the ceiling.
 	ReasoningEffortMappings []ReasoningEffortMapping `json:"reasoning_effort_mappings"`
 

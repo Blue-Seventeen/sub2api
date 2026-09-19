@@ -249,13 +249,20 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 	return nil, ErrLiveUnavailable
 }
 
-func (s *OpenAIGatewayService) shouldFailoverLiveCreateError(err error) bool {
+func (s *OpenAIGatewayService) shouldFailoverLiveCreateError(args ...any) bool {
+	var err error
+	for _, arg := range args {
+		if candidate, ok := arg.(error); ok {
+			err = candidate
+		}
+	}
 	var upstreamErr *UpstreamFailoverError
 	if !errors.As(err, &upstreamErr) {
 		// 凭证读取和网络传输错误都可能只影响当前账号或代理。
 		return true
 	}
 	return s.shouldFailoverOpenAIUpstreamResponse(
+		nil,
 		upstreamErr.StatusCode,
 		"",
 		upstreamErr.ResponseBody,

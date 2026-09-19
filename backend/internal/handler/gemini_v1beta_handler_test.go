@@ -3,14 +3,115 @@
 package handler
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+type geminiModelsHTTPUpstreamStub struct {
+	service.HTTPUpstream
+	status int
+	body   string
+}
+
+func (s *geminiModelsHTTPUpstreamStub) Do(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: s.status,
+		Header: http.Header{
+			"Content-Type": []string{"application/json"},
+			"X-Request-Id": []string{"models-request"},
+		},
+		Body: io.NopCloser(strings.NewReader(s.body)),
+	}, nil
+}
+
+func TestGeminiV1BetaListModels_ProductionAllowlistPreservesEnvelopeAndSanitizesNulls(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const groupID int64 = 42
+	const body = `{"models":[{"name":"models/gemini-2.5-pro","description":null,"extra":{"kept":true,"removed":null}},{"name":"models/gemini-2.5-flash"}],"nextPageToken":"next","unknown":{"value":42},"empty":null}`
+	for _, enabled := range []bool{false, true} {
+		repo := &geminiAllowlistAccountRepoStub{gatewayModelsAccountRepoStub: gatewayModelsAccountRepoStub{
+			byGroup: map[int64][]service.Account{groupID: {{
+				ID: 1, Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey,
+				Credentials: map[string]any{"api_key": "test-key"},
+			}}},
+		}}
+		h := &GatewayHandler{geminiCompatService: service.NewGeminiMessagesCompatService(
+			repo, nil, nil, nil, nil, nil,
+			&geminiModelsHTTPUpstreamStub{status: http.StatusOK, body: body}, nil, &config.Config{},
+		)}
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		c.Request = httptest.NewRequest(http.MethodGet, "/v1beta/models", nil)
+		c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{GroupID: new(groupID), Group: &service.Group{
+			ID: groupID, Platform: service.PlatformGemini,
+			ModelAllowlist: service.GroupModelAllowlist{Enabled: enabled, Models: []string{"gemini-2.5-pro"}},
+		}})
+		h.GeminiV1BetaListModels(c)
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.Equal(t, "models-request", rec.Header().Get("X-Request-Id"))
+		var got map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+		require.JSONEq(t, `"next"`, string(got["nextPageToken"]))
+		require.JSONEq(t, `{"value":42}`, string(got["unknown"]))
+		require.NotContains(t, rec.Body.String(), "null")
+		wantModels := `[{"name":"models/gemini-2.5-pro","extra":{"kept":true}}]`
+		if !enabled {
+			wantModels = `[{"name":"models/gemini-2.5-pro","extra":{"kept":true}},{"name":"models/gemini-2.5-flash"}]`
+		}
+		require.JSONEq(t, wantModels, string(got["models"]))
+	}
+}
+
+func TestGeminiV1BetaListModels_AllowlistFiltersNativeResponse(t *testing.T) {
+	body := []byte(`{"models":[{"name":"models/gemini-2.5-pro"},{"name":"models/gemini-2.5-flash"}],"nextPageToken":"next"}`)
+	filtered, dropped, ok := filterUpstreamGeminiModelsBody(body, service.GroupModelAllowlist{Enabled: true, Models: []string{"gemini-2.5-pro"}})
+	require.True(t, ok)
+	require.True(t, dropped)
+	require.JSONEq(t, `{"models":[{"name":"models/gemini-2.5-pro"}],"nextPageToken":"next"}`, string(filtered))
+}
+
+func TestGeminiV1BetaListModels_ForcedAntigravityAppliesAllowlist(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/antigravity/v1beta/models", nil)
+	c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{
+		Group: &service.Group{
+			Platform: service.PlatformGemini,
+			ModelAllowlist: service.GroupModelAllowlist{
+				Enabled: true,
+				Models:  []string{"gemini-custom"},
+			},
+		},
+	})
+	c.Set(string(middleware.ContextKeyForcePlatform), service.PlatformAntigravity)
+
+	(&GatewayHandler{}).GeminiV1BetaListModels(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got antigravity.GeminiModelsListResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.Empty(t, got.Models)
+}
+
+func TestGeminiModelAllowlist_DisabledPreservesNativeResponse(t *testing.T) {
+	body := []byte(`{"models":[{"name":"models/gemini-2.5-pro"}]}`)
+	filtered, dropped, ok := filterUpstreamGeminiModelsBody(body, service.GroupModelAllowlist{Enabled: false, Models: []string{"other"}})
+	require.True(t, ok)
+	require.False(t, dropped)
+	require.Equal(t, body, filtered)
+}
 
 // TestGeminiV1BetaHandler_PlatformRoutingInvariant 文档化并验证 Handler 层的平台路由逻辑不变量
 // 该测试确保 gemini 和 antigravity 平台的路由逻辑符合预期

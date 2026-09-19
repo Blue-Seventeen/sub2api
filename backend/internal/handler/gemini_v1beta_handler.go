@@ -45,9 +45,32 @@ func (h *GatewayHandler) GeminiV1BetaListModels(c *gin.Context) {
 		return
 	}
 
+	filterGeminiModels := func(models []gemini.Model) []gemini.Model {
+		if !apiKey.Group.ModelAllowlistEnabled() {
+			return models
+		}
+		filtered := make([]gemini.Model, 0, len(models))
+		for _, model := range models {
+			if apiKey.Group.ModelAllowlist.Allows(model.Name) {
+				filtered = append(filtered, model)
+			}
+		}
+		return filtered
+	}
+
 	// 强制 antigravity 模式：返回 antigravity 支持的模型列表
 	if forcePlatform == service.PlatformAntigravity {
-		c.JSON(http.StatusOK, antigravity.FallbackGeminiModelsList())
+		models := antigravity.DefaultGeminiModels()
+		if apiKey.Group.ModelAllowlistEnabled() {
+			filtered := make([]antigravity.GeminiModel, 0, len(models))
+			for _, model := range models {
+				if apiKey.Group.ModelAllowlist.Allows(model.Name) {
+					filtered = append(filtered, model)
+				}
+			}
+			models = filtered
+		}
+		c.JSON(http.StatusOK, antigravity.GeminiModelsListResponse{Models: models})
 		return
 	}
 
@@ -57,7 +80,7 @@ func (h *GatewayHandler) GeminiV1BetaListModels(c *gin.Context) {
 		hasAntigravity, _ := h.geminiCompatService.HasAntigravityAccounts(c.Request.Context(), apiKey.GroupID)
 		if hasAntigravity {
 			// antigravity 账户使用静态模型列表
-			c.JSON(http.StatusOK, gemini.FallbackModelsList())
+			c.JSON(http.StatusOK, gemini.ModelsListResponse{Models: filterGeminiModels(gemini.DefaultModels())})
 			return
 		}
 		markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
@@ -71,8 +94,13 @@ func (h *GatewayHandler) GeminiV1BetaListModels(c *gin.Context) {
 		return
 	}
 	if shouldFallbackGeminiModels(res) {
-		c.JSON(http.StatusOK, gemini.FallbackModelsList())
+		c.JSON(http.StatusOK, gemini.ModelsListResponse{Models: filterGeminiModels(gemini.DefaultModels())})
 		return
+	}
+	if apiKey.Group.ModelAllowlistEnabled() {
+		if filtered, dropped, ok := filterUpstreamGeminiModelsBody(res.Body, apiKey.Group.ModelAllowlist); ok && dropped {
+			res.Body = filtered
+		}
 	}
 	writeSanitizedGeminiModelsResponse(c, res)
 }
@@ -724,6 +752,49 @@ func writeUpstreamResponse(c *gin.Context, res *service.UpstreamHTTPResult) {
 		contentType = "application/json"
 	}
 	c.Data(res.StatusCode, contentType, res.Body)
+}
+
+// filterUpstreamGeminiModelsBody filters models[].name while preserving the
+// upstream envelope and any pagination fields.
+func filterUpstreamGeminiModelsBody(body []byte, allowlist service.GroupModelAllowlist) (filtered []byte, dropped bool, ok bool) {
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil, false, false
+	}
+	rawModels, hasModels := envelope["models"]
+	if !hasModels {
+		return body, false, true
+	}
+	type modelName struct {
+		Name string `json:"name"`
+	}
+	var models []json.RawMessage
+	if err := json.Unmarshal(rawModels, &models); err != nil {
+		return nil, false, false
+	}
+	kept := make([]json.RawMessage, 0, len(models))
+	for _, raw := range models {
+		var model modelName
+		if err := json.Unmarshal(raw, &model); err != nil {
+			return nil, false, false
+		}
+		if allowlist.Allows(model.Name) {
+			kept = append(kept, raw)
+		}
+	}
+	if len(kept) == len(models) {
+		return body, false, true
+	}
+	mergedModels, err := json.Marshal(kept)
+	if err != nil {
+		return nil, false, false
+	}
+	envelope["models"] = mergedModels
+	merged, err := json.Marshal(envelope)
+	if err != nil {
+		return nil, false, false
+	}
+	return merged, true, true
 }
 
 func writeSanitizedGeminiModelsResponse(c *gin.Context, res *service.UpstreamHTTPResult) {

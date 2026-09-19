@@ -14,9 +14,6 @@ type LeaderLockCache interface {
 	// TryAcquireLeaderLock sets key=owner with the given TTL iff key is absent.
 	// It returns true when the caller becomes the owner.
 	TryAcquireLeaderLock(ctx context.Context, key, owner string, ttl time.Duration) (bool, error)
-	// TryAcquireOrRenewLeaderLock sets key=owner when absent, or extends the TTL
-	// when the same owner already holds it. It returns false when a peer owns it.
-	TryAcquireOrRenewLeaderLock(ctx context.Context, key, owner string, ttl time.Duration) (bool, error)
 	// ReleaseLeaderLock deletes key iff it is still owned by owner.
 	ReleaseLeaderLock(ctx context.Context, key, owner string) error
 }
@@ -86,7 +83,7 @@ func tryAcquirePeriodicLeaderLease(ctx context.Context, cache LeaderLockCache, d
 	}
 
 	if cache != nil {
-		ok, err := cache.TryAcquireOrRenewLeaderLock(ctx, key, owner, ttl)
+		ok, err := tryAcquireOrRenewLeaderLock(ctx, cache, key, owner, ttl)
 		if err != nil || !ok {
 			return nil, false
 		}
@@ -94,4 +91,15 @@ func tryAcquirePeriodicLeaderLease(ctx context.Context, cache LeaderLockCache, d
 	}
 
 	return tryAcquireSingletonLeaderLock(ctx, nil, db, key, owner, ttl)
+}
+
+type leaderLeaseCache interface {
+	TryAcquireOrRenewLeaderLock(context.Context, string, string, time.Duration) (bool, error)
+}
+
+func tryAcquireOrRenewLeaderLock(ctx context.Context, cache LeaderLockCache, key, owner string, ttl time.Duration) (bool, error) {
+	if lease, ok := cache.(leaderLeaseCache); ok {
+		return lease.TryAcquireOrRenewLeaderLock(ctx, key, owner, ttl)
+	}
+	return cache.TryAcquireLeaderLock(ctx, key, owner, ttl)
 }

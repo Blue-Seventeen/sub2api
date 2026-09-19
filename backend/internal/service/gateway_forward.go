@@ -16,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 // 重试相关常量
@@ -804,9 +805,17 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			var sseErr *sseStreamErrorEventError
 			if errors.As(err, &sseErr) {
 				// 上游 HTTP 200 + SSE 流体内出现 event:error 帧。
-				// 保留 StatusCode=403 以兼容既有 failover/客户端响应语义，
-				// 但补全 ResponseBody 与 ops 上下文，让运维日志能反映上游真实错误。
+				// 未向下游输出前，Anthropic overloaded_error 使用语义 529，
+				// 让账号进入全局 overload cooldown；已有输出仍保留 403 语义。
 				body := []byte(sseErr.RawData)
+				statusCode := http.StatusForbidden
+				if !c.Writer.Written() &&
+					strings.EqualFold(strings.TrimSpace(gjson.GetBytes(body, "error.type").String()), "overloaded_error") {
+					statusCode = 529
+					if s.rateLimitService != nil {
+						s.rateLimitService.HandleUpstreamError(ctx, account, statusCode, resp.Header, body, mappedModel)
+					}
+				}
 
 				upstreamMsg := sanitizeUpstreamErrorMessage(
 					strings.TrimSpace(extractUpstreamErrorMessage(body)),
@@ -825,7 +834,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					Platform:           account.Platform,
 					AccountID:          account.ID,
 					AccountName:        account.Name,
-					UpstreamStatusCode: 403,
+					UpstreamStatusCode: statusCode,
 					UpstreamRequestID:  resp.Header.Get("x-request-id"),
 					Kind:               "stream_error",
 					Message:            upstreamMsg,
@@ -839,7 +848,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				)
 
 				return nil, &UpstreamFailoverError{
-					StatusCode:   403,
+					StatusCode:   statusCode,
 					ResponseBody: body,
 				}
 			}

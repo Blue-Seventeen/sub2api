@@ -653,12 +653,10 @@ const startTest = async () => {
       model_id: requestModelId(),
       prompt: showsPromptInput.value ? testPrompt.value.trim() : ''
     }
-    if (props.account.platform !== 'grok') {
-      requestBody.mode = showOpenAITestMode.value ? testMode.value : 'default'
-      requestBody.test_type = testType.value
-      if (testType.value === 'tts') {
-        requestBody.test_options = { voice: ttsVoice.value.trim() }
-      }
+    requestBody.mode = showOpenAITestMode.value ? testMode.value : 'default'
+    requestBody.test_type = testType.value
+    if (testType.value === 'tts') {
+      requestBody.test_options = { voice: ttsVoice.value.trim() }
     }
 
     // Use the configured API base; EventSource does not support POST.

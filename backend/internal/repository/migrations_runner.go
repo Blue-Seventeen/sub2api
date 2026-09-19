@@ -60,6 +60,9 @@ const latestAPIKeyIPIndexMigration = "174_add_usage_logs_api_key_latest_ip_index
 const latestAPIKeyIPIndex = "idx_usage_logs_api_key_latest_ip"
 const emailAliasDedupIndexMigration = "190_add_users_email_alias_dedup_index_notx.sql"
 const emailAliasDedupIndex = "idx_users_email_dot_stripped"
+const upstreamModelMismatchIndexMigration = "195_add_usage_log_upstream_model_mismatch_index_notx.sql"
+const effectiveModelIndexesMigration = "226_add_usage_log_effective_model_indexes_notx.sql"
+const upstreamRequestIDIndexMigration = "233_add_usage_log_upstream_request_id_index_notx.sql"
 
 var accountGroupSchedulerIndexes = []string{
 	"idx_account_groups_group_priority_account",
@@ -309,6 +312,12 @@ func prepareNonTransactionalMigration(ctx context.Context, db migrationConnectio
 		return dropInvalidIndexes(ctx, db, latestAPIKeyIPIndex)
 	case emailAliasDedupIndexMigration:
 		return dropInvalidIndexes(ctx, db, emailAliasDedupIndex)
+	case upstreamModelMismatchIndexMigration:
+		return dropInvalidIndexes(ctx, db, "idx_usage_logs_upstream_model_mismatch_created_at")
+	case effectiveModelIndexesMigration:
+		return dropInvalidIndexes(ctx, db, "idx_usage_logs_effective_requested_model_created", "idx_usage_logs_effective_upstream_model_created")
+	case upstreamRequestIDIndexMigration:
+		return dropInvalidIndexes(ctx, db, "idx_usage_logs_upstream_request_id")
 	default:
 		return nil
 	}

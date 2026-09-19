@@ -68,6 +68,19 @@ func (r stubOpenAIAccountRepo) GetByID(ctx context.Context, id int64) (*Account,
 	return nil, errors.New("account not found")
 }
 
+func (r stubOpenAIAccountRepo) GetByIDs(ctx context.Context, ids []int64) ([]*Account, error) {
+	accounts := make([]*Account, 0, len(ids))
+	for _, id := range ids {
+		for i := range r.accounts {
+			if r.accounts[i].ID == id {
+				accounts = append(accounts, &r.accounts[i])
+				break
+			}
+		}
+	}
+	return accounts, nil
+}
+
 func (r stubOpenAIAccountRepo) ListSchedulableByGroupIDAndPlatform(ctx context.Context, groupID int64, platform string) ([]Account, error) {
 	var result []Account
 	for _, acc := range r.accounts {
@@ -101,7 +114,7 @@ func TestOpenAIGatewayService_ForwardAsAnthropic_TempUnschedulableReturnsFailove
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
-	upstreamBody := []byte(`{"error":{"message":"Our servers are currently overloaded. Please try again later."}}`)
+	upstreamBody := []byte(`{"error":{"message":"This account is temporarily unavailable."}}`)
 	upstream := &httpUpstreamRecorder{responses: []*http.Response{
 		{
 			StatusCode: http.StatusBadRequest,
@@ -138,7 +151,7 @@ func TestOpenAIGatewayService_ForwardAsAnthropic_TempUnschedulableReturnsFailove
 			"temp_unschedulable_enabled": true,
 			"temp_unschedulable_rules": []any{map[string]any{
 				"error_code":       float64(http.StatusBadRequest),
-				"keywords":         []any{"our servers are currently overloaded", "please try again later"},
+				"keywords":         []any{"this account is temporarily unavailable"},
 				"duration_minutes": float64(1),
 			}},
 		},
@@ -180,21 +193,23 @@ func TestFailoverOpenAIUpstreamHTTPError_NilContextSkipsTempUnschedulablePolicy(
 		Credentials: map[string]any{
 			"temp_unschedulable_enabled": true,
 			"temp_unschedulable_rules": []any{map[string]any{
-				"error_code":       float64(http.StatusBadRequest),
-				"keywords":         []any{"servers are currently overloaded"},
+				"error_code":       float64(http.StatusInternalServerError),
+				"keywords":         []any{"upstream is temporarily unavailable"},
 				"duration_minutes": float64(1),
 			}},
 		},
 	}
-	body := []byte(`{"error":{"message":"Our servers are currently overloaded."}}`)
-	resp := &http.Response{StatusCode: http.StatusBadRequest, Header: http.Header{}}
+	body := []byte(`{"error":{"message":"Upstream is temporarily unavailable."}}`)
+	resp := &http.Response{StatusCode: http.StatusInternalServerError, Header: http.Header{}}
 
 	got := svc.failoverOpenAIUpstreamHTTPError(
 		context.Background(), nil, account, resp, body,
-		"Our servers are currently overloaded.", "gpt-5.4",
+		"Upstream is temporarily unavailable.", "gpt-5.4",
 	)
 
-	require.Nil(t, got)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, got, &failoverErr)
+	require.Equal(t, http.StatusInternalServerError, failoverErr.StatusCode)
 	require.Zero(t, repo.modelRateLimitAccountID)
 	require.Empty(t, repo.modelRateLimitKey)
 }
@@ -606,8 +621,54 @@ func (c stubConcurrencyCache) GetAccountWaitingCount(ctx context.Context, accoun
 }
 
 type stubGatewayCache struct {
-	sessionBindings map[string]int64
-	deletedSessions map[string]int
+	sessionBindings   map[string]int64
+	deletedSessions   map[string]int
+	pendingBilling    map[string][]byte
+	billingClaims     map[string]bool
+	reasoningContents map[string]string
+}
+
+func (c *stubGatewayCache) SetGrokVideoPendingBilling(_ context.Context, key string, payload []byte, _ time.Duration) error {
+	if c.pendingBilling == nil {
+		c.pendingBilling = make(map[string][]byte)
+	}
+	c.pendingBilling[key] = append([]byte(nil), payload...)
+	return nil
+}
+
+func (c *stubGatewayCache) GetGrokVideoPendingBilling(_ context.Context, key string) ([]byte, error) {
+	return append([]byte(nil), c.pendingBilling[key]...), nil
+}
+
+func (c *stubGatewayCache) ClaimGrokVideoBilled(_ context.Context, key string, _ time.Duration) (bool, error) {
+	if c.billingClaims == nil {
+		c.billingClaims = make(map[string]bool)
+	}
+	if c.billingClaims[key] {
+		return false, nil
+	}
+	c.billingClaims[key] = true
+	return true, nil
+}
+
+func (c *stubGatewayCache) ReleaseGrokVideoBilled(_ context.Context, key string) error {
+	delete(c.billingClaims, key)
+	return nil
+}
+
+func (c *stubGatewayCache) SetReasoningContent(_ context.Context, key, content string, _ time.Duration) error {
+	if c.reasoningContents == nil {
+		c.reasoningContents = make(map[string]string)
+	}
+	c.reasoningContents[key] = content
+	return nil
+}
+
+func (c *stubGatewayCache) GetReasoningContent(_ context.Context, key string) (string, error) {
+	if content, ok := c.reasoningContents[key]; ok {
+		return content, nil
+	}
+	return "", ErrReasoningContentNotFound
 }
 
 func (c *stubGatewayCache) GetSessionAccountID(ctx context.Context, groupID int64, sessionHash string) (int64, error) {

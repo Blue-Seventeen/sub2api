@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -111,7 +112,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 
 	promptCacheKey = strings.TrimSpace(promptCacheKey)
 	compatPromptCacheInjected := false
-	if promptCacheKey == "" && account.Type == AccountTypeOAuth && shouldAutoInjectPromptCacheKeyForCompat(upstreamModel) {
+	if promptCacheKey == "" && account.IsOpenAIOAuthLike() && shouldAutoInjectPromptCacheKeyForCompat(upstreamModel) {
 		promptCacheKey = deriveCompatPromptCacheKey(&chatReq, upstreamModel)
 		compatPromptCacheInjected = promptCacheKey != ""
 	}
@@ -195,7 +196,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	}
 	logger.L().Debug("openai chat_completions: model mapping applied", logFields...)
 
-	if account.Type == AccountTypeOAuth {
+	if account.IsOpenAIOAuthLike() {
 		var reqBody map[string]any
 		if err := json.Unmarshal(responsesBody, &reqBody); err != nil {
 			return nil, fmt.Errorf("unmarshal for codex transform: %w", err)
@@ -409,10 +410,19 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	upstreamModel string,
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
+	beginUpstreamResponseModelObservation(c)
+	observer := upstreamResponseModelObserverFromContext(c)
 	requestID := resp.Header.Get("x-request-id")
 
 	finalResponse, usage, acc, err := s.readOpenAICompatBufferedTerminal(resp, "openai chat_completions buffered", requestID)
 	if err != nil {
+		if shouldClassifyOpenAIUpstreamStreamReadError(err, c.Request.Context()) && !errors.Is(err, bufio.ErrTooLong) {
+			classifiedErr := newOpenAIUpstreamStreamReadError(err)
+			code, message, _ := OpenAIUpstreamStreamReadErrorDetails(classifiedErr)
+			failoverErr := s.newOpenAIStreamFailoverError(c, account, false, requestID, nil, message, resp.Header)
+			failoverErr.ResponseBody = []byte(fmt.Sprintf(`{"error":{"type":"upstream_error","code":%q,"message":%q}}`, code, message))
+			return nil, failoverErr
+		}
 		return nil, err
 	}
 
@@ -420,6 +430,8 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 		writeChatCompletionsError(c, http.StatusBadGateway, "api_error", "Upstream stream ended without a terminal response event")
 		return nil, fmt.Errorf("upstream stream ended without terminal event")
 	}
+	terminalPayload, _ := json.Marshal(gin.H{"type": "response.completed", "response": finalResponse})
+	observer.ObserveOpenAI(terminalPayload, "response.completed")
 	if strings.TrimSpace(finalResponse.Status) == "failed" {
 		payload, _ := json.Marshal(gin.H{"type": "response.failed", "response": finalResponse})
 		// cyber_policy 致命不可重试：不 failover，以 Chat Completions 错误格式回写（F4），
@@ -485,6 +497,7 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 		UpstreamModel:                 upstreamModel,
 		UpstreamResponseModel:         observedUpstreamResponseModel(c),
 		UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
+		UpstreamResponseServiceTier:   observer.ServiceTier(),
 		Stream:                        false,
 		Duration:                      time.Since(startTime),
 	}, nil
@@ -924,7 +937,7 @@ func (s *OpenAIGatewayService) shouldFailoverOpenAIChatCompletionsUpstreamRespon
 	if isOpenAIInstructionsRequiredError(statusCode, upstreamMsg, upstreamBody) {
 		return true
 	}
-	return s.shouldFailoverOpenAIUpstreamResponse(statusCode, upstreamMsg, upstreamBody)
+	return s.shouldFailoverOpenAIUpstreamResponse(nil, statusCode, upstreamMsg, upstreamBody)
 }
 
 // writeChatCompletionsError writes an error response in OpenAI Chat Completions format.

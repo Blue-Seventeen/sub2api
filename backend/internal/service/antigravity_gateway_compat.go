@@ -158,7 +158,7 @@ func preserveChatCompletionTokenLimit(request *apicompat.ChatCompletionsRequest,
 		limit = request.MaxCompletionTokens
 	}
 	if limit != nil && *limit > 0 {
-		claudeRequest.MaxTokens = *limit
+		claudeRequest.MaxTokens = min(*limit, antigravityCompatSafeMaxTokens)
 	}
 }
 
@@ -272,12 +272,62 @@ func (s *AntigravityGatewayService) buildAntigravityCompatGeminiBody(
 		if cleaned, cleanErr := cleanGeminiRequest(body); cleanErr == nil {
 			body = cleaned
 		}
+		body = ensureAntigravityMixedToolConfig(body)
 		return s.wrapV1InternalRequest(projectID, mappedModel, body)
 	}
 
 	options := s.getClaudeTransformOptions(ctx)
 	options.EnableIdentityPatch = true
 	return antigravity.TransformClaudeToGeminiWithOptions(claudeRequest, projectID, mappedModel, options)
+}
+
+const antigravityCompatSafeMaxTokens = 64000
+
+func ensureAntigravityMixedToolConfig(body []byte) []byte {
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return body
+	}
+
+	tools, ok := payload["tools"].([]any)
+	if !ok || !hasMixedGeminiToolMaps(tools) {
+		return body
+	}
+
+	toolConfig, _ := payload["toolConfig"].(map[string]any)
+	if toolConfig == nil {
+		toolConfig = make(map[string]any)
+		payload["toolConfig"] = toolConfig
+	}
+	toolConfig["includeServerSideToolInvocations"] = true
+	delete(toolConfig, "include_server_side_tool_invocations")
+
+	updated, err := json.Marshal(payload)
+	if err != nil {
+		return body
+	}
+	return updated
+}
+
+func hasMixedGeminiToolMaps(tools []any) bool {
+	hasFunctionDeclarations := false
+	hasServerSideTool := false
+	for _, raw := range tools {
+		tool, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if declarations, ok := tool["functionDeclarations"].([]any); ok && len(declarations) > 0 {
+			hasFunctionDeclarations = true
+		}
+		if _, ok := tool["googleSearch"]; ok {
+			hasServerSideTool = true
+		}
+		if _, ok := tool["codeExecution"]; ok {
+			hasServerSideTool = true
+		}
+	}
+	return hasFunctionDeclarations && hasServerSideTool
 }
 
 func antigravityCompatProxyURL(account *Account) string {

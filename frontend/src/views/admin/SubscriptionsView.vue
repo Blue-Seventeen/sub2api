@@ -192,12 +192,15 @@
                   }}
                 </span>
               </div>
-              <span class="truncate font-medium text-gray-900 dark:text-white">
+              <RouterLink
+                :to="{ path: '/admin/usage', query: { user_id: row.user_id } }"
+                class="truncate font-medium text-gray-900 hover:text-primary-600 dark:text-white dark:hover:text-primary-400"
+              >
                 {{ userColumnMode === 'email'
                   ? (row.user?.email || t('admin.redeem.userPrefix', { id: row.user_id }))
-                  : (row.user?.username || '-')
+                  : (row.user?.username || t('admin.redeem.userPrefix', { id: row.user_id }))
                 }}
-              </span>
+              </RouterLink>
             </div>
           </template>
 
@@ -992,6 +995,8 @@ import type { SimpleUser } from '@/api/admin/usage'
 import type { Column } from '@/components/common/types'
 import { formatCurrencyAmount, formatDateTimeToMinute } from '@/utils/format'
 import { platformLabel } from '@/utils/platformColors'
+import { GROUP_PLATFORM_OPTIONS } from '@/constants/platforms'
+import { RouterLink } from 'vue-router'
 import { useClipboard } from '@/composables/useClipboard'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -1312,15 +1317,7 @@ const groupOptions = computed(() => [
 
 const platformFilterOptions = computed(() => [
   { value: '', label: t('admin.subscriptions.allPlatforms') },
-  { value: 'anthropic', label: platformDisplayName('anthropic') },
-  { value: 'openai', label: platformDisplayName('openai') },
-  { value: 'gemini', label: platformDisplayName('gemini') },
-  { value: 'antigravity', label: platformDisplayName('antigravity') },
-  { value: 'zhipu', label: platformDisplayName('zhipu') },
-  { value: 'deepseek', label: platformDisplayName('deepseek') },
-  { value: 'volcengine', label: platformDisplayName('volcengine') },
-  { value: 'ali', label: platformDisplayName('ali') },
-  { value: 'moonshot', label: platformDisplayName('moonshot') }
+  ...GROUP_PLATFORM_OPTIONS.map(({ value }) => ({ value, label: platformDisplayName(value) }))
 ])
 
 // Group options for assign (only subscription type groups)

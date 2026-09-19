@@ -717,6 +717,13 @@ func opsNullableIntPointer(v *int) any {
 	return sql.NullInt64{Int64: int64(*v), Valid: true}
 }
 
+func opsNullableInt64Pointer(v *int64) any {
+	if v == nil {
+		return sql.NullInt64{}
+	}
+	return sql.NullInt64{Int64: *v, Valid: true}
+}
+
 func opsNullTime(v any) any {
 	var t time.Time
 	switch x := v.(type) {

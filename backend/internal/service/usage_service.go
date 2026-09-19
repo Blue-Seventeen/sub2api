@@ -22,6 +22,7 @@ type CreateUsageLogRequest struct {
 	APIKeyID              int64   `json:"api_key_id"`
 	AccountID             int64   `json:"account_id"`
 	RequestID             string  `json:"request_id"`
+	UpstreamRequestID     *string `json:"upstream_request_id,omitempty"`
 	Model                 string  `json:"model"`
 	InputTokens           int     `json:"input_tokens"`
 	OutputTokens          int     `json:"output_tokens"`
@@ -104,6 +105,7 @@ func (s *UsageService) Create(ctx context.Context, req CreateUsageLogRequest) (*
 		APIKeyID:                req.APIKeyID,
 		AccountID:               req.AccountID,
 		RequestID:               req.RequestID,
+		UpstreamRequestID:       req.UpstreamRequestID,
 		Model:                   req.Model,
 		InputTokens:             req.InputTokens,
 		OutputTokens:            req.OutputTokens,

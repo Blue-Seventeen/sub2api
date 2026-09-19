@@ -11,6 +11,7 @@ import type { OpsRequestDetailsPreset } from './OpsRequestDetailsModal.vue'
 import { useAdminSettingsStore } from '@/stores'
 import { formatNumber } from '@/utils/format'
 import { platformLabel } from '@/utils/platformColors'
+import { CONCRETE_PLATFORM_OPTIONS } from '@/constants/platforms'
 
 type RealtimeWindow = '1min' | '5min' | '30min' | '1h'
 
@@ -110,23 +111,7 @@ const platformDisplayName = (platform: string) => platformLabel(platform, t)
 
 const platformOptions = computed(() => [
   { value: '', label: t('common.all') },
-  { value: 'openai', label: platformDisplayName('openai') },
-  { value: 'anthropic', label: platformDisplayName('anthropic') },
-  { value: 'gemini', label: platformDisplayName('gemini') },
-  { value: 'antigravity', label: platformDisplayName('antigravity') },
-  { value: 'zhipu', label: platformDisplayName('zhipu') },
-  { value: 'deepseek', label: platformDisplayName('deepseek') },
-  { value: 'volcengine', label: platformDisplayName('volcengine') },
-  { value: 'ali', label: platformDisplayName('ali') },
-  { value: 'moonshot', label: platformDisplayName('moonshot') },
-  { value: 'perplexity', label: platformDisplayName('perplexity') },
-  { value: 'mistral', label: platformDisplayName('mistral') },
-  { value: 'siliconflow', label: platformDisplayName('siliconflow') },
-  { value: 'openrouter', label: platformDisplayName('openrouter') },
-  { value: 'suno', label: platformDisplayName('suno') },
-  { value: 'kling', label: platformDisplayName('kling') },
-  { value: 'midjourney', label: platformDisplayName('midjourney') },
-  { value: 'grok', label: platformDisplayName('grok') }
+  ...CONCRETE_PLATFORM_OPTIONS.map(({ value }) => ({ value, label: platformDisplayName(value) }))
 ])
 
 const timeRangeOptions = computed(() => [

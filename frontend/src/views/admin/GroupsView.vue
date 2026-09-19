@@ -407,6 +407,7 @@
               </button>
               <button
                 data-testid="group-duplicate"
+                v-if="!authStore.isSimpleMode"
                 :title="
                   duplicatingGroupIds.has(row.id)
                     ? t('admin.groups.duplicating')
@@ -426,7 +427,8 @@
                 </span>
               </button>
               <button
-                v-if="row.platform === 'composite'"
+                v-if="!authStore.isSimpleMode && row.platform === 'composite'"
+                data-testid="group-composite-routes"
                 @click="handleCompositeRoutes(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-cyan-600 dark:hover:bg-dark-700 dark:hover:text-cyan-400"
               >
@@ -436,6 +438,8 @@
                 }}</span>
               </button>
               <button
+                v-if="!authStore.isSimpleMode"
+                data-testid="group-rate-multipliers"
                 @click="handleRateMultipliers(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-purple-600 dark:hover:bg-dark-700 dark:hover:text-purple-400"
               >
@@ -445,6 +449,8 @@
                 }}</span>
               </button>
               <button
+                v-if="!authStore.isSimpleMode"
+                data-testid="group-rpm-overrides"
                 @click="handleRPMOverrides(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-orange-600 dark:hover:bg-dark-700 dark:hover:text-orange-400"
               >
@@ -724,6 +730,7 @@
           id-prefix="create-group-reasoning"
           :platform="createForm.platform"
           v-model:max-effort="createForm.max_reasoning_effort"
+          v-model:over-limit="createForm.max_reasoning_effort_over_limit"
           v-model:mappings="createForm.reasoning_effort_mappings"
         />
         <div
@@ -975,7 +982,7 @@
               <div class="flex items-center gap-1.5">
                 <button
                   type="button"
-                  class="rounded px-2 py-1 font-medium text-primary-600 transition-colors hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-900/20"
+                  class="btn btn-secondary shrink-0 whitespace-nowrap px-2 py-1"
                   @click="addModelsListItem(createModelsListState)"
                 >
                   {{ t("admin.groups.modelsList.add") }}
@@ -2276,6 +2283,14 @@
         @submit.prevent="handleUpdateGroup"
         class="space-y-5"
       >
+        <CodexManifestAccountsField
+          v-if="editForm.platform === 'openai' && editingGroup"
+          ref="editCodexManifestRef"
+          :group-id="editingGroup.id"
+          :model-value="editCodexManifestConfig"
+          @update:model-value="Object.assign(editCodexManifestConfig, $event)"
+          :account-names="editCodexManifestAccountNames"
+        />
         <div>
           <label class="input-label">{{ t("admin.groups.form.name") }}</label>
           <input
@@ -2467,6 +2482,7 @@
           id-prefix="edit-group-reasoning"
           :platform="editForm.platform"
           v-model:max-effort="editForm.max_reasoning_effort"
+          v-model:over-limit="editForm.max_reasoning_effort_over_limit"
           v-model:mappings="editForm.reasoning_effort_mappings"
         />
         <div v-if="editForm.subscription_type !== 'subscription'">
@@ -2684,7 +2700,7 @@
               <div class="flex items-center gap-1.5">
                 <button
                   type="button"
-                  class="rounded px-2 py-1 font-medium text-primary-600 transition-colors hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-900/20"
+                  class="btn btn-secondary shrink-0 whitespace-nowrap px-2 py-1"
                   @click="addModelsListItem(editModelsListState)"
                 >
                   {{ t("admin.groups.modelsList.add") }}
@@ -4517,10 +4533,13 @@
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useAppStore } from "@/stores/app";
+import { useAuthStore } from "@/stores/auth";
+import { CONCRETE_PLATFORM_OPTIONS, GROUP_PLATFORM_OPTIONS } from "@/constants/platforms";
 import { useOnboardingStore } from "@/stores/onboarding";
 import { adminAPI } from "@/api/admin";
 import type {
   AdminGroup,
+  CodexModelsManifestConfig,
   CompositeModelRoute,
   CompositeModelRouteInput,
   CompositeRouteDecision,
@@ -4546,6 +4565,7 @@ import GroupRateMultipliersModal from "@/components/admin/group/GroupRateMultipl
 import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesModal.vue";
 import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
 import ReasoningEffortPolicyFields from "@/components/admin/group/ReasoningEffortPolicyFields.vue";
+import CodexManifestAccountsField from "@/components/admin/group/CodexManifestAccountsField.vue";
 import { VueDraggable } from "vue-draggable-plus";
 import { createStableObjectKeyResolver } from "@/utils/stableObjectKey";
 import { extractApiErrorMessage } from "@/utils/apiError";
@@ -4584,8 +4604,8 @@ import {
   removeSelectedModelsListItems,
   setModelsListCandidates,
   startEditModelsListItem,
-} from "./groupsModelsList";
-import { createModelsListCandidatesTracker } from "./groupsModelsListCandidates";
+} from "./groupModelAllowlist";
+import { createModelAllowlistCandidatesTracker as createModelsListCandidatesTracker } from "./modelAllowlistCandidates";
 import { normalizeSupportedModelScopesForPlatform } from "./groupsSupportedModelScopes";
 import {
   isProfitControlPlatform,
@@ -4614,6 +4634,7 @@ import {
 
 const { t } = useI18n();
 const appStore = useAppStore();
+const authStore = useAuthStore();
 const onboardingStore = useOnboardingStore();
 
 const ALWAYS_VISIBLE_COLUMNS = new Set(["name", "actions"]);
@@ -4917,26 +4938,7 @@ const exclusiveOptions = computed(() => [
 const platformDisplayName = (platform: string) => platformLabel(platform, t);
 type VisibleGroupPlatform = GroupPlatform;
 type PlatformSelectOption = { value: VisibleGroupPlatform; label: string };
-const groupPlatformValues: VisibleGroupPlatform[] = [
-  "anthropic",
-  "openai",
-  "gemini",
-  "antigravity",
-  "zhipu",
-  "deepseek",
-  "volcengine",
-  "ali",
-  "moonshot",
-  "perplexity",
-  "mistral",
-  "siliconflow",
-  "openrouter",
-  "suno",
-  "kling",
-  "midjourney",
-  "composite",
-  "grok",
-];
+const groupPlatformValues: VisibleGroupPlatform[] = [...GROUP_PLATFORM_OPTIONS].map(({ value }) => value);
 
 const platformOptions = computed<PlatformSelectOption[]>(() =>
   groupPlatformValues.map((value) => ({
@@ -5001,6 +5003,20 @@ const createPlatformSearchMeta: Record<
     iconActiveClass:
       "bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100",
     textActiveClass: "text-zinc-900 dark:text-zinc-100",
+  },
+  kimi: {
+    subtitle: "Kimi / Moonshot",
+    searchTerms: ["kimi", "moonshot", "coding"],
+    activeClass: "border-pink-200 bg-white shadow-sm dark:border-pink-900/50 dark:bg-dark-600",
+    iconActiveClass: "bg-pink-50 text-pink-600 dark:bg-pink-900/30 dark:text-pink-300",
+    textActiveClass: "text-pink-600 dark:text-pink-300",
+  },
+  minimax: {
+    subtitle: "MiniMax",
+    searchTerms: ["minimax", "mimo", "voice"],
+    activeClass: "border-indigo-200 bg-white shadow-sm dark:border-indigo-900/30 dark:bg-dark-600",
+    iconActiveClass: "bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-300",
+    textActiveClass: "text-indigo-600 dark:text-indigo-300",
   },
   composite: {
     subtitle: "Multi-provider route",
@@ -5126,25 +5142,7 @@ const platformFilterOptions = computed(() => [
   ...platformOptions.value,
 ]);
 
-const compositeRouteTargetPlatforms: Exclude<GroupPlatform, "composite">[] = [
-  "anthropic",
-  "openai",
-  "gemini",
-  "antigravity",
-  "grok",
-  "zhipu",
-  "deepseek",
-  "volcengine",
-  "ali",
-  "moonshot",
-  "perplexity",
-  "mistral",
-  "siliconflow",
-  "openrouter",
-  "suno",
-  "kling",
-  "midjourney",
-];
+const compositeRouteTargetPlatforms: Exclude<GroupPlatform, "composite">[] = [...CONCRETE_PLATFORM_OPTIONS].map(({ value }) => value);
 
 const compositeRoutePlatformOptions = computed(() =>
   compositeRouteTargetPlatforms.map((value) => ({
@@ -5408,6 +5406,14 @@ type ReasoningEffortPolicyFieldsExpose = {
 };
 const createReasoningEffortPolicyRef = ref<ReasoningEffortPolicyFieldsExpose | null>(null);
 const editReasoningEffortPolicyRef = ref<ReasoningEffortPolicyFieldsExpose | null>(null);
+const editCodexManifestRef = ref<InstanceType<typeof CodexManifestAccountsField> | null>(null);
+const createCodexManifestDefaults = (): CodexModelsManifestConfig => ({
+  enabled: false,
+  account_ids: [],
+  fallback_to_scheduler: false,
+});
+const editCodexManifestConfig = reactive<CodexModelsManifestConfig>(createCodexManifestDefaults());
+const editCodexManifestAccountNames = ref<Record<number, string>>({});
 const modelsListCandidatesTracker = createModelsListCandidatesTracker();
 const createModelsListSelectedCount = computed(
   () => createModelsListState.items.filter((item) => item.selected).length,
@@ -5484,6 +5490,7 @@ const createForm = reactive({
   rpm_limit: 0 as number,
   newapi_style_interface_enabled: false,
   max_reasoning_effort: "",
+  max_reasoning_effort_over_limit: "downgrade",
   reasoning_effort_mappings: [] as ReasoningEffortMappingRow[],
 });
 
@@ -5897,6 +5904,7 @@ const editForm = reactive({
   rpm_limit: 0 as number,
   newapi_style_interface_enabled: false,
   max_reasoning_effort: "",
+  max_reasoning_effort_over_limit: "downgrade",
   reasoning_effort_mappings: [] as ReasoningEffortMappingRow[],
 });
 
@@ -6329,6 +6337,7 @@ const closeCreateModal = () => {
   createForm.rpm_limit = 0;
   createForm.newapi_style_interface_enabled = false;
   createForm.max_reasoning_effort = "";
+  createForm.max_reasoning_effort_over_limit = "downgrade";
   createForm.reasoning_effort_mappings = [];
   createReasoningEffortPolicyRef.value?.resetValidation();
   resetModelsListState(createModelsListState);
@@ -6431,6 +6440,7 @@ const handleCreateGroup = async () => {
         createModelRoutingRules.value,
       ),
       models_list_config: buildModelsListConfig(createModelsListState),
+      codex_models_manifest_config: createCodexManifestDefaults(),
       supported_model_scopes: normalizeSupportedModelScopesForPlatform(
         createForm.platform,
         createForm.supported_model_scopes,
@@ -6590,6 +6600,21 @@ const handleEdit = async (group: AdminGroup) => {
     group.platform,
   );
   resetModelsListState(editModelsListState, group.models_list_config);
+  const savedManifest = group.codex_models_manifest_config ?? createCodexManifestDefaults();
+  Object.assign(editCodexManifestConfig, {
+    enabled: savedManifest.enabled ?? false,
+    account_ids: [...(savedManifest.account_ids ?? [])],
+    fallback_to_scheduler: savedManifest.fallback_to_scheduler ?? false,
+  });
+  editCodexManifestAccountNames.value = {};
+  for (const id of editCodexManifestConfig.account_ids) {
+    void adminAPI.accounts.getById(id).then((account) => {
+      if (editingGroup.value?.id === group.id) editCodexManifestAccountNames.value[id] = account.name;
+    }).catch(() => {
+      // Unavailable accounts retain their ID label in the selector.
+    });
+  }
+  editForm.max_reasoning_effort_over_limit = group.max_reasoning_effort_over_limit || "downgrade";
   // 鍔犺浇妯″瀷璺敱瑙勫垯锛堝紓姝ュ姞杞借处鍙峰悕绉帮級
   editForm.newapi_style_interface_enabled =
     group.newapi_style_interface_enabled ?? false;
@@ -6608,6 +6633,7 @@ const closeEditModal = () => {
   showEditModal.value = false;
   editingGroup.value = null;
   editForm.max_reasoning_effort = "";
+  editForm.max_reasoning_effort_over_limit = "downgrade";
   editForm.reasoning_effort_mappings = [];
   editReasoningEffortPolicyRef.value?.resetValidation();
   editModelRoutingRules.value = [];
@@ -6629,6 +6655,9 @@ const closeEditModal = () => {
   resetMessagesDispatchFormState(editForm);
   editForm.allow_live = false;
   resetModelsListState(editModelsListState);
+  Object.assign(editCodexManifestConfig, createCodexManifestDefaults());
+  editCodexManifestAccountNames.value = {};
+  editCodexManifestRef.value?.resetValidation();
 };
 
 const handleUpdateGroup = async () => {
@@ -6647,6 +6676,11 @@ const handleUpdateGroup = async () => {
     return;
   }
   if (!validateProfitControlForm(editForm)) {
+    return;
+  }
+  if (editForm.platform === "openai" && editCodexManifestConfig.enabled && editCodexManifestConfig.account_ids.length === 0) {
+    appStore.showError(t("admin.groups.codexModelsManifest.selectAtLeastOne"));
+    editCodexManifestRef.value?.validate();
     return;
   }
 
@@ -6678,6 +6712,9 @@ const handleUpdateGroup = async () => {
         editModelRoutingRules.value,
       ),
       models_list_config: buildModelsListConfig(editModelsListState),
+      codex_models_manifest_config: editForm.platform === "openai"
+        ? { ...editCodexManifestConfig, account_ids: [...editCodexManifestConfig.account_ids] }
+        : createCodexManifestDefaults(),
       supported_model_scopes: normalizeSupportedModelScopesForPlatform(
         editForm.platform,
         editForm.supported_model_scopes,
@@ -6743,7 +6780,7 @@ const handleUpdateGroup = async () => {
     loadGroups();
   } catch (error: any) {
     appStore.showError(
-      error.response?.data?.detail || t("admin.groups.failedToUpdate"),
+      extractApiErrorMessage(error, t("admin.groups.failedToUpdate")),
     );
     console.error("Error updating group:", error);
   } finally {

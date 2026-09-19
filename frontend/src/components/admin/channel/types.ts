@@ -1,4 +1,4 @@
-import type { BillingMode, PricingInterval } from '@/api/admin/channels'
+import type { BillingMode, ChannelTimePricing, PricingInterval } from '@/api/admin/channels'
 
 type TranslateFn = (key: string, params?: Record<string, unknown>) => string
 
@@ -9,7 +9,12 @@ export interface IntervalFormEntry {
   input_price: number | string | null
   output_price: number | string | null
   cache_write_price: number | string | null
+  cache_write_1h_price?: number | string | null
   cache_read_price: number | string | null
+  input_multiplier?: number | string | null
+  output_multiplier?: number | string | null
+  cache_write_multiplier?: number | string | null
+  cache_read_multiplier?: number | string | null
   per_request_price: number | string | null
   sort_order: number
 }
@@ -20,11 +25,119 @@ export interface PricingFormEntry {
   input_price: number | string | null
   output_price: number | string | null
   cache_write_price: number | string | null
+  cache_write_1h_price?: number | string | null
   cache_read_price: number | string | null
+  fast_multiplier?: number | string | null
+  flex_multiplier?: number | string | null
+  max_reasoning_effort_multiplier?: number | string | null
   image_input_price: number | string | null
   image_output_price: number | string | null
   per_request_price: number | string | null
   intervals: IntervalFormEntry[]
+  time_pricing: TimePricingFormEntry
+}
+
+export interface TimePricingPeriodFormEntry {
+  start_time: string
+  end_time: string
+  multiplier: number | string
+}
+
+export interface TimePricingFormEntry {
+  timezone: string
+  weekdays_only?: boolean
+  periods: TimePricingPeriodFormEntry[]
+}
+
+export const COMMON_TIMEZONES = [
+  'UTC', 'Asia/Shanghai', 'Asia/Tokyo', 'Asia/Seoul', 'Asia/Singapore', 'Asia/Kolkata',
+  'Australia/Sydney', 'Europe/London', 'Europe/Paris', 'Europe/Berlin',
+  'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
+  'America/Toronto', 'America/Sao_Paulo', 'Pacific/Auckland', 'Pacific/Honolulu',
+]
+
+export function createDefaultTimePricingForm(): TimePricingFormEntry {
+  return { timezone: 'Asia/Shanghai', weekdays_only: false, periods: [] }
+}
+
+export function apiTimePricingToForm(value: ChannelTimePricing | null | undefined): TimePricingFormEntry {
+  return value ? {
+    timezone: value.timezone || 'Asia/Shanghai',
+    weekdays_only: value.weekdays_only === true,
+    periods: (value.periods || []).map(period => ({
+      ...period,
+      start_time: /^\d{2}:\d{2}$/.test(period.start_time) ? `${period.start_time}:00` : period.start_time,
+      end_time: /^\d{2}:\d{2}$/.test(period.end_time) ? `${period.end_time}:00` : period.end_time,
+      multiplier: Number(period.multiplier).toFixed(2),
+    })),
+  } : createDefaultTimePricingForm()
+}
+
+export function formTimePricingToAPI(value: TimePricingFormEntry | null | undefined): ChannelTimePricing | null {
+  if (!value?.periods?.length) return null
+  return {
+    timezone: typeof value.timezone === 'string' ? value.timezone.trim() : '',
+    weekdays_only: value.weekdays_only,
+    periods: value.periods.map(period => ({
+      start_time: period.start_time,
+      end_time: period.end_time,
+      multiplier: Number(period.multiplier),
+    })),
+  }
+}
+
+export function isValidTimePricingMultiplier(value: number | string): boolean {
+  const numericValue = Number(value)
+  return /^\d+(?:\.\d{1,2})?$/.test(String(value)) && Number.isFinite(numericValue) && numericValue > 0
+}
+
+export function isValidPositiveMultiplier(value: number | string | null | undefined): boolean {
+  if (value === null || value === undefined || value === '') return true
+  const numericValue = Number(value)
+  return Number.isFinite(numericValue) && numericValue > 0
+}
+
+function timeSeconds(value: string, isEnd = false): number {
+  if (isEnd && value === '00:00:00') return 24 * 60 * 60
+  const [hours, minutes, seconds = 0] = value.split(':').map(Number)
+  return hours * 3600 + minutes * 60 + seconds
+}
+
+export function validateTimePricing(value: TimePricingFormEntry, t: TranslateFn): string | null {
+  if (!value?.periods?.length) return null
+  if (typeof value.timezone !== 'string' || value.timezone.trim() === '') return t('admin.channels.timePricingValidation.timezone')
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value.timezone })
+  } catch {
+    return t('admin.channels.timePricingValidation.timezone')
+  }
+  const ranges: Array<{ start: number; end: number }> = []
+  for (const period of value.periods) {
+    if (!/^\d{2}:\d{2}:\d{2}$/.test(period.start_time) || !/^\d{2}:\d{2}:\d{2}$/.test(period.end_time)) {
+      return t('admin.channels.timePricingValidation.format')
+    }
+    const start = timeSeconds(period.start_time)
+    const end = timeSeconds(period.end_time, true)
+    if (period.start_time === period.end_time) return t('admin.channels.timePricingValidation.range')
+    if (start >= end) return t('admin.channels.timePricingValidation.range')
+    if (!isValidTimePricingMultiplier(period.multiplier)) return t('admin.channels.timePricingValidation.multiplier')
+    ranges.push({ start, end })
+  }
+  ranges.sort((left, right) => left.start - right.start)
+  for (let index = 1; index < ranges.length; index += 1) {
+    if (ranges[index].start < ranges[index - 1].end) return t('admin.channels.timePricingValidation.overlap')
+  }
+  return null
+}
+
+export function formatTimezoneOffset(timezone: string, at = new Date()): string {
+  try {
+    const part = new Intl.DateTimeFormat('en-US', { timeZone: timezone, timeZoneName: 'shortOffset' })
+      .formatToParts(at).find(item => item.type === 'timeZoneName')?.value
+    return part && part !== 'GMT' ? part.replace('GMT', 'UTC') : 'UTC+00:00'
+  } catch {
+    return ''
+  }
 }
 
 // 价格转换：后端存 per-token，前端显示 per-MTok ($/1M tokens)
@@ -57,9 +170,14 @@ export function apiIntervalsToForm(intervals: PricingInterval[]): IntervalFormEn
     input_price: perTokenToMTok(iv.input_price),
     output_price: perTokenToMTok(iv.output_price),
     cache_write_price: perTokenToMTok(iv.cache_write_price),
+    cache_write_1h_price: perTokenToMTok(iv.cache_write_1h_price),
     cache_read_price: perTokenToMTok(iv.cache_read_price),
     per_request_price: iv.per_request_price,
-    sort_order: iv.sort_order
+    sort_order: iv.sort_order,
+    input_multiplier: toNullableNumber(iv.input_multiplier),
+    output_multiplier: toNullableNumber(iv.output_multiplier),
+    cache_write_multiplier: toNullableNumber(iv.cache_write_multiplier),
+    cache_read_multiplier: toNullableNumber(iv.cache_read_multiplier)
   }))
 }
 
@@ -71,9 +189,14 @@ export function formIntervalsToAPI(intervals: IntervalFormEntry[]): PricingInter
     input_price: mTokToPerToken(iv.input_price),
     output_price: mTokToPerToken(iv.output_price),
     cache_write_price: mTokToPerToken(iv.cache_write_price),
+    cache_write_1h_price: mTokToPerToken(iv.cache_write_1h_price),
     cache_read_price: mTokToPerToken(iv.cache_read_price),
     per_request_price: toNullableNumber(iv.per_request_price),
-    sort_order: iv.sort_order
+    sort_order: iv.sort_order,
+    input_multiplier: toNullableNumber(iv.input_multiplier),
+    output_multiplier: toNullableNumber(iv.output_multiplier),
+    cache_write_multiplier: toNullableNumber(iv.cache_write_multiplier),
+    cache_read_multiplier: toNullableNumber(iv.cache_read_multiplier)
   }))
 }
 
@@ -203,6 +326,15 @@ function validateIntervalPrices(iv: IntervalFormEntry, idx: number, t: Translate
         { index, field },
       )
     }
+  }
+  const multipliers: [string, number | string | null | undefined][] = [
+    ['inputMultiplier', iv.input_multiplier],
+    ['outputMultiplier', iv.output_multiplier],
+    ['cacheWriteMultiplier', iv.cache_write_multiplier],
+    ['cacheReadMultiplier', iv.cache_read_multiplier],
+  ]
+  for (const [key, val] of multipliers) {
+    if (!isValidPositiveMultiplier(val)) return intervalValidationMessage(t, 'multiplierPositive', { index, field: intervalPriceLabel(t, key) })
   }
   return null
 }

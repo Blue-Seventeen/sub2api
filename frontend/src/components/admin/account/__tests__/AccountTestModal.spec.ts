@@ -33,6 +33,9 @@ vi.mock('vue-i18n', async () => {
         if (key === 'admin.accounts.imageReceived' && params?.count) {
           return `received-${params.count}`
         }
+        if (key === 'admin.accounts.imagePreviewAlt' && params?.index) {
+          return `test-image-${params.index}`
+        }
         return messages[key] || key
       }
     })
@@ -248,8 +251,42 @@ describe('AccountTestModal', () => {
     const [, request] = (global.fetch as any).mock.calls[0]
     expect(JSON.parse(request.body)).toEqual({
       model_id: 'grok-4.3',
-      prompt: ''
+      prompt: '',
+      mode: 'default',
+      test_type: 'auto'
     })
+  })
+
+  it('lets the backend infer automatic Grok media probes after resolving model mappings', async () => {
+    getAvailableModels.mockResolvedValue([{ id: 'public-media-alias', display_name: 'Mapped media model' }])
+    global.fetch = vi.fn().mockResolvedValue(createStreamResponse([
+      'data: {"type":"test_complete","success":true}\n'
+    ])) as any
+    const wrapper = mountModal(true, { platform: 'grok', type: 'oauth' })
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text().includes('admin.accounts.startTest'))!.trigger('click')
+    await flushPromises()
+    expect(JSON.parse((global.fetch as any).mock.calls[0][1].body)).toEqual({
+      model_id: 'public-media-alias', prompt: '', mode: 'default', test_type: 'auto'
+    })
+    wrapper.unmount()
+  })
+
+  it('preserves explicit Grok probe selection instead of silently sending an automatic probe', async () => {
+    getAvailableModels.mockResolvedValue([{ id: 'grok-4.3', display_name: 'Grok 4.3' }])
+    global.fetch = vi.fn().mockResolvedValue(createStreamResponse([
+      'data: {"type":"test_complete","success":true}\n'
+    ])) as any
+    const wrapper = mountModal(true, { platform: 'grok', type: 'oauth' })
+    await flushPromises()
+    ;(wrapper.vm as any).testType = 'image'
+    await wrapper.vm.$nextTick()
+    await wrapper.findAll('button').find(button => button.text().includes('admin.accounts.startTest'))!.trigger('click')
+    await flushPromises()
+    expect(JSON.parse((global.fetch as any).mock.calls[0][1].body)).toMatchObject({
+      model_id: 'grok-4.3', mode: 'default', test_type: 'image'
+    })
+    wrapper.unmount()
   })
 
   it('shows every explicit test type for any account', async () => {

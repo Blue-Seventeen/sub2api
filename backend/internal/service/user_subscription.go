@@ -1,6 +1,10 @@
 package service
 
-import "time"
+import (
+	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
+)
 
 const (
 	subscriptionDailyWindow   = 24 * time.Hour
@@ -116,13 +120,8 @@ func (s *UserSubscription) NeedsDailyReset() bool {
 }
 
 func (s *UserSubscription) NeedsDailyResetAt(now time.Time) bool {
-	if s.DailyWindowStart == nil {
-		return false
-	}
-	if s.HasOneTimeDailyQuota() {
-		return false
-	}
-	return subscriptionWindowExpired(s.DailyWindowStart, subscriptionDailyWindow, now)
+	_, ok := s.automaticDailyWindowStartAt(now)
+	return ok
 }
 
 func (s *UserSubscription) NeedsWeeklyReset() bool {
@@ -159,8 +158,23 @@ func (s *UserSubscription) NeedsCustomResetAt(group *Group, now time.Time) bool 
 }
 
 func (s *UserSubscription) canAutomaticallyResetDailyAt(now time.Time) bool {
-	_, ok := s.automaticWindowStartAt(s.DailyWindowStart, 24*time.Hour, now)
-	return !s.HasOneTimeDailyQuota() && ok
+	_, ok := s.automaticDailyWindowStartAt(now)
+	return ok
+}
+
+// automaticDailyWindowStartAt keeps daily quota windows aligned to calendar
+// midnights in the configured server timezone. A persisted non-midnight
+// legacy/manual anchor is healed at the next calendar boundary.
+func (s *UserSubscription) automaticDailyWindowStartAt(now time.Time) (time.Time, bool) {
+	if s.DailyWindowStart == nil || s.HasOneTimeDailyQuota() {
+		return time.Time{}, false
+	}
+
+	today := timezone.StartOfDay(now)
+	if !today.After(timezone.StartOfDay(*s.DailyWindowStart)) {
+		return time.Time{}, false
+	}
+	return today, true
 }
 
 func (s *UserSubscription) canAutomaticallyResetWeeklyAt(now time.Time) bool {
@@ -207,7 +221,7 @@ func (s *UserSubscription) DailyResetTime() *time.Time {
 		t := s.ExpiresAt
 		return &t
 	}
-	t := s.DailyWindowStart.Add(subscriptionDailyWindow)
+	t := timezone.StartOfDay(*s.DailyWindowStart).AddDate(0, 0, 1)
 	return &t
 }
 
@@ -215,7 +229,7 @@ func (s *UserSubscription) EffectiveDisplayDailyResetTime() *time.Time {
 	if s.DailyWindowStart == nil || s.HasOneTimeDailyQuota() {
 		return nil
 	}
-	t := s.DailyWindowStart.Add(subscriptionDailyWindow)
+	t := timezone.StartOfDay(*s.DailyWindowStart).AddDate(0, 0, 1)
 	return &t
 }
 
@@ -223,7 +237,7 @@ func (s *UserSubscription) WeeklyResetTime() *time.Time {
 	if s.WeeklyWindowStart == nil {
 		return nil
 	}
-	t := s.WeeklyWindowStart.Add(subscriptionWeeklyWindow)
+	t := s.windowResetAnchor(s.WeeklyWindowStart).Add(subscriptionWeeklyWindow)
 	return &t
 }
 
@@ -231,8 +245,20 @@ func (s *UserSubscription) MonthlyResetTime() *time.Time {
 	if s.MonthlyWindowStart == nil {
 		return nil
 	}
-	t := s.MonthlyWindowStart.Add(subscriptionMonthlyWindow)
+	t := s.windowResetAnchor(s.MonthlyWindowStart).Add(subscriptionMonthlyWindow)
 	return &t
+}
+
+func (s *UserSubscription) windowResetAnchor(previous *time.Time) time.Time {
+	if previous == nil {
+		return time.Time{}
+	}
+	anchor := *previous
+	legacyAnchor := startOfDay(s.StartsAt)
+	if legacyAnchor.Before(s.StartsAt) && anchor.Equal(legacyAnchor) {
+		return s.StartsAt
+	}
+	return anchor
 }
 
 func (s *UserSubscription) CustomResetTime(group *Group) *time.Time {

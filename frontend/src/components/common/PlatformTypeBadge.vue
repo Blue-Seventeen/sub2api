@@ -126,6 +126,10 @@ const planLabel = computed(() => {
       return props.platform === 'grok' ? 'Grok Free' : 'Free'
     case 'supergrok':
       return 'SuperGrok'
+    case 'supergroklite':
+      return 'SuperGrok Lite'
+    case 'heavy':
+      return 'Heavy'
     case 'supergrokheavy':
       return 'SuperGrok Heavy'
     case 'abnormal':
@@ -144,6 +148,8 @@ const planIconName = computed<'bolt' | null>(() => {
   if (props.platform !== 'grok') return null
   if (
     normalizedPlanType.value === 'supergrok' ||
+    normalizedPlanType.value === 'supergroklite' ||
+    normalizedPlanType.value === 'heavy' ||
     normalizedPlanType.value === 'supergrokheavy'
   ) {
     return 'bolt'
@@ -157,6 +163,11 @@ const typeClass = computed(() => platformBadgeLightClass(props.platform))
 const planBadgeClass = computed(() => {
   if (normalizedPlanType.value === 'abnormal') {
     return 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400'
+  }
+  if (props.platform === 'grok') {
+    if (isGrokFreePlan.value) return 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
+    if (['supergrok', 'supergroklite'].includes(normalizedPlanType.value)) return 'bg-cyan-100 text-cyan-600 dark:bg-cyan-900/30 dark:text-cyan-400'
+    if (['supergrokheavy', 'heavy'].includes(normalizedPlanType.value)) return 'bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400'
   }
   return typeClass.value
 })

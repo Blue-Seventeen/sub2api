@@ -45,6 +45,7 @@ export async function getRealtimeMetrics(): Promise<{
 }
 
 export interface TrendParams {
+  native_compaction_v2?: boolean
   start_date?: string
   end_date?: string
   granularity?: 'day' | 'hour'

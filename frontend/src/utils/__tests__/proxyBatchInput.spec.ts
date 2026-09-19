@@ -5,7 +5,8 @@ describe('proxyBatchInput', () => {
   it('parses IPv6 host literals and encoded auth', () => {
     expect(parseProxyUrl('socks5h://user%40name:p%3Ass@[2001:db8::1]:1080')).toEqual({
       protocol: 'socks5h',
-      host: '[2001:db8::1]',
+      // The backend uses net.JoinHostPort, which adds the URL brackets.
+      host: '2001:db8::1',
       port: 1080,
       username: 'user@name',
       password: 'p:ss'

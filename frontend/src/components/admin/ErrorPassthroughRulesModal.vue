@@ -439,6 +439,7 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { platformLabel } from '@/utils/platformColors'
+import { CONCRETE_PLATFORM_OPTIONS } from '@/constants/platforms'
 
 const props = defineProps<{
   show: boolean
@@ -488,25 +489,7 @@ const matchModeOptions = computed(() => [
 
 const platformDisplayName = (platform: string) => platformLabel(platform, t)
 
-const platformOptions = computed(() => [
-  { value: 'anthropic', label: platformDisplayName('anthropic') },
-  { value: 'openai', label: platformDisplayName('openai') },
-  { value: 'gemini', label: platformDisplayName('gemini') },
-  { value: 'antigravity', label: platformDisplayName('antigravity') },
-  { value: 'zhipu', label: platformDisplayName('zhipu') },
-  { value: 'deepseek', label: platformDisplayName('deepseek') },
-  { value: 'volcengine', label: platformDisplayName('volcengine') },
-  { value: 'ali', label: platformDisplayName('ali') },
-  { value: 'moonshot', label: platformDisplayName('moonshot') },
-  { value: 'perplexity', label: platformDisplayName('perplexity') },
-  { value: 'mistral', label: platformDisplayName('mistral') },
-  { value: 'siliconflow', label: platformDisplayName('siliconflow') },
-  { value: 'openrouter', label: platformDisplayName('openrouter') },
-  { value: 'suno', label: platformDisplayName('suno') },
-  { value: 'kling', label: platformDisplayName('kling') },
-  { value: 'midjourney', label: platformDisplayName('midjourney') },
-  { value: 'grok', label: platformDisplayName('grok') }
-])
+const platformOptions = computed(() => CONCRETE_PLATFORM_OPTIONS.map(({ value }) => ({ value, label: platformDisplayName(value) })))
 
 // Load rules when dialog opens
 watch(() => props.show, (newVal) => {
