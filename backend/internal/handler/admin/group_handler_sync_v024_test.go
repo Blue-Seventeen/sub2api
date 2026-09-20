@@ -107,6 +107,27 @@ func TestGroupRequestsSyncV024OmittedFieldsStayUnchanged(t *testing.T) {
 	require.False(t, svc.createdGroups[0].PeakRateEnabledSet)
 }
 
+func TestGroupCreateRequestModelsListConfigPresenceIsPreserved(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		set  bool
+	}{
+		{name: "omitted", body: `{"name":"default"}`, set: false},
+		{name: "explicitly disabled", body: `{"name":"disabled","models_list_config":{"enabled":false,"models":[]}}`, set: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := newStubAdminService()
+			syncGroupRequest(t, svc, http.MethodPost, []byte(tc.body))
+			require.Equal(t, tc.set, svc.createdGroups[0].ModelsListConfigSet)
+			if tc.set {
+				require.False(t, svc.createdGroups[0].ModelsListConfig.Enabled)
+				require.Empty(t, svc.createdGroups[0].ModelsListConfig.Models)
+			}
+		})
+	}
+}
+
 func TestGroupRequestsSyncV024Platforms(t *testing.T) {
 	for _, platform := range []string{"kimi", "minimax", "moonshot", "volcengine", "ali", "perplexity", "mistral", "siliconflow", "openrouter", "suno", "kling", "midjourney"} {
 		for _, method := range []string{http.MethodPost, http.MethodPut} {

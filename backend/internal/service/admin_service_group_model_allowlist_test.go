@@ -67,6 +67,53 @@ func TestAdminService_CreateGroup_NormalizesModelAllowlist(t *testing.T) {
 	require.Equal(t, []string{"gpt-5.4", "claude-*"}, repo.created.ModelAllowlist.Models)
 }
 
+func TestAdminService_CreateGroup_CanonicalExplicitEmptyWinsOverLegacyAlias(t *testing.T) {
+	repo := &groupRepoStubForAdmin{createID: 53}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	_, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
+		Name:                "canonical-empty-group",
+		Platform:            PlatformOpenAI,
+		RateMultiplier:      1,
+		ModelsListConfigSet: true,
+		ModelsListConfig:    GroupModelsListConfig{Enabled: false},
+		ModelAllowlist:      GroupModelAllowlist{Enabled: true, Models: []string{"legacy-only"}},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, repo.created)
+	require.False(t, repo.created.ModelsListConfig.Enabled)
+	require.Empty(t, repo.created.ModelsListConfig.Models)
+	require.Equal(t, repo.created.ModelsListConfig, GroupModelsListConfig{Enabled: repo.created.ModelAllowlist.Enabled, Models: repo.created.ModelAllowlist.Models})
+}
+
+type globalModelAdminRepoStub struct {
+	groupRepoStubForAdmin
+	summary *GlobalModelOperationSummary
+}
+
+func (r *globalModelAdminRepoStub) UpdateWithGlobalModelOperations(_ context.Context, group *Group, _ []GroupModelOperation) (*GlobalModelOperationSummary, error) {
+	group.ModelsListConfig = GroupModelsListConfig{Enabled: true, Models: []string{"canonical-final"}}
+	group.ModelAllowlist = GroupModelAllowlist{Enabled: true, Models: []string{"canonical-final"}}
+	r.updated = group
+	return r.summary, nil
+}
+
+func TestAdminService_UpdateGroup_GlobalOperationKeepsReturnedCurrentGroupInSync(t *testing.T) {
+	existing := &Group{ID: 9, Name: "global", Platform: PlatformOpenAI, Status: StatusActive}
+	repo := &globalModelAdminRepoStub{summary: &GlobalModelOperationSummary{TargetPlatform: PlatformOpenAI, AffectedGroupIDs: []int64{9}}}
+	repo.getByID = existing
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	got, err := svc.UpdateGroup(context.Background(), existing.ID, &UpdateGroupInput{
+		GlobalModelOperations: []GroupModelOperation{{Operation: "add", Model: "canonical-final"}},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, GroupModelsListConfig{Enabled: true, Models: []string{"canonical-final"}}, got.ModelsListConfig)
+	require.Equal(t, GroupModelAllowlist{Enabled: true, Models: []string{"canonical-final"}}, got.ModelAllowlist)
+}
+
 func TestAdminService_UpdateGroup_RejectsEmptyEnabledModelAllowlist(t *testing.T) {
 	existing := &Group{ID: 1, Name: "existing", Platform: PlatformOpenAI, Status: StatusActive}
 	repo := &groupRepoStubForAdmin{getByID: existing}

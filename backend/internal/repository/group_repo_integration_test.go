@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -199,6 +200,102 @@ func (s *GroupRepoSuite) TestUpdate() {
 	got, err := s.repo.GetByID(s.ctx, group.ID)
 	s.Require().NoError(err, "GetByID after update")
 	s.Require().Equal("updated", got.Name)
+}
+
+func (s *GroupRepoSuite) TestGlobalModelOperationsScopesTargetsAndWritesOneEventPerAffectedGroup() {
+	newGroup := func(name, platform, status, subscription string, config service.GroupModelsListConfig) *service.Group {
+		g := &service.Group{
+			Name: name, Platform: platform, RateMultiplier: 1, Status: status,
+			SubscriptionType: subscription, ModelsListConfig: config,
+			ModelAllowlist: service.GroupModelAllowlist{Enabled: config.Enabled, Models: append([]string(nil), config.Models...)},
+		}
+		s.Require().NoError(s.repo.Create(s.ctx, g))
+		return g
+	}
+	current := newGroup("global-current", service.PlatformOpenAI, service.StatusActive, service.SubscriptionTypeStandard,
+		service.GroupModelsListConfig{Enabled: false, Models: []string{"gpt-model", "gpt-*"}})
+	inactive := newGroup("global-inactive", service.PlatformOpenAI, "inactive", service.SubscriptionTypeStandard,
+		service.GroupModelsListConfig{Enabled: true, Models: []string{"gpt-model", "gpt-*"}})
+	subscription := newGroup("global-subscription", service.PlatformOpenAI, service.StatusActive, service.SubscriptionTypeSubscription,
+		service.GroupModelsListConfig{Enabled: true, Models: []string{"gpt-model", "gpt-*"}})
+	otherPlatform := newGroup("global-other-platform", service.PlatformAnthropic, service.StatusActive, service.SubscriptionTypeStandard,
+		service.GroupModelsListConfig{Enabled: true, Models: []string{"gpt-model"}})
+	softDeleted := newGroup("global-soft-deleted", service.PlatformOpenAI, service.StatusActive, service.SubscriptionTypeStandard,
+		service.GroupModelsListConfig{Enabled: true, Models: []string{"gpt-model"}})
+	_, err := s.tx.ExecContext(s.ctx, "UPDATE groups SET deleted_at = NOW() WHERE id = $1", softDeleted.ID)
+	s.Require().NoError(err)
+	_, err = s.tx.ExecContext(s.ctx, "DELETE FROM scheduler_outbox")
+	s.Require().NoError(err)
+
+	current.ModelsListConfig = service.GroupModelsListConfig{Enabled: false, Models: []string{"gpt-model", "gpt-*"}}
+	current.ModelAllowlist = service.GroupModelAllowlist{Enabled: false, Models: []string{"gpt-model", "gpt-*"}}
+	summary, err := s.repo.UpdateWithGlobalModelOperations(s.ctx, current, []service.GroupModelOperation{
+		{Operation: "remove", Model: "GPT-MODEL"},
+		{Operation: "add", Model: "last-wins"},
+		{Operation: "remove", Model: "LAST-WINS"},
+		{Operation: "add", Model: "last-wins"},
+	})
+	s.Require().NoError(err)
+	s.Require().Equal([]int64{current.ID, inactive.ID, subscription.ID}, summary.AffectedGroupIDs)
+	s.Require().Equal(3, summary.AffectedGroupCount)
+	s.Require().Equal(service.GroupModelsListConfig{Enabled: false, Models: []string{"gpt-*", "last-wins"}}, current.ModelsListConfig)
+	s.Require().Equal(current.ModelsListConfig, service.GroupModelsListConfig{Enabled: current.ModelAllowlist.Enabled, Models: current.ModelAllowlist.Models})
+
+	for _, id := range []int64{current.ID, inactive.ID, subscription.ID} {
+		got, getErr := s.repo.GetByID(s.ctx, id)
+		s.Require().NoError(getErr)
+		s.Require().Equal([]string{"gpt-*", "last-wins"}, got.ModelsListConfig.Models)
+		s.Require().Equal(got.ModelsListConfig.Enabled, got.ModelAllowlist.Enabled)
+		s.Require().Equal(got.ModelsListConfig.Models, got.ModelAllowlist.Models)
+		var count int
+		s.Require().NoError(scanSingleRow(s.ctx, s.tx, "SELECT COUNT(*) FROM scheduler_outbox WHERE group_id = $1", []any{id}, &count))
+		s.Require().Equal(1, count)
+	}
+	for _, id := range []int64{otherPlatform.ID, softDeleted.ID} {
+		var modelsJSON []byte
+		s.Require().NoError(scanSingleRow(s.ctx, s.tx, "SELECT models_list_config FROM groups WHERE id = $1", []any{id}, &modelsJSON))
+		s.Require().Contains(string(modelsJSON), `"gpt-model"`)
+		s.Require().NotContains(string(modelsJSON), `"last-wins"`)
+	}
+}
+
+func TestGlobalModelOperationsRollBackWhenOutboxFails(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	repo := newGroupRepositoryWithSQL(client, integrationDB)
+	group := &service.Group{
+		Name: "global-outbox-rollback", Platform: service.PlatformOpenAI, RateMultiplier: 1,
+		Status: service.StatusActive, SubscriptionType: service.SubscriptionTypeStandard,
+		ModelsListConfig: service.GroupModelsListConfig{Enabled: true, Models: []string{"before"}},
+		ModelAllowlist:   service.GroupModelAllowlist{Enabled: true, Models: []string{"before"}},
+	}
+	require.NoError(t, repo.Create(ctx, group))
+	_, err := integrationDB.ExecContext(ctx, "DELETE FROM scheduler_outbox WHERE group_id = $1", group.ID)
+	require.NoError(t, err)
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	functionName := "fail_global_outbox_" + suffix
+	triggerName := "fail_global_outbox_trigger_" + suffix
+	_, err = integrationDB.ExecContext(ctx, fmt.Sprintf(`
+		CREATE OR REPLACE FUNCTION %s() RETURNS trigger AS $$
+		BEGIN RAISE EXCEPTION 'forced global outbox failure'; END;
+		$$ LANGUAGE plpgsql`, functionName))
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, fmt.Sprintf("CREATE TRIGGER %s BEFORE INSERT ON scheduler_outbox FOR EACH ROW EXECUTE FUNCTION %s()", triggerName, functionName))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = integrationDB.ExecContext(context.Background(), fmt.Sprintf("DROP TRIGGER IF EXISTS %s ON scheduler_outbox", triggerName))
+		_, _ = integrationDB.ExecContext(context.Background(), fmt.Sprintf("DROP FUNCTION IF EXISTS %s()", functionName))
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM groups WHERE id = $1", group.ID)
+	})
+
+	group.ModelsListConfig.Models = []string{"after"}
+	group.ModelAllowlist.Models = []string{"after"}
+	_, err = repo.UpdateWithGlobalModelOperations(ctx, group, []service.GroupModelOperation{{Operation: "add", Model: "after"}})
+	require.ErrorContains(t, err, "forced global outbox failure")
+
+	got, err := client.Group.Get(ctx, group.ID)
+	require.NoError(t, err)
+	require.Equal(t, []string{"before"}, got.ModelsListConfig.Models)
 }
 
 func (s *GroupRepoSuite) TestGetByID_PreservesMessagesDispatchModelConfig() {

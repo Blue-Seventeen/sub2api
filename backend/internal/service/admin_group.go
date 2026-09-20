@@ -434,7 +434,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		return nil, err
 	}
 	modelsListConfig := normalizeGroupModelsListConfig(input.ModelsListConfig)
-	if !hasCanonicalGroupModelsListConfig(modelsListConfig) {
+	if !input.ModelsListConfigSet && !hasCanonicalGroupModelsListConfig(modelsListConfig) {
 		modelAllowlist, normalizeErr := normalizeGroupModelAllowlist(input.ModelAllowlist)
 		if normalizeErr != nil {
 			return nil, normalizeErr

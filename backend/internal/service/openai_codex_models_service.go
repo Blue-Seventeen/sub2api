@@ -55,9 +55,13 @@ const (
 // catalog is additionally restricted by FilterForListing (wildcard entries
 // expand against the catalog).
 func FilterCodexModelIDsForGroup(modelIDs []string, group *Group) []string {
+	policy := GroupModelAllowlist{}
+	if group != nil {
+		policy = group.EffectiveModelPolicy()
+	}
 	explicitlyEnabled := make(map[string]struct{})
-	if group != nil && group.ModelAllowlistEnabled() {
-		for _, modelID := range group.ModelAllowlist.Models {
+	if policy.Enabled {
+		for _, modelID := range policy.Models {
 			modelID = strings.TrimSpace(modelID)
 			if strings.HasPrefix(modelID, codexAutoModelPrefix) {
 				explicitlyEnabled[modelID] = struct{}{}
@@ -84,8 +88,8 @@ func FilterCodexModelIDsForGroup(modelIDs []string, group *Group) []string {
 		}
 		filtered = append(filtered, modelID)
 	}
-	if group != nil && group.ModelAllowlistEnabled() {
-		filtered = group.ModelAllowlist.FilterForListing(filtered)
+	if policy.Enabled {
+		filtered = policy.FilterForListing(filtered)
 	}
 	return filtered
 }
@@ -149,11 +153,12 @@ func (s *OpenAIGatewayService) BuildGroupConfiguredCodexModelsManifest(
 	if err != nil {
 		return nil, false, fmt.Errorf("initialize group configured Codex models: %w", err)
 	}
+	policy := group.EffectiveModelPolicy()
 	body, _, err = mergeConfiguredCodexModelsManifest(
 		body,
 		nil,
-		group.ModelAllowlist.Models,
-		group.ModelAllowlistEnabled(),
+		policy.Models,
+		policy.Enabled,
 	)
 	if err != nil {
 		return nil, false, fmt.Errorf("build group configured Codex models: %w", err)
@@ -185,6 +190,7 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 	if group.Platform != PlatformOpenAI || len(manifest.Body) == 0 {
 		return nil
 	}
+	policy := group.EffectiveModelPolicy()
 
 	var configuredModels []string
 	if !group.CodexModelsManifestConfig.Enabled {
@@ -197,14 +203,14 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 	body, changed, err := mergeConfiguredCodexModelsManifest(
 		manifest.Body,
 		configuredModels,
-		group.ModelAllowlist.Models,
-		group.ModelAllowlistEnabled(),
+		policy.Models,
+		policy.Enabled,
 	)
 	if err != nil {
 		return fmt.Errorf("merge group configured Codex models: %w", err)
 	}
-	if group.CodexModelsManifestConfig.Enabled && group.ModelAllowlistEnabled() {
-		body, err = orderPinnedCodexModelsBySelection(body, group.ModelAllowlist)
+	if group.CodexModelsManifestConfig.Enabled && policy.Enabled {
+		body, err = orderPinnedCodexModelsBySelection(body, policy)
 		if err != nil {
 			return fmt.Errorf("order pinned Codex models: %w", err)
 		}
@@ -297,15 +303,19 @@ func openAIConfiguredCodexModelIDs(accounts []Account) []string {
 
 func openAIConfiguredCodexModelIDsForGroup(accounts []Account, group *Group) []string {
 	models := supplementUnmappedOpenAIModels(accounts, openAIConfiguredCodexModelIDs(accounts))
-	if group == nil || !group.ModelAllowlistEnabled() {
+	if group == nil {
 		return models
 	}
 
-	seen := make(map[string]struct{}, len(models)+len(group.ModelAllowlist.Models))
+	policy := group.EffectiveModelPolicy()
+	if !policy.Enabled {
+		return models
+	}
+	seen := make(map[string]struct{}, len(models)+len(policy.Models))
 	for _, modelID := range models {
 		seen[modelID] = struct{}{}
 	}
-	for _, selectedModel := range group.ModelAllowlist.Models {
+	for _, selectedModel := range policy.Models {
 		selectedModel = strings.TrimSpace(selectedModel)
 		if selectedModel == "" || strings.Contains(selectedModel, "*") {
 			continue

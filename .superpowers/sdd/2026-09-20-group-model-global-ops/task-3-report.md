@@ -71,3 +71,93 @@ were not run in this checkout.
 - `backend/internal/handler/admin/group_handler.go`
 - `backend/internal/handler/dto/types.go`
 - `backend/internal/handler/dto/mappers.go`
+
+## Fix Round 1
+
+### Status
+
+Completed. The reviewer findings and the follow-up compile blocker were fixed
+without changing frontend, subscription, deployment, or migrations 235/236.
+
+### Changes
+
+- Routed runtime model policy checks through `EffectiveModelPolicy()` in
+  `openai_codex_models_service.go`, `openai_models_list.go`, and
+  `model_plaza_service.go`. The model-plaza read is a runtime model-admission
+  filter, so it is part of the canonical policy surface rather than a legacy
+  compatibility projection.
+- Declared the canonical `policy` in `MergeGroupConfiguredCodexModels` and used
+  it for merge and pinned-order operations.
+- Updated global create/update repository operations to copy the final
+  canonical policy back to both `groupIn.ModelsListConfig` and
+  `groupIn.ModelAllowlist` after commit. The enabled value is preserved.
+- Kept one scheduler outbox event for every changed global target and emitted
+  the current-group event only when the current group was not already in the
+  affected target set. This avoids duplicate current-group events while
+  preserving normal create/update event semantics.
+- Added request presence plumbing with `ModelsListConfigSet`. An explicitly
+  supplied empty or disabled `models_list_config` now wins over
+  `model_allowlist`; the legacy alias is used only when the canonical field is
+  absent.
+- Added canonical-vs-mirror regression coverage for Codex listing, OpenAI
+  models listing, and model plaza filtering, plus presence, in-memory
+  synchronization, scope, repeated-operation, wildcard, outbox-count, and
+  outbox-rollback tests.
+
+### Changed Files
+
+- `.superpowers/sdd/2026-09-20-group-model-global-ops/task-3-report.md`
+- `backend/internal/handler/admin/group_handler.go`
+- `backend/internal/handler/admin/group_handler_sync_v024_test.go`
+- `backend/internal/repository/group_repo.go`
+- `backend/internal/repository/group_repo_integration_test.go`
+- `backend/internal/service/admin_group.go`
+- `backend/internal/service/admin_service.go`
+- `backend/internal/service/admin_service_group_model_allowlist_test.go`
+- `backend/internal/service/model_plaza_service.go`
+- `backend/internal/service/model_plaza_canonical_policy_test.go`
+- `backend/internal/service/openai_codex_models_service.go`
+- `backend/internal/service/openai_codex_models_service_test.go`
+- `backend/internal/service/openai_models_list.go`
+- `backend/internal/service/openai_models_list_test.go`
+- `backend/internal/service/group_model_policy_test.go`
+
+### Verification
+
+Commands and observed outputs:
+
+```text
+go test ./internal/service ./internal/repository ./internal/handler/admin ./internal/handler/dto -run '^$' -count=1
+ok  github.com/Wei-Shaw/sub2api/internal/service       0.666s [no tests to run]
+ok  github.com/Wei-Shaw/sub2api/internal/repository    0.424s [no tests to run]
+ok  github.com/Wei-Shaw/sub2api/internal/handler/admin 0.415s [no tests to run]
+ok  github.com/Wei-Shaw/sub2api/internal/handler/dto   0.518s [no tests to run]
+
+go test ./internal/service -run 'Test(EffectiveModelPolicy|FilterCodexModelIDsForGroup|OpenAI.*Canonical|ModelPlaza.*Canonical|ApplyGlobalModelOperations)' -count=1
+ok  github.com/Wei-Shaw/sub2api/internal/service 0.645s
+
+go test ./internal/handler/admin -run 'Test.*(ModelsList|Global|Create)' -count=1
+ok  github.com/Wei-Shaw/sub2api/internal/handler/admin 0.508s
+
+go test -tags=integration ./internal/repository -run 'TestGroupRepoSuite/TestGlobalModelOperationsScopesTargetsAndWritesOneEventPerAffectedGroup|TestGlobalModelOperationsRollBackWhenOutboxFails' -count=1
+ok  github.com/Wei-Shaw/sub2api/internal/repository 9.223s
+
+git diff --check
+exit code 0
+```
+
+The integration command ran against the configured repository integration
+database and covered same-platform scope, inactive and subscription groups,
+soft-delete and other-platform exclusion, exact removal with wildcard
+preservation, repeated operations with last-operation-wins behavior, one
+outbox row per affected group, and rollback when outbox persistence fails.
+
+### Concerns
+
+- The complete service suite still contains the two previously documented
+  canonical-policy/auth-cache expectation failures from the surrounding
+  worktree changes (auth snapshot version and legacy mirror expectation). The
+  focused fix-round tests and changed-package compilation pass.
+- Cache invalidation remains exercised through the existing repository/service
+  global-operation path; no separate external Redis integration test was
+  added in this round.

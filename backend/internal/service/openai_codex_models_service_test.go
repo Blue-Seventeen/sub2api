@@ -171,6 +171,18 @@ func TestFilterCodexModelIDsForGroupOmitsWildcardKeys(t *testing.T) {
 	require.Equal(t, []string{"deepseek-v4-pro", "gpt-5.5"}, got)
 }
 
+func TestFilterCodexModelIDsForGroupUsesCanonicalPolicyOverLegacyMirror(t *testing.T) {
+	group := &Group{
+		Platform:         PlatformOpenAI,
+		ModelsListConfig: GroupModelsListConfig{Enabled: true, Models: []string{"codex-auto-canonical"}},
+		ModelAllowlist:   GroupModelAllowlist{Enabled: true, Models: []string{"codex-auto-legacy"}},
+	}
+
+	got := FilterCodexModelIDsForGroup([]string{"codex-auto-canonical", "codex-auto-legacy"}, group)
+
+	require.Equal(t, []string{"codex-auto-canonical"}, got)
+}
+
 func decodeCodexManifestModels(t *testing.T, body []byte) []map[string]any {
 	t.Helper()
 

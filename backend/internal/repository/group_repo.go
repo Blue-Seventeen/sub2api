@@ -107,11 +107,22 @@ func (r *groupRepository) CreateWithGlobalModelOperations(ctx context.Context, g
 	if err != nil {
 		return nil, err
 	}
+	currentPolicy, _, _, _, err := service.ApplyGlobalModelOperations(groupIn.ModelsListConfig, operations)
+	if err != nil {
+		return nil, err
+	}
+	if !summaryContainsGroup(summary, groupIn.ID) {
+		if err := enqueueSchedulerOutbox(ctx, txClient, service.SchedulerOutboxEventGroupChanged, nil, &groupIn.ID, nil); err != nil {
+			return nil, err
+		}
+	}
 	if tx != nil {
 		if err := tx.Commit(); err != nil {
 			return nil, err
 		}
 	}
+	groupIn.ModelsListConfig = currentPolicy
+	groupIn.ModelAllowlist = service.GroupModelAllowlist{Enabled: currentPolicy.Enabled, Models: append([]string(nil), currentPolicy.Models...)}
 	groupIn.GlobalModelOperationSummary = summary
 	return summary, nil
 }
@@ -514,13 +525,36 @@ func (r *groupRepository) UpdateWithGlobalModelOperations(ctx context.Context, g
 	if err != nil {
 		return nil, err
 	}
+	currentPolicy, _, _, _, err := service.ApplyGlobalModelOperations(groupIn.ModelsListConfig, operations)
+	if err != nil {
+		return nil, err
+	}
+	if !summaryContainsGroup(summary, groupIn.ID) {
+		if err := enqueueSchedulerOutbox(ctx, txClient, service.SchedulerOutboxEventGroupChanged, nil, &groupIn.ID, nil); err != nil {
+			return nil, err
+		}
+	}
 	if tx != nil {
 		if err := tx.Commit(); err != nil {
 			return nil, err
 		}
 	}
+	groupIn.ModelsListConfig = currentPolicy
+	groupIn.ModelAllowlist = service.GroupModelAllowlist{Enabled: currentPolicy.Enabled, Models: append([]string(nil), currentPolicy.Models...)}
 	groupIn.GlobalModelOperationSummary = summary
 	return summary, nil
+}
+
+func summaryContainsGroup(summary *service.GlobalModelOperationSummary, groupID int64) bool {
+	if summary == nil {
+		return false
+	}
+	for _, id := range summary.AffectedGroupIDs {
+		if id == groupID {
+			return true
+		}
+	}
+	return false
 }
 
 func applyGlobalModelOperationsInTx(ctx context.Context, client *dbent.Client, platform string, operations []service.GroupModelOperation) (*service.GlobalModelOperationSummary, error) {

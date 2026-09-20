@@ -174,7 +174,8 @@ func (s *ModelPlazaService) ListGroups(ctx context.Context) ([]PlazaGroup, error
 				if !GroupAllowsRequestedModel(groupEnt[gid], m.Name) {
 					continue
 				}
-				if groupEnt[gid].ModelAllowlistEnabled() && !groupEnt[gid].ModelAllowlist.Allows(m.Name) {
+				policy := groupEnt[gid].EffectiveModelPolicy()
+				if policy.Enabled && !policy.Allows(m.Name) {
 					continue
 				}
 				key := modelKey{platform: m.Platform, name: m.Name}

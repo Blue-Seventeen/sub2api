@@ -171,6 +171,13 @@ func sanitizeUpdateGroupRequestForSimpleMode(req *UpdateGroupRequest) {
 	*req = UpdateGroupRequest{Name: req.Name, Description: req.Description}
 }
 
+func valueOrZeroGroupModelsListConfig(value *service.GroupModelsListConfig) service.GroupModelsListConfig {
+	if value == nil {
+		return service.GroupModelsListConfig{}
+	}
+	return *value
+}
+
 // CreateGroupRequest represents create group request
 type CreateGroupRequest struct {
 	Name                      string                        `json:"name" binding:"required"`
@@ -233,7 +240,7 @@ type CreateGroupRequest struct {
 	RequirePrivacySet           bool                                      `json:"require_privacy_set"`
 	DefaultMappedModel          string                                    `json:"default_mapped_model"`
 	MessagesDispatchModelConfig service.OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config"`
-	ModelsListConfig            service.GroupModelsListConfig             `json:"models_list_config"`
+	ModelsListConfig            *service.GroupModelsListConfig            `json:"models_list_config"`
 	ModelAllowlist              service.GroupModelAllowlist               `json:"model_allowlist"`
 	GlobalModelOperations       []service.GroupModelOperation             `json:"global_model_operations,omitempty"`
 	CodexModelsManifestConfig   service.GroupCodexModelsManifestConfig    `json:"codex_models_manifest_config"`
@@ -749,7 +756,8 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		MessagesDispatchModelConfig:     req.MessagesDispatchModelConfig,
 		ModelAllowlist:                  req.ModelAllowlist,
 		CodexModelsManifestConfig:       req.CodexModelsManifestConfig,
-		ModelsListConfig:                req.ModelsListConfig,
+		ModelsListConfig:                valueOrZeroGroupModelsListConfig(req.ModelsListConfig),
+		ModelsListConfigSet:             req.ModelsListConfig != nil,
 		GlobalModelOperations:           req.GlobalModelOperations,
 		RPMLimit:                        req.RPMLimit,
 		NewAPIStyleInterfaceEnabled:     req.NewAPIStyleInterfaceEnabled,

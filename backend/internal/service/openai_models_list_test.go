@@ -57,6 +57,21 @@ func TestFetchOpenAIModelsListUsesStandardRequestAndIsolatesCodexCache(t *testin
 	require.EqualValues(t, 3, calls.Load(), "credentials must participate in the cache key")
 }
 
+func TestProjectAccountModelsBodyUsesCanonicalPolicyOverLegacyMirror(t *testing.T) {
+	account := &Account{Credentials: map[string]any{
+		"model_mapping": map[string]any{"canonical-alias": "upstream-model", "legacy-alias": "upstream-model"},
+	}}
+	group := &Group{
+		ModelsListConfig: GroupModelsListConfig{Enabled: true, Models: []string{"canonical-alias"}},
+		ModelAllowlist:   GroupModelAllowlist{Enabled: true, Models: []string{"legacy-alias"}},
+	}
+
+	body, err := projectAccountModelsBody([]byte(`{"data":[{"id":"upstream-model"}]}`), account, group, false)
+	require.NoError(t, err)
+	require.Contains(t, string(body), `"id":"canonical-alias"`)
+	require.NotContains(t, string(body), `"id":"legacy-alias"`)
+}
+
 func TestFetchOpenAIModelsListOAuthSharesManifestCache(t *testing.T) {
 	_, calls := newCodexModelsOAuthCacheServer(t, `{"models":[{"slug":"special-oauth-model"},{"slug":"gpt-image-1"}]}`)
 	s := &OpenAIGatewayService{}
