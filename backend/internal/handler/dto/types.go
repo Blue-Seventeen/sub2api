@@ -203,6 +203,7 @@ type AdminGroup struct {
 	MessagesDispatchModelConfig domain.OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config"`
 	ModelsListConfig            domain.GroupModelsListConfig             `json:"models_list_config"`
 	ModelAllowlist              service.GroupModelAllowlist              `json:"model_allowlist"`
+	GlobalModelOperationSummary *service.GlobalModelOperationSummary     `json:"global_model_operation_summary,omitempty"`
 	CodexModelsManifestConfig   domain.GroupCodexModelsManifestConfig    `json:"codex_models_manifest_config"`
 	ModelPricing                []service.ChannelModelPricing            `json:"model_pricing"`
 	ForceOpenAIFast             bool                                     `json:"force_openai_fast"`

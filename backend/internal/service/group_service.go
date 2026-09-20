@@ -38,6 +38,14 @@ type GroupRepository interface {
 	UpdateSortOrders(ctx context.Context, updates []GroupSortOrderUpdate) error
 }
 
+// GlobalModelOperationsRepository is an optional concrete-repository
+// capability. It intentionally does not extend GroupRepository because many
+// service tests use smaller repository doubles.
+type GlobalModelOperationsRepository interface {
+	CreateWithGlobalModelOperations(ctx context.Context, group *Group, operations []GroupModelOperation) (*GlobalModelOperationSummary, error)
+	UpdateWithGlobalModelOperations(ctx context.Context, group *Group, operations []GroupModelOperation) (*GlobalModelOperationSummary, error)
+}
+
 type GroupDuplicateRepository interface {
 	// FindByDuplicateOperationID performs the read-only recovery lookup used
 	// after an ambiguous idempotency-store failure.

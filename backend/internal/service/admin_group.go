@@ -433,7 +433,15 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	if err != nil {
 		return nil, err
 	}
-	modelAllowlist, err := normalizeGroupModelAllowlist(input.ModelAllowlist)
+	modelsListConfig := normalizeGroupModelsListConfig(input.ModelsListConfig)
+	if !hasCanonicalGroupModelsListConfig(modelsListConfig) {
+		modelAllowlist, normalizeErr := normalizeGroupModelAllowlist(input.ModelAllowlist)
+		if normalizeErr != nil {
+			return nil, normalizeErr
+		}
+		modelsListConfig = GroupModelsListConfig{Enabled: modelAllowlist.Enabled, Models: append([]string(nil), modelAllowlist.Models...)}
+	}
+	modelPolicy, err := NormalizeGroupModelPolicy(modelsListConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -657,9 +665,9 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		RequirePrivacySet:               input.RequirePrivacySet,
 		DefaultMappedModel:              input.DefaultMappedModel,
 		MessagesDispatchModelConfig:     normalizeOpenAIMessagesDispatchModelConfig(input.MessagesDispatchModelConfig),
-		ModelAllowlist:                  modelAllowlist,
+		ModelAllowlist:                  modelPolicy.ModelAllowlist,
 		CodexModelsManifestConfig:       normalizeCodexModelsManifestConfig(platform, input.CodexModelsManifestConfig),
-		ModelsListConfig:                normalizeGroupModelsListConfig(input.ModelsListConfig),
+		ModelsListConfig:                modelPolicy.ModelsListConfig,
 		RPMLimit:                        input.RPMLimit,
 		NewAPIStyleInterfaceEnabled:     input.NewAPIStyleInterfaceEnabled,
 		MaxReasoningEffort:              maxReasoningEffort,
@@ -672,7 +680,17 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		group.AllowLive = false
 	}
 	sanitizeGroupReasoningEffortPolicy(group)
-	if err := s.groupRepo.Create(ctx, group); err != nil {
+	if len(input.GlobalModelOperations) > 0 {
+		globalRepo, ok := s.groupRepo.(GlobalModelOperationsRepository)
+		if !ok {
+			return nil, errors.New("global model operations are not supported by the configured group repository")
+		}
+		summary, createErr := globalRepo.CreateWithGlobalModelOperations(ctx, group, input.GlobalModelOperations)
+		if createErr != nil {
+			return nil, createErr
+		}
+		group.GlobalModelOperationSummary = summary
+	} else if err := s.groupRepo.Create(ctx, group); err != nil {
 		return nil, err
 	}
 
@@ -703,6 +721,11 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 			return nil, fmt.Errorf("failed to bind accounts to new group: %w", err)
 		}
 		group.AccountCount = int64(len(accountIDsToCopy))
+	}
+	if s.authCacheInvalidator != nil && group.GlobalModelOperationSummary != nil {
+		for _, affectedID := range group.GlobalModelOperationSummary.AffectedGroupIDs {
+			s.authCacheInvalidator.InvalidateAuthCacheByGroupID(ctx, affectedID)
+		}
 	}
 
 	return group, nil
@@ -835,6 +858,13 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		normalizeUpdateGroupInputForSimpleMode(input)
 	}
 	previousPlatform := group.Platform
+	if len(input.GlobalModelOperations) > 0 && input.Platform != "" && NormalizeGroupPlatform(input.Platform) != previousPlatform {
+		return nil, infraerrors.BadRequest("GLOBAL_MODEL_OPERATIONS_PLATFORM_CHANGE", "global model operations cannot be combined with a platform change")
+	}
+	if !hasCanonicalGroupModelsListConfig(group.ModelsListConfig) && (group.ModelAllowlist.Enabled || len(group.ModelAllowlist.Models) > 0) {
+		group.ModelsListConfig = GroupModelsListConfig{Enabled: group.ModelAllowlist.Enabled, Models: append([]string(nil), group.ModelAllowlist.Models...)}
+	}
+	group.ModelAllowlist = groupModelAllowlistFromModelsListConfig(normalizeGroupModelsListConfig(group.ModelsListConfig))
 
 	if input.Name != "" {
 		group.Name = input.Name
@@ -1096,18 +1126,23 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	if input.MessagesDispatchModelConfig != nil {
 		group.MessagesDispatchModelConfig = normalizeOpenAIMessagesDispatchModelConfig(*input.MessagesDispatchModelConfig)
 	}
-	if input.ModelAllowlist != nil {
-		modelAllowlist, normalizeErr := normalizeGroupModelAllowlist(*input.ModelAllowlist)
-		if normalizeErr != nil {
-			return nil, normalizeErr
-		}
-		group.ModelAllowlist = modelAllowlist
-	}
 	if input.CodexModelsManifestConfig != nil {
 		group.CodexModelsManifestConfig = *input.CodexModelsManifestConfig
 	}
 	if input.ModelsListConfig != nil {
-		group.ModelsListConfig = normalizeGroupModelsListConfig(*input.ModelsListConfig)
+		policy, normalizeErr := NormalizeGroupModelPolicy(*input.ModelsListConfig)
+		if normalizeErr != nil {
+			return nil, normalizeErr
+		}
+		group.ModelsListConfig = policy.ModelsListConfig
+		group.ModelAllowlist = policy.ModelAllowlist
+	} else if input.ModelAllowlist != nil {
+		modelAllowlist, normalizeErr := normalizeGroupModelAllowlist(*input.ModelAllowlist)
+		if normalizeErr != nil {
+			return nil, normalizeErr
+		}
+		group.ModelsListConfig = GroupModelsListConfig{Enabled: modelAllowlist.Enabled, Models: append([]string(nil), modelAllowlist.Models...)}
+		group.ModelAllowlist = modelAllowlist
 	}
 	if input.RPMLimit != nil {
 		group.RPMLimit = *input.RPMLimit
@@ -1149,12 +1184,29 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		}
 	}
 
-	if err := s.groupRepo.Update(ctx, group); err != nil {
+	if len(input.GlobalModelOperations) > 0 {
+		globalRepo, ok := s.groupRepo.(GlobalModelOperationsRepository)
+		if !ok {
+			return nil, errors.New("global model operations are not supported by the configured group repository")
+		}
+		summary, updateErr := globalRepo.UpdateWithGlobalModelOperations(ctx, group, input.GlobalModelOperations)
+		if updateErr != nil {
+			return nil, updateErr
+		}
+		group.GlobalModelOperationSummary = summary
+	} else if err := s.groupRepo.Update(ctx, group); err != nil {
 		return nil, err
 	}
 
 	if s.authCacheInvalidator != nil {
 		s.authCacheInvalidator.InvalidateAuthCacheByGroupID(ctx, id)
+		if group.GlobalModelOperationSummary != nil {
+			for _, affectedID := range group.GlobalModelOperationSummary.AffectedGroupIDs {
+				if affectedID != id {
+					s.authCacheInvalidator.InvalidateAuthCacheByGroupID(ctx, affectedID)
+				}
+			}
+		}
 	}
 	if group.Platform != previousPlatform && s.channelCacheInvalidator != nil {
 		s.channelCacheInvalidator.InvalidateCache()

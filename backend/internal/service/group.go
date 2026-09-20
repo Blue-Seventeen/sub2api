@@ -104,6 +104,7 @@ type Group struct {
 	MessagesDispatchModelConfig OpenAIMessagesDispatchModelConfig
 	ModelsListConfig            GroupModelsListConfig
 	ModelAllowlist              GroupModelAllowlist
+	GlobalModelOperationSummary *GlobalModelOperationSummary
 	CodexModelsManifestConfig   domain.GroupCodexModelsManifestConfig
 	ModelPricing                []ChannelModelPricing
 	LongContextPricingEnabled   bool

@@ -235,6 +235,7 @@ type CreateGroupRequest struct {
 	MessagesDispatchModelConfig service.OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config"`
 	ModelsListConfig            service.GroupModelsListConfig             `json:"models_list_config"`
 	ModelAllowlist              service.GroupModelAllowlist               `json:"model_allowlist"`
+	GlobalModelOperations       []service.GroupModelOperation             `json:"global_model_operations,omitempty"`
 	CodexModelsManifestConfig   service.GroupCodexModelsManifestConfig    `json:"codex_models_manifest_config"`
 	// 分组 RPM 上限（0 = 不限制）
 	RPMLimit                    int  `json:"rpm_limit"`
@@ -313,6 +314,7 @@ type UpdateGroupRequest struct {
 	MessagesDispatchModelConfig *service.OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config"`
 	ModelsListConfig            *service.GroupModelsListConfig             `json:"models_list_config"`
 	ModelAllowlist              *service.GroupModelAllowlist               `json:"model_allowlist"`
+	GlobalModelOperations       []service.GroupModelOperation              `json:"global_model_operations,omitempty"`
 	CodexModelsManifestConfig   *service.GroupCodexModelsManifestConfig    `json:"codex_models_manifest_config"`
 	// 分组 RPM 上限（0 = 不限制）；nil 表示未提供不改动
 	RPMLimit                    *int  `json:"rpm_limit"`
@@ -748,6 +750,7 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		ModelAllowlist:                  req.ModelAllowlist,
 		CodexModelsManifestConfig:       req.CodexModelsManifestConfig,
 		ModelsListConfig:                req.ModelsListConfig,
+		GlobalModelOperations:           req.GlobalModelOperations,
 		RPMLimit:                        req.RPMLimit,
 		NewAPIStyleInterfaceEnabled:     req.NewAPIStyleInterfaceEnabled,
 		MaxReasoningEffort:              req.MaxReasoningEffort,
@@ -904,6 +907,7 @@ func (h *GroupHandler) Update(c *gin.Context) {
 		ModelAllowlist:                  req.ModelAllowlist,
 		CodexModelsManifestConfig:       req.CodexModelsManifestConfig,
 		ModelsListConfig:                req.ModelsListConfig,
+		GlobalModelOperations:           req.GlobalModelOperations,
 		RPMLimit:                        req.RPMLimit,
 		NewAPIStyleInterfaceEnabled:     req.NewAPIStyleInterfaceEnabled,
 		MaxReasoningEffort:              req.MaxReasoningEffort,

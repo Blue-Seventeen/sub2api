@@ -86,6 +86,36 @@ func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) er
 	return nil
 }
 
+func (r *groupRepository) CreateWithGlobalModelOperations(ctx context.Context, groupIn *service.Group, operations []service.GroupModelOperation) (*service.GlobalModelOperationSummary, error) {
+	tx, err := r.client.Tx(ctx)
+	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+		return nil, err
+	}
+	txClient := r.client
+	if tx == nil {
+		// The caller already owns the transaction (used by transactional
+		// repository composition and integration tests).
+		txClient = r.client
+	} else {
+		defer func() { _ = tx.Rollback() }()
+		txClient = tx.Client()
+	}
+	if err := createGroupRecord(ctx, txClient, groupIn); err != nil {
+		return nil, err
+	}
+	summary, err := applyGlobalModelOperationsInTx(ctx, txClient, groupIn.Platform, operations)
+	if err != nil {
+		return nil, err
+	}
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+	}
+	groupIn.GlobalModelOperationSummary = summary
+	return summary, nil
+}
+
 func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *service.Group) error {
 	if groupIn == nil {
 		return errors.New("group is nil")
@@ -283,11 +313,21 @@ func (r *groupRepository) GetByIDLite(ctx context.Context, id int64) (*service.G
 }
 
 func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) error {
+	if err := updateGroupRecord(ctx, r.client, groupIn); err != nil {
+		return err
+	}
+	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &groupIn.ID, nil); err != nil {
+		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue group update failed: group=%d err=%v", groupIn.ID, err)
+	}
+	return nil
+}
+
+func updateGroupRecord(ctx context.Context, client *dbent.Client, groupIn *service.Group) error {
 	modelPricing, err := json.Marshal(groupIn.ModelPricing)
 	if err != nil {
 		return fmt.Errorf("marshal group model pricing: %w", err)
 	}
-	builder := r.client.Group.UpdateOneID(groupIn.ID).
+	builder := client.Group.UpdateOneID(groupIn.ID).
 		SetName(groupIn.Name).
 		SetDescription(groupIn.Description).
 		SetPlatform(groupIn.Platform).
@@ -451,10 +491,88 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		return translatePersistenceError(err, service.ErrGroupNotFound, service.ErrGroupExists)
 	}
 	groupIn.UpdatedAt = updated.UpdatedAt
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &groupIn.ID, nil); err != nil {
-		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue group update failed: group=%d err=%v", groupIn.ID, err)
-	}
 	return nil
+}
+
+func (r *groupRepository) UpdateWithGlobalModelOperations(ctx context.Context, groupIn *service.Group, operations []service.GroupModelOperation) (*service.GlobalModelOperationSummary, error) {
+	tx, err := r.client.Tx(ctx)
+	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+		return nil, err
+	}
+	txClient := r.client
+	if tx == nil {
+		// Reuse the caller-owned transaction.
+		txClient = r.client
+	} else {
+		defer func() { _ = tx.Rollback() }()
+		txClient = tx.Client()
+	}
+	if err := updateGroupRecord(ctx, txClient, groupIn); err != nil {
+		return nil, err
+	}
+	summary, err := applyGlobalModelOperationsInTx(ctx, txClient, groupIn.Platform, operations)
+	if err != nil {
+		return nil, err
+	}
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+	}
+	groupIn.GlobalModelOperationSummary = summary
+	return summary, nil
+}
+
+func applyGlobalModelOperationsInTx(ctx context.Context, client *dbent.Client, platform string, operations []service.GroupModelOperation) (*service.GlobalModelOperationSummary, error) {
+	groups, err := client.Group.Query().
+		Where(group.PlatformEQ(platform), group.DeletedAtIsNil()).
+		Order(dbent.Asc(group.FieldID)).
+		ForUpdate().
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	summary := &service.GlobalModelOperationSummary{TargetPlatform: platform}
+	for _, target := range groups {
+		updated, changed, added, removed, err := service.ApplyGlobalModelOperations(target.ModelsListConfig, operations)
+		if err != nil {
+			return nil, err
+		}
+		if !changed {
+			continue
+		}
+		if _, err := client.Group.UpdateOneID(target.ID).
+			SetModelsListConfig(updated).
+			SetModelAllowlist(service.DomainGroupModelAllowlist(service.GroupModelAllowlist{Enabled: updated.Enabled, Models: append([]string(nil), updated.Models...)})).
+			Save(ctx); err != nil {
+			return nil, err
+		}
+		summary.AffectedGroupIDs = append(summary.AffectedGroupIDs, target.ID)
+		for _, model := range added {
+			if !containsModelFold(summary.AddedModels, model) {
+				summary.AddedModels = append(summary.AddedModels, model)
+			}
+		}
+		for _, model := range removed {
+			if !containsModelFold(summary.RemovedModels, model) {
+				summary.RemovedModels = append(summary.RemovedModels, model)
+			}
+		}
+		if err := enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventGroupChanged, nil, &target.ID, nil); err != nil {
+			return nil, err
+		}
+	}
+	summary.AffectedGroupCount = len(summary.AffectedGroupIDs)
+	return summary, nil
+}
+
+func containsModelFold(models []string, model string) bool {
+	for _, existing := range models {
+		if strings.EqualFold(existing, model) {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *groupRepository) Delete(ctx context.Context, id int64) error {

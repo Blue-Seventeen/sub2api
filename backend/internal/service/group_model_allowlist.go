@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -11,11 +12,109 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 )
 
+// GroupModelOperation describes one ordered global model-list mutation.
+type GroupModelOperation struct {
+	Operation string `json:"operation"`
+	Model     string `json:"model"`
+}
+
+// GlobalModelOperationSummary reports the committed scope and effects of a
+// global model-list mutation.
+type GlobalModelOperationSummary struct {
+	TargetPlatform     string   `json:"target_platform"`
+	AffectedGroupCount int      `json:"affected_group_count"`
+	AddedModels        []string `json:"added_models"`
+	RemovedModels      []string `json:"removed_models"`
+	AffectedGroupIDs   []int64  `json:"affected_group_ids,omitempty"`
+}
+
+// ApplyGlobalModelOperations applies ordered exact model operations to one
+// group configuration. Matching is case-insensitive, while stored additions
+// retain the requested spelling and wildcard entries are never expanded.
+func ApplyGlobalModelOperations(config GroupModelsListConfig, operations []GroupModelOperation) (GroupModelsListConfig, bool, []string, []string, error) {
+	updated := normalizeGroupModelsListConfig(config)
+	original := append([]string(nil), updated.Models...)
+	for _, operation := range operations {
+		model := strings.TrimSpace(operation.Model)
+		if model == "" {
+			return GroupModelsListConfig{}, false, nil, nil, fmt.Errorf("global model operation model is required")
+		}
+		operationName := strings.ToLower(strings.TrimSpace(operation.Operation))
+		index := -1
+		for i, existing := range updated.Models {
+			if strings.EqualFold(existing, model) {
+				index = i
+				break
+			}
+		}
+		switch operationName {
+		case "add":
+			if index < 0 {
+				updated.Models = append(updated.Models, model)
+			}
+		case "remove":
+			if index >= 0 {
+				updated.Models = append(updated.Models[:index], updated.Models[index+1:]...)
+			}
+		default:
+			return GroupModelsListConfig{}, false, nil, nil, fmt.Errorf("unsupported global model operation: %s", operation.Operation)
+		}
+	}
+	var added, removed []string
+	for _, model := range updated.Models {
+		if !containsExactModel(original, model) {
+			added = appendUniqueFold(added, model)
+		}
+	}
+	for _, model := range original {
+		if !containsExactModel(updated.Models, model) {
+			removed = appendUniqueFold(removed, model)
+		}
+	}
+	return updated, !stringSlicesEqual(original, updated.Models), added, removed, nil
+}
+
+func containsExactModel(models []string, model string) bool {
+	for _, existing := range models {
+		if strings.EqualFold(existing, model) {
+			return true
+		}
+	}
+	return false
+}
+
+func appendUniqueFold(models []string, model string) []string {
+	if containsExactModel(models, model) {
+		return models
+	}
+	return append(models, model)
+}
+
+func stringSlicesEqual(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // GroupModelAllowlist 是 service 层的分组模型白名单（与 domain.GroupModelAllowlist
 // 字段一致，ent 持久化用 domain 类型，边界处显式转换）。
 type GroupModelAllowlist struct {
 	Enabled bool     `json:"enabled"`
 	Models  []string `json:"models,omitempty"`
+}
+
+// GroupModelPolicy is the canonical group model policy plus its persisted
+// compatibility mirror. ModelsListConfig is the business source of truth;
+// ModelAllowlist is kept equal to it for old projections and cache readers.
+type GroupModelPolicy struct {
+	ModelsListConfig GroupModelsListConfig
+	ModelAllowlist   GroupModelAllowlist
 }
 
 // DomainGroupModelAllowlist 把 service 白名单转换为 ent 持久化使用的 domain 类型。
@@ -26,6 +125,24 @@ func DomainGroupModelAllowlist(cfg GroupModelAllowlist) domain.GroupModelAllowli
 // GroupModelAllowlistFromDomain 把 ent 读出的 domain 白名单转换为 service 类型。
 func GroupModelAllowlistFromDomain(cfg domain.GroupModelAllowlist) GroupModelAllowlist {
 	return GroupModelAllowlist{Enabled: cfg.Enabled, Models: cfg.Models}
+}
+
+func groupModelAllowlistFromModelsListConfig(cfg GroupModelsListConfig) GroupModelAllowlist {
+	return GroupModelAllowlist{Enabled: cfg.Enabled, Models: append([]string(nil), cfg.Models...)}
+}
+
+// NormalizeGroupModelPolicy normalizes the canonical models_list_config and
+// returns the exact compatibility mirror that must be persisted alongside it.
+func NormalizeGroupModelPolicy(cfg GroupModelsListConfig) (GroupModelPolicy, error) {
+	normalized := normalizeGroupModelsListConfig(cfg)
+	return GroupModelPolicy{
+		ModelsListConfig: normalized,
+		ModelAllowlist:   groupModelAllowlistFromModelsListConfig(normalized),
+	}, nil
+}
+
+func hasCanonicalGroupModelsListConfig(cfg GroupModelsListConfig) bool {
+	return cfg.Enabled || len(cfg.Models) > 0
 }
 
 // supplementUnmappedOpenAIModels ensures a partial mapping catalog does not
@@ -85,7 +202,25 @@ func normalizeGroupModelAllowlist(cfg GroupModelAllowlist) (GroupModelAllowlist,
 // ModelAllowlistEnabled 报告该分组是否启用了模型白名单。
 // 开启后所有携带模型的网关请求与模型列表接口都受白名单约束。
 func (g *Group) ModelAllowlistEnabled() bool {
-	return g != nil && g.ModelAllowlist.Enabled
+	return g != nil && g.EffectiveModelPolicy().Enabled
+}
+
+// EffectiveModelPolicy returns the canonical models_list_config policy. The
+// legacy mirror is used only for in-memory records created before the
+// migration, where the canonical field is absent.
+func (g *Group) EffectiveModelPolicy() GroupModelAllowlist {
+	if g == nil {
+		return GroupModelAllowlist{}
+	}
+	if hasCanonicalGroupModelsListConfig(g.ModelsListConfig) {
+		return groupModelAllowlistFromModelsListConfig(normalizeGroupModelsListConfig(g.ModelsListConfig))
+	}
+	return g.ModelAllowlist
+}
+
+// AllowsModel applies the canonical group model policy to a requested model.
+func (g *Group) AllowsModel(model string) bool {
+	return g.EffectiveModelPolicy().Allows(model)
 }
 
 // Allows 判断客户端请求的模型是否命中白名单。
