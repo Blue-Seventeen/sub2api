@@ -40,3 +40,19 @@ The full suite emitted pre-existing test-path stderr such as simulated API failu
 
 - No live browser interaction or backend API E2E was run. The frontend relies on the Task 3 backend contract and optional `global_model_operation_summary` response shape already represented in the frontend types.
 - The repository contains unrelated staged/unstaged/untracked changes, including backend work and `frontend/vitest-sync-*.json`; those were intentionally excluded from the Task 4 commit.
+
+## Fix Round 1: Summary Contract
+
+### Changes
+
+- Updated `frontend/src/types/index.ts` so `GroupModelOperationSummary` uses the backend field `target_platform`.
+- Updated `frontend/src/views/admin/GroupsView.vue` to format the success summary from `summary.target_platform`.
+- Added `frontend/src/views/admin/__tests__/groupsModelsListSummary.spec.ts`, which asserts the type and formatter use `target_platform` and rejects the legacy `summary.platform` access.
+- No backend, migration, billing, subscription, promotion, proxy, scheduler, or unrelated frontend files were changed.
+
+### TDD / Verification Evidence
+
+- RED: `pnpm exec vitest run src/views/admin/__tests__/groupsModelsListSummary.spec.ts` failed with `1 test failed`; the assertion found the old `GroupModelOperationSummary.platform` declaration before the fix.
+- GREEN: `pnpm exec vitest run src/views/admin/__tests__/groupsModelsListSummary.spec.ts src/views/admin/__tests__/groupsModelsList.spec.ts src/components/admin/group/__tests__/ModelListScopeDialog.spec.ts` passed: `3 test files passed`, `26 tests passed`.
+- Typecheck: `pnpm run typecheck` passed with exit code `0`.
+- Diff check: `git diff --check -- frontend` passed with exit code `0`.

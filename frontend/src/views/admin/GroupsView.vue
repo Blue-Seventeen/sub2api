@@ -5826,7 +5826,7 @@ const modelsListSummaryMessage = (summary?: GroupModelOperationSummary) => {
     ...summary.removed_models.map((model) => t("admin.groups.modelsList.summaryRemoved", { model })),
   ];
   return t("admin.groups.modelsList.summary", {
-    platform: platformDisplayName(summary.platform),
+    platform: platformDisplayName(summary.target_platform),
     operations: operationNames.join(", "),
     count: summary.affected_group_count,
   });

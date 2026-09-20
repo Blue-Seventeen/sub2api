@@ -651,7 +651,7 @@ export interface GroupModelOperation {
 }
 
 export interface GroupModelOperationSummary {
-  platform: GroupPlatform
+  target_platform: GroupPlatform
   affected_group_count: number
   added_models: string[]
   removed_models: string[]
