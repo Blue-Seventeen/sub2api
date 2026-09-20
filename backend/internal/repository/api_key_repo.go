@@ -993,7 +993,7 @@ func groupEntityToService(g *dbent.Group) *service.Group {
 			modelPricing = nil
 		}
 	}
-	return &service.Group{
+	result := &service.Group{
 		ID:                              g.ID,
 		Name:                            g.Name,
 		Description:                     derefString(g.Description),
@@ -1067,6 +1067,8 @@ func groupEntityToService(g *dbent.Group) *service.Group {
 		CreatedAt:                       g.CreatedAt,
 		UpdatedAt:                       g.UpdatedAt,
 	}
+	result.ModelAllowlist = result.EffectiveModelPolicy()
+	return result
 }
 
 func derefString(s *string) string {

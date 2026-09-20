@@ -141,7 +141,7 @@ func (h *BatchImageHandler) Models(c *gin.Context) {
 	}
 	// 分组级模型白名单：ListModels 已按分组账号枚举，这里再按白名单过滤一次。
 	if apiKey, ok := middleware.GetAPIKeyFromContext(c); ok && apiKey != nil && apiKey.Group != nil {
-		got.Data = filterBatchImageModelsByAllowlist(got.Data, apiKey.Group.ModelAllowlist)
+		got.Data = filterBatchImageModelsByAllowlist(got.Data, apiKey.Group.EffectiveModelPolicy())
 	}
 	c.JSON(http.StatusOK, got)
 }

@@ -46,12 +46,13 @@ func (h *GatewayHandler) GeminiV1BetaListModels(c *gin.Context) {
 	}
 
 	filterGeminiModels := func(models []gemini.Model) []gemini.Model {
-		if !apiKey.Group.ModelAllowlistEnabled() {
+		policy := apiKey.Group.EffectiveModelPolicy()
+		if !policy.Enabled {
 			return models
 		}
 		filtered := make([]gemini.Model, 0, len(models))
 		for _, model := range models {
-			if apiKey.Group.ModelAllowlist.Allows(model.Name) {
+			if policy.Allows(model.Name) {
 				filtered = append(filtered, model)
 			}
 		}
@@ -62,9 +63,10 @@ func (h *GatewayHandler) GeminiV1BetaListModels(c *gin.Context) {
 	if forcePlatform == service.PlatformAntigravity {
 		models := antigravity.DefaultGeminiModels()
 		if apiKey.Group.ModelAllowlistEnabled() {
+			policy := apiKey.Group.EffectiveModelPolicy()
 			filtered := make([]antigravity.GeminiModel, 0, len(models))
 			for _, model := range models {
-				if apiKey.Group.ModelAllowlist.Allows(model.Name) {
+				if policy.Allows(model.Name) {
 					filtered = append(filtered, model)
 				}
 			}
@@ -98,7 +100,7 @@ func (h *GatewayHandler) GeminiV1BetaListModels(c *gin.Context) {
 		return
 	}
 	if apiKey.Group.ModelAllowlistEnabled() {
-		if filtered, dropped, ok := filterUpstreamGeminiModelsBody(res.Body, apiKey.Group.ModelAllowlist); ok && dropped {
+		if filtered, dropped, ok := filterUpstreamGeminiModelsBody(res.Body, apiKey.Group.EffectiveModelPolicy()); ok && dropped {
 			res.Body = filtered
 		}
 	}

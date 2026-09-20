@@ -693,6 +693,11 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	} else if err := s.groupRepo.Create(ctx, group); err != nil {
 		return nil, err
 	}
+	if s.authCacheInvalidator != nil && group.GlobalModelOperationSummary != nil {
+		for _, affectedID := range group.GlobalModelOperationSummary.AffectedGroupIDs {
+			s.authCacheInvalidator.InvalidateAuthCacheByGroupID(ctx, affectedID)
+		}
+	}
 
 	// require_oauth_only: 过滤掉 apikey 类型账号
 	if group.RequireOAuthOnly && groupSupportsOAuthOnlyFilter(group.Platform) && len(accountIDsToCopy) > 0 {
@@ -722,12 +727,6 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		}
 		group.AccountCount = int64(len(accountIDsToCopy))
 	}
-	if s.authCacheInvalidator != nil && group.GlobalModelOperationSummary != nil {
-		for _, affectedID := range group.GlobalModelOperationSummary.AffectedGroupIDs {
-			s.authCacheInvalidator.InvalidateAuthCacheByGroupID(ctx, affectedID)
-		}
-	}
-
 	return group, nil
 }
 
@@ -860,9 +859,6 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	previousPlatform := group.Platform
 	if len(input.GlobalModelOperations) > 0 && input.Platform != "" && NormalizeGroupPlatform(input.Platform) != previousPlatform {
 		return nil, infraerrors.BadRequest("GLOBAL_MODEL_OPERATIONS_PLATFORM_CHANGE", "global model operations cannot be combined with a platform change")
-	}
-	if !hasCanonicalGroupModelsListConfig(group.ModelsListConfig) && (group.ModelAllowlist.Enabled || len(group.ModelAllowlist.Models) > 0) {
-		group.ModelsListConfig = GroupModelsListConfig{Enabled: group.ModelAllowlist.Enabled, Models: append([]string(nil), group.ModelAllowlist.Models...)}
 	}
 	group.ModelAllowlist = groupModelAllowlistFromModelsListConfig(normalizeGroupModelsListConfig(group.ModelsListConfig))
 

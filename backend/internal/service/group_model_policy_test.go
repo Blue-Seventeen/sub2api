@@ -90,3 +90,18 @@ func TestAPIKeyAuthSnapshotHydratedEmptyCanonicalDoesNotRestoreLegacyMirror(t *t
 	require.Equal(t, GroupModelAllowlist{}, apiKey.Group.ModelAllowlist)
 	require.False(t, apiKey.Group.ModelAllowlistEnabled())
 }
+
+func TestAPIKeyAuthSnapshotLegacyMirrorRemainsEffectiveWhenCanonicalIsAbsent(t *testing.T) {
+	svc := &APIKeyService{}
+	apiKey := svc.snapshotToAPIKey("key", &APIKeyAuthSnapshot{
+		Version: apiKeyAuthSnapshotVersion,
+		Group: &APIKeyAuthGroupSnapshot{
+			ID:               10,
+			ModelsListConfig: GroupModelsListConfig{},
+			ModelAllowlist:   GroupModelAllowlist{Enabled: true, Models: []string{"legacy-only"}},
+		},
+	})
+
+	require.NotNil(t, apiKey.Group)
+	require.Equal(t, GroupModelAllowlist{Enabled: true, Models: []string{"legacy-only"}}, apiKey.Group.EffectiveModelPolicy())
+}

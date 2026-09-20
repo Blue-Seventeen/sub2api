@@ -1,8 +1,11 @@
 package service
 
 import (
+	"encoding/json"
+	"net/http"
 	"testing"
 
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/stretchr/testify/require"
 )
 
@@ -55,5 +58,22 @@ func TestApplyGlobalModelOperations_AddsExactModelWithoutMatchingWildcard(t *tes
 func TestApplyGlobalModelOperations_RejectsUnknownOperation(t *testing.T) {
 	_, _, _, _, err := ApplyGlobalModelOperations(GroupModelsListConfig{}, []GroupModelOperation{{Operation: "replace", Model: "gpt-4o"}})
 
-	require.EqualError(t, err, "unsupported global model operation: replace")
+	appErr := infraerrors.FromError(err)
+	require.Equal(t, int32(http.StatusBadRequest), appErr.Code)
+	require.Equal(t, "INVALID_GLOBAL_MODEL_OPERATION", appErr.Reason)
+}
+
+func TestApplyGlobalModelOperations_RejectsEmptyModelAsBadRequest(t *testing.T) {
+	_, _, _, _, err := ApplyGlobalModelOperations(GroupModelsListConfig{}, []GroupModelOperation{{Operation: "add", Model: " "}})
+
+	appErr := infraerrors.FromError(err)
+	require.Equal(t, int32(http.StatusBadRequest), appErr.Code)
+	require.Equal(t, "INVALID_GLOBAL_MODEL_OPERATION", appErr.Reason)
+}
+
+func TestGlobalModelOperationSummaryDoesNotMarshalAffectedGroupIDs(t *testing.T) {
+	body, err := json.Marshal(GlobalModelOperationSummary{AffectedGroupIDs: []int64{4, 9}})
+
+	require.NoError(t, err)
+	require.NotContains(t, string(body), "affected_group_ids")
 }

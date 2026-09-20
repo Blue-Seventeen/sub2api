@@ -1,7 +1,6 @@
 package service
 
 import (
-	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -25,7 +24,7 @@ type GlobalModelOperationSummary struct {
 	AffectedGroupCount int      `json:"affected_group_count"`
 	AddedModels        []string `json:"added_models"`
 	RemovedModels      []string `json:"removed_models"`
-	AffectedGroupIDs   []int64  `json:"affected_group_ids,omitempty"`
+	AffectedGroupIDs   []int64  `json:"-"`
 }
 
 // ApplyGlobalModelOperations applies ordered exact model operations to one
@@ -37,7 +36,7 @@ func ApplyGlobalModelOperations(config GroupModelsListConfig, operations []Group
 	for _, operation := range operations {
 		model := strings.TrimSpace(operation.Model)
 		if model == "" {
-			return GroupModelsListConfig{}, false, nil, nil, fmt.Errorf("global model operation model is required")
+			return GroupModelsListConfig{}, false, nil, nil, infraerrors.BadRequest("INVALID_GLOBAL_MODEL_OPERATION", "global model operation model is required")
 		}
 		operationName := strings.ToLower(strings.TrimSpace(operation.Operation))
 		index := -1
@@ -57,7 +56,7 @@ func ApplyGlobalModelOperations(config GroupModelsListConfig, operations []Group
 				updated.Models = append(updated.Models[:index], updated.Models[index+1:]...)
 			}
 		default:
-			return GroupModelsListConfig{}, false, nil, nil, fmt.Errorf("unsupported global model operation: %s", operation.Operation)
+			return GroupModelsListConfig{}, false, nil, nil, infraerrors.Newf(http.StatusBadRequest, "INVALID_GLOBAL_MODEL_OPERATION", "unsupported global model operation: %s", operation.Operation)
 		}
 	}
 	var added, removed []string
@@ -205,14 +204,15 @@ func (g *Group) ModelAllowlistEnabled() bool {
 	return g != nil && g.EffectiveModelPolicy().Enabled
 }
 
-// EffectiveModelPolicy returns the canonical models_list_config policy. The
-// legacy mirror is used only for in-memory records created before the
-// migration, where the canonical field is absent.
+// EffectiveModelPolicy returns the canonical models_list_config policy.
+// Hydrated records always have a persisted canonical field, including an
+// explicitly empty configuration. The legacy mirror is used only by old
+// in-memory fixtures that were never hydrated from repository/cache storage.
 func (g *Group) EffectiveModelPolicy() GroupModelAllowlist {
 	if g == nil {
 		return GroupModelAllowlist{}
 	}
-	if hasCanonicalGroupModelsListConfig(g.ModelsListConfig) {
+	if g.Hydrated || hasCanonicalGroupModelsListConfig(g.ModelsListConfig) {
 		return groupModelAllowlistFromModelsListConfig(normalizeGroupModelsListConfig(g.ModelsListConfig))
 	}
 	return g.ModelAllowlist

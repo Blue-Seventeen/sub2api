@@ -518,10 +518,14 @@ func (r *groupRepository) UpdateWithGlobalModelOperations(ctx context.Context, g
 		defer func() { _ = tx.Rollback() }()
 		txClient = tx.Client()
 	}
+	targets, err := lockGlobalModelOperationTargets(ctx, txClient, groupIn.Platform)
+	if err != nil {
+		return nil, err
+	}
 	if err := updateGroupRecord(ctx, txClient, groupIn); err != nil {
 		return nil, err
 	}
-	summary, err := applyGlobalModelOperationsInTx(ctx, txClient, groupIn.Platform, operations)
+	summary, err := applyGlobalModelOperationsToLockedTargets(ctx, txClient, groupIn.Platform, targets, groupIn.ID, groupIn.ModelsListConfig, operations)
 	if err != nil {
 		return nil, err
 	}
@@ -558,6 +562,16 @@ func summaryContainsGroup(summary *service.GlobalModelOperationSummary, groupID 
 }
 
 func applyGlobalModelOperationsInTx(ctx context.Context, client *dbent.Client, platform string, operations []service.GroupModelOperation) (*service.GlobalModelOperationSummary, error) {
+	groups, err := lockGlobalModelOperationTargets(ctx, client, platform)
+	if err != nil {
+		return nil, err
+	}
+	return applyGlobalModelOperationsToLockedTargets(ctx, client, platform, groups, 0, service.GroupModelsListConfig{}, operations)
+}
+
+// lockGlobalModelOperationTargets establishes the shared ascending row-lock
+// order before either local or global writes can acquire a target row lock.
+func lockGlobalModelOperationTargets(ctx context.Context, client *dbent.Client, platform string) ([]*dbent.Group, error) {
 	groups, err := client.Group.Query().
 		Where(group.PlatformEQ(platform), group.DeletedAtIsNil()).
 		Order(dbent.Asc(group.FieldID)).
@@ -566,9 +580,17 @@ func applyGlobalModelOperationsInTx(ctx context.Context, client *dbent.Client, p
 	if err != nil {
 		return nil, err
 	}
+	return groups, nil
+}
+
+func applyGlobalModelOperationsToLockedTargets(ctx context.Context, client *dbent.Client, platform string, groups []*dbent.Group, currentGroupID int64, currentPolicy service.GroupModelsListConfig, operations []service.GroupModelOperation) (*service.GlobalModelOperationSummary, error) {
 	summary := &service.GlobalModelOperationSummary{TargetPlatform: platform}
 	for _, target := range groups {
-		updated, changed, added, removed, err := service.ApplyGlobalModelOperations(target.ModelsListConfig, operations)
+		policy := target.ModelsListConfig
+		if target.ID == currentGroupID {
+			policy = currentPolicy
+		}
+		updated, changed, added, removed, err := service.ApplyGlobalModelOperations(policy, operations)
 		if err != nil {
 			return nil, err
 		}

@@ -7,12 +7,13 @@ import (
 )
 
 func blockedModelAllowlistCandidate(group *service.Group, candidates []string) string {
-	if !group.ModelAllowlistEnabled() {
+	policy := group.EffectiveModelPolicy()
+	if !policy.Enabled {
 		return ""
 	}
 	for _, candidate := range candidates {
 		candidate = strings.TrimSpace(candidate)
-		if candidate != "" && !group.ModelAllowlist.Allows(candidate) {
+		if candidate != "" && !policy.Allows(candidate) {
 			return candidate
 		}
 	}

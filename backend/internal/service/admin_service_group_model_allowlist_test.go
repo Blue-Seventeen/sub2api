@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"testing"
 
@@ -92,6 +93,14 @@ type globalModelAdminRepoStub struct {
 	summary *GlobalModelOperationSummary
 }
 
+func (r *globalModelAdminRepoStub) CreateWithGlobalModelOperations(_ context.Context, group *Group, _ []GroupModelOperation) (*GlobalModelOperationSummary, error) {
+	if r.createID > 0 {
+		group.ID = r.createID
+	}
+	r.created = group
+	return r.summary, nil
+}
+
 func (r *globalModelAdminRepoStub) UpdateWithGlobalModelOperations(_ context.Context, group *Group, _ []GroupModelOperation) (*GlobalModelOperationSummary, error) {
 	group.ModelsListConfig = GroupModelsListConfig{Enabled: true, Models: []string{"canonical-final"}}
 	group.ModelAllowlist = GroupModelAllowlist{Enabled: true, Models: []string{"canonical-final"}}
@@ -112,6 +121,62 @@ func TestAdminService_UpdateGroup_GlobalOperationKeepsReturnedCurrentGroupInSync
 	require.NoError(t, err)
 	require.Equal(t, GroupModelsListConfig{Enabled: true, Models: []string{"canonical-final"}}, got.ModelsListConfig)
 	require.Equal(t, GroupModelAllowlist{Enabled: true, Models: []string{"canonical-final"}}, got.ModelAllowlist)
+}
+
+type failingAccountLookupForGlobalCreate struct{ AccountRepository }
+
+func (failingAccountLookupForGlobalCreate) GetByIDs(_ context.Context, _ []int64) ([]*Account, error) {
+	return nil, errors.New("account lookup failed")
+}
+
+func TestAdminService_CreateGroup_GlobalOperationInvalidatesCachesBeforeAccountCopyFailure(t *testing.T) {
+	repo := &globalModelAdminRepoStub{
+		groupRepoStubForAdmin: groupRepoStubForAdmin{
+			createID:                  40,
+			getByIDByID:               map[int64]*Group{7: {ID: 7, Platform: PlatformOpenAI}},
+			getAccountIDsByGroupIDsFn: func([]int64) ([]int64, error) { return []int64{91}, nil },
+		},
+		summary: &GlobalModelOperationSummary{TargetPlatform: PlatformOpenAI, AffectedGroupIDs: []int64{40, 41}},
+	}
+	invalidator := &authCacheInvalidatorStub{}
+	svc := &adminServiceImpl{
+		groupRepo:            repo,
+		accountRepo:          failingAccountLookupForGlobalCreate{},
+		authCacheInvalidator: invalidator,
+	}
+	requireOAuthOnly := true
+
+	_, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
+		Name:                     "global-cache-before-copy",
+		Platform:                 PlatformOpenAI,
+		RateMultiplier:           1,
+		RequireOAuthOnly:         requireOAuthOnly,
+		CopyAccountsFromGroupIDs: []int64{7},
+		GlobalModelOperations:    []GroupModelOperation{{Operation: "add", Model: "gpt-5.4"}},
+	})
+
+	require.ErrorContains(t, err, "account lookup failed")
+	require.Equal(t, []int64{40, 41}, invalidator.groupIDs)
+}
+
+func TestAdminService_UpdateGroupDoesNotPromoteStaleMirrorIntoHydratedEmptyCanonical(t *testing.T) {
+	existing := &Group{
+		ID:               12,
+		Name:             "canonical-empty",
+		Platform:         PlatformOpenAI,
+		Status:           StatusActive,
+		Hydrated:         true,
+		ModelsListConfig: GroupModelsListConfig{},
+		ModelAllowlist:   GroupModelAllowlist{Enabled: true, Models: []string{"stale-legacy"}},
+	}
+	repo := &groupRepoStubForAdmin{getByID: existing}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	_, err := svc.UpdateGroup(context.Background(), existing.ID, &UpdateGroupInput{Name: "canonical-empty-updated"})
+
+	require.NoError(t, err)
+	require.Equal(t, GroupModelsListConfig{}, repo.updated.ModelsListConfig)
+	require.Equal(t, GroupModelAllowlist{}, repo.updated.ModelAllowlist)
 }
 
 func TestAdminService_UpdateGroup_RejectsEmptyEnabledModelAllowlist(t *testing.T) {

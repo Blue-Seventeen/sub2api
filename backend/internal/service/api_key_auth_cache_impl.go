@@ -495,9 +495,18 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 	if snapshot.Group != nil {
 		peakRateWindows := PeakRateWindowsForRead(snapshot.Group.PeakRateWindows, snapshot.Group.PeakStart, snapshot.Group.PeakEnd, snapshot.Group.PeakRateMultiplier)
 		peakStart, peakEnd, peakMultiplier := PeakRateLegacyFields(peakRateWindows)
+		modelsListConfig := snapshot.Group.ModelsListConfig
 		modelAllowlist := snapshot.Group.ModelAllowlist
 		if snapshot.Group.ModelsListConfigPresent {
 			modelAllowlist = groupModelAllowlistFromModelsListConfig(snapshot.Group.ModelsListConfig)
+		} else {
+			// Older cache snapshots predate the canonical field. Materialize their
+			// legacy mirror only in memory; persisted hydrated groups still use the
+			// canonical field, including an explicitly empty configuration.
+			modelsListConfig = GroupModelsListConfig{
+				Enabled: modelAllowlist.Enabled,
+				Models:  append([]string(nil), modelAllowlist.Models...),
+			}
 		}
 		apiKey.Group = &Group{
 			ID:                              snapshot.Group.ID,
@@ -546,7 +555,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			FreeOpenAIFast:                  snapshot.Group.FreeOpenAIFast,
 			DefaultMappedModel:              snapshot.Group.DefaultMappedModel,
 			MessagesDispatchModelConfig:     snapshot.Group.MessagesDispatchModelConfig,
-			ModelsListConfig:                snapshot.Group.ModelsListConfig,
+			ModelsListConfig:                modelsListConfig,
 			ModelAllowlist:                  modelAllowlist,
 			CodexModelsManifestConfig:       snapshot.Group.CodexModelsManifestConfig,
 			RequireOAuthOnly:                snapshot.Group.RequireOAuthOnly,

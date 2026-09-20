@@ -154,10 +154,110 @@ outbox row per affected group, and rollback when outbox persistence fails.
 
 ### Concerns
 
-- The complete service suite still contains the two previously documented
-  canonical-policy/auth-cache expectation failures from the surrounding
-  worktree changes (auth snapshot version and legacy mirror expectation). The
-  focused fix-round tests and changed-package compilation pass.
-- Cache invalidation remains exercised through the existing repository/service
-  global-operation path; no separate external Redis integration test was
-  added in this round.
+- The `go test -tags=unit` service command remains unavailable because the
+  broader worktree has unrelated duplicate helpers, undefined platform
+  constants, and stale pricing-test signatures. The normal service suite and
+  all Task 3 focused tests pass without that tag.
+
+## Fix Round 2
+
+### Status
+
+Completed. All Important findings were addressed, and the low-risk Minor
+findings were also fixed without changing migrations 235/236 or unrelated
+subscription, deployment, promotion, proxy, scheduler, or frontend work.
+
+### Changes
+
+- `UpdateWithGlobalModelOperations` locks every live target group in ascending
+  ID order before updating the current row or applying global mutations.
+- Create-path global-operation auth caches are invalidated immediately after
+  the committed repository operation, before account filtering or binding can
+  fail.
+- `EffectiveModelPolicy` treats hydrated groups, including explicit empty
+  `models_list_config`, as canonical. Legacy-only auth-cache snapshots are
+  recognized through `models_list_config_present` and materialized only in
+  memory, so stale mirrors cannot revive persisted empty policy.
+- Batch image, Gemini v1beta, model-allowlist middleware/handler, and related
+  runtime paths use `EffectiveModelPolicy` for admission/listing decisions.
+- `AffectedGroupIDs` is service-internal and is excluded from JSON responses.
+- Rollback coverage mutates both the current group and a second global target,
+  then verifies both JSON columns and all outbox rows roll back on failure.
+- Empty or unsupported global operations return structured HTTP 400 errors.
+
+### Changed Files
+
+- `backend/internal/handler/batch_image_handler.go`
+- `backend/internal/handler/gemini_v1beta_handler.go`
+- `backend/internal/handler/model_allowlist.go`
+- `backend/internal/repository/api_key_repo.go`
+- `backend/internal/repository/group_repo.go`
+- `backend/internal/repository/group_repo_integration_test.go`
+- `backend/internal/server/middleware/group_model_allowlist.go`
+- `backend/internal/service/admin_group.go`
+- `backend/internal/service/admin_service_group_model_allowlist_test.go`
+- `backend/internal/service/api_key_auth_cache_impl.go`
+- `backend/internal/service/group_model_allowlist.go`
+- `backend/internal/service/group_model_global_ops_create_test.go`
+- `backend/internal/service/group_model_global_ops_test.go`
+- `backend/internal/service/group_model_policy_test.go`
+- `.superpowers/sdd/2026-09-20-group-model-global-ops/task-3-report.md`
+
+### Verification
+
+The new old-snapshot regression was verified red before implementation:
+
+```text
+go test ./internal/service -run 'TestAPIKeyAuthSnapshot(LegacyMirrorRemainsEffectiveWhenCanonicalIsAbsent|HydratedEmptyCanonicalDoesNotRestoreLegacyMirror)' -count=1
+FAIL: TestAPIKeyAuthSnapshotLegacyMirrorRemainsEffectiveWhenCanonicalIsAbsent
+expected legacy-only policy, got empty policy
+```
+
+It passed after the cache reconstruction fix:
+
+```text
+go test ./internal/service -run 'TestAPIKeyAuthSnapshot(LegacyMirrorRemainsEffectiveWhenCanonicalIsAbsent|HydratedEmptyCanonicalDoesNotRestoreLegacyMirror)' -count=1
+ok  github.com/Wei-Shaw/sub2api/internal/service 0.461s
+```
+
+Additional covering commands and observed outputs:
+
+```text
+go test ./internal/service -run 'Test(ApplyGlobalModelOperations|GroupEffectiveModelPolicy|GroupModelPolicy|APIKeyAuthSnapshot|ModelPlaza.*Canonical|OpenAI.*Canonical|FilterCodexModelIDsForGroup)' -count=1
+ok  github.com/Wei-Shaw/sub2api/internal/service 0.441s
+
+go test ./internal/service -run 'TestCreateGroupGlobalOperationsInvalidateCachesBeforeAccountCopyFailure' -count=1
+ok  github.com/Wei-Shaw/sub2api/internal/service 0.452s
+
+go test ./internal/handler -run 'Test.*(BatchImage|Gemini|ModelAllowlist|Model)' -count=1
+ok  github.com/Wei-Shaw/sub2api/internal/handler 1.362s
+
+go test ./internal/handler/admin -run 'Test.*(ModelsList|Global|Create)' -count=1
+ok  github.com/Wei-Shaw/sub2api/internal/handler/admin 1.804s
+
+go test ./internal/server/middleware -run 'TestGroupModelAllowlist' -count=1
+ok  github.com/Wei-Shaw/sub2api/internal/server/middleware 0.414s
+
+go test ./internal/repository -run '^$' -count=1
+ok  github.com/Wei-Shaw/sub2api/internal/repository 0.326s [no tests to run]
+
+go test -tags=integration ./internal/repository -run 'TestGroupRepoSuite/TestGlobalModelOperationsScopesTargetsAndWritesOneEventPerAffectedGroup|TestGlobalModelOperationsRollBackWhenOutboxFails' -count=1
+ok  github.com/Wei-Shaw/sub2api/internal/repository 7.902s
+
+go test ./internal/service -count=1
+ok  github.com/Wei-Shaw/sub2api/internal/service 132.486s
+
+go test ./internal/handler ./internal/handler/admin ./internal/server/middleware -run '^$' -count=1
+ok  github.com/Wei-Shaw/sub2api/internal/handler 0.390s [no tests to run]
+ok  github.com/Wei-Shaw/sub2api/internal/handler/admin 0.263s [no tests to run]
+ok  github.com/Wei-Shaw/sub2api/internal/server/middleware 0.292s [no tests to run]
+
+git diff --check
+exit code 0
+```
+
+The integration tests verified same-platform scope, inactive and subscription
+groups, soft-delete and other-platform exclusion, exact wildcard behavior,
+last-operation-wins ordering, one outbox row per affected group, and rollback
+of current and target policy JSON plus outbox rows. The full normal service
+suite also passed.

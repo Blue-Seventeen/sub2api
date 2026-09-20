@@ -270,32 +270,52 @@ func TestGlobalModelOperationsRollBackWhenOutboxFails(t *testing.T) {
 		ModelAllowlist:   service.GroupModelAllowlist{Enabled: true, Models: []string{"before"}},
 	}
 	require.NoError(t, repo.Create(ctx, group))
-	_, err := integrationDB.ExecContext(ctx, "DELETE FROM scheduler_outbox WHERE group_id = $1", group.ID)
+	target := &service.Group{
+		Name: "global-outbox-rollback-target", Platform: service.PlatformOpenAI, RateMultiplier: 1,
+		Status: service.StatusActive, SubscriptionType: service.SubscriptionTypeStandard,
+		ModelsListConfig: service.GroupModelsListConfig{Enabled: false, Models: []string{"target-before"}},
+		ModelAllowlist:   service.GroupModelAllowlist{Enabled: false, Models: []string{"target-before"}},
+	}
+	require.NoError(t, repo.Create(ctx, target))
+	_, err := integrationDB.ExecContext(ctx, "DELETE FROM scheduler_outbox WHERE group_id IN ($1, $2)", group.ID, target.ID)
 	require.NoError(t, err)
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 	functionName := "fail_global_outbox_" + suffix
 	triggerName := "fail_global_outbox_trigger_" + suffix
 	_, err = integrationDB.ExecContext(ctx, fmt.Sprintf(`
 		CREATE OR REPLACE FUNCTION %s() RETURNS trigger AS $$
-		BEGIN RAISE EXCEPTION 'forced global outbox failure'; END;
-		$$ LANGUAGE plpgsql`, functionName))
+		BEGIN
+			IF NEW.group_id = %d THEN
+				RAISE EXCEPTION 'forced global outbox failure';
+			END IF;
+			RETURN NEW;
+		END;
+		$$ LANGUAGE plpgsql`, functionName, target.ID))
 	require.NoError(t, err)
 	_, err = integrationDB.ExecContext(ctx, fmt.Sprintf("CREATE TRIGGER %s BEFORE INSERT ON scheduler_outbox FOR EACH ROW EXECUTE FUNCTION %s()", triggerName, functionName))
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_, _ = integrationDB.ExecContext(context.Background(), fmt.Sprintf("DROP TRIGGER IF EXISTS %s ON scheduler_outbox", triggerName))
 		_, _ = integrationDB.ExecContext(context.Background(), fmt.Sprintf("DROP FUNCTION IF EXISTS %s()", functionName))
-		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM groups WHERE id = $1", group.ID)
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM groups WHERE id IN ($1, $2)", group.ID, target.ID)
 	})
 
-	group.ModelsListConfig.Models = []string{"after"}
-	group.ModelAllowlist.Models = []string{"after"}
 	_, err = repo.UpdateWithGlobalModelOperations(ctx, group, []service.GroupModelOperation{{Operation: "add", Model: "after"}})
 	require.ErrorContains(t, err, "forced global outbox failure")
 
 	got, err := client.Group.Get(ctx, group.ID)
 	require.NoError(t, err)
 	require.Equal(t, []string{"before"}, got.ModelsListConfig.Models)
+	require.Equal(t, []string{"before"}, got.ModelAllowlist.Models)
+	targetAfter, err := client.Group.Get(ctx, target.ID)
+	require.NoError(t, err)
+	require.Equal(t, []string{"target-before"}, targetAfter.ModelsListConfig.Models)
+	require.Equal(t, []string{"target-before"}, targetAfter.ModelAllowlist.Models)
+	for _, groupID := range []int64{group.ID, target.ID} {
+		var outboxCount int
+		require.NoError(t, scanSingleRow(ctx, integrationDB, "SELECT COUNT(*) FROM scheduler_outbox WHERE group_id = $1", []any{groupID}, &outboxCount))
+		require.Zero(t, outboxCount)
+	}
 }
 
 func (s *GroupRepoSuite) TestGetByID_PreservesMessagesDispatchModelConfig() {
