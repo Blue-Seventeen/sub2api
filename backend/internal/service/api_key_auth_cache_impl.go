@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 21 // v21: restore upstream pricing/policy fields and public-group restriction.
+const apiKeyAuthSnapshotVersion = 22 // v22: models_list_config is canonical for group model policy.
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -429,7 +429,8 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			DefaultMappedModel:              apiKey.Group.DefaultMappedModel,
 			MessagesDispatchModelConfig:     apiKey.Group.MessagesDispatchModelConfig,
 			ModelsListConfig:                apiKey.Group.ModelsListConfig,
-			ModelAllowlist:                  apiKey.Group.ModelAllowlist,
+			ModelsListConfigPresent:         apiKey.Group.Hydrated || hasCanonicalGroupModelsListConfig(apiKey.Group.ModelsListConfig),
+			ModelAllowlist:                  apiKey.Group.EffectiveModelPolicy(),
 			CodexModelsManifestConfig:       apiKey.Group.CodexModelsManifestConfig,
 			RequireOAuthOnly:                apiKey.Group.RequireOAuthOnly,
 			RequirePrivacySet:               apiKey.Group.RequirePrivacySet,
@@ -494,6 +495,10 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 	if snapshot.Group != nil {
 		peakRateWindows := PeakRateWindowsForRead(snapshot.Group.PeakRateWindows, snapshot.Group.PeakStart, snapshot.Group.PeakEnd, snapshot.Group.PeakRateMultiplier)
 		peakStart, peakEnd, peakMultiplier := PeakRateLegacyFields(peakRateWindows)
+		modelAllowlist := snapshot.Group.ModelAllowlist
+		if snapshot.Group.ModelsListConfigPresent {
+			modelAllowlist = groupModelAllowlistFromModelsListConfig(snapshot.Group.ModelsListConfig)
+		}
 		apiKey.Group = &Group{
 			ID:                              snapshot.Group.ID,
 			Name:                            snapshot.Group.Name,
@@ -542,7 +547,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			DefaultMappedModel:              snapshot.Group.DefaultMappedModel,
 			MessagesDispatchModelConfig:     snapshot.Group.MessagesDispatchModelConfig,
 			ModelsListConfig:                snapshot.Group.ModelsListConfig,
-			ModelAllowlist:                  snapshot.Group.ModelAllowlist,
+			ModelAllowlist:                  modelAllowlist,
 			CodexModelsManifestConfig:       snapshot.Group.CodexModelsManifestConfig,
 			RequireOAuthOnly:                snapshot.Group.RequireOAuthOnly,
 			RequirePrivacySet:               snapshot.Group.RequirePrivacySet,

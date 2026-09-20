@@ -1191,12 +1191,14 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 	if platform == service.PlatformComposite {
 		availableModels := h.compositeAvailableModels(c.Request.Context(), groupID)
 		if apiKey != nil && apiKey.Group.ModelAllowlistEnabled() {
+			policy := apiKey.Group.EffectiveModelPolicy()
 			if len(availableModels) == 0 {
 				availableModels = defaultModelIDsForPlatform(service.PlatformComposite)
 			}
-			availableModels = apiKey.Group.ModelAllowlist.FilterForListing(availableModels)
 			if apiKey.Group.CustomModelsListEnabled() {
 				availableModels = filterCompositeModelsByCustomList(availableModels, apiKey.Group.ModelsListConfig.Models)
+			} else {
+				availableModels = policy.FilterForListing(availableModels)
 			}
 			writeModelsList(c, platform, availableModels)
 			return
@@ -1217,10 +1219,16 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 	// Get available models from account configurations for the selected group platform.
 	availableModels := h.gatewayService.GetAvailableModels(c.Request.Context(), groupID, platform)
 	if apiKey != nil && apiKey.Group.ModelAllowlistEnabled() {
+		policy := apiKey.Group.EffectiveModelPolicy()
 		fallbackModels := defaultModelIDsForPlatform(platform)
-		availableModels = apiKey.Group.ModelAllowlist.FilterForListing(modelListingSource(platform, availableModels, fallbackModels))
 		if apiKey.Group.CustomModelsListEnabled() {
-			availableModels = filterCompositeModelsByCustomList(availableModels, apiKey.Group.ModelsListConfig.Models)
+			availableModels = filterModelsByCustomList(
+				customModelsListSource(platform, availableModels, fallbackModels),
+				fallbackModels,
+				apiKey.Group.ModelsListConfig.Models,
+			)
+		} else {
+			availableModels = policy.FilterForListing(modelListingSource(platform, availableModels, fallbackModels))
 		}
 		writeModelsList(c, platform, availableModels)
 		return
@@ -1314,15 +1322,15 @@ func (h *GatewayHandler) codexModelIDsForGroup(ctx context.Context, group *servi
 		availableModels := h.compositeAvailableModels(ctx, groupID)
 		fallbackModels := defaultCodexModelIDsForPlatform(service.PlatformComposite)
 		if group.ModelAllowlistEnabled() {
+			policy := group.EffectiveModelPolicy()
 			source := availableModels
 			if len(source) == 0 {
 				source = fallbackModels
 			}
-			models := group.ModelAllowlist.FilterForListing(source)
 			if group.CustomModelsListEnabled() {
-				models = filterCompositeModelsByCustomList(models, group.ModelsListConfig.Models)
+				return filterCompositeModelsByLegacyList(source, group.ModelsListConfig.Models)
 			}
-			return models
+			return policy.FilterForListing(source)
 		}
 		if group.CustomModelsListEnabled() {
 			return filterCompositeModelsByLegacyList(availableModels, group.ModelsListConfig.Models)
@@ -1336,11 +1344,14 @@ func (h *GatewayHandler) codexModelIDsForGroup(ctx context.Context, group *servi
 	availableModels := h.gatewayService.GetAvailableModels(ctx, groupID, platform)
 	fallbackModels := defaultCodexModelIDsForPlatform(platform)
 	if group.ModelAllowlistEnabled() {
-		models := group.ModelAllowlist.FilterForListing(modelListingSource(platform, availableModels, fallbackModels))
 		if group.CustomModelsListEnabled() {
-			models = filterCompositeModelsByCustomList(models, group.ModelsListConfig.Models)
+			return filterModelsByCustomList(
+				customModelsListSource(platform, availableModels, fallbackModels),
+				fallbackModels,
+				group.ModelsListConfig.Models,
+			)
 		}
-		return models
+		return group.EffectiveModelPolicy().FilterForListing(modelListingSource(platform, availableModels, fallbackModels))
 	}
 	if group.CustomModelsListEnabled() {
 		return filterModelsByCustomList(customModelsListSource(platform, availableModels, fallbackModels), fallbackModels, group.ModelsListConfig.Models)
@@ -1789,9 +1800,10 @@ func mergeModelIDs(primary, secondary []string) []string {
 func (h *GatewayHandler) AntigravityModels(c *gin.Context) {
 	models := antigravity.DefaultModels()
 	if apiKey, ok := middleware2.GetAPIKeyFromContext(c); ok && apiKey != nil && apiKey.Group.ModelAllowlistEnabled() {
+		policy := apiKey.Group.EffectiveModelPolicy()
 		filtered := make([]antigravity.ClaudeModel, 0, len(models))
 		for _, model := range models {
-			if apiKey.Group.ModelAllowlist.Allows(model.ID) {
+			if policy.Allows(model.ID) {
 				filtered = append(filtered, model)
 			}
 		}

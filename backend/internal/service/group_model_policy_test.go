@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -25,6 +26,18 @@ func TestGroupEffectiveModelPolicyFallsBackToLegacyMirrorOnlyWhenCanonicalIsAbse
 
 	require.Equal(t, group.ModelAllowlist, group.EffectiveModelPolicy())
 	require.True(t, group.AllowsModel("legacy-only"))
+}
+
+func TestGroupEffectiveModelPolicyHydratedEmptyCanonicalDoesNotFallBackToMirror(t *testing.T) {
+	group := &Group{
+		Hydrated:         true,
+		ModelsListConfig: GroupModelsListConfig{},
+		ModelAllowlist:   GroupModelAllowlist{Enabled: true, Models: []string{"stale-legacy"}},
+	}
+
+	require.Equal(t, GroupModelAllowlist{}, group.EffectiveModelPolicy())
+	require.False(t, group.ModelAllowlistEnabled())
+	require.True(t, group.AllowsModel("stale-legacy"))
 }
 
 func TestGroupModelPolicyAliasNormalization(t *testing.T) {
@@ -52,5 +65,28 @@ func TestAPIKeyAuthSnapshotUsesCanonicalModelPolicy(t *testing.T) {
 	require.NotNil(t, snapshot)
 	require.Equal(t, GroupModelAllowlist{Enabled: true, Models: []string{"gpt-5.4"}}, snapshot.Group.ModelAllowlist)
 	require.Equal(t, apiKey.Group.ModelsListConfig, snapshot.Group.ModelsListConfig)
+	require.True(t, snapshot.Group.ModelsListConfigPresent)
+	payload, err := json.Marshal(snapshot)
+	require.NoError(t, err)
+	var decoded APIKeyAuthSnapshot
+	require.NoError(t, json.Unmarshal(payload, &decoded))
+	require.True(t, decoded.Group.ModelsListConfigPresent)
 	require.Equal(t, apiKeyAuthSnapshotVersion, snapshot.Version)
+}
+
+func TestAPIKeyAuthSnapshotHydratedEmptyCanonicalDoesNotRestoreLegacyMirror(t *testing.T) {
+	svc := &APIKeyService{}
+	apiKey := svc.snapshotToAPIKey("key", &APIKeyAuthSnapshot{
+		Version: apiKeyAuthSnapshotVersion,
+		Group: &APIKeyAuthGroupSnapshot{
+			ID:                      10,
+			ModelsListConfig:        GroupModelsListConfig{},
+			ModelsListConfigPresent: true,
+			ModelAllowlist:          GroupModelAllowlist{Enabled: true, Models: []string{"stale-legacy"}},
+		},
+	})
+
+	require.NotNil(t, apiKey.Group)
+	require.Equal(t, GroupModelAllowlist{}, apiKey.Group.ModelAllowlist)
+	require.False(t, apiKey.Group.ModelAllowlistEnabled())
 }

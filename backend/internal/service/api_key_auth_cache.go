@@ -112,6 +112,7 @@ type APIKeyAuthGroupSnapshot struct {
 	DefaultMappedModel          string                            `json:"default_mapped_model,omitempty"`
 	MessagesDispatchModelConfig OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config,omitempty"`
 	ModelsListConfig            GroupModelsListConfig             `json:"models_list_config,omitempty"`
+	ModelsListConfigPresent     bool                              `json:"models_list_config_present"`
 	ModelAllowlist              GroupModelAllowlist               `json:"model_allowlist,omitempty"`
 	CodexModelsManifestConfig   GroupCodexModelsManifestConfig    `json:"codex_models_manifest_config,omitempty"`
 	RequireOAuthOnly            bool                              `json:"require_oauth_only"`

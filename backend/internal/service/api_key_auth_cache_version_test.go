@@ -45,6 +45,30 @@ func TestAPIKeyAuthSnapshotPreservesPricingAndAccessPolicy(t *testing.T) {
 	require.Equal(t, apiKeyAuthSnapshotVersion, cached.Snapshot.Version)
 }
 
+func TestAPIKeyAuthSnapshotMaterializesLegacyModelAllowlistWhenCanonicalConfigIsAbsent(t *testing.T) {
+	groupID := int64(11)
+	svc := &APIKeyService{}
+
+	materialized, used, err := svc.applyAuthCacheEntry("k-legacy-model-mirror", &APIKeyAuthCacheEntry{
+		Snapshot: &APIKeyAuthSnapshot{
+			Version:  apiKeyAuthSnapshotVersion,
+			APIKeyID: 1,
+			UserID:   2,
+			GroupID:  &groupID,
+			Status:   StatusActive,
+			Group: &APIKeyAuthGroupSnapshot{
+				ID:             groupID,
+				Status:         StatusActive,
+				ModelAllowlist: GroupModelAllowlist{Enabled: true, Models: []string{"legacy-only"}},
+			},
+		},
+	})
+
+	require.NoError(t, err)
+	require.True(t, used)
+	require.Equal(t, GroupModelAllowlist{Enabled: true, Models: []string{"legacy-only"}}, materialized.Group.ModelAllowlist)
+}
+
 func TestAPIKeyService_RejectsV10AuthSnapshotWithoutModelAllowlist(t *testing.T) {
 	groupID := int64(9)
 	svc := &APIKeyService{}
