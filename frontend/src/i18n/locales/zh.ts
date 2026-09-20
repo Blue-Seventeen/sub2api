@@ -2399,8 +2399,8 @@ export const legacyLocale = {
         }
       },
       modelsList: {
-        title: '自定义 /v1/models 模型列表',
-        hint: '启用后同时限制 /v1/models 展示结果和该分组可调用模型；支持大小写不敏感匹配和后缀 * 通配。',
+        title: '自定义 /v1/models 展示与可调用模型列表',
+        hint: '启用后同时控制 /v1/models 展示结果和该分组可调用模型限制；支持大小写不敏感匹配和后缀 * 通配。',
         loading: '正在加载模型列表...',
         empty: '暂无可展示模型',
         add: '新增',
@@ -2410,7 +2410,19 @@ export const legacyLocale = {
         modelPlaceholder: '模型名称，例如 kimi-k2.6 或 kimi-*',
         selectedSummary: '已选 {selected} / {total}',
         selectAll: '全选',
-        invertSelection: '反选'
+        invertSelection: '反选',
+        addScopeTitle: '选择新增范围',
+        addScopeDescription: '选择仅向当前分组新增模型，还是向该平台的所有分组新增模型。',
+        deleteScopeTitle: '选择删除范围',
+        deleteScopeDescription: '选择仅在当前分组删除 {count} 个已选模型，还是从该平台的所有分组删除。',
+        groupScope: '仅当前分组',
+        groupScopeHint: '立即修改当前分组的模型列表。',
+        globalScope: '该平台所有分组',
+        globalScopeHint: '记录平台级操作，在保存分组时执行。',
+        platformChangeCleared: '平台已变更，待执行的平台级模型操作已清除。',
+        summary: '{platform}：{operations}。受影响分组数：{count}。',
+        summaryAdded: '新增 {model}',
+        summaryRemoved: '删除 {model}'
       },
       claudeCode: {
         title: 'Claude Code 客户端限制',

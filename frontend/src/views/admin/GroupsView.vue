@@ -983,7 +983,7 @@
                 <button
                   type="button"
                   class="btn btn-secondary shrink-0 whitespace-nowrap px-2 py-1"
-                  @click="addModelsListItem(createModelsListState)"
+                  @click="openModelsListScopeDialog('create', 'add')"
                 >
                   {{ t("admin.groups.modelsList.add") }}
                 </button>
@@ -991,7 +991,7 @@
                   type="button"
                   :disabled="createModelsListSelectedCount === 0"
                   class="rounded px-2 py-1 font-medium text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-red-400 dark:hover:bg-red-900/20"
-                  @click="removeSelectedModelsListItems(createModelsListState)"
+                  @click="openModelsListScopeDialog('create', 'remove')"
                 >
                   {{ t("admin.groups.modelsList.delete") }}
                 </button>
@@ -1042,7 +1042,7 @@
                 <button
                   type="button"
                   class="rounded px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
-                  @click="removeModelsListItem(createModelsListState, item)"
+                @click="openModelsListScopeDialog('create', 'remove', item)"
                 >
                   {{ t("admin.groups.modelsList.delete") }}
                 </button>
@@ -2701,7 +2701,7 @@
                 <button
                   type="button"
                   class="btn btn-secondary shrink-0 whitespace-nowrap px-2 py-1"
-                  @click="addModelsListItem(editModelsListState)"
+                  @click="openModelsListScopeDialog('edit', 'add')"
                 >
                   {{ t("admin.groups.modelsList.add") }}
                 </button>
@@ -2709,7 +2709,7 @@
                   type="button"
                   :disabled="editModelsListSelectedCount === 0"
                   class="rounded px-2 py-1 font-medium text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-red-400 dark:hover:bg-red-900/20"
-                  @click="removeSelectedModelsListItems(editModelsListState)"
+                  @click="openModelsListScopeDialog('edit', 'remove')"
                 >
                   {{ t("admin.groups.modelsList.delete") }}
                 </button>
@@ -2760,7 +2760,7 @@
                 <button
                   type="button"
                   class="rounded px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
-                  @click="removeModelsListItem(editModelsListState, item)"
+                @click="openModelsListScopeDialog('edit', 'remove', item)"
                 >
                   {{ t("admin.groups.modelsList.delete") }}
                 </button>
@@ -4482,6 +4482,13 @@
       @close="showRPMOverridesModal = false"
       @success="loadGroups"
     />
+    <ModelListScopeDialog
+      :show="modelListScopeDialog.show"
+      :operation="modelListScopeDialog.operation"
+      :selected-count="modelListScopeDialog.selectedCount"
+      @close="closeModelsListScopeDialog"
+      @select="applyModelsListScope"
+    />
     <Teleport to="body">
       <Transition
         enter-active-class="transition duration-150 ease-out"
@@ -4546,6 +4553,7 @@ import type {
   CompositeRouteEndpoint,
   CompositeRouteMatchType,
   CreateGroupRequest,
+  GroupModelOperationSummary,
   GroupPlatform,
   SubscriptionType,
   UpdateGroupRequest,
@@ -4563,6 +4571,7 @@ import PlatformIcon from "@/components/common/PlatformIcon.vue";
 import Icon from "@/components/icons/Icon.vue";
 import GroupRateMultipliersModal from "@/components/admin/group/GroupRateMultipliersModal.vue";
 import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesModal.vue";
+import ModelListScopeDialog from "@/components/admin/group/ModelListScopeDialog.vue";
 import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
 import ReasoningEffortPolicyFields from "@/components/admin/group/ReasoningEffortPolicyFields.vue";
 import CodexManifestAccountsField from "@/components/admin/group/CodexManifestAccountsField.vue";
@@ -4595,16 +4604,22 @@ import {
 } from "@/utils/peak-rate";
 import {
   addModelsListItem,
-  buildModelsListConfig,
+  buildModelsListPayload,
   cancelModelsListItemEdit,
   commitModelsListItemEdit,
   createModelsListState as createInitialModelsListState,
+  clearGlobalModelOperations,
   moveModelsListItem,
-  removeModelsListItem,
-  removeSelectedModelsListItems,
+  removeModelsListItemWithScope,
+  removeSelectedModelsListItemsWithScope,
   setModelsListCandidates,
   startEditModelsListItem,
 } from "./groupModelAllowlist";
+import type {
+  ModelsListItem,
+  ModelListOperation,
+  ModelListOperationScope,
+} from "./groupsModelsList";
 import { createModelAllowlistCandidatesTracker as createModelsListCandidatesTracker } from "./modelAllowlistCandidates";
 import { normalizeSupportedModelScopesForPlatform } from "./groupsSupportedModelScopes";
 import {
@@ -5342,6 +5357,20 @@ let abortController: AbortController | null = null;
 const showCreateModal = ref(false);
 const showEditModal = ref(false);
 const showDeleteDialog = ref(false);
+type ModelsListMode = "create" | "edit";
+const modelListScopeDialog = reactive<{
+  show: boolean;
+  mode: ModelsListMode;
+  operation: ModelListOperation;
+  item: ModelsListItem | null;
+  selectedCount: number;
+}>({
+  show: false,
+  mode: "create",
+  operation: "add",
+  item: null,
+  selectedCount: 0,
+});
 const pendingLiveForm = ref<"create" | "edit" | null>(null);
 const showUnsupportedLiveConfirm = computed(
   () => pendingLiveForm.value !== null,
@@ -5421,6 +5450,43 @@ const createModelsListSelectedCount = computed(
 const editModelsListSelectedCount = computed(
   () => editModelsListState.items.filter((item) => item.selected).length,
 );
+
+const modelsListStateForMode = (mode: ModelsListMode) =>
+  mode === "create" ? createModelsListState : editModelsListState;
+
+const openModelsListScopeDialog = (
+  mode: ModelsListMode,
+  operation: ModelListOperation,
+  item: ModelsListItem | null = null,
+) => {
+  const state = modelsListStateForMode(mode);
+  modelListScopeDialog.mode = mode;
+  modelListScopeDialog.operation = operation;
+  modelListScopeDialog.item = item;
+  modelListScopeDialog.selectedCount = item
+    ? 1
+    : state.items.filter((entry) => entry.selected).length;
+  modelListScopeDialog.show = true;
+};
+
+const closeModelsListScopeDialog = () => {
+  modelListScopeDialog.show = false;
+  modelListScopeDialog.item = null;
+  modelListScopeDialog.selectedCount = 0;
+};
+
+const applyModelsListScope = (scope: ModelListOperationScope) => {
+  const { mode, operation, item } = modelListScopeDialog;
+  const state = modelsListStateForMode(mode);
+  if (operation === "add") {
+    addModelsListItem(state, scope);
+  } else if (item) {
+    removeModelsListItemWithScope(state, item, scope);
+  } else {
+    removeSelectedModelsListItemsWithScope(state, scope);
+  }
+  closeModelsListScopeDialog();
+};
 
 const createForm = reactive({
   name: "",
@@ -5750,6 +5816,25 @@ const resetModelsListState = (
   state.savedModels = fresh.savedModels;
   state.items = fresh.items;
   state.itemsInitialized = fresh.itemsInitialized;
+  state.globalModelOperations = fresh.globalModelOperations;
+};
+
+const modelsListSummaryMessage = (summary?: GroupModelOperationSummary) => {
+  if (!summary) return "";
+  const operationNames = [
+    ...summary.added_models.map((model) => t("admin.groups.modelsList.summaryAdded", { model })),
+    ...summary.removed_models.map((model) => t("admin.groups.modelsList.summaryRemoved", { model })),
+  ];
+  return t("admin.groups.modelsList.summary", {
+    platform: platformDisplayName(summary.platform),
+    operations: operationNames.join(", "),
+    count: summary.affected_group_count,
+  });
+};
+
+const showModelsListOperationSummary = (summary?: GroupModelOperationSummary) => {
+  const message = modelsListSummaryMessage(summary);
+  if (message) appStore.showSuccess(message);
 };
 
 const loadModelsListCandidates = async (
@@ -6439,7 +6524,7 @@ const handleCreateGroup = async () => {
       model_routing: convertRoutingRulesToApiFormat(
         createModelRoutingRules.value,
       ),
-      models_list_config: buildModelsListConfig(createModelsListState),
+      ...buildModelsListPayload(createModelsListState),
       codex_models_manifest_config: createCodexManifestDefaults(),
       supported_model_scopes: normalizeSupportedModelScopesForPlatform(
         createForm.platform,
@@ -6502,8 +6587,10 @@ const handleCreateGroup = async () => {
       ...requestData,
       ...peakPayload,
     };
-    await adminAPI.groups.create(requestPayload);
+    const response = await adminAPI.groups.create(requestPayload);
     appStore.showSuccess(t("admin.groups.groupCreated"));
+    showModelsListOperationSummary(response.global_model_operation_summary);
+    clearGlobalModelOperations(createModelsListState);
     closeCreateModal();
     loadGroups();
     // Only advance tour if active, on submit step, and creation succeeded
@@ -6711,7 +6798,7 @@ const handleUpdateGroup = async () => {
       model_routing: convertRoutingRulesToApiFormat(
         editModelRoutingRules.value,
       ),
-      models_list_config: buildModelsListConfig(editModelsListState),
+      ...buildModelsListPayload(editModelsListState),
       codex_models_manifest_config: editForm.platform === "openai"
         ? { ...editCodexManifestConfig, account_ids: [...editCodexManifestConfig.account_ids] }
         : createCodexManifestDefaults(),
@@ -6774,8 +6861,10 @@ const handleUpdateGroup = async () => {
       payload.web_search_price_per_call,
     );
     const requestPayload: UpdateGroupRequest = { ...payload, ...peakPayload };
-    await adminAPI.groups.update(editingGroup.value.id, requestPayload);
+    const response = await adminAPI.groups.update(editingGroup.value.id, requestPayload);
     appStore.showSuccess(t("admin.groups.groupUpdated"));
+    showModelsListOperationSummary(response.global_model_operation_summary);
+    clearGlobalModelOperations(editModelsListState);
     closeEditModal();
     loadGroups();
   } catch (error: any) {
@@ -7103,6 +7192,10 @@ watch(
       createForm.require_privacy_set = false;
     }
     resetDisabledBatchImagePricing(createForm);
+    if (createModelsListState.globalModelOperations.length > 0) {
+      clearGlobalModelOperations(createModelsListState);
+      appStore.showWarning(t("admin.groups.modelsList.platformChangeCleared"));
+    }
     resetModelsListState(createModelsListState);
     loadModelsListCandidates("create", 0, newVal);
   },
@@ -7152,6 +7245,10 @@ watch(
     }
     resetDisabledBatchImagePricing(editForm);
     if (editingGroup.value) {
+      if (editModelsListState.globalModelOperations.length > 0) {
+        clearGlobalModelOperations(editModelsListState);
+        appStore.showWarning(t("admin.groups.modelsList.platformChangeCleared"));
+      }
       resetModelsListState(editModelsListState, editForm.platform === editingGroup.value.platform ? editingGroup.value.models_list_config : undefined);
       loadModelsListCandidates("edit", editingGroup.value.id, newVal);
     }

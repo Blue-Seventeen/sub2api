@@ -9,6 +9,20 @@ export interface ModelsListItem {
   selected: boolean
   editing?: boolean
   draft?: string
+  operationScope?: ModelListOperationScope
+}
+
+export type ModelListOperation = 'add' | 'remove'
+export type ModelListOperationScope = 'group' | 'global'
+
+export interface GlobalModelOperation {
+  operation: ModelListOperation
+  model: string
+}
+
+export interface ModelsListPayload {
+  models_list_config: ModelsListConfig
+  global_model_operations: GlobalModelOperation[]
 }
 
 export interface ModelsListState {
@@ -17,6 +31,7 @@ export interface ModelsListState {
   savedModels: string[]
   items: ModelsListItem[]
   itemsInitialized: boolean
+  globalModelOperations: GlobalModelOperation[]
 }
 
 let modelsListItemSeq = 0
@@ -29,6 +44,7 @@ export const createModelsListState = (
   savedModels: normalizeModels(config?.models ?? []),
   items: [],
   itemsInitialized: false,
+  globalModelOperations: [],
 })
 
 export const hydrateModelsListState = (
@@ -105,7 +121,10 @@ export const moveModelsListItem = (
   state.items.splice(toIndex, 0, item)
 }
 
-export const addModelsListItem = (state: ModelsListState) => {
+export const addModelsListItem = (
+  state: ModelsListState,
+  operationScope: ModelListOperationScope = 'group',
+) => {
   state.itemsInitialized = true
   state.items.unshift({
     uid: nextModelsListItemUID(),
@@ -113,6 +132,7 @@ export const addModelsListItem = (state: ModelsListState) => {
     selected: true,
     editing: true,
     draft: '',
+    operationScope,
   })
 }
 
@@ -130,6 +150,9 @@ export const commitModelsListItemEdit = (state: ModelsListState, item: ModelsLis
   const nextKey = modelKey(nextID)
   const duplicate = state.items.find(other => other !== item && modelKey(other.id) === nextKey)
   if (duplicate) {
+    if (item.operationScope === 'global') {
+      queueGlobalModelOperation(state, 'add', nextID)
+    }
     if (item.id.trim()) {
       item.draft = item.id
       item.editing = false
@@ -142,6 +165,10 @@ export const commitModelsListItemEdit = (state: ModelsListState, item: ModelsLis
   item.draft = nextID
   item.editing = false
   item.selected = true
+  if (item.operationScope === 'global') {
+    queueGlobalModelOperation(state, 'add', nextID)
+    delete item.operationScope
+  }
 }
 
 export const cancelModelsListItemEdit = (state: ModelsListState, item: ModelsListItem) => {
@@ -165,6 +192,56 @@ export const removeSelectedModelsListItems = (state: ModelsListState) => {
   state.itemsInitialized = true
   state.items = state.items.filter(item => !item.selected)
 }
+
+export const removeModelsListItemWithScope = (
+  state: ModelsListState,
+  item: ModelsListItem,
+  operationScope: ModelListOperationScope = 'group',
+) => {
+  if (operationScope === 'global') {
+    queueGlobalModelOperation(state, 'remove', item.id)
+  }
+  removeModelsListItem(state, item)
+}
+
+export const removeSelectedModelsListItemsWithScope = (
+  state: ModelsListState,
+  operationScope: ModelListOperationScope = 'group',
+) => {
+  const selectedItems = state.items.filter(item => item.selected)
+  if (operationScope === 'global') {
+    selectedItems.forEach(item => queueGlobalModelOperation(state, 'remove', item.id))
+  }
+  removeSelectedModelsListItems(state)
+}
+
+export const queueGlobalModelOperation = (
+  state: ModelsListState,
+  operation: ModelListOperation,
+  rawModel: string,
+) => {
+  const model = rawModel.trim()
+  if (!model) return
+
+  const key = modelKey(model)
+  state.globalModelOperations = [
+    ...state.globalModelOperations.filter(item => modelKey(item.model) !== key),
+    { operation, model },
+  ]
+}
+
+export const getGlobalModelOperations = (
+  state: ModelsListState,
+): GlobalModelOperation[] => state.globalModelOperations.map(operation => ({ ...operation }))
+
+export const clearGlobalModelOperations = (state: ModelsListState) => {
+  state.globalModelOperations = []
+}
+
+export const buildModelsListPayload = (state: ModelsListState): ModelsListPayload => ({
+  models_list_config: buildModelsListConfig(state),
+  global_model_operations: getGlobalModelOperations(state),
+})
 
 export const buildModelsListConfig = (state: ModelsListState): ModelsListConfig => ({
   enabled: state.enabled,

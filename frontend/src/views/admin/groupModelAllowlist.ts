@@ -154,4 +154,19 @@ const normalizeModels = (models: string[]): string[] => {
   return out
 }
 
-export { addModelsListItem, buildModelsListConfig, cancelModelsListItemEdit, commitModelsListItemEdit, createModelsListState, moveModelsListItem, removeModelsListItem, removeSelectedModelsListItems, setModelsListCandidates, startEditModelsListItem } from './groupsModelsList'
+export {
+  addModelsListItem,
+  buildModelsListConfig,
+  buildModelsListPayload,
+  cancelModelsListItemEdit,
+  clearGlobalModelOperations,
+  commitModelsListItemEdit,
+  createModelsListState,
+  moveModelsListItem,
+  removeModelsListItem,
+  removeModelsListItemWithScope,
+  removeSelectedModelsListItems,
+  removeSelectedModelsListItemsWithScope,
+  setModelsListCandidates,
+  startEditModelsListItem,
+} from './groupsModelsList'

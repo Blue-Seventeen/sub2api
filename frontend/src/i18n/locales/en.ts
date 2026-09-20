@@ -2319,8 +2319,8 @@ export const legacyLocale = {
       }
     },
       modelsList: {
-        title: 'Custom /v1/models Model List',
-        hint: 'When enabled, this controls both the /v1/models response and callable models for this group. Matching is case-insensitive and supports suffix * wildcards.',
+        title: 'Custom /v1/models Display and Callable Model List',
+        hint: 'When enabled, this controls both the /v1/models response and callable-model restrictions for this group. Matching is case-insensitive and supports suffix * wildcards.',
         loading: 'Loading model list...',
         empty: 'No displayable models',
         add: 'Add',
@@ -2330,7 +2330,19 @@ export const legacyLocale = {
         modelPlaceholder: 'Model name, e.g. kimi-k2.6 or kimi-*',
         selectedSummary: 'Selected {selected} / {total}',
         selectAll: 'Select all',
-        invertSelection: 'Invert'
+        invertSelection: 'Invert',
+        addScopeTitle: 'Choose add scope',
+        addScopeDescription: 'Choose whether to add the model only to this group or to every group on this platform.',
+        deleteScopeTitle: 'Choose delete scope',
+        deleteScopeDescription: 'Choose whether to delete {count} selected model(s) only here or from every group on this platform.',
+        groupScope: 'This group only',
+        groupScopeHint: 'Change this group model list immediately.',
+        globalScope: 'All groups on this platform',
+        globalScopeHint: 'Queue a platform-wide operation and apply it when the group is saved.',
+        platformChangeCleared: 'Pending global model operations were cleared because the platform changed.',
+        summary: '{platform}: {operations}. Affected groups: {count}.',
+        summaryAdded: 'added {model}',
+        summaryRemoved: 'removed {model}'
       },
       claudeCode: {
         title: 'Claude Code Client Restriction',

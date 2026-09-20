@@ -3,12 +3,18 @@ import { describe, expect, it } from "vitest";
 import {
   addModelsListItem,
   buildModelsListConfig,
+  buildModelsListPayload,
   commitModelsListItemEdit,
   createModelsListState,
   hydrateModelsListState,
   moveModelsListItem,
   removeModelsListItem,
+  removeModelsListItemWithScope,
+  removeSelectedModelsListItemsWithScope,
   removeSelectedModelsListItems,
+  queueGlobalModelOperation,
+  clearGlobalModelOperations,
+  getGlobalModelOperations,
   setModelsListCandidates,
   startEditModelsListItem,
   toggleModelsListItem,
@@ -196,6 +202,130 @@ describe("groupsModelsList", () => {
     expect(buildModelsListConfig(state)).toEqual({
       enabled: true,
       models: ["Kimi"],
+    });
+  });
+
+  it("queues global model operations with case-insensitive last-operation-wins semantics", () => {
+    const state = createModelsListState({ enabled: true, models: ["gpt-5.4"] });
+
+    queueGlobalModelOperation(state, "add", " GPT-5.5 ");
+    queueGlobalModelOperation(state, "remove", "gpt-5.5");
+    queueGlobalModelOperation(state, "add", "GPT-5.5");
+
+    expect(getGlobalModelOperations(state)).toEqual([
+      { operation: "add", model: "GPT-5.5" },
+    ]);
+  });
+
+  it("does not queue blank global model operations", () => {
+    const state = createModelsListState();
+
+    queueGlobalModelOperation(state, "add", "   ");
+
+    expect(getGlobalModelOperations(state)).toEqual([]);
+  });
+
+  it("clears pending global operations without changing local models", () => {
+    const state = hydrateModelsListState(
+      { enabled: true, models: ["gpt-5.4"] },
+      ["gpt-5.4"],
+    );
+    queueGlobalModelOperation(state, "remove", "gpt-5.4");
+
+    clearGlobalModelOperations(state);
+
+    expect(getGlobalModelOperations(state)).toEqual([]);
+    expect(buildModelsListConfig(state)).toEqual({
+      enabled: true,
+      models: ["gpt-5.4"],
+    });
+  });
+
+  it("defaults newly added entries to group scope", () => {
+    const state = createModelsListState();
+
+    addModelsListItem(state);
+    state.items[0].draft = "gpt-5.5";
+    commitModelsListItemEdit(state, state.items[0]);
+
+    expect(getGlobalModelOperations(state)).toEqual([]);
+    expect(buildModelsListConfig(state).models).toEqual(["gpt-5.5"]);
+  });
+
+  it("queues a global add when a global draft is committed", () => {
+    const state = createModelsListState({ enabled: false });
+
+    addModelsListItem(state, "global");
+    state.items[0].draft = " gpt-5.5 ";
+    commitModelsListItemEdit(state, state.items[0]);
+
+    expect(getGlobalModelOperations(state)).toEqual([
+      { operation: "add", model: "gpt-5.5" },
+    ]);
+  });
+
+  it("queues a global add even when the model already exists locally", () => {
+    const state = hydrateModelsListState(
+      { enabled: false, models: ["gpt-5.5"] },
+      ["gpt-5.5"],
+    );
+
+    addModelsListItem(state, "global");
+    state.items[0].draft = "GPT-5.5";
+    commitModelsListItemEdit(state, state.items[0]);
+
+    expect(getGlobalModelOperations(state)).toEqual([
+      { operation: "add", model: "GPT-5.5" },
+    ]);
+    expect(buildModelsListConfig(state).models).toEqual(["gpt-5.5"]);
+  });
+
+  it("queues only selected exact entries for a global delete", () => {
+    const state = hydrateModelsListState(
+      { enabled: false, models: ["gpt-*", "gpt-5.5", "gpt-5.4"] },
+      ["gpt-*", "gpt-5.5", "gpt-5.4"],
+    );
+    state.items.forEach((item) => {
+      item.selected = item.id !== "gpt-5.4";
+    });
+
+    removeSelectedModelsListItemsWithScope(state, "global");
+
+    expect(getGlobalModelOperations(state)).toEqual([
+      { operation: "remove", model: "gpt-*" },
+      { operation: "remove", model: "gpt-5.5" },
+    ]);
+    expect(buildModelsListConfig(state)).toEqual({ enabled: false, models: [] });
+  });
+
+  it("does not queue a local row deletion as a global operation", () => {
+    const state = hydrateModelsListState(
+      { enabled: true, models: ["gpt-5.5"] },
+      ["gpt-5.5"],
+    );
+
+    removeModelsListItemWithScope(state, state.items[0]);
+
+    expect(getGlobalModelOperations(state)).toEqual([]);
+  });
+
+  it("retains pending operations while building a failed-save payload", () => {
+    const state = createModelsListState({ enabled: false });
+    queueGlobalModelOperation(state, "add", "gpt-5.5");
+
+    expect(buildModelsListConfig(state)).toEqual({ enabled: false, models: [] });
+    expect(getGlobalModelOperations(state)).toEqual([
+      { operation: "add", model: "gpt-5.5" },
+    ]);
+  });
+
+  it("builds a create/update payload without changing the hidden-list flag", () => {
+    const state = createModelsListState({ enabled: false, models: ["gpt-5.4"] });
+    queueGlobalModelOperation(state, "remove", "gpt-5.5");
+
+    expect(buildModelsListPayload(state)).toEqual({
+      models_list_config: { enabled: false, models: ["gpt-5.4"] },
+      global_model_operations: [{ operation: "remove", model: "gpt-5.5" }],
     });
   });
 });

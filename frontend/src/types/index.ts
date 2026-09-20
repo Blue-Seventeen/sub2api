@@ -643,6 +643,20 @@ export interface ModelsListConfig {
 
 export type ModelAllowlist = ModelsListConfig
 
+export type GroupModelOperationType = 'add' | 'remove'
+
+export interface GroupModelOperation {
+  operation: GroupModelOperationType
+  model: string
+}
+
+export interface GroupModelOperationSummary {
+  platform: GroupPlatform
+  affected_group_count: number
+  added_models: string[]
+  removed_models: string[]
+}
+
 export interface CodexModelsManifestConfig {
   enabled: boolean
   account_ids: number[]
@@ -829,6 +843,7 @@ export interface CreateGroupRequest {
   mcp_xml_inject?: boolean
   supported_model_scopes?: string[]
   models_list_config?: ModelsListConfig
+  global_model_operations?: GroupModelOperation[]
   allow_messages_dispatch?: boolean
   allow_live?: boolean
   default_mapped_model?: string
@@ -899,6 +914,7 @@ export interface UpdateGroupRequest {
   mcp_xml_inject?: boolean
   supported_model_scopes?: string[]
   models_list_config?: ModelsListConfig
+  global_model_operations?: GroupModelOperation[]
   allow_messages_dispatch?: boolean
   allow_live?: boolean
   default_mapped_model?: string

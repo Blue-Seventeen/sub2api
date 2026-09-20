@@ -13,6 +13,7 @@ import type {
   CompositeRouteDecision,
   CreateGroupRequest,
   UpdateGroupRequest,
+  GroupModelOperationSummary,
   PaginatedResponse
 } from '@/types'
 
@@ -124,8 +125,12 @@ export async function getModelsListCandidates(
  * @param groupData - Group data
  * @returns Created group
  */
-export async function create(groupData: CreateGroupRequest): Promise<AdminGroup> {
-  const { data } = await apiClient.post<AdminGroup>('/admin/groups', groupData)
+export type GroupMutationResponse = AdminGroup & {
+  global_model_operation_summary?: GroupModelOperationSummary
+}
+
+export async function create(groupData: CreateGroupRequest): Promise<GroupMutationResponse> {
+  const { data } = await apiClient.post<GroupMutationResponse>('/admin/groups', groupData)
   return data
 }
 
@@ -215,8 +220,8 @@ export async function duplicate(id: number): Promise<AdminGroup> {
  * @param updates - Fields to update
  * @returns Updated group
  */
-export async function update(id: number, updates: UpdateGroupRequest): Promise<AdminGroup> {
-  const { data } = await apiClient.put<AdminGroup>(`/admin/groups/${id}`, updates)
+export async function update(id: number, updates: UpdateGroupRequest): Promise<GroupMutationResponse> {
+  const { data } = await apiClient.put<GroupMutationResponse>(`/admin/groups/${id}`, updates)
   return data
 }
 
