@@ -2790,12 +2790,16 @@ func TestOpenAIWSHTTPBridgeGrok429PersistsRateLimit(t *testing.T) {
 	account := &Account{ID: 68, Platform: PlatformGrok, Type: AccountTypeOAuth, Concurrency: 1}
 	before := time.Now()
 
-	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(
-		context.Background(), nil, account, "token",
-		[]byte(`{"type":"response.create","model":"grok-4.3","input":"hi"}`),
-		64, "grok-4.3", "", "", "", "cache-id", 1,
-		func([]byte) error { return nil },
-	)
+	var result *OpenAIForwardResult
+	var err error
+	require.NotPanics(t, func() {
+		result, err = svc.proxyOpenAIWSHTTPBridgeTurn(
+			context.Background(), nil, account, "token",
+			[]byte(`{"type":"response.create","model":"grok-4.3","input":"hi"}`),
+			64, "grok-4.3", "", "", "", "cache-id", 1,
+			func([]byte) error { return nil },
+		)
+	})
 
 	require.Error(t, err)
 	require.Nil(t, result)

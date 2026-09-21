@@ -516,8 +516,10 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if account.Platform != PlatformGrok && isOpenAIResponsesLiteWebSocketPayload(payload) {
 			upstreamReq.Header.Set(responsesLiteHeader, "true")
 		}
-		if turnState := strings.TrimSpace(c.GetHeader(openAIWSTurnStateHeader)); turnState != "" {
-			upstreamReq.Header.Set(openAIWSTurnStateHeader, turnState)
+		if c != nil {
+			if turnState := strings.TrimSpace(c.GetHeader(openAIWSTurnStateHeader)); turnState != "" {
+				upstreamReq.Header.Set(openAIWSTurnStateHeader, turnState)
+			}
 		}
 		return upstreamReq, nil
 	}
