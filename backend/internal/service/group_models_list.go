@@ -33,10 +33,10 @@ func (g *Group) CustomModelsListEnabled() bool {
 }
 
 func GroupAllowsRequestedModel(group *Group, model string) bool {
-	if group == nil || !group.CustomModelsListEnabled() {
+	if group == nil {
 		return true
 	}
-	return ModelsListAllowsModel(group.ModelsListConfig.Models, model)
+	return group.EffectiveGroupModelPolicy().Allows(model)
 }
 
 func ModelsListAllowsModel(patterns []string, model string) bool {

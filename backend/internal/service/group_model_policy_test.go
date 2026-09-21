@@ -21,6 +21,16 @@ func TestGroupEffectiveModelPolicyUsesModelsListConfigAsCanonical(t *testing.T) 
 	require.False(t, group.AllowsModel("legacy-only"))
 }
 
+func TestGroupEffectiveGroupModelPolicyMatchesCompatibilityWrapper(t *testing.T) {
+	group := &Group{
+		ModelsListConfig: GroupModelsListConfig{Enabled: true, Models: []string{" gpt-5.4 ", "GPT-5.4"}},
+		ModelAllowlist:   GroupModelAllowlist{Enabled: true, Models: []string{"legacy-only"}},
+	}
+
+	require.Equal(t, GroupModelAllowlist{Enabled: true, Models: []string{"gpt-5.4"}}, group.EffectiveGroupModelPolicy())
+	require.Equal(t, group.EffectiveGroupModelPolicy(), group.EffectiveModelPolicy())
+}
+
 func TestGroupEffectiveModelPolicyFallsBackToLegacyMirrorOnlyWhenCanonicalIsAbsent(t *testing.T) {
 	group := &Group{ModelAllowlist: GroupModelAllowlist{Enabled: true, Models: []string{"legacy-only"}}}
 

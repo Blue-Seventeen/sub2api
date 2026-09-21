@@ -50,3 +50,28 @@ func TestModelPlazaServiceUsesCanonicalPolicyOverLegacyMirror(t *testing.T) {
 	require.Len(t, out[0].Models, 1)
 	require.Equal(t, "canonical-model", out[0].Models[0].Name)
 }
+
+func TestModelPlazaServiceUsesCanonicalPolicyCandidates(t *testing.T) {
+	channels := []Channel{{
+		ID: 1, Name: "canonical", Status: StatusActive, GroupIDs: []int64{10},
+		ModelPricing: []ChannelModelPricing{{Platform: PlatformGemini, Models: []string{"models/gemini-2.5-pro"}}},
+	}}
+	groups := []Group{{
+		ID: 10, Name: "canonical", Platform: PlatformGemini, RateMultiplier: 1,
+		ModelsListConfig: GroupModelsListConfig{Enabled: true, Models: []string{"gemini-2.5-pro"}},
+		ModelAllowlist:   GroupModelAllowlist{Enabled: true, Models: []string{"legacy-model"}},
+	}}
+
+	svc := NewModelPlazaService(
+		plazaCanonicalChannelRepo{channels: channels},
+		plazaCanonicalGroupRepo{groups: groups},
+		nil,
+		nil,
+		nil,
+	)
+	out, err := svc.ListGroups(context.Background())
+
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	require.Equal(t, []string{"models/gemini-2.5-pro"}, []string{out[0].Models[0].Name})
+}

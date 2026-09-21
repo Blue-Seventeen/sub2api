@@ -28,6 +28,31 @@ func TestGroupAllowsRequestedModel_EnabledEmptyDeniesAll(t *testing.T) {
 	require.False(t, GroupAllowsRequestedModel(group, "kimi-k2.6"))
 }
 
+func TestGroupAllowsRequestedModelUsesCanonicalPolicyCandidates(t *testing.T) {
+	group := &Group{
+		Hydrated: true,
+		ModelsListConfig: GroupModelsListConfig{
+			Enabled: true,
+			Models:  []string{"gemini-2.5-pro", "claude-sonnet-4.5", "gpt-5.5"},
+		},
+		ModelAllowlist: GroupModelAllowlist{Enabled: true, Models: []string{"legacy-only"}},
+	}
+
+	require.True(t, GroupAllowsRequestedModel(group, "models/gemini-2.5-pro"))
+	require.True(t, GroupAllowsRequestedModel(group, "claude-sonnet-4.5-thinking"))
+	require.True(t, GroupAllowsRequestedModel(group, "gpt-5.5-codex-high"))
+	require.False(t, GroupAllowsRequestedModel(group, "legacy-only"))
+}
+
+func TestGroupAllowsRequestedModelDisabledCanonicalPolicyPassesThrough(t *testing.T) {
+	group := &Group{
+		Hydrated:       true,
+		ModelAllowlist: GroupModelAllowlist{Enabled: true, Models: []string{"legacy-only"}},
+	}
+
+	require.True(t, GroupAllowsRequestedModel(group, "unlisted-model"))
+}
+
 func TestNormalizeGroupModelsListConfig_DedupesCaseInsensitive(t *testing.T) {
 	cfg := normalizeGroupModelsListConfig(GroupModelsListConfig{
 		Enabled: true,

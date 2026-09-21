@@ -162,6 +162,7 @@ func (s *ModelPlazaService) ListGroups(ctx context.Context) ([]PlazaGroup, error
 				idx = make(map[modelKey]int, len(supported))
 				modelIdx[gid] = idx
 			}
+			policy := groupEnt[gid].EffectiveGroupModelPolicy()
 			for j := range supported {
 				m := supported[j]
 				if pg.Platform == PlatformComposite {
@@ -171,11 +172,7 @@ func (s *ModelPlazaService) ListGroups(ctx context.Context) ([]PlazaGroup, error
 				} else if m.Platform != pg.Platform {
 					continue
 				}
-				if !GroupAllowsRequestedModel(groupEnt[gid], m.Name) {
-					continue
-				}
-				policy := groupEnt[gid].EffectiveModelPolicy()
-				if policy.Enabled && !policy.Allows(m.Name) {
+				if !policy.Allows(m.Name) {
 					continue
 				}
 				key := modelKey{platform: m.Platform, name: m.Name}

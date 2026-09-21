@@ -204,11 +204,11 @@ func (g *Group) ModelAllowlistEnabled() bool {
 	return g != nil && g.EffectiveModelPolicy().Enabled
 }
 
-// EffectiveModelPolicy returns the canonical models_list_config policy.
+// EffectiveGroupModelPolicy returns the canonical models_list_config policy.
 // Hydrated records always have a persisted canonical field, including an
 // explicitly empty configuration. The legacy mirror is used only by old
 // in-memory fixtures that were never hydrated from repository/cache storage.
-func (g *Group) EffectiveModelPolicy() GroupModelAllowlist {
+func (g *Group) EffectiveGroupModelPolicy() GroupModelAllowlist {
 	if g == nil {
 		return GroupModelAllowlist{}
 	}
@@ -216,6 +216,11 @@ func (g *Group) EffectiveModelPolicy() GroupModelAllowlist {
 		return groupModelAllowlistFromModelsListConfig(normalizeGroupModelsListConfig(g.ModelsListConfig))
 	}
 	return g.ModelAllowlist
+}
+
+// EffectiveModelPolicy is retained as a compatibility wrapper.
+func (g *Group) EffectiveModelPolicy() GroupModelAllowlist {
+	return g.EffectiveGroupModelPolicy()
 }
 
 // AllowsModel applies the canonical group model policy to a requested model.
@@ -327,8 +332,12 @@ func (a GroupModelAllowlist) FilterForListing(source []string) []string {
 			// 空 前缀（裸 `*` 条目）匹配全部来源，与 Allows 的全放行语义一致。
 			prefix := strings.ToLower(strings.TrimSuffix(entry, "*"))
 			for _, pattern := range patterns {
-				if strings.HasPrefix(strings.ToLower(pattern), prefix) {
+				for _, candidate := range groupModelAllowlistCandidates(pattern) {
+					if !strings.HasPrefix(candidate, prefix) {
+						continue
+					}
 					add(pattern)
+					break
 				}
 			}
 			continue
@@ -340,22 +349,36 @@ func (a GroupModelAllowlist) FilterForListing(source []string) []string {
 	return filtered
 }
 
-// allowlistSourcePatternAllowsModel 沿用 filterModelsByCustomList 时代的匹配规则：
-// 精确相等、source 通配模式的前缀匹配，以及 Claude 归一化（-thinking 后缀）
-// 后的精确匹配。比较与 Allows 一律大小写不敏感，保证「准入允许 ⇒ 列表可见」。
+// allowlistSourcePatternAllowsModel 比较 source 与白名单条目在同一组候选
+// 形式下是否等价。source 通配模式仍按前缀匹配，保证「准入允许 ⇒ 列表可见」。
 func allowlistSourcePatternAllowsModel(patterns []string, model string) bool {
 	for _, pattern := range patterns {
-		if strings.EqualFold(pattern, model) {
-			return true
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
 		}
-		if strings.HasSuffix(pattern, "*") && strings.HasPrefix(strings.ToLower(model), strings.ToLower(strings.TrimSuffix(pattern, "*"))) {
+		if strings.HasSuffix(pattern, "*") {
+			prefix := strings.ToLower(strings.TrimSuffix(pattern, "*"))
+			for _, candidate := range groupModelAllowlistCandidates(model) {
+				if strings.HasPrefix(candidate, prefix) {
+					return true
+				}
+			}
+			continue
+		}
+		if allowlistModelsEquivalent(pattern, model) {
 			return true
 		}
 	}
-	normalizedClaudeModel := claude.NormalizeModelID(strings.TrimSuffix(model, "-thinking"))
-	if !strings.EqualFold(normalizedClaudeModel, model) {
-		for _, pattern := range patterns {
-			if strings.EqualFold(pattern, normalizedClaudeModel) {
+	return false
+}
+
+func allowlistModelsEquivalent(left, right string) bool {
+	leftCandidates := groupModelAllowlistCandidates(left)
+	rightCandidates := groupModelAllowlistCandidates(right)
+	for _, leftCandidate := range leftCandidates {
+		for _, rightCandidate := range rightCandidates {
+			if leftCandidate == rightCandidate {
 				return true
 			}
 		}

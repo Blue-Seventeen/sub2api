@@ -3,6 +3,8 @@ package service
 import (
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestNormalizeGroupModelAllowlist(t *testing.T) {
@@ -250,5 +252,25 @@ func TestGroupModelAllowlistFilterForListing(t *testing.T) {
 		if got := cfg.FilterForListing(source); len(got) != 0 {
 			t.Fatalf("expected empty output for enabled empty config, got %#v", got)
 		}
+	})
+}
+
+func TestGroupModelAllowlistFilterForListingUsesCanonicalCandidates(t *testing.T) {
+	t.Run("exact entry keeps configured display name for models prefix source", func(t *testing.T) {
+		cfg := GroupModelAllowlist{Enabled: true, Models: []string{"gemini-2.5-pro"}}
+		got := cfg.FilterForListing([]string{"models/gemini-2.5-pro"})
+
+		require.Equal(t, []string{"gemini-2.5-pro"}, got)
+	})
+
+	t.Run("wildcard expansion preserves normalized source order", func(t *testing.T) {
+		cfg := GroupModelAllowlist{Enabled: true, Models: []string{"gemini-*"}}
+		got := cfg.FilterForListing([]string{
+			"models/gemini-2.5-flash",
+			"models/gemini-2.5-pro",
+			"gpt-5.4",
+		})
+
+		require.Equal(t, []string{"models/gemini-2.5-flash", "models/gemini-2.5-pro"}, got)
 	})
 }
