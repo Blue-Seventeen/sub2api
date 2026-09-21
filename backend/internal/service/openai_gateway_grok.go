@@ -556,7 +556,7 @@ func patchGrokResponsesBodyBase(body []byte, upstreamModel string) ([]byte, erro
 	if err != nil {
 		return nil, err
 	}
-	for _, unsupportedField := range []string{"prompt_cache_retention", "safety_identifier", "metadata"} {
+	for _, unsupportedField := range []string{"prompt_cache_retention", "safety_identifier"} {
 		if gjson.GetBytes(out, unsupportedField).Exists() {
 			out, err = sjson.DeleteBytes(out, unsupportedField)
 			if err != nil {
@@ -2094,7 +2094,12 @@ func isGrokSpendingLimitError(responseBody []byte) bool {
 		gjson.GetBytes(responseBody, "error.code").String(),
 	)))
 	if code == "personal-team-blocked:spending-limit" {
-		return true
+		message := strings.ToLower(strings.TrimSpace(firstNonEmpty(
+			gjson.GetBytes(responseBody, "error").String(),
+			gjson.GetBytes(responseBody, "error.message").String(),
+			gjson.GetBytes(responseBody, "message").String(),
+		)))
+		return strings.Contains(message, "spending limit") || strings.Contains(message, "run out of credits")
 	}
 	message := strings.ToLower(strings.TrimSpace(firstNonEmpty(
 		gjson.GetBytes(responseBody, "error").String(),

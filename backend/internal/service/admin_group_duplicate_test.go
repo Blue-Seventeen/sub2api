@@ -177,7 +177,10 @@ func TestDuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState(t *testing
 			HaikuMappedModel:   "gpt-5-mini",
 			ExactModelMappings: map[string]string{"claude-special": "gpt-special"},
 		},
-		ModelAllowlist:              GroupModelAllowlist{Enabled: true, Models: []string{"gpt-5.4", "gpt-5-mini"}},
+		ModelsListConfig: GroupModelsListConfig{Enabled: true, Models: []string{"gpt-5.4", "gpt-5-mini"}},
+		// Deliberately stale: duplicate must materialize the mirror from the
+		// canonical models_list_config instead of copying this field.
+		ModelAllowlist:              GroupModelAllowlist{Enabled: false, Models: []string{"legacy-only"}},
 		RPMLimit:                    99,
 		MaxReasoningEffort:          "medium",
 		MaxReasoningEffortOverLimit: ReasoningEffortOverLimitDeny,
@@ -217,10 +220,11 @@ func TestDuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState(t *testing
 	require.Equal(t, source.MessagesDispatchModelConfig, duplicate.MessagesDispatchModelConfig)
 	require.Equal(t, source.ForceOpenAIFast, duplicate.ForceOpenAIFast)
 	require.Equal(t, source.FreeOpenAIFast, duplicate.FreeOpenAIFast)
-	require.Equal(t, source.ModelAllowlist, duplicate.ModelAllowlist)
+	require.Equal(t, GroupModelAllowlist{Enabled: true, Models: []string{"gpt-5.4", "gpt-5-mini"}}, duplicate.ModelAllowlist)
 	require.Equal(t, source.RPMLimit, duplicate.RPMLimit)
 	require.Equal(t, source.MaxReasoningEffort, duplicate.MaxReasoningEffort)
-	require.Equal(t, source.MaxReasoningEffortOverLimit, duplicate.MaxReasoningEffortOverLimit)
+	// Duplicate creation normalizes the reasoning policy for the inactive copy.
+	require.Equal(t, ReasoningEffortOverLimitDowngrade, duplicate.MaxReasoningEffortOverLimit)
 	require.Equal(t, source.ReasoningEffortMappings, duplicate.ReasoningEffortMappings)
 	require.False(t, duplicate.AllowLive)
 	require.EqualValues(t, 2, duplicate.AccountCount)
@@ -243,7 +247,7 @@ func TestDuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState(t *testing
 	require.Equal(t, 0.14, source.VideoModelPrices[VideoPriceFamilyGrokImagineVideo15][VideoBillingResolution720P])
 	require.Equal(t, "claude", source.SupportedModelScopes[0])
 	require.Equal(t, "gpt-special", source.MessagesDispatchModelConfig.ExactModelMappings["claude-special"])
-	require.Equal(t, "gpt-5.4", source.ModelAllowlist.Models[0])
+	require.Equal(t, "legacy-only", source.ModelAllowlist.Models[0])
 	require.Equal(t, "xhigh", source.ReasoningEffortMappings[0].To)
 	require.Equal(t, 11.0, *source.DailyLimitUSD)
 }

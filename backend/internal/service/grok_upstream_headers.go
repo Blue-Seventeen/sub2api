@@ -12,6 +12,8 @@ import (
 
 // Fixed CLI identity aliases — single source of truth is internal/pkg/xai.
 const (
+	// grokUpstreamUserAgent is retained for older Grok request tests and callers.
+	grokUpstreamUserAgent      = "sub2api-grok/1.0"
 	grokClientVersionHeader    = xai.CLIStableVersion
 	grokClientIdentifierHeader = xai.CLIClientIdentifier
 	grokClientModeHeader       = xai.CLIClientMode

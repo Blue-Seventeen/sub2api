@@ -67,6 +67,20 @@ func cloneGroupModelRouting(value map[string][]int64) map[string][]int64 {
 	return cloned
 }
 
+func cloneGroupVideoModelPrices(value map[string]map[string]float64) map[string]map[string]float64 {
+	if value == nil {
+		return nil
+	}
+	cloned := make(map[string]map[string]float64, len(value))
+	for model, prices := range value {
+		cloned[model] = make(map[string]float64, len(prices))
+		for resolution, price := range prices {
+			cloned[model][resolution] = price
+		}
+	}
+	return cloned
+}
+
 func cloneGroupMessagesDispatchModelConfig(value OpenAIMessagesDispatchModelConfig) OpenAIMessagesDispatchModelConfig {
 	cloned := value
 	if value.ExactModelMappings != nil {
@@ -79,6 +93,10 @@ func cloneGroupMessagesDispatchModelConfig(value OpenAIMessagesDispatchModelConf
 }
 
 func cloneGroupForDuplicate(source *Group, operationID string) *Group {
+	canonicalModelsListConfig := GroupModelsListConfig{
+		Enabled: source.ModelsListConfig.Enabled,
+		Models:  append([]string(nil), source.ModelsListConfig.Models...),
+	}
 	return &Group{
 		Name:                            duplicateGroupName(source.Name, 1),
 		Description:                     source.Description,
@@ -113,6 +131,7 @@ func cloneGroupForDuplicate(source *Group, operationID string) *Group {
 		VideoPrice480P:                  cloneGroupValuePointer(source.VideoPrice480P),
 		VideoPrice720P:                  cloneGroupValuePointer(source.VideoPrice720P),
 		VideoPrice1080P:                 cloneGroupValuePointer(source.VideoPrice1080P),
+		VideoModelPrices:                cloneGroupVideoModelPrices(source.VideoModelPrices),
 		WebSearchPricePerCall:           cloneGroupValuePointer(source.WebSearchPricePerCall),
 		ClaudeCodeOnly:                  source.ClaudeCodeOnly,
 		FallbackGroupID:                 cloneGroupValuePointer(source.FallbackGroupID),
@@ -126,12 +145,14 @@ func cloneGroupForDuplicate(source *Group, operationID string) *Group {
 		AllowLive:                       source.AllowLive && OpenAILiveFeatureEnabled,
 		RequireOAuthOnly:                source.RequireOAuthOnly,
 		RequirePrivacySet:               source.RequirePrivacySet,
+		ForceOpenAIFast:                 source.ForceOpenAIFast,
+		FreeOpenAIFast:                  source.FreeOpenAIFast,
 		DefaultMappedModel:              source.DefaultMappedModel,
 		MessagesDispatchModelConfig:     cloneGroupMessagesDispatchModelConfig(source.MessagesDispatchModelConfig),
-		ModelsListConfig: GroupModelsListConfig{
-			Enabled: source.ModelsListConfig.Enabled,
-			Models:  append([]string(nil), source.ModelsListConfig.Models...),
-		},
+		ModelsListConfig:                canonicalModelsListConfig,
+		// model_allowlist is a compatibility mirror, never an independent
+		// source when duplicating a group.
+		ModelAllowlist:          groupModelAllowlistFromModelsListConfig(canonicalModelsListConfig),
 		RPMLimit:                source.RPMLimit,
 		MaxReasoningEffort:      source.MaxReasoningEffort,
 		ReasoningEffortMappings: append([]ReasoningEffortMapping(nil), source.ReasoningEffortMappings...),
