@@ -497,14 +497,23 @@ func (h *ChannelHandler) GetModelDefaultPricing(c *gin.Context) {
 	}
 
 	response.Success(c, gin.H{
-		"found":              true,
-		"input_price":        pricing.InputPricePerToken,
-		"output_price":       pricing.OutputPricePerToken,
-		"cache_write_price":  pricing.CacheCreationPricePerToken,
-		"cache_read_price":   pricing.CacheReadPricePerToken,
-		"image_input_price":  pricing.ImageInputPricePerToken,
-		"image_output_price": pricing.ImageOutputPricePerToken,
+		"found":                           true,
+		"input_price":                     pricing.InputPricePerToken,
+		"output_price":                    pricing.OutputPricePerToken,
+		"cache_write_price":               pricing.CacheCreationPricePerToken,
+		"cache_write_1h_price":            optionalPositiveFloat64(pricing.CacheCreation1hPrice),
+		"cache_read_price":                pricing.CacheReadPricePerToken,
+		"image_input_price":               pricing.ImageInputPricePerToken,
+		"image_output_price":              pricing.ImageOutputPricePerToken,
+		"max_reasoning_effort_multiplier": pricing.MaxReasoningEffortMultiplier,
 	})
+}
+
+func optionalPositiveFloat64(value float64) *float64 {
+	if value <= 0 {
+		return nil
+	}
+	return &value
 }
 
 // platformToLiteLLMProvider maps a channel platform name to the corresponding
@@ -515,6 +524,10 @@ var platformToLiteLLMProvider = map[string]string{
 	service.PlatformGemini:      "google",
 	service.PlatformAntigravity: "anthropic",
 	service.PlatformGrok:        "xai",
+	service.PlatformKimi:        "moonshot",
+	service.PlatformZhipu:       "zhipuai",
+	service.PlatformDeepseek:    "deepseek",
+	service.PlatformMiniMax:     "minimax",
 }
 
 // SyncPricingModels 返回 LiteLLM 定价目录中指定平台的最新模型列表
