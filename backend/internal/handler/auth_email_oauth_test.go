@@ -232,7 +232,6 @@ func TestEmailOAuthStartPreservesPromoCodeInPendingSession(t *testing.T) {
 }
 
 func TestCompleteEmailOAuthRegistrationUsesAffiliateCodeFromPendingSession(t *testing.T) {
-	t.Skip("affiliate compatibility is inert in this fork; pending aff_code is accepted but not bound")
 	affiliateRepo := newOAuthEmailAffiliateRepoStub(map[string]int64{"AFF456": 2002})
 	handler, client := newOAuthPendingFlowTestHandlerWithDependencies(t, oauthPendingFlowTestHandlerOptions{
 		invitationEnabled: true,

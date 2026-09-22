@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestMergeBalanceHistoryCodesIncludesAffiliateTransfersByDefault(t *testing.T) {
+func TestMergeBalanceHistoryCodesIgnoresAffiliateTransfers(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
@@ -54,11 +54,11 @@ func TestMergeBalanceHistoryCodesIncludesAffiliateTransfersByDefault(t *testing.
 	})
 
 	require.Len(t, got, 2)
-	require.Equal(t, RedeemTypeAffiliateBalance, got[0].Type)
-	require.Equal(t, RedeemTypeBalance, got[1].Type)
+	require.Equal(t, RedeemTypeBalance, got[0].Type)
+	require.Equal(t, RedeemTypeConcurrency, got[1].Type)
 }
 
-func TestMergeBalanceHistoryCodesPaginatesAfterCombiningSources(t *testing.T) {
+func TestMergeBalanceHistoryCodesPaginatesRedeemHistoryOnly(t *testing.T) {
 	t.Parallel()
 
 	base := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
@@ -80,7 +80,5 @@ func TestMergeBalanceHistoryCodesPaginatesAfterCombiningSources(t *testing.T) {
 		pagination.PaginationParams{Page: 2, PageSize: 2},
 	)
 
-	require.Len(t, got, 2)
-	require.Equal(t, RedeemTypeConcurrency, got[0].Type)
-	require.Equal(t, int64(-4), got[1].ID)
+	require.Empty(t, got)
 }

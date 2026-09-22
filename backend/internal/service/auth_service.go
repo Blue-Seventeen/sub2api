@@ -962,7 +962,8 @@ func authSourceSignupSettings(defaults *AuthSourceDefaultSettings, signupSource 
 }
 
 func (s *AuthService) bindOAuthAffiliate(ctx context.Context, userID int64, affiliateCode string) {
-	// Upstream Affiliate is intentionally disabled in this fork.
+	// Upstream Affiliate is intentionally inert in this fork. Keep the method
+	// as a compatibility shim for OAuth callers that still carry aff_code.
 }
 
 func (s *AuthService) postAuthUserBootstrap(ctx context.Context, user *User, signupSource string, touchLogin bool) {

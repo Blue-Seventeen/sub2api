@@ -62,7 +62,10 @@ func (s *settingGetAllRepoStub) Get(ctx context.Context, key string) (*Setting, 
 }
 
 func (s *settingGetAllRepoStub) GetValue(ctx context.Context, key string) (string, error) {
-	panic("unexpected GetValue call")
+	if value, ok := s.values[key]; ok {
+		return value, nil
+	}
+	return "", ErrSettingNotFound
 }
 
 func (s *settingGetAllRepoStub) Set(ctx context.Context, key, value string) error {
@@ -195,17 +198,17 @@ func TestSettingService_AffiliateAdminRechargeSetting(t *testing.T) {
 		require.False(t, settings.AdminRechargeRebateEnabled)
 	})
 
-	t.Run("explicit value is parsed", func(t *testing.T) {
+	t.Run("explicit value remains disabled", func(t *testing.T) {
 		svc := NewSettingService(&settingGetAllRepoStub{values: map[string]string{
 			SettingKeyAffiliateAdminRechargeEnabled: "true",
 		}}, &config.Config{})
 
 		settings, err := svc.GetAllSettings(context.Background())
 		require.NoError(t, err)
-		require.True(t, settings.AdminRechargeRebateEnabled)
+		require.False(t, settings.AdminRechargeRebateEnabled)
 	})
 
-	t.Run("value is persisted", func(t *testing.T) {
+	t.Run("value is persisted as disabled", func(t *testing.T) {
 		repo := &settingUpdateRepoStub{}
 		svc := NewSettingService(repo, &config.Config{})
 
@@ -213,8 +216,32 @@ func TestSettingService_AffiliateAdminRechargeSetting(t *testing.T) {
 			AdminRechargeRebateEnabled: true,
 		})
 		require.NoError(t, err)
-		require.Equal(t, "true", repo.updates[SettingKeyAffiliateAdminRechargeEnabled])
+		require.Equal(t, "false", repo.updates[SettingKeyAffiliateAdminRechargeEnabled])
 	})
+}
+
+func TestSettingService_AffiliateCannotBeEnabled(t *testing.T) {
+	ctx := context.Background()
+
+	readSvc := NewSettingService(&settingGetAllRepoStub{values: map[string]string{
+		SettingKeyAffiliateEnabled:              "true",
+		SettingKeyAffiliateAdminRechargeEnabled: "true",
+	}}, &config.Config{})
+	settings, err := readSvc.GetAllSettings(ctx)
+	require.NoError(t, err)
+	require.False(t, settings.AffiliateEnabled)
+	require.False(t, readSvc.IsAffiliateEnabled(ctx))
+	require.False(t, readSvc.IsAffiliateAdminRechargeEnabled(ctx))
+
+	writeRepo := &settingUpdateRepoStub{}
+	writeSvc := NewSettingService(writeRepo, &config.Config{})
+	err = writeSvc.UpdateSettings(ctx, &SystemSettings{
+		AffiliateEnabled:           true,
+		AdminRechargeRebateEnabled: true,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "false", writeRepo.updates[SettingKeyAffiliateEnabled])
+	require.Equal(t, "false", writeRepo.updates[SettingKeyAffiliateAdminRechargeEnabled])
 }
 
 func (s *defaultSubGroupReaderStub) GetByID(ctx context.Context, id int64) (*Group, error) {
