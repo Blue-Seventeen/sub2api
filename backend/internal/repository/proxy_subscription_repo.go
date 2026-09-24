@@ -487,16 +487,22 @@ func (r *proxySubscriptionRepository) syncNodes(ctx context.Context, q sqlExecut
 	for _, node := range existing {
 		existingByKey[node.NodeKey] = node
 	}
+	seenNodeKeys := make(map[string]struct{}, len(nodes))
 
 	now := time.Now()
 	createdProxies := make([]service.Proxy, 0)
 	var firstActiveNodeProxyID *int64
 	for _, node := range nodes {
+		seenNodeKeys[node.NodeKey] = struct{}{}
 		node.SubscriptionID = subscriptionID
 		if node.Status == "" {
 			node.Status = service.ProxySubscriptionNodeStatusActive
 		}
 		if current, ok := existingByKey[node.NodeKey]; ok {
+			// Provider absence is recoverable; operator-disabled nodes stay disabled.
+			if current.Status == service.ProxySubscriptionNodeStatusSourceMissing {
+				current.Status = service.ProxySubscriptionNodeStatusActive
+			}
 			if firstActiveNodeProxyID == nil && current.ProxyID != nil && current.Status == service.ProxySubscriptionNodeStatusActive {
 				id := *current.ProxyID
 				firstActiveNodeProxyID = &id
@@ -509,9 +515,10 @@ func (r *proxySubscriptionRepository) syncNodes(ctx context.Context, q sqlExecut
 					server = NULLIF($5, ''),
 					port = NULLIF($6, 0),
 					raw_config = $7,
+					status = CASE WHEN status = $8 THEN $9 ELSE status END,
 					updated_at = NOW()
 				WHERE id = $1
-			`, current.ID, node.Name, node.ProviderName, node.Type, node.Server, node.Port, node.RawConfig); err != nil {
+			`, current.ID, node.Name, node.ProviderName, node.Type, node.Server, node.Port, node.RawConfig, service.ProxySubscriptionNodeStatusSourceMissing, service.ProxySubscriptionNodeStatusActive); err != nil {
 				return nil, err
 			}
 			if current.ProxyID != nil && current.Status == service.ProxySubscriptionNodeStatusActive {
@@ -540,6 +547,21 @@ func (r *proxySubscriptionRepository) syncNodes(ctx context.Context, q sqlExecut
 			firstActiveNodeProxyID = &id
 		}
 		createdProxies = append(createdProxies, proxyOut)
+	}
+	for _, current := range existing {
+		if current.Status != service.ProxySubscriptionNodeStatusActive {
+			continue
+		}
+		if _, ok := seenNodeKeys[current.NodeKey]; ok {
+			continue
+		}
+		if _, err := q.ExecContext(ctx, `
+			UPDATE proxy_subscription_nodes
+			SET status = $2, updated_at = NOW()
+			WHERE id = $1 AND status = $3
+		`, current.ID, service.ProxySubscriptionNodeStatusSourceMissing, service.ProxySubscriptionNodeStatusActive); err != nil {
+			return nil, err
+		}
 	}
 	if err := r.migrateLegacyManagedProxyRows(ctx, q, subscriptionID, firstActiveNodeProxyID); err != nil {
 		return nil, err

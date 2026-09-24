@@ -15,14 +15,22 @@ import (
 func TestGetByKeyForAuthCarriesGroupModelAllowlist(t *testing.T) {
 	ctx := context.Background()
 	suffix := time.Now().UnixNano()
-	group := mustCreateGroup(t, integrationEntClient, &service.Group{
-		Name: fmt.Sprintf("model-allowlist-proj-group-%d", suffix), Platform: service.PlatformOpenAI,
-		RateMultiplier: 1,
-		ModelAllowlist: service.GroupModelAllowlist{
+	canonical := service.GroupModelsListConfig{
+		Enabled: true,
+		Models:  []string{"gpt-5.4", "gpt-5.5-*"},
+	}
+	// Persist conflicting fields so auth must project the canonical policy,
+	// rather than accidentally enforcing the legacy compatibility mirror.
+	group, err := integrationEntClient.Group.Create().
+		SetName(fmt.Sprintf("model-allowlist-proj-group-%d", suffix)).
+		SetPlatform(service.PlatformOpenAI).
+		SetRateMultiplier(1).
+		SetModelsListConfig(canonical).
+		SetModelAllowlist(service.DomainGroupModelAllowlist(service.GroupModelAllowlist{
 			Enabled: true,
-			Models:  []string{"gpt-5.4", "gpt-5.5-*"},
-		},
-	})
+			Models:  []string{"stale-mirror"},
+		})).Save(ctx)
+	require.NoError(t, err)
 	user := mustCreateUser(t, integrationEntClient, &service.User{
 		Email: fmt.Sprintf("model-allowlist-proj-%d@example.com", suffix), Concurrency: 5,
 	})
@@ -45,6 +53,12 @@ func TestGetByKeyForAuthCarriesGroupModelAllowlist(t *testing.T) {
 	got, err := apiKeyRepo.GetByKeyForAuth(ctx, keyValue)
 	require.NoError(t, err)
 	require.NotNil(t, got.Group)
-	require.True(t, got.Group.ModelAllowlist.Enabled, "model_allowlist 必须进入认证投影（投影漏列会让分组级准入静默失效）")
+	require.True(t, got.Group.Hydrated)
+	require.Equal(t, canonical, got.Group.ModelsListConfig, "auth projection must include the canonical models_list_config")
+	require.True(t, got.Group.ModelAllowlist.Enabled, "the compatibility allowlist must reflect the canonical policy")
 	require.Equal(t, []string{"gpt-5.4", "gpt-5.5-*"}, got.Group.ModelAllowlist.Models)
+	require.True(t, got.Group.AllowsModel("gpt-5.4"))
+	require.True(t, got.Group.AllowsModel("gpt-5.5-test"))
+	require.False(t, got.Group.AllowsModel("stale-mirror"))
+	require.False(t, got.Group.AllowsModel("unlisted-model"))
 }

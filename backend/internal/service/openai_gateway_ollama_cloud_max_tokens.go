@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/tidwall/gjson"
@@ -29,7 +30,7 @@ func clampOllamaCloudUpstreamMaxTokens(account *Account, body []byte) []byte {
 	if account == nil || len(body) == 0 {
 		return body
 	}
-	if !isOllamaCloudBaseURL(account.GetOpenAIBaseURL()) {
+	if !isOllamaCloudBaseURL(strings.TrimRight(strings.TrimSpace(account.GetOpenAIBaseURL()), "/")) {
 		return body
 	}
 	if !isDeepSeekModel(gjson.GetBytes(body, "model").String()) && !isOllamaCloudRawChatCompletionsAccount(account) {
@@ -59,7 +60,7 @@ func ollamaCloudResponsesMaxOutputTokensClamp(account *Account, upstreamModel st
 	if account == nil || account.Type != AccountTypeAPIKey || !isDeepSeekModel(upstreamModel) {
 		return 0, false
 	}
-	if !isOllamaCloudBaseURL(ollamaCloudResponsesUpstreamBaseURL(account)) {
+	if !isOllamaCloudBaseURL(strings.TrimRight(strings.TrimSpace(ollamaCloudResponsesUpstreamBaseURL(account)), "/")) {
 		return 0, false
 	}
 	value := gjson.GetBytes(body, "max_output_tokens")

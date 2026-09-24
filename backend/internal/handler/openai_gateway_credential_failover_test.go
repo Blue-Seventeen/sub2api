@@ -4,6 +4,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -164,6 +166,57 @@ func TestOpenAIManagedModelNotFoundExhaustionSanitizesMessage(t *testing.T) {
 	require.True(t, ok)
 	require.NotContains(t, recorded, "super-secret-value")
 	require.Contains(t, recorded, "access_token=***")
+}
+
+func TestOpenAIManagedModelNotFoundExhaustionWhitelistsErrorFields(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	(&OpenAIGatewayHandler{}).handleFailoverExhausted(c, &service.UpstreamFailoverError{
+		StatusCode:   http.StatusBadRequest,
+		ResponseBody: []byte(`{"error":{"type":"invalid_request_error","code":"model_not_found","param":"model","message":"Model not found at https://private.example/debug?access_token=super-secret-value","token":"private-token","account_id":99},"debug":"private-debug"}`),
+	}, false)
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
+	require.Len(t, payload, 1)
+	errBody, ok := payload["error"].(map[string]any)
+	require.True(t, ok)
+	require.Len(t, errBody, 4)
+	require.Equal(t, "invalid_request_error", errBody["type"])
+	require.Equal(t, "model_not_found", errBody["code"])
+	require.Equal(t, "model", errBody["param"])
+	for _, secret := range []string{"private.example", "super-secret-value", "private-token", "private-debug", "account_id"} {
+		require.NotContains(t, recorder.Body.String(), secret)
+	}
+	require.Contains(t, errBody["message"], "*.*.*.*")
+}
+
+func TestOpenAICapacityFailoverSanitizesTypedMessageAndRejectsUnrelatedHints(t *testing.T) {
+	for _, recognized := range []bool{true, false} {
+		t.Run(map[bool]string{true: "capacity", false: "unrelated"}[recognized], func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			payload := `{"error":{"code":"server_is_overloaded","message":"Our servers are currently overloaded. Please try again later."}}`
+			if !recognized {
+				payload = `{"error":{"code":"invalid_request_error","message":"invalid input"}}`
+			}
+			(&OpenAIGatewayHandler{}).handleFailoverExhausted(c, &service.UpstreamFailoverError{
+				StatusCode: http.StatusBadRequest, RequestScopedTransient: true,
+				ResponseBody: []byte(payload), ClientStatusCode: http.StatusServiceUnavailable,
+				ClientMessage: "Our servers are currently overloaded. Check https://private.example/debug?access_token=super-secret-value",
+			}, false)
+			if recognized {
+				require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+				require.Equal(t, "server_error", gjson.Get(recorder.Body.String(), "error.type").String())
+				require.Contains(t, recorder.Body.String(), "overloaded")
+			} else {
+				require.Equal(t, http.StatusBadGateway, recorder.Code)
+				require.NotContains(t, recorder.Body.String(), "overloaded")
+			}
+			require.NotContains(t, recorder.Body.String(), "private.example")
+			require.NotContains(t, recorder.Body.String(), "super-secret-value")
+		})
+	}
 }
 
 func TestResponsesFailoverExhaustedAfterForwardedTerminalMarksOpsWithoutDuplicateFrame(t *testing.T) {
@@ -412,12 +465,19 @@ func TestOpsWebSocketCredentialFailoverExhaustedIsRecorded(t *testing.T) {
 	ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	router := gin.New()
 	router.Use(OpsErrorLoggerMiddleware(ops))
+	serverErr := make(chan error, 1)
 	router.GET("/openai/v1/responses", func(c *gin.Context) {
+		conn, err := coderws.Accept(c.Writer, c.Request, nil)
+		if err != nil {
+			serverErr <- err
+			return
+		}
+		defer conn.CloseNow()
 		c.Set(service.OpsUpstreamErrorsKey, []*service.OpsUpstreamErrorEvent{{
 			Stage: string(service.GatewayFailureStageAccountAuth), Scope: string(service.GatewayFailureScopeAccount),
 			Reason: string(service.GrokCredentialReasonRevoked), Message: "Grok OAuth credentials require account action",
 		}})
-		closeOpenAIWSFailoverExhausted(c, nil, &service.UpstreamFailoverError{
+		closeOpenAIWSFailoverExhausted(c, conn, &service.UpstreamFailoverError{
 			Stage:             service.GatewayFailureStageAccountAuth,
 			Scope:             service.GatewayFailureScopeAccount,
 			Reason:            service.GrokCredentialReasonRevoked,
@@ -425,16 +485,73 @@ func TestOpsWebSocketCredentialFailoverExhaustedIsRecorded(t *testing.T) {
 		})
 	})
 
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/openai/v1/responses", nil)
-	request.Header.Set("Connection", "Upgrade")
-	request.Header.Set("Upgrade", "websocket")
-	router.ServeHTTP(recorder, request)
+	finished := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		router.ServeHTTP(w, r)
+		close(finished)
+	}))
+	t.Cleanup(server.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, response, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/openai/v1/responses", nil)
+	require.NoError(t, err)
+	defer conn.CloseNow()
+	require.Equal(t, http.StatusSwitchingProtocols, response.StatusCode)
+	_, _, err = conn.Read(ctx)
+	require.Equal(t, coderws.StatusTryAgainLater, coderws.CloseStatus(err))
+	select {
+	case err := <-serverErr:
+		t.Fatalf("WebSocket upgrade failed: %v", err)
+	case <-finished:
+	case <-ctx.Done():
+		t.Fatal("WebSocket handler did not finish before the deadline")
+	}
 
-	require.Equal(t, http.StatusOK, recorder.Code)
 	require.Equal(t, int64(1), OpsErrorLogQueueLength())
 	job := <-opsErrorLogQueue
 	require.Equal(t, "account_auth", job.entry.ErrorPhase)
 	require.Equal(t, http.StatusServiceUnavailable, job.entry.StatusCode)
 	require.Equal(t, service.GrokCredentialUnavailableClientMessage, job.entry.ErrorMessage)
+}
+
+func TestCredentialFailoverExhaustionClosesWebSocketWithSafeRetry(t *testing.T) {
+	serverErr := make(chan error, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := coderws.Accept(w, r, nil)
+		if err != nil {
+			serverErr <- err
+			return
+		}
+		defer conn.CloseNow()
+		closeOpenAIWSFailoverExhausted(nil, conn, &service.UpstreamFailoverError{
+			Stage:             service.GatewayFailureStageAccountAuth,
+			Scope:             service.GatewayFailureScopeAccount,
+			Reason:            service.GrokCredentialReasonRevoked,
+			NextAccountAction: service.NextAccountStop,
+			ClientStatusCode:  http.StatusTeapot,
+			ClientMessage:     "invalid_grant refresh_token=must-not-leak",
+		})
+		serverErr <- nil
+	}))
+	t.Cleanup(server.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, response, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	require.NoError(t, err)
+	defer conn.CloseNow()
+	require.Equal(t, http.StatusSwitchingProtocols, response.StatusCode)
+	_, _, err = conn.Read(ctx)
+	var closeErr coderws.CloseError
+	require.ErrorAs(t, err, &closeErr)
+	require.Equal(t, coderws.StatusTryAgainLater, closeErr.Code)
+	require.Equal(t, service.GrokCredentialUnavailableClientMessage, closeErr.Reason)
+	for _, secret := range []string{"invalid_grant", "refresh_token", "must-not-leak"} {
+		require.NotContains(t, closeErr.Reason, secret)
+	}
+	select {
+	case err := <-serverErr:
+		require.NoError(t, err)
+	case <-ctx.Done():
+		t.Fatal("WebSocket failover close did not finish before the deadline")
+	}
 }

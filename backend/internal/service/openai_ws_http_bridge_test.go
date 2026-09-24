@@ -975,9 +975,10 @@ func TestProxyOpenAIWSHTTPBridgeTurnRewritesCapacityShedCodeForClient(t *testing
 		},
 		{
 			// 后续 turn 不允许 replay，容量错误必须改写后交给客户端重试。
-			name: "turn2_bare_response_failed",
-			turn: 2,
-			body: "data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_shed\",\"status\":\"failed\",\"error\":{\"code\":\"server_is_overloaded\",\"message\":\"Our servers are currently overloaded. Please try again later.\"}}}\n\n",
+			name:    "turn2_bare_response_failed",
+			turn:    2,
+			body:    "data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_shed\",\"status\":\"failed\",\"error\":{\"code\":\"server_is_overloaded\",\"message\":\"Our servers are currently overloaded. Please try again later.\"}}}\n\n",
+			wantErr: true,
 		},
 	}
 	for _, tt := range tests {
@@ -1042,7 +1043,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnBareErrorUsesAuthoritativeFailed(t *testing.
 		return nil
 	})
 
-	require.NoError(t, err)
+	require.Error(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, 9, result.Usage.InputTokens)
 	require.Equal(t, 2, result.Usage.OutputTokens)
@@ -1050,6 +1051,60 @@ func TestProxyOpenAIWSHTTPBridgeTurnBareErrorUsesAuthoritativeFailed(t *testing.
 	require.Len(t, writes, 2)
 	require.Equal(t, "response.output_text.delta", gjson.GetBytes(writes[0], "type").String())
 	require.Equal(t, "response.failed", gjson.GetBytes(writes[1], "type").String())
+}
+
+func TestProxyOpenAIWSHTTPBridgeTurnFailedTerminalReturnsError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, eventType := range []string{"response.fail", "response.failed"} {
+		for _, tc := range []struct {
+			name          string
+			responseUsage string
+			topUsage      string
+			wantInput     int
+			wantOutput    int
+		}{
+			{name: "without_usage"},
+			{name: "zero_usage", responseUsage: `,"usage":{"input_tokens":0,"output_tokens":0}`},
+			{name: "nested_usage", responseUsage: `,"usage":{"input_tokens":9,"output_tokens":2}`, wantInput: 9, wantOutput: 2},
+			{name: "top_level_usage", topUsage: `,"usage":{"input_tokens":7,"output_tokens":3}`, wantInput: 7, wantOutput: 3},
+		} {
+			t.Run(eventType+"/"+tc.name, func(t *testing.T) {
+				logSink, restore := captureStructuredLog(t)
+				defer restore()
+				body := "data: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_failed\",\"delta\":\"partial output\"}\n\n" +
+					fmt.Sprintf(`data: {"type":%q,"response":{"id":"resp_failed","model":"gpt-5.5","status":"failed","output":[],"error":{"code":"server_error","message":"upstream failed"}%s}%s}`, eventType, tc.responseUsage, tc.topUsage) + "\n\n"
+				upstream := &httpUpstreamRecorder{resp: &http.Response{
+					StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)),
+				}}
+				svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+				account := &Account{ID: 111, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1}
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+				payload := []byte(`{"type":"response.create","model":"gpt-5.5","input":"hi"}`)
+				var writes [][]byte
+				result, err := svc.proxyOpenAIWSHTTPBridgeTurn(context.Background(), c, account, "test-token", payload, len(payload), "gpt-5.5", "", "", "", "", 1, func(message []byte) error {
+					writes = append(writes, append([]byte(nil), message...))
+					return nil
+				})
+				// AfterTurn skips normal text-usage settlement on a non-nil turn error.
+				require.ErrorContains(t, err, "upstream failed")
+				var failover *UpstreamFailoverError
+				require.False(t, errors.As(err, &failover), "partial output cannot be replayed")
+				require.NotNil(t, result)
+				require.Equal(t, "response.failed", result.UpstreamTerminalEvent)
+				require.False(t, result.SucceededForScheduling())
+				require.Zero(t, result.ImageCount)
+				require.Equal(t, tc.wantInput, result.Usage.InputTokens)
+				require.Equal(t, tc.wantOutput, result.Usage.OutputTokens)
+				require.NotNil(t, result.FirstTokenMs)
+				require.Len(t, writes, 2)
+				require.Equal(t, "partial output", gjson.GetBytes(writes[0], "delta").String())
+				require.Equal(t, "response.failed", gjson.GetBytes(writes[1], "type").String())
+				require.Equal(t, "failed", gjson.GetBytes(writes[1], "response.status").String())
+				require.False(t, logSink.ContainsMessage("ingress_ws_http_bridge_turn_completed"))
+			})
+		}
+	}
 }
 
 func TestProxyOpenAIWSHTTPBridgeTurnMarksCyberPolicyForFailureShapes(t *testing.T) {
@@ -1090,6 +1145,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnMarksCyberPolicyForFailureShapes(t *testing.
 			wantInput:  9,
 			wantOutput: 2,
 			wantResult: true,
+			wantError:  true,
 		},
 	}
 
@@ -1261,7 +1317,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnDoesNotReplayCapacityAfterSemanticOutput(t *
 	)
 
 	require.NotNil(t, result)
-	require.NoError(t, err)
+	require.Error(t, err)
 	require.Len(t, writes, 3)
 	var failoverErr *UpstreamFailoverError
 	require.False(t, errors.As(err, &failoverErr))
@@ -1580,11 +1636,11 @@ func TestProxyResponsesWebSocketFromClientForGrokUsesXAIHTTPBridgeAndPreservesMa
 
 	bridgeResponse := func(responseID, requestID string, cachedTokens int) *http.Response {
 		sseBody := strings.Join([]string{
-			`data: {"type":"response.created","response":{"id":"` + responseID + `","model":"grok-4.3"}}`,
+			`data: {"type":"response.created","response":{"id":"` + responseID + `","model":"grok-4.3","error":null}}`,
 			"",
 			`data: {"type":"response.output_text.delta","response":{"id":"` + responseID + `"},"delta":"ok"}`,
 			"",
-			`data: {"type":"response.completed","response":{"id":"` + responseID + `","model":"grok-4.3","usage":{"input_tokens":4,"output_tokens":2,"input_tokens_details":{"cached_tokens":` + fmt.Sprintf("%d", cachedTokens) + `}}}}`,
+			`data: {"type":"response.completed","response":{"id":"` + responseID + `","model":"grok-4.3","error":null,"usage":{"input_tokens":4,"output_tokens":2,"input_tokens_details":{"cached_tokens":` + fmt.Sprintf("%d", cachedTokens) + `}}}}`,
 			"",
 		}, "\n")
 		return &http.Response{
@@ -1621,6 +1677,12 @@ func TestProxyResponsesWebSocketFromClientForGrokUsesXAIHTTPBridgeAndPreservesMa
 		},
 	}
 
+	type turnOutcome struct {
+		turn   int
+		result *OpenAIForwardResult
+		err    error
+	}
+	turns := make(chan turnOutcome, 3)
 	errCh := make(chan error, 1)
 	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := coderws.Accept(w, r, &coderws.AcceptOptions{CompressionMode: coderws.CompressionContextTakeover})
@@ -1650,6 +1712,9 @@ func TestProxyResponsesWebSocketFromClientForGrokUsesXAIHTTPBridgeAndPreservesMa
 		ginCtx.Set("api_key", &APIKey{ID: 7101})
 
 		errCh <- svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, "access-token", firstMessage, &OpenAIWSIngressHooks{
+			AfterTurn: func(turn int, result *OpenAIForwardResult, turnErr error) {
+				turns <- turnOutcome{turn: turn, result: result, err: turnErr}
+			},
 			MapRequestModel: func(_ int, originalModel string) (string, error) {
 				if originalModel == "channel-alias" {
 					return "grok-4.3", nil
@@ -1664,6 +1729,7 @@ func TestProxyResponsesWebSocketFromClientForGrokUsesXAIHTTPBridgeAndPreservesMa
 	clientConn, _, err := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(wsServer.URL, "http"), nil)
 	cancelDial()
 	require.NoError(t, err)
+	defer func() { _ = clientConn.CloseNow() }()
 
 	writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
 	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","generate":true,"model":"grok","stream":true,"input":"hi","prompt_cache_retention":"24h"}`))
@@ -1722,6 +1788,18 @@ func TestProxyResponsesWebSocketFromClientForGrokUsesXAIHTTPBridgeAndPreservesMa
 		require.Fail(t, "proxy did not finish after client close")
 	}
 
+	require.Len(t, turns, 3)
+	for i, cachedTokens := range []int{0, 3, 0} {
+		outcome := <-turns
+		require.Equal(t, i+1, outcome.turn)
+		require.NoError(t, outcome.err)
+		require.NotNil(t, outcome.result)
+		require.Equal(t, "response.completed", outcome.result.UpstreamTerminalEvent)
+		require.Equal(t, fmt.Sprintf("resp_grok_ws_%d", i+1), outcome.result.RequestID)
+		require.EqualValues(t, 4, outcome.result.Usage.InputTokens)
+		require.EqualValues(t, 2, outcome.result.Usage.OutputTokens)
+		require.EqualValues(t, cachedTokens, outcome.result.Usage.CacheReadInputTokens)
+	}
 	require.Len(t, upstream.requests, 3)
 	require.Len(t, upstream.bodies, 3)
 	require.Equal(t, xai.DefaultCLIBaseURL+"/responses", upstream.lastReq.URL.String())

@@ -403,6 +403,11 @@ func TestAPIContracts(t *testing.T) {
 						"video_price_720p": null,
 						"video_price_1080p": null,
 						"web_search_price_per_call": null,
+						"search_price_per_1k": null,
+						"audio_realtime_price_per_min": null,
+						"audio_tts_price_per_million_chars": null,
+						"audio_stt_price_per_hour": null,
+						"long_context_pricing_enabled": false,
 						"allow_image_generation": false,
 						"allow_batch_image_generation": false,
 						"batch_image_discount_multiplier": 0,
@@ -420,6 +425,7 @@ func TestAPIContracts(t *testing.T) {
 						"require_privacy_set": false,
 						"newapi_style_interface_enabled": false,
 						"max_reasoning_effort": "",
+						"max_reasoning_effort_over_limit": "",
 						"reasoning_effort_mappings": null,
 						"rpm_limit": 0,
 						"created_at": "2025-01-02T03:04:05Z",
@@ -491,6 +497,11 @@ func TestAPIContracts(t *testing.T) {
 							"video_price_720p": null,
 							"video_price_1080p": null,
 							"web_search_price_per_call": null,
+							"search_price_per_1k": null,
+							"audio_realtime_price_per_min": null,
+							"audio_tts_price_per_million_chars": null,
+							"audio_stt_price_per_hour": null,
+							"long_context_pricing_enabled": false,
 							"allow_image_generation": false,
 							"allow_batch_image_generation": false,
 							"batch_image_discount_multiplier": 0,
@@ -508,6 +519,7 @@ func TestAPIContracts(t *testing.T) {
 							"require_privacy_set": false,
 							"newapi_style_interface_enabled": false,
 							"max_reasoning_effort": "",
+							"max_reasoning_effort_over_limit": "",
 							"reasoning_effort_mappings": null,
 							"rpm_limit": 0,
 							"created_at": "0001-01-01T00:00:00Z",
@@ -667,6 +679,7 @@ func TestAPIContracts(t *testing.T) {
 								"model": "claude-3",
 								"request_type": "stream",
 								"openai_ws_mode": false,
+								"native_compaction_v2": false,
 								"group_id": null,
 								"subscription_id": null,
 							"input_tokens": 10,
@@ -796,6 +809,7 @@ func TestAPIContracts(t *testing.T) {
 					"registration_enabled": true,
 					"email_verify_enabled": false,
 					"registration_email_suffix_whitelist": [],
+					"registration_email_domain_quota_enabled": false,
 					"promo_code_enabled": true,
 					"password_reset_enabled": false,
 					"frontend_url": "",
@@ -829,6 +843,7 @@ func TestAPIContracts(t *testing.T) {
 					"turnstile_site_key": "site-key",
 					"turnstile_secret_key_configured": true,
 					"tencent_captcha_enabled": false,
+					"tencent_captcha_region": "cn",
 					"tencent_captcha_app_id": "",
 					"tencent_captcha_app_secret_key_configured": false,
 					"tencent_captcha_cloud_secret_id_configured": false,
@@ -1010,6 +1025,7 @@ func TestAPIContracts(t *testing.T) {
 					"payment_visible_method_wxpay_enabled": false,
 					"openai_low_upstream_rate_priority_enabled": true,
 					"openai_oauth_scheduling_rate_multiplier": 0.05,
+					"openai_ttft_mode": "semantic",
 					"openai_advanced_scheduler_enabled": true,
 					"markdown_pages_enabled": false,
 					"openai_advanced_scheduler_sticky_weighted_enabled": false,
@@ -1075,8 +1091,17 @@ func TestAPIContracts(t *testing.T) {
 					"balance_low_notify_threshold": 0,
 					"balance_low_notify_recharge_url": "",
 					"account_quota_notify_emails": [],
+					"account_scheduling_thresholds": {"anthropic": 100, "openai": 100, "grok": 100},
 					"channel_monitor_enabled": true,
+					"channel_monitor_mode": "v1",
+					"channel_monitor_hide_throughput": true,
+					"channel_monitor_show_quota": false,
+					"channel_monitor_hide_user_ranking": false,
 					"channel_monitor_default_interval_seconds": 60,
+					"grok_default_text_model": "grok-4.6",
+					"grok_cross_client_model_map_enabled": true,
+					"grok_default_base_url_mode": "cli",
+					"plugin_management_enabled": false,
 					"available_channels_enabled": false,
 					"model_plaza_enabled": false,
 					"model_plaza_require_auth": false,
@@ -1154,6 +1179,7 @@ func TestAPIContracts(t *testing.T) {
 					"registration_enabled": true,
 					"email_verify_enabled": false,
 					"registration_email_suffix_whitelist": [],
+					"registration_email_domain_quota_enabled": false,
 					"promo_code_enabled": true,
 					"password_reset_enabled": false,
 					"frontend_url": "",
@@ -1188,6 +1214,7 @@ func TestAPIContracts(t *testing.T) {
 					"turnstile_site_key": "",
 					"turnstile_secret_key_configured": false,
 					"tencent_captcha_enabled": false,
+					"tencent_captcha_region": "cn",
 					"tencent_captcha_app_id": "",
 					"tencent_captcha_app_secret_key_configured": false,
 					"tencent_captcha_cloud_secret_id_configured": false,
@@ -1335,6 +1362,7 @@ func TestAPIContracts(t *testing.T) {
 					"payment_visible_method_wxpay_enabled": false,
 					"openai_low_upstream_rate_priority_enabled": false,
 					"openai_oauth_scheduling_rate_multiplier": 1,
+					"openai_ttft_mode": "semantic",
 					"openai_advanced_scheduler_enabled": false,
 					"openai_advanced_scheduler_sticky_weighted_enabled": false,
 					"openai_advanced_scheduler_subscription_priority_enabled": false,
@@ -1397,8 +1425,17 @@ func TestAPIContracts(t *testing.T) {
 					"balance_low_notify_threshold": 0,
 					"balance_low_notify_recharge_url": "",
 					"account_quota_notify_emails": [],
+					"account_scheduling_thresholds": {"anthropic": 100, "openai": 100, "grok": 100},
 					"channel_monitor_enabled": true,
+					"channel_monitor_mode": "v1",
+					"channel_monitor_hide_throughput": true,
+					"channel_monitor_show_quota": false,
+					"channel_monitor_hide_user_ranking": false,
 					"channel_monitor_default_interval_seconds": 60,
+					"grok_default_text_model": "grok-4.6",
+					"grok_cross_client_model_map_enabled": true,
+					"grok_default_base_url_mode": "cli",
+					"plugin_management_enabled": false,
 					"available_channels_enabled": false,
 					"model_plaza_enabled": false,
 					"model_plaza_require_auth": false,
@@ -1574,7 +1611,7 @@ func newContractDeps(t *testing.T) *contractDeps {
 	settingRepo := newStubSettingRepo()
 	settingService := service.NewSettingService(settingRepo, cfg)
 
-	adminService := service.NewAdminService(nil, userRepo, groupRepo, &accountRepo, proxyRepo, nil, nil, nil, apiKeyRepo, redeemRepo, nil, nil, nil, nil, nil, nil, nil, settingService, nil, userSubRepo, nil, nil, nil, nil, nil, nil)
+	adminService := service.NewAdminService(nil, userRepo, groupRepo, &accountRepo, proxyRepo, nil, nil, nil, apiKeyRepo, redeemRepo, nil, nil, nil, nil, nil, nil, nil, settingService, nil, userSubRepo, nil, nil, nil, nil, nil, nil, nil)
 	authHandler := handler.NewAuthHandler(cfg, nil, userService, settingService, nil, redeemService, nil, nil)
 	apiKeyHandler := handler.NewAPIKeyHandler(apiKeyService)
 	usageHandler := handler.NewUsageHandler(usageService, apiKeyService, nil, nil)
@@ -1887,6 +1924,10 @@ func (stubGroupRepo) DeleteCascade(ctx context.Context, id int64) ([]int64, erro
 	return nil, errors.New("not implemented")
 }
 
+func (stubGroupRepo) DeleteCascadeIfEmpty(context.Context, int64) ([]int64, error) {
+	panic("unexpected DeleteCascadeIfEmpty in API contract test")
+}
+
 func (stubGroupRepo) List(ctx context.Context, params pagination.PaginationParams) ([]service.Group, *pagination.PaginationResult, error) {
 	return nil, nil, errors.New("not implemented")
 }
@@ -2140,6 +2181,10 @@ func (s *stubAccountRepo) ResetQuotaUsed(ctx context.Context, id int64) error {
 	return errors.New("not implemented")
 }
 
+func (s *stubAccountRepo) ResetQuotaUsedAndClearRateLimitCooldown(context.Context, int64) error {
+	panic("unexpected ResetQuotaUsedAndClearRateLimitCooldown in API contract test")
+}
+
 func (s *stubAccountRepo) BulkUpdate(ctx context.Context, ids []int64, updates service.AccountBulkUpdate) (int64, error) {
 	s.bulkUpdateIDs = append([]int64{}, ids...)
 	return int64(len(ids)), nil
@@ -2385,10 +2430,10 @@ func (stubUserSubscriptionRepo) UpdateStatus(ctx context.Context, subscriptionID
 func (stubUserSubscriptionRepo) UpdateNotes(ctx context.Context, subscriptionID int64, notes string) error {
 	return errors.New("not implemented")
 }
-func (stubUserSubscriptionRepo) ActivateWindows(ctx context.Context, id int64, start time.Time) error {
+func (stubUserSubscriptionRepo) ActivateWindows(ctx context.Context, id int64, dailyStart, periodicStart time.Time) error {
 	return errors.New("not implemented")
 }
-func (stubUserSubscriptionRepo) ResetUsageWindows(ctx context.Context, id int64, resetDaily, resetWeekly, resetMonthly bool, newWindowStart time.Time) error {
+func (stubUserSubscriptionRepo) ResetUsageWindows(ctx context.Context, id int64, resetDaily, resetWeekly, resetMonthly bool, dailyStart, periodicStart time.Time) error {
 	return errors.New("not implemented")
 }
 func (stubUserSubscriptionRepo) ResetDailyUsage(ctx context.Context, id int64, expectedWindowStart *time.Time, newWindowStart time.Time) error {

@@ -554,7 +554,9 @@ func (s *AccountUsageService) GetUsageBatch(ctx context.Context, accountIDs []in
 		id := accountID
 		account := accountsByID[id]
 		if account == nil {
+			mu.Lock()
 			errorsByAccount[id] = ErrAccountNotFound.Error()
+			mu.Unlock()
 			continue
 		}
 

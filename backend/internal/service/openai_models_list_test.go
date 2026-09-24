@@ -72,6 +72,41 @@ func TestProjectAccountModelsBodyUsesCanonicalPolicyOverLegacyMirror(t *testing.
 	require.NotContains(t, string(body), `"id":"legacy-alias"`)
 }
 
+func TestSelectModelCatalogEntriesMatchesCaseInsensitivelyAndDeduplicates(t *testing.T) {
+	byID := map[string]json.RawMessage{
+		"codex-auto-fast": json.RawMessage(`{"id":"codex-auto-fast"}`),
+		"CODEX-AUTO-FAST": json.RawMessage(`{"id":"CODEX-AUTO-FAST"}`),
+		"gpt-5.5":         json.RawMessage(`{"id":"gpt-5.5"}`),
+	}
+
+	got := selectModelCatalogEntries(byID, []string{"CODEX-AUTO-FAST", "codex-auto-fast", "GPT-5.5"})
+
+	require.Len(t, got, 2)
+	var first struct {
+		ID string `json:"id"`
+	}
+	var second struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(got[0], &first))
+	require.NoError(t, json.Unmarshal(got[1], &second))
+	require.True(t, strings.EqualFold("codex-auto-fast", first.ID))
+	require.Equal(t, "gpt-5.5", second.ID)
+}
+
+func TestOrderPinnedCodexModelsBySelectionMatchesCaseInsensitivelyAndPreservesOrder(t *testing.T) {
+	body := []byte(`{"models":[{"slug":"codex-auto-fast"},{"slug":"gpt-5.5"},{"slug":"codex-auto-review"}]}`)
+	allowlist := GroupModelAllowlist{
+		Enabled: true,
+		Models:  []string{"GPT-5.5", "CODEX-AUTO-FAST"},
+	}
+
+	got, err := orderPinnedCodexModelsBySelection(body, allowlist)
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"gpt-5.5", "codex-auto-fast"}, codexManifestModelSlugs(t, got))
+}
+
 func TestFetchOpenAIModelsListOAuthSharesManifestCache(t *testing.T) {
 	_, calls := newCodexModelsOAuthCacheServer(t, `{"models":[{"slug":"special-oauth-model"},{"slug":"gpt-image-1"}]}`)
 	s := &OpenAIGatewayService{}

@@ -167,7 +167,7 @@ func TestSanitizeGrokResponsesModelInputSkipsInvalidOutputImages(t *testing.T) {
 	require.Equal(t, "message", gjson.GetBytes(patched, "input.1.type").String())
 }
 
-func TestPatchGrokResponsesBodyCombinesAdditionalToolsAndDropsOrphanControls(t *testing.T) {
+func TestPatchGrokResponsesBodyCombinesAdditionalToolsAndPreservesMalformedTools(t *testing.T) {
 	body := []byte(`{
 		"input":[{"type":"additional_tools","tools":[{"type":"function","name":"lookup"}]},{"role":"user","content":"hi"}],
 		"tools":[{"type":"function","name":"lookup"}],
@@ -188,8 +188,9 @@ func TestPatchGrokResponsesBodyCombinesAdditionalToolsAndDropsOrphanControls(t *
 		malformedBody := []byte(`{"input":"hi","tools":` + malformedTools + `,"tool_choice":"auto","parallel_tool_calls":true}`)
 		patched, err := patchGrokResponsesBody(malformedBody, "grok-4.5")
 		require.NoError(t, err)
-		require.False(t, gjson.GetBytes(patched, "tool_choice").Exists(), string(patched))
-		require.False(t, gjson.GetBytes(patched, "parallel_tool_calls").Exists(), string(patched))
+		require.Equal(t, malformedTools, gjson.GetBytes(patched, "tools").Raw, string(patched))
+		require.Equal(t, "auto", gjson.GetBytes(patched, "tool_choice").String(), string(patched))
+		require.True(t, gjson.GetBytes(patched, "parallel_tool_calls").Bool(), string(patched))
 	}
 }
 

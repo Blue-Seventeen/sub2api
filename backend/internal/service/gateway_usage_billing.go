@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -210,6 +211,9 @@ func postUsageBilling(ctx context.Context, p *postUsageBillingParams, deps *bill
 }
 
 func resolveUsageBillingRequestID(ctx context.Context, upstreamRequestID string) string {
+	if requestID := strings.TrimSpace(upstreamRequestID); isForcedUsageBillingRequestID(requestID) {
+		return requestID
+	}
 	if ctx != nil {
 		if clientRequestID, _ := ctx.Value(ctxkey.ClientRequestID).(string); strings.TrimSpace(clientRequestID) != "" {
 			return "client:" + strings.TrimSpace(clientRequestID)
@@ -222,6 +226,14 @@ func resolveUsageBillingRequestID(ctx context.Context, upstreamRequestID string)
 		return requestID
 	}
 	return "generated:" + generateRequestID()
+}
+
+func isForcedUsageBillingRequestID(requestID string) bool {
+	id := strings.TrimSpace(requestID)
+	return strings.HasPrefix(id, "web_search:") ||
+		strings.HasPrefix(id, "grok-video:") ||
+		strings.HasPrefix(id, "grok_audio:") ||
+		strings.HasPrefix(id, "grok_realtime:")
 }
 
 func StableGrokAudioBillingRequestID(upstreamRequestID string) string {
@@ -633,6 +645,7 @@ type recordUsageOpts struct {
 	// 长上下文计费（仅 Gemini 路径需要）
 	LongContextThreshold  int
 	LongContextMultiplier float64
+	PricingAt             time.Time
 }
 
 // RecordUsage 记录使用量并扣费（或更新订阅用量）
@@ -806,6 +819,12 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	if pricingAt.IsZero() {
 		pricingAt = timezone.Now()
 	}
+	pricingOpts := recordUsageOpts{}
+	if opts != nil {
+		pricingOpts = *opts
+	}
+	pricingOpts.PricingAt = pricingAt
+	opts = &pricingOpts
 	realMultiplier, realImageMultiplier := computePeakAwareMultipliers(apiKey, baseMultiplier, pricingAt)
 	// token 倍率叠加高峰因子（token 计费含图片 token，图片按次倍率不受影响）。高峰因子按请求时刻现算，
 	// 不并入上面的 getUserGroupRateMultiplier，以免污染 user:group 倍率缓存。
@@ -838,7 +857,12 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	}
 
 	// 计算费用
-	cost := s.calculateRecordUsageCost(ctx, result, apiKey, billingModel, multiplier, imageMultiplier, opts)
+	cost, pricingErr := s.calculateRecordUsageCost(ctx, result, apiKey, billingModel, multiplier, imageMultiplier, opts)
+	if pricingErr != nil {
+		cost = &CostBreakdown{}
+	} else {
+		cost = s.applyResponseModelBilling(ctx, input, result, apiKey, billingModel, multiplier, imageMultiplier, opts, cost)
+	}
 	useImageRate := usageUsesImageMultiplier(result.ImageCount, costBillingMode(cost), result.RequestCount, result.TaskCount, result.BillableDurationSeconds, result.BillableCharacterCount)
 	applyRealActualCostFromRates(cost, useImageRate, multiplier, imageMultiplier, realMultiplier, realImageMultiplier, user)
 
@@ -853,6 +877,10 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	accountRateMultiplier := account.BillingRateMultiplier()
 	usageLog := s.buildRecordUsageLog(ctx, input, result, apiKey, user, account, subscription,
 		requestedModel, multiplier, imageMultiplier, unifiedRateMultiplier, accountRateMultiplier, billingType, cacheTTLOverridden, cost, opts)
+	if pricingErr != nil {
+		writeBillingFailedUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.gateway")
+		return fmt.Errorf("calculate usage pricing: %w", pricingErr)
+	}
 
 	// 计算账号统计定价费用（使用最终上游模型匹配自定义规则）
 	if apiKey.GroupID != nil {
@@ -918,6 +946,65 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	return nil
 }
 
+// applyResponseModelBilling adopts an upstream-declared response model only
+// for token-priced requests and only when the candidate cannot increase the
+// bill. Search and other unit/media requests retain the request model because
+// their charge is independent of the response model.
+func (s *GatewayService) applyResponseModelBilling(
+	ctx context.Context,
+	input *recordUsageCoreInput,
+	result *ForwardResult,
+	apiKey *APIKey,
+	billingModel string,
+	multiplier float64,
+	imageMultiplier float64,
+	opts *recordUsageOpts,
+	baseline *CostBreakdown,
+) *CostBreakdown {
+	if s == nil || input == nil || result == nil || baseline == nil || s.billingService == nil {
+		return baseline
+	}
+	responseModel := responseModelBillingDeclaration(
+		input.BillingModelSource,
+		result.UpstreamResponseModel,
+		result.UpstreamResponseModelConflict,
+		forwardResultHasNonTokenBilling(result),
+	)
+	if responseModel == "" {
+		return baseline
+	}
+	responseChannelPriced := s.resolveChannelPricing(ctx, responseModel, apiKey) != nil
+	if !responseChannelPriced && !s.billingService.HasIdentifiedTokenPricing(responseModel) {
+		return baseline
+	}
+	responseCost, err := s.calculateRecordUsageCost(ctx, result, apiKey, responseModel, multiplier, imageMultiplier, opts)
+	if err != nil {
+		return baseline
+	}
+	if responseModelBillingAdoptable(
+		baseline,
+		responseCost,
+		s.resolveChannelPricing(ctx, billingModel, apiKey) != nil,
+		responseChannelPriced,
+	) {
+		return responseCost
+	}
+	return baseline
+}
+
+func forwardResultHasNonTokenBilling(result *ForwardResult) bool {
+	if result == nil {
+		return false
+	}
+	return result.ImageCount > 0 ||
+		result.AudioUsage != nil ||
+		result.BillableDurationSeconds > 0 ||
+		result.BillableCharacterCount > 0 ||
+		result.RequestCount > 0 ||
+		result.TaskCount > 0 ||
+		result.SearchCount > 0
+}
+
 // calculateRecordUsageCost 根据请求类型和选项计算费用。
 func (s *GatewayService) calculateRecordUsageCost(
 	ctx context.Context,
@@ -927,29 +1014,55 @@ func (s *GatewayService) calculateRecordUsageCost(
 	multiplier float64,
 	imageMultiplier float64,
 	opts *recordUsageOpts,
-) *CostBreakdown {
-	if cost := s.calculateQuantityModeCost(ctx, result, apiKey, billingModel, multiplier); cost != nil {
-		return cost
+) (*CostBreakdown, error) {
+	if cost, err := s.calculateQuantityModeCost(ctx, result, apiKey, billingModel, multiplier); cost != nil || err != nil {
+		if err != nil {
+			return nil, err
+		}
+		return s.addSearchSurcharge(result, apiKey, multiplier, cost), nil
 	}
+	var cost *CostBreakdown
+	var err error
 	if unitCount := resultBillableRequestCount(result); unitCount > 0 {
 		if forwardResultHasTokenUsage(result) {
 			if resolved := s.resolveChannelPricing(ctx, billingModel, apiKey); resolved == nil || resolved.Mode == BillingModeToken {
-				return s.calculateTokenCost(ctx, result, apiKey, billingModel, multiplier, opts)
+				cost, err = s.calculateTokenCost(ctx, result, apiKey, billingModel, multiplier, opts)
+			} else {
+				cost, err = s.calculateRequestUnitCost(ctx, result, apiKey, billingModel, multiplier, unitCount)
 			}
+		} else {
+			cost, err = s.calculateRequestUnitCost(ctx, result, apiKey, billingModel, multiplier, unitCount)
 		}
-		return s.calculateRequestUnitCost(ctx, result, apiKey, billingModel, multiplier, unitCount)
-	}
-
-	// 图片生成：渠道定价为 token 计费时走 token 路径，否则走图片计费
-	if result.ImageCount > 0 {
+	} else if result.ImageCount > 0 {
 		if resolved := s.resolveChannelPricing(ctx, billingModel, apiKey); resolved != nil && resolved.Mode == BillingModeToken && forwardResultHasTokenUsage(result) {
-			return s.calculateTokenCost(ctx, result, apiKey, billingModel, multiplier, opts)
+			cost, err = s.calculateTokenCost(ctx, result, apiKey, billingModel, multiplier, opts)
+		} else {
+			cost, err = s.calculateImageCost(ctx, result, apiKey, billingModel, imageMultiplier)
 		}
-		return s.calculateImageCost(ctx, result, apiKey, billingModel, imageMultiplier)
+	} else {
+		cost, err = s.calculateTokenCost(ctx, result, apiKey, billingModel, multiplier, opts)
 	}
+	if err != nil {
+		return nil, err
+	}
+	return s.addSearchSurcharge(result, apiKey, multiplier, cost), nil
+}
 
-	// Token 计费
-	return s.calculateTokenCost(ctx, result, apiKey, billingModel, multiplier, opts)
+func (s *GatewayService) addSearchSurcharge(result *ForwardResult, apiKey *APIKey, multiplier float64, cost *CostBreakdown) *CostBreakdown {
+	if s == nil || s.billingService == nil || result == nil || result.SearchCount <= 0 {
+		return cost
+	}
+	searchCost := s.billingService.CalculateSearchCost(
+		result.SearchCount,
+		groupSearchPricePer1kFromAPIKey(apiKey),
+		multiplier,
+	)
+	if cost == nil {
+		return searchCost
+	}
+	cost.TotalCost += searchCost.TotalCost
+	cost.ActualCost += searchCost.ActualCost
+	return cost
 }
 
 // compositeBillableModel 决定 composite 分组请求的计费模型：来源覆盖把计费模型
@@ -969,7 +1082,7 @@ func (s *GatewayService) compositeBillableModel(ctx context.Context, apiKey *API
 
 // billableModelWithFallback 在选定计费模型（可能是 composite 公开别名或未定价的映射名）
 // 查不到任何价格（渠道价与全局价均无）时，按序回退到实际转发的具体模型，避免静默 $0 计费。
-// 所有候选都无价时保持原值，走既有的 warn + 零成本路径。
+// 所有候选都无价时保持原值，由计费路径返回价格缺失错误。
 func (s *GatewayService) billableModelWithFallback(ctx context.Context, apiKey *APIKey, billingModel string, fallbacks ...string) string {
 	if s.hasResolvableTokenPricing(ctx, billingModel, apiKey) {
 		return billingModel
@@ -1026,11 +1139,11 @@ func (s *GatewayService) calculateImageCost(
 	apiKey *APIKey,
 	billingModel string,
 	multiplier float64,
-) *CostBreakdown {
+) (*CostBreakdown, error) {
 	sizeTier := NormalizeImageBillingTierOrDefault(result.ImageSize)
 	groupConfig := imagePriceConfigFromAPIKey(apiKey)
 	if apiKeyHasConfiguredImagePrice(apiKey, sizeTier) {
-		return s.billingService.CalculateImageCost(billingModel, sizeTier, result.ImageCount, groupConfig, multiplier)
+		return s.billingService.CalculateImageCost(billingModel, sizeTier, result.ImageCount, groupConfig, multiplier), nil
 	}
 	if resolved := s.resolveChannelPricing(ctx, billingModel, apiKey); resolved != nil {
 		tokens := UsageTokens{
@@ -1040,7 +1153,7 @@ func (s *GatewayService) calculateImageCost(
 		}
 		gid, ok := apiKeyBillingGroupID(apiKey)
 		if !ok {
-			return &CostBreakdown{ActualCost: 0, BillingMode: string(resolved.Mode)}
+			return nil, errors.New("channel image pricing requires a billing group")
 		}
 		cost, err := s.billingService.CalculateCostUnified(CostInput{
 			Ctx:            ctx,
@@ -1053,14 +1166,10 @@ func (s *GatewayService) calculateImageCost(
 			Resolver:       s.resolver,
 			Resolved:       resolved,
 		})
-		if err != nil {
-			logger.LegacyPrintf("service.gateway", "Calculate image token cost failed: %v", err)
-			return &CostBreakdown{ActualCost: 0}
-		}
-		return cost
+		return cost, err
 	}
 
-	return s.billingService.CalculateImageCost(billingModel, sizeTier, result.ImageCount, groupConfig, multiplier)
+	return s.billingService.CalculateImageCost(billingModel, sizeTier, result.ImageCount, groupConfig, multiplier), nil
 }
 
 // calculateTokenCost 计算 Token 计费：根据 opts 决定走普通/长上下文/渠道统一计费。
@@ -1071,7 +1180,7 @@ func (s *GatewayService) calculateTokenCost(
 	billingModel string,
 	multiplier float64,
 	opts *recordUsageOpts,
-) *CostBreakdown {
+) (*CostBreakdown, error) {
 	tokens := UsageTokens{
 		InputTokens:           result.Usage.InputTokens,
 		OutputTokens:          result.Usage.OutputTokens,
@@ -1082,6 +1191,42 @@ func (s *GatewayService) calculateTokenCost(
 		ImageOutputTokens:     result.Usage.ImageOutputTokens,
 	}
 
+	// Default DeepSeek cards need the same request-time policy as the unified
+	// gateway. Resolve custom cards first so explicit prices, including zero,
+	// remain exempt from the default-card peak factor.
+	if isDeepSeekModel(billingModel) {
+		resolver := s.resolver
+		if resolver == nil {
+			resolver = NewModelPricingResolver(nil, s.billingService)
+		}
+		input := CostInput{
+			Ctx:            ctx,
+			Model:          billingModel,
+			Tokens:         tokens,
+			RequestCount:   1,
+			RateMultiplier: multiplier,
+			Resolver:       resolver,
+		}
+		if apiKey != nil {
+			input.Group = apiKey.Group
+			if gid, ok := apiKeyBillingGroupID(apiKey); ok {
+				input.GroupID = &gid
+			}
+		}
+		if opts != nil {
+			input.PricingAt = opts.PricingAt
+		}
+		input.Resolved = resolver.Resolve(ctx, PricingInput{Model: billingModel, GroupID: input.GroupID, Group: input.Group})
+		if opts != nil && opts.LongContextThreshold > 0 && input.Resolved.Source != PricingSourceChannel && input.Resolved.Source != PricingSourceGroup {
+			return calculateCostWithLongContext(tokens, multiplier, opts.LongContextThreshold, opts.LongContextMultiplier, func(part UsageTokens, rate float64) (*CostBreakdown, error) {
+				partInput := input
+				partInput.Tokens, partInput.RateMultiplier = part, rate
+				return s.billingService.CalculateCostUnified(partInput)
+			})
+		}
+		return s.billingService.CalculateCostUnified(input)
+	}
+
 	var cost *CostBreakdown
 	var err error
 
@@ -1089,7 +1234,11 @@ func (s *GatewayService) calculateTokenCost(
 	if resolved := s.resolveChannelPricing(ctx, billingModel, apiKey); resolved != nil {
 		gid, ok := apiKeyBillingGroupID(apiKey)
 		if !ok {
-			return &CostBreakdown{ActualCost: 0, BillingMode: string(resolved.Mode)}
+			return nil, errors.New("channel token pricing requires a billing group")
+		}
+		var pricingAt time.Time
+		if opts != nil {
+			pricingAt = opts.PricingAt
 		}
 		cost, err = s.billingService.CalculateCostUnified(CostInput{
 			Ctx:            ctx,
@@ -1098,20 +1247,17 @@ func (s *GatewayService) calculateTokenCost(
 			Tokens:         tokens,
 			RequestCount:   1,
 			RateMultiplier: multiplier,
+			PricingAt:      pricingAt,
 			Resolver:       s.resolver,
 			Resolved:       resolved,
 		})
-	} else if opts.LongContextThreshold > 0 {
+	} else if opts != nil && opts.LongContextThreshold > 0 {
 		// 长上下文双倍计费（如 Gemini 200K 阈值）
 		cost, err = s.billingService.CalculateCostWithLongContext(billingModel, tokens, multiplier, opts.LongContextThreshold, opts.LongContextMultiplier)
 	} else {
 		cost, err = s.billingService.CalculateCost(billingModel, tokens, multiplier)
 	}
-	if err != nil {
-		logger.LegacyPrintf("service.gateway", "Calculate cost failed: %v", err)
-		return &CostBreakdown{ActualCost: 0}
-	}
-	return cost
+	return cost, err
 }
 
 // buildRecordUsageLog 构建使用日志并设置计费模式。
@@ -1250,17 +1396,17 @@ func (s *GatewayService) calculateQuantityModeCost(
 	apiKey *APIKey,
 	billingModel string,
 	multiplier float64,
-) *CostBreakdown {
+) (*CostBreakdown, error) {
 	if result == nil {
-		return nil
+		return nil, nil
 	}
 	resolved := s.resolveChannelPricing(ctx, billingModel, apiKey)
 	if resolved == nil || (resolved.Mode != BillingModeDuration && resolved.Mode != BillingModeCharacter) {
-		return nil
+		return nil, nil
 	}
 	gid, ok := apiKeyBillingGroupID(apiKey)
 	if !ok {
-		return &CostBreakdown{ActualCost: 0, BillingMode: string(resolved.Mode)}
+		return nil, errors.New("channel quantity pricing requires a billing group")
 	}
 	cost, err := s.billingService.CalculateCostUnified(CostInput{
 		Ctx:             ctx,
@@ -1272,11 +1418,7 @@ func (s *GatewayService) calculateQuantityModeCost(
 		Resolver:        s.resolver,
 		Resolved:        resolved,
 	})
-	if err != nil {
-		logger.LegacyPrintf("service.gateway", "Calculate quantity-mode cost failed: %v", err)
-		return &CostBreakdown{ActualCost: 0, BillingMode: string(resolved.Mode)}
-	}
-	return cost
+	return cost, err
 }
 
 func forwardResultHasTokenUsage(result *ForwardResult) bool {
@@ -1312,14 +1454,14 @@ func (s *GatewayService) calculateRequestUnitCost(
 	billingModel string,
 	multiplier float64,
 	count int,
-) *CostBreakdown {
+) (*CostBreakdown, error) {
 	if count <= 0 {
-		return &CostBreakdown{ActualCost: 0, BillingMode: string(BillingModePerRequest)}
+		return &CostBreakdown{ActualCost: 0, BillingMode: string(BillingModePerRequest)}, nil
 	}
 	if resolved := s.resolveChannelPricing(ctx, billingModel, apiKey); resolved != nil {
 		gid, ok := apiKeyBillingGroupID(apiKey)
 		if !ok {
-			return &CostBreakdown{ActualCost: 0, BillingMode: string(BillingModePerRequest)}
+			return nil, errors.New("channel request pricing requires a billing group")
 		}
 		cost, err := s.billingService.CalculateCostUnified(CostInput{
 			Ctx:            ctx,
@@ -1331,11 +1473,7 @@ func (s *GatewayService) calculateRequestUnitCost(
 			Resolver:       s.resolver,
 			Resolved:       resolved,
 		})
-		if err != nil {
-			logger.LegacyPrintf("service.gateway", "Calculate request/task unit cost failed: %v", err)
-			return &CostBreakdown{ActualCost: 0, BillingMode: string(BillingModePerRequest)}
-		}
-		return cost
+		return cost, err
 	}
 	logger.LegacyPrintf(
 		"service.gateway",
@@ -1345,7 +1483,7 @@ func (s *GatewayService) calculateRequestUnitCost(
 		result.TaskCount,
 		result.BillableUnitType,
 	)
-	return &CostBreakdown{ActualCost: 0, BillingMode: string(BillingModePerRequest)}
+	return nil, fmt.Errorf("request/task pricing not found for model: %s", billingModel)
 }
 
 func apiKeyBillingGroupID(apiKey *APIKey) (int64, bool) {

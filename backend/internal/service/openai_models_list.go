@@ -179,7 +179,7 @@ func projectAccountModelsBody(body []byte, account *Account, group *Group, codex
 			if isCodexDedicatedMediaModel(id) {
 				continue
 			}
-			if strings.HasPrefix(id, codexAutoModelPrefix) && len(FilterCodexModelIDsForGroup([]string{id}, group)) == 0 {
+			if isCodexAutoModel(id) && len(FilterCodexModelIDsForGroup([]string{id}, group)) == 0 {
 				continue
 			}
 		}
@@ -284,8 +284,9 @@ func (s *OpenAIGatewayService) FetchPinnedOpenAIModelsList(ctx context.Context, 
 			if err := json.Unmarshal(raw, &model); err != nil {
 				return nil, nil, err
 			}
-			if _, exists := byID[model.ID]; !exists {
-				byID[model.ID] = raw
+			modelKey := normalizeModelCatalogKey(model.ID)
+			if _, exists := byID[modelKey]; !exists {
+				byID[modelKey] = raw
 				modelIDs = append(modelIDs, model.ID)
 				models = append(models, raw)
 			}
@@ -308,18 +309,30 @@ func (s *OpenAIGatewayService) FetchPinnedOpenAIModelsList(ctx context.Context, 
 
 func selectModelCatalogEntries(byID map[string]json.RawMessage, selected []string) []json.RawMessage {
 	models := make([]json.RawMessage, 0, len(selected))
+	normalizedByID := make(map[string]json.RawMessage, len(byID))
+	for id, raw := range byID {
+		key := normalizeModelCatalogKey(id)
+		if _, exists := normalizedByID[key]; !exists {
+			normalizedByID[key] = raw
+		}
+	}
 	seen := make(map[string]struct{}, len(selected))
 	for _, id := range selected {
 		id = strings.TrimSpace(id)
-		if _, ok := seen[id]; ok {
+		key := normalizeModelCatalogKey(id)
+		if _, ok := seen[key]; ok {
 			continue
 		}
-		if raw, exists := byID[id]; exists {
+		if raw, exists := normalizedByID[key]; exists {
 			models = append(models, raw)
-			seen[id] = struct{}{}
+			seen[key] = struct{}{}
 		}
 	}
 	return models
+}
+
+func normalizeModelCatalogKey(id string) string {
+	return strings.ToLower(strings.TrimSpace(id))
 }
 
 func orderPinnedCodexModelsBySelection(body []byte, allowlist GroupModelAllowlist) ([]byte, error) {
@@ -336,7 +349,11 @@ func orderPinnedCodexModelsBySelection(body []byte, allowlist GroupModelAllowlis
 		if err := json.Unmarshal(raw, &entry); err != nil {
 			return nil, err
 		}
-		byID[entry.Slug] = raw
+		modelKey := normalizeModelCatalogKey(entry.Slug)
+		if _, exists := byID[modelKey]; exists {
+			continue
+		}
+		byID[modelKey] = raw
 		modelIDs = append(modelIDs, entry.Slug)
 	}
 	envelope["models"], err = json.Marshal(selectModelCatalogEntries(byID, allowlist.FilterForListing(modelIDs)))

@@ -188,7 +188,7 @@ func (s *BillingCacheSuite) TestSubscriptionCache() {
 			},
 		},
 		{
-			name: "update_usage_increments_all_fields",
+			name: "legacy_update_usage_does_not_mutate_aggregate",
 			fn: func(ctx context.Context, rdb *redis.Client, cache service.BillingCache) {
 				userID := int64(13)
 				groupID := int64(23)
@@ -207,9 +207,9 @@ func (s *BillingCacheSuite) TestSubscriptionCache() {
 
 				gotSub, err := cache.GetSubscriptionCache(ctx, userID, groupID)
 				require.NoError(s.T(), err, "GetSubscriptionCache after update")
-				require.Equal(s.T(), 1.5, gotSub.DailyUsage)
-				require.Equal(s.T(), 2.5, gotSub.WeeklyUsage)
-				require.Equal(s.T(), 3.5, gotSub.MonthlyUsage)
+				require.Equal(s.T(), 1.0, gotSub.DailyUsage)
+				require.Equal(s.T(), 2.0, gotSub.WeeklyUsage)
+				require.Equal(s.T(), 3.0, gotSub.MonthlyUsage)
 			},
 		},
 		{
@@ -276,6 +276,40 @@ func (s *BillingCacheSuite) TestSubscriptionCache() {
 			tt.fn(ctx, rdb, cache)
 		})
 	}
+}
+
+func (s *BillingCacheSuite) TestSubscriptionGenerationFencesStaleRefill() {
+	rdb := testRedis(s.T())
+	cache := NewBillingCache(rdb).(*billingCache)
+	ctx := context.Background()
+	userID, groupID := int64(302), int64(402)
+	refreshAt := time.Now().Add(45 * time.Minute).Truncate(time.Second)
+	data := &service.SubscriptionCacheData{Status: "active", ExpiresAt: time.Now().Add(time.Hour), RefreshAt: refreshAt, DailyUsage: 1}
+
+	generation, err := cache.GetSubscriptionCacheGeneration(ctx, userID, groupID)
+	require.NoError(s.T(), err)
+	require.Zero(s.T(), generation)
+	written, err := cache.SetSubscriptionCacheIfGeneration(ctx, userID, groupID, generation, data)
+	require.NoError(s.T(), err)
+	require.True(s.T(), written)
+
+	got, err := cache.GetSubscriptionCache(ctx, userID, groupID)
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), refreshAt, got.RefreshAt)
+
+	require.NoError(s.T(), cache.InvalidateSubscriptionCache(ctx, userID, groupID))
+	generation, err = cache.GetSubscriptionCacheGeneration(ctx, userID, groupID)
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), int64(1), generation)
+	_, err = cache.GetSubscriptionCache(ctx, userID, groupID)
+	require.ErrorIs(s.T(), err, redis.Nil)
+
+	written, err = cache.SetSubscriptionCacheIfGeneration(ctx, userID, groupID, 0, data)
+	require.NoError(s.T(), err)
+	require.False(s.T(), written)
+	written, err = cache.SetSubscriptionCacheIfGeneration(ctx, userID, groupID, generation, data)
+	require.NoError(s.T(), err)
+	require.True(s.T(), written)
 }
 
 // TestDeductUserBalance_ErrorPropagation 验证 P2-12 修复：
@@ -358,7 +392,7 @@ func (s *BillingCacheSuite) TestUpdateSubscriptionUsage_ErrorPropagation() {
 		cancel()
 
 		err := cache.UpdateSubscriptionUsage(cancelCtx, 301, 401, 1.0)
-		require.Error(s.T(), err, "cancelled context should propagate error")
+		require.NoError(s.T(), err, "legacy updater should be a no-op")
 	})
 }
 

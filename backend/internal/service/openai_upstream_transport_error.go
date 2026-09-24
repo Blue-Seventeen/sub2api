@@ -153,6 +153,8 @@ func handleOpenAITransportError(ctx context.Context, c *gin.Context, account *Ac
 		Platform:           platform,
 		AccountID:          accountID,
 		AccountName:        accountName,
+		ProxyID:            opsUpstreamProxyID(account),
+		ProxyName:          opsUpstreamProxyName(account),
 		UpstreamStatusCode: 0,
 		UpstreamURL:        upstreamURL,
 		Passthrough:        passthrough,

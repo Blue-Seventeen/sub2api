@@ -338,6 +338,36 @@ func (s *PaymentService) ReconcilePendingPaymentOrders(ctx context.Context) (int
 	return recovered, nil
 }
 
+// ReconcilePendingWxpayOrders preserves the historical WeChat-only recovery API.
+func (s *PaymentService) ReconcilePendingWxpayOrders(ctx context.Context) (int, error) {
+	now := time.Now()
+	orders, err := s.entClient.PaymentOrder.Query().
+		Where(
+			paymentorder.StatusEQ(OrderStatusPending),
+			paymentorder.ExpiresAtGT(now),
+			paymentorder.Or(
+				paymentorder.PaymentTypeEQ(payment.TypeWxpay),
+				paymentorder.PaymentTypeHasPrefix(payment.TypeWxpay+"_"),
+				paymentorder.ProviderKeyEQ(payment.TypeWxpay),
+				paymentorder.ProviderKeyHasPrefix(payment.TypeWxpay+"_"),
+			),
+		).
+		Order(dbent.Asc(paymentorder.FieldCreatedAt)).
+		Limit(pendingPaymentReconcileLimit).
+		All(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("query pending wxpay orders: %w", err)
+	}
+
+	recovered := 0
+	for _, order := range orders {
+		if s.reconcilePaid(ctx, order) == checkPaidResultAlreadyPaid {
+			recovered++
+		}
+	}
+	return recovered, nil
+}
+
 // VerifyOrderPublic returns the currently persisted public order state without
 // triggering any upstream reconciliation. Signed resume-token recovery is the
 // only public recovery path allowed to query upstream state.

@@ -425,6 +425,11 @@ func isClientVisibleErrorSSEEventType(eventType string) bool {
 	}
 }
 
+func hasClientVisibleErrorValue(value gjson.Result) bool {
+	// Successful Responses events include error:null; do not redact their data.
+	return value.Exists() && value.Type != gjson.Null
+}
+
 func isClientVisibleErrorSSEData(payload string) bool {
 	payload = strings.TrimSpace(payload)
 	if payload == "" || payload == "[DONE]" {
@@ -433,13 +438,13 @@ func isClientVisibleErrorSSEData(payload string) bool {
 	if isClientVisibleErrorSSEEventType(strings.TrimSpace(gjson.Get(payload, "type").String())) {
 		return true
 	}
-	if gjson.Get(payload, "error").Exists() {
+	if hasClientVisibleErrorValue(gjson.Get(payload, "error")) {
 		return true
 	}
 	if isClientVisibleErrorSSEEventType(strings.TrimSpace(gjson.Get(payload, "response.status").String())) {
 		return true
 	}
-	if gjson.Get(payload, "response.error").Exists() {
+	if hasClientVisibleErrorValue(gjson.Get(payload, "response.error")) {
 		return true
 	}
 	return false
@@ -499,7 +504,7 @@ func sanitizeClientVisibleOpenAIWSEvent(payload []byte) []byte {
 		return payload
 	}
 	eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
-	if isClientVisibleErrorSSEEventType(eventType) || gjson.GetBytes(payload, "error").Exists() || gjson.GetBytes(payload, "response.error").Exists() {
+	if isClientVisibleErrorSSEEventType(eventType) || hasClientVisibleErrorValue(gjson.GetBytes(payload, "error")) || hasClientVisibleErrorValue(gjson.GetBytes(payload, "response.error")) {
 		return sanitizeClientVisibleUpstreamErrorPayload(payload)
 	}
 	return payload
@@ -1446,11 +1451,11 @@ func (s *GatewayService) extractSSEUsagePatch(event map[string]any) *sseUsagePat
 			patch.hasCacheReadInput = true
 		}
 		if cc, ok := usageObj["cache_creation"].(map[string]any); ok {
-			if v, exists := parseSSEUsageInt(cc["ephemeral_5m_input_tokens"]); exists && v > 0 {
+			if v, exists := parseSSEUsageInt(cc["ephemeral_5m_input_tokens"]); exists {
 				patch.cacheCreation5mTokens = v
 				patch.hasCacheCreation5m = true
 			}
-			if v, exists := parseSSEUsageInt(cc["ephemeral_1h_input_tokens"]); exists && v > 0 {
+			if v, exists := parseSSEUsageInt(cc["ephemeral_1h_input_tokens"]); exists {
 				patch.cacheCreation1hTokens = v
 				patch.hasCacheCreation1h = true
 			}

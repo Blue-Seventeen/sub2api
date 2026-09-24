@@ -103,10 +103,11 @@ func openAIWSPassthroughPolicyModelFromSessionFrame(account *Account, payload []
 }
 
 type openAIWSPassthroughUsageMeta struct {
-	serviceTier     atomic.Pointer[string]
-	reasoningEffort atomic.Pointer[string]
-	requestModel    atomic.Pointer[string]
-	upstreamModel   atomic.Pointer[string]
+	serviceTier              atomic.Pointer[string]
+	reasoningEffort          atomic.Pointer[string]
+	requestedReasoningEffort atomic.Pointer[string]
+	requestModel             atomic.Pointer[string]
+	upstreamModel            atomic.Pointer[string]
 
 	// Only the client-to-upstream filter goroutine writes this field.
 	sessionRequestModel string
@@ -129,6 +130,14 @@ func (m *openAIWSPassthroughUsageMeta) initFromFirstFrame(policyOutput []byte, m
 	m.serviceTier.Store(extractOpenAIServiceTierFromBody(policyOutput))
 	m.reasoningEffort.Store(extractOpenAIReasoningEffortFromBody(policyOutput, mappedModel, m.sessionRequestModel))
 	m.storeTurnModels(m.sessionRequestModel, policyOutput)
+}
+
+func (m *openAIWSPassthroughUsageMeta) captureRequestedReasoningEffort(originalBody []byte, modelCandidates ...string) {
+	if m == nil {
+		return
+	}
+	candidates := append([]string{m.sessionRequestModel}, modelCandidates...)
+	m.requestedReasoningEffort.Store(CanonicalRequestedReasoningEffort(originalBody, candidates...))
 }
 
 func (m *openAIWSPassthroughUsageMeta) updateSessionRequestModel(payload []byte) {
@@ -707,6 +716,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		firstClientMessage = s.ReplaceModelInBody(firstClientMessage, capturedSessionModel)
 	}
 	usageMeta := newOpenAIWSPassthroughUsageMeta(initialRequestModel, firstClientMessage)
+	usageMeta.captureRequestedReasoningEffort(firstClientMessage, capturedSessionModel)
 	updatedFirst, _, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, capturedSessionModel, firstClientMessage)
 	if policyErr != nil {
 		return fmt.Errorf("apply openai fast policy on first ws frame: %w", policyErr)
@@ -996,6 +1006,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			if isResponseCreate && model != "" && model != strings.TrimSpace(gjson.GetBytes(payload, "model").String()) {
 				payload = s.ReplaceModelInBody(payload, model)
 			}
+			if isResponseCreate {
+				usageMeta.captureRequestedReasoningEffort(payload, model, requestModelForThisFrame)
+			}
 			out, _, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, model, payload)
 			// 多轮 passthrough usage：仅在成功（non-block / non-err）
 			// 的 response.create 帧上更新 usageMeta，使用
@@ -1114,16 +1127,17 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 						CacheReadInputTokens:     turn.Usage.CacheReadInputTokens,
 						ImageOutputTokens:        turn.Usage.ImageOutputTokens,
 					},
-					Model:                 turnRequestModel,
-					UpstreamModel:         openAIWSDifferentModel(turnRequestModel, turnUpstreamModel),
-					ServiceTier:           usageMeta.serviceTier.Load(),
-					ReasoningEffort:       usageMeta.reasoningEffort.Load(),
-					Stream:                true,
-					OpenAIWSMode:          true,
-					UpstreamTerminalEvent: normalizeOpenAIWSTerminalEvent(turn.TerminalEventType),
-					ResponseHeaders:       cloneHeader(handshakeHeaders),
-					Duration:              turn.Duration,
-					FirstTokenMs:          turn.FirstTokenMs,
+					Model:                    turnRequestModel,
+					UpstreamModel:            openAIWSDifferentModel(turnRequestModel, turnUpstreamModel),
+					ServiceTier:              usageMeta.serviceTier.Load(),
+					ReasoningEffort:          usageMeta.reasoningEffort.Load(),
+					RequestedReasoningEffort: usageMeta.requestedReasoningEffort.Load(),
+					Stream:                   true,
+					OpenAIWSMode:             true,
+					UpstreamTerminalEvent:    normalizeOpenAIWSTerminalEvent(turn.TerminalEventType),
+					ResponseHeaders:          cloneHeader(handshakeHeaders),
+					Duration:                 turn.Duration,
+					FirstTokenMs:             turn.FirstTokenMs,
 				}
 				logOpenAIWSV2Passthrough(
 					"relay_turn_completed account_id=%d turn=%d request_id=%s terminal_event=%s turn_requested_model=%s turn_upstream_model=%s duration_ms=%d first_token_ms=%d input_tokens=%d output_tokens=%d cache_read_tokens=%d",
@@ -1239,16 +1253,17 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			CacheReadInputTokens:     relayResult.Usage.CacheReadInputTokens,
 			ImageOutputTokens:        relayResult.Usage.ImageOutputTokens,
 		},
-		Model:                 resultRequestModel,
-		UpstreamModel:         openAIWSDifferentModel(resultRequestModel, resultUpstreamModel),
-		ServiceTier:           usageMeta.serviceTier.Load(),
-		ReasoningEffort:       usageMeta.reasoningEffort.Load(),
-		Stream:                true,
-		OpenAIWSMode:          true,
-		UpstreamTerminalEvent: normalizeOpenAIWSTerminalEvent(relayResult.TerminalEventType),
-		ResponseHeaders:       cloneHeader(handshakeHeaders),
-		Duration:              relayResult.Duration,
-		FirstTokenMs:          relayResult.FirstTokenMs,
+		Model:                    resultRequestModel,
+		UpstreamModel:            openAIWSDifferentModel(resultRequestModel, resultUpstreamModel),
+		ServiceTier:              usageMeta.serviceTier.Load(),
+		ReasoningEffort:          usageMeta.reasoningEffort.Load(),
+		RequestedReasoningEffort: usageMeta.requestedReasoningEffort.Load(),
+		Stream:                   true,
+		OpenAIWSMode:             true,
+		UpstreamTerminalEvent:    normalizeOpenAIWSTerminalEvent(relayResult.TerminalEventType),
+		ResponseHeaders:          cloneHeader(handshakeHeaders),
+		Duration:                 relayResult.Duration,
+		FirstTokenMs:             relayResult.FirstTokenMs,
 	}
 
 	turnCount := int(completedTurns.Load())

@@ -341,6 +341,20 @@ func (s *OpenAIGatewayService) handleOpenAIWSFailureAccountSideEffects(ctx conte
 	}
 	message := extractOpenAISSEErrorMessage(payload)
 	status := openAIStreamFailureStatus(payload, message)
+	standardRateLimit := status == http.StatusBadGateway &&
+		account != nil && account.Platform == PlatformOpenAI &&
+		strings.EqualFold(strings.TrimSpace(gjson.GetBytes(payload, "error.code").String()), "rate_limit_exceeded")
+	if standardRateLimit {
+		s.handleOpenAIAccountUpstreamError(
+			ctx,
+			account,
+			http.StatusTooManyRequests,
+			openAIWSSemantic429Headers(account, canonicalModel, headers),
+			payload,
+			canonicalModel,
+		)
+		return true
+	}
 	switch status {
 	case http.StatusUnauthorized, http.StatusTooManyRequests, 529:
 		s.handleOpenAIStreamTerminalAccountSideEffects(nil, account, payload, message, headers, canonicalModel)

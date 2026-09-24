@@ -776,6 +776,26 @@ func isOpenAICompatResponsesTerminalEvent(eventType string) bool {
 	}
 }
 
+func openAICompatTerminalResponse(event *apicompat.ResponsesStreamEvent, payload []byte) *apicompat.ResponsesResponse {
+	if event == nil {
+		return nil
+	}
+	if event.Response != nil {
+		return event.Response
+	}
+	if strings.TrimSpace(event.Type) != "error" && strings.TrimSpace(event.Type) != "response.failed" {
+		return nil
+	}
+	message := extractOpenAISSEErrorMessage(payload)
+	if message == "" {
+		message = "Upstream response failed"
+	}
+	return &apicompat.ResponsesResponse{
+		Status: "failed",
+		Error:  &apicompat.ResponsesError{Code: event.Code, Message: message},
+	}
+}
+
 func (s *OpenAIGatewayService) recordOpenAIMessagesStreamUpstreamError(c *gin.Context, account *Account, upstreamRequestID, kind, message string) {
 	if c == nil {
 		return
@@ -1087,7 +1107,11 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				// Once Anthropic output has started, switching accounts would splice
 				// two model streams together. Surface a proper Anthropic error event
 				// instead of returning a failover error that the handler cannot retry.
-				if !clientOutputStarted && openAIStreamFailedEventShouldFailover(payloadBytes, message) {
+				shouldFailover := openAIStreamFailedEventShouldFailover(payloadBytes, message)
+				if isBareErrorEvent {
+					shouldFailover = openAIStreamErrorEventShouldFailover(payloadBytes, message)
+				}
+				if !clientOutputStarted && shouldFailover {
 					streamFailoverErr = s.newOpenAIStreamFailoverError(c, account, false, requestID, payloadBytes, message, resp.Header)
 					return true
 				}

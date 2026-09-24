@@ -58,6 +58,23 @@ func TestGroupModelPolicyAliasNormalization(t *testing.T) {
 	require.Equal(t, GroupModelAllowlist{Enabled: true, Models: []string{"gpt-5.4", "gpt-*"}}, got.ModelAllowlist)
 }
 
+func TestNormalizeGroupModelPolicyRejectsWildcardInTheMiddleOfCanonicalModel(t *testing.T) {
+	_, err := NormalizeGroupModelPolicy(GroupModelsListConfig{
+		Enabled: true,
+		Models:  []string{"foo*bar"},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "INVALID_MODEL_ALLOWLIST")
+}
+
+func TestNormalizeGroupModelPolicyRejectsExplicitEnabledEmptyCanonicalConfig(t *testing.T) {
+	_, err := NormalizeGroupModelPolicy(GroupModelsListConfig{Enabled: true})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "INVALID_MODEL_ALLOWLIST")
+}
+
 func TestAPIKeyAuthSnapshotUsesCanonicalModelPolicy(t *testing.T) {
 	groupID := int64(10)
 	apiKey := &APIKey{

@@ -247,6 +247,13 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 	if usage == nil {
 		usage = &OpenAIUsage{}
 	}
+	if !reqStream && !hasBillableGrokChatUsage(*usage) {
+		return nil, newGrokMissingUsageFailoverError(
+			c,
+			account,
+			firstNonEmpty(resp.Header.Get("x-request-id"), resp.Header.Get("xai-request-id")),
+		)
+	}
 	reasoningEffort := extractOpenAIReasoningEffortFromBody(patchedBody, originalModel)
 	result := &OpenAIForwardResult{
 		RequestID:       firstNonEmpty(resp.Header.Get("x-request-id"), resp.Header.Get("xai-request-id")),
@@ -1076,14 +1083,8 @@ func sanitizeGrokResponsesTools(body []byte) ([]byte, error) {
 		return deleteGrokOrphanToolControls(body)
 	}
 	if !tools.IsArray() {
-		// xAI rejects tool_choice when tools is null/object. Drop the malformed
-		// collection and any orphan tool controls instead of forwarding a pair
-		// the Grok Responses endpoint cannot interpret.
-		body, err := sjson.DeleteBytes(body, "tools")
-		if err != nil {
-			return nil, err
-		}
-		return deleteGrokOrphanToolControls(body)
+		// Preserve malformed caller input for compatibility and diagnostics.
+		return body, nil
 	}
 
 	rawTools := tools.Array()

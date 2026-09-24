@@ -404,15 +404,31 @@ func (h *GatewayHandler) responsesErrorResponse(c *gin.Context, status int, code
 
 // handleResponsesFailoverExhausted writes a failover-exhausted error in Responses format.
 func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastErr *service.UpstreamFailoverError, streamStarted bool) {
+	if failoverClientGone(c) {
+		return
+	}
+	if service.StopOpenAICompactSSEKeepaliveCommitted(c) || c.Writer.Written() {
+		streamStarted = true
+	}
 	if streamStarted {
-		return // Can't write error after stream started
+		if _, alreadyReported := service.GetOpsStreamError(c); alreadyReported {
+			return
+		}
+	}
+	writeError := func(status int, errType, message string) {
+		if streamStarted {
+			service.MarkOpsStreamFailure(c, errType, "", message, status)
+			writeResponsesFailedSSE(c, errType, "", message)
+			return
+		}
+		h.responsesErrorResponse(c, status, errType, message)
 	}
 	if lastErr != nil {
 		copyFailoverRetryAfter(c, lastErr.ResponseHeaders)
 	}
 	if lastErr != nil && lastErr.IsCredentialFailure() {
 		status, message := credentialFailoverClientResponse(lastErr)
-		h.responsesErrorResponse(c, status, "server_error", message)
+		writeError(status, "server_error", message)
 		return
 	}
 	statusCode := http.StatusBadGateway
@@ -421,8 +437,16 @@ func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastEr
 	}
 	if lastErr != nil && service.IsOpenAISilentRefusalErrorBody(lastErr.ResponseBody) {
 		service.SetOpsUpstreamError(c, statusCode, service.OpenAISilentRefusalClientMessage(), "")
-		h.responsesErrorResponse(c, http.StatusBadGateway, "upstream_error", service.OpenAISilentRefusalClientMessage())
+		writeError(http.StatusBadGateway, "upstream_error", service.OpenAISilentRefusalClientMessage())
 		return
 	}
-	h.responsesErrorResponse(c, statusCode, "server_error", "All available accounts exhausted")
+	if status, message, ok := openAICapacityFailoverClientResponse(lastErr); ok {
+		writeError(status, "server_error", message)
+		return
+	}
+	errType := "server_error"
+	if statusCode == http.StatusTooManyRequests {
+		errType = "rate_limit_error"
+	}
+	writeError(statusCode, errType, "All available accounts exhausted")
 }

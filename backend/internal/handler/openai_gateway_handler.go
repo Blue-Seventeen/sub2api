@@ -1543,6 +1543,14 @@ func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, 
 		h.anthropicStreamingAwareError(c, status, "api_error", message, streamStarted)
 		return
 	}
+	if status, message, ok := openAICapacityFailoverClientResponse(failoverErr); ok {
+		h.anthropicStreamingAwareError(c, status, "api_error", message, streamStarted)
+		return
+	}
+	if failoverErr == nil {
+		h.anthropicStreamingAwareError(c, http.StatusBadGateway, "api_error", "Upstream request failed", streamStarted)
+		return
+	}
 	status, errType, errMsg := h.mapUpstreamError(failoverErr.StatusCode)
 	h.anthropicStreamingAwareError(c, status, errType, errMsg, streamStarted)
 }
@@ -2089,7 +2097,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		}
 		releaseAccountSlot()
 		if !failoverErr.ShouldRetryNextAccount() {
-			closeOpenAIWSFailoverExhausted(wsConn, failoverErr)
+			closeOpenAIWSFailoverExhausted(c, wsConn, failoverErr)
 			return false
 		}
 		if ctx.Err() != nil {
@@ -2099,12 +2107,12 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		failedAccountIDs[account.ID] = struct{}{}
 		lastFailoverErr = failoverErr
 		if switchCount >= maxAccountSwitches {
-			closeOpenAIWSFailoverExhausted(wsConn, failoverErr)
+			closeOpenAIWSFailoverExhausted(c, wsConn, failoverErr)
 			return false
 		}
 		switchCount++
 		if h.gatewayService.ShouldStopOpenAIOAuth429Failover(account, failoverErr.StatusCode, switchCount, &oauth429FailoverState) {
-			closeOpenAIWSFailoverExhausted(wsConn, failoverErr)
+			closeOpenAIWSFailoverExhausted(c, wsConn, failoverErr)
 			return false
 		}
 		reqLog.Warn("openai.websocket_upstream_failover_switching",
@@ -2160,7 +2168,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				zap.Int("excluded_account_count", len(failedAccountIDs)),
 			)
 			if lastFailoverErr != nil {
-				closeOpenAIWSFailoverExhausted(wsConn, lastFailoverErr)
+				closeOpenAIWSFailoverExhausted(c, wsConn, lastFailoverErr)
 			} else {
 				closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "no available account")
 			}
@@ -2168,7 +2176,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		}
 		if selection == nil || selection.Account == nil {
 			if lastFailoverErr != nil {
-				closeOpenAIWSFailoverExhausted(wsConn, lastFailoverErr)
+				closeOpenAIWSFailoverExhausted(c, wsConn, lastFailoverErr)
 			} else {
 				closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "no available account")
 			}
@@ -2865,6 +2873,15 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 		}
 	}
 
+	if status, message, ok := openAICapacityFailoverClientResponse(failoverErr); ok {
+		service.SetOpsUpstreamError(c, statusCode, message, "")
+		h.handleStreamingAwareError(c, status, "server_error", message, streamStarted)
+		return
+	}
+	if h.tryWriteModelNotFoundFailover(c, failoverErr, streamStarted) {
+		return
+	}
+
 	// 记录原始上游状态码，以便 ops 错误日志捕获真实的上游错误
 	upstreamMsg := service.ExtractUpstreamErrorMessage(responseBody)
 	service.SetOpsUpstreamError(c, statusCode, upstreamMsg, "")
@@ -2915,6 +2932,9 @@ func isOpenAIImagesInboundEndpoint(c *gin.Context) bool {
 }
 
 func credentialFailoverClientResponse(failoverErr *service.UpstreamFailoverError) (int, string) {
+	if failoverErr != nil && failoverErr.Reason == service.OpenAIUpstreamAccessStateReason {
+		return http.StatusBadGateway, "Upstream access is temporarily unavailable, please retry later"
+	}
 	if failoverErr != nil && failoverErr.Reason == service.AntigravityCredentialRejectedReason {
 		return http.StatusBadGateway, service.AntigravityCredentialRejectedClientMessage
 	}
@@ -2992,6 +3012,12 @@ func (h *OpenAIGatewayHandler) handleStreamingAwareErrorWithCode(
 	// body-signal compact 心跳可能已把响应头提交为 200：先停心跳（建立
 	// happens-before，接管 ResponseWriter），并升级为流内错误处理。
 	if service.StopOpenAICompactSSEKeepaliveCommitted(c) {
+		streamStarted = true
+	}
+	// Ordinary Responses keepalives also commit the HTTP status as 200 while
+	// remaining non-semantic output. A later exhausted failover must therefore
+	// terminate the existing SSE stream instead of appending a JSON response.
+	if !streamStarted && c.Writer.Written() && service.OpenAICompactKeepaliveAdjustedWrittenSize(c) < 0 {
 		streamStarted = true
 	}
 	if streamStarted {
@@ -3234,13 +3260,26 @@ func closeOpenAIClientWS(conn *coderws.Conn, status coderws.StatusCode, reason s
 	_ = conn.CloseNow()
 }
 
-func closeOpenAIWSFailoverExhausted(conn *coderws.Conn, failoverErr *service.UpstreamFailoverError) {
+func closeOpenAIWSFailoverExhausted(c *gin.Context, conn *coderws.Conn, failoverErr *service.UpstreamFailoverError) {
+	status, errType, message := http.StatusBadGateway, "upstream_error", "upstream websocket proxy failed"
+	if failoverErr != nil {
+		if failoverErr.IsCredentialFailure() {
+			status, message = credentialFailoverClientResponse(failoverErr)
+		} else {
+			status, errType, message = (&OpenAIGatewayHandler{}).mapUpstreamError(failoverErr.StatusCode)
+			if capacityStatus, capacityMessage, ok := openAICapacityFailoverClientResponse(failoverErr); ok {
+				status, errType, message = capacityStatus, "server_error", capacityMessage
+			}
+		}
+	}
+	// The upgrade's HTTP 101 is not a successful request when retries exhaust.
+	service.MarkOpsStreamFailure(c, errType, "", message, status)
 	if failoverErr == nil {
 		closeOpenAIClientWS(conn, coderws.StatusInternalError, "upstream websocket proxy failed")
 		return
 	}
 	if failoverErr.Stage == service.GatewayFailureStageAccountAuth {
-		closeOpenAIClientWS(conn, coderws.StatusTryAgainLater, service.GrokCredentialUnavailableClientMessage)
+		closeOpenAIClientWS(conn, coderws.StatusTryAgainLater, message)
 		return
 	}
 	switch failoverErr.StatusCode {

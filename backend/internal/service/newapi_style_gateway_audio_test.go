@@ -469,7 +469,8 @@ func TestNewAPIStyleZhipuASRBillsFallbackAudioDuration(t *testing.T) {
 		BillingMode:     BillingModeDuration,
 		PerRequestPrice: &unitPrice,
 	})
-	cost := pricingSvc.calculateRecordUsageCost(context.Background(), result, &APIKey{GroupID: &groupID}, "glm-asr-2512", 1, 1, &recordUsageOpts{})
+	cost, err := pricingSvc.calculateRecordUsageCost(context.Background(), result, &APIKey{GroupID: &groupID}, "glm-asr-2512", 1, 1, &recordUsageOpts{})
+	require.NoError(t, err)
 
 	require.NotNil(t, cost)
 	require.Equal(t, string(BillingModeDuration), cost.BillingMode)
@@ -635,7 +636,8 @@ func TestNewAPIStyleZhipuTTSBillsRequestCharacters(t *testing.T) {
 		BillingMode:     BillingModeCharacter,
 		PerRequestPrice: &unitPrice,
 	})
-	cost := pricingSvc.calculateRecordUsageCost(context.Background(), result, &APIKey{GroupID: &groupID}, "glm-tts", 1, 1, &recordUsageOpts{})
+	cost, err := pricingSvc.calculateRecordUsageCost(context.Background(), result, &APIKey{GroupID: &groupID}, "glm-tts", 1, 1, &recordUsageOpts{})
+	require.NoError(t, err)
 
 	require.NotNil(t, cost)
 	require.Equal(t, string(BillingModeCharacter), cost.BillingMode)
@@ -667,7 +669,8 @@ func TestNewAPIStyleZhipuTTSPerRequestPricingStillUsesRequestCount(t *testing.T)
 		BillingMode:     BillingModePerRequest,
 		PerRequestPrice: &perRequestPrice,
 	})
-	cost := pricingSvc.calculateRecordUsageCost(context.Background(), result, &APIKey{GroupID: &groupID}, "glm-tts", 1, 1, &recordUsageOpts{})
+	cost, err := pricingSvc.calculateRecordUsageCost(context.Background(), result, &APIKey{GroupID: &groupID}, "glm-tts", 1, 1, &recordUsageOpts{})
+	require.NoError(t, err)
 
 	require.NotNil(t, cost)
 	require.Equal(t, string(BillingModePerRequest), cost.BillingMode)
@@ -838,12 +841,13 @@ func TestNewAPIStyleAudioTokenChannelPricingWinsOverRequestGuardrail(t *testing.
 		InputPrice:  &inputPrice,
 	})
 
-	cost := svc.calculateRecordUsageCost(context.Background(), &ForwardResult{
+	cost, err := svc.calculateRecordUsageCost(context.Background(), &ForwardResult{
 		Model:            "glm-asr-2512",
 		Usage:            ClaudeUsage{InputTokens: 119, OutputTokens: 11},
 		RequestCount:     1,
 		BillableUnitType: BillableUnitTypeRequest,
 	}, &APIKey{GroupID: &groupID}, "glm-asr-2512", 1, 1, &recordUsageOpts{})
+	require.NoError(t, err)
 
 	if cost == nil {
 		t.Fatalf("cost is nil")
@@ -866,12 +870,13 @@ func TestNewAPIStyleAudioNoChannelPricingFallsBackToTokenUsage(t *testing.T) {
 	}
 	tokens := ClaudeUsage{InputTokens: 1000, OutputTokens: 500}
 
-	cost := svc.calculateRecordUsageCost(context.Background(), &ForwardResult{
+	cost, err := svc.calculateRecordUsageCost(context.Background(), &ForwardResult{
 		Model:            "claude-sonnet-4",
 		Usage:            tokens,
 		RequestCount:     1,
 		BillableUnitType: BillableUnitTypeRequest,
 	}, &APIKey{}, "claude-sonnet-4", 1, 1, &recordUsageOpts{})
+	require.NoError(t, err)
 
 	if cost == nil {
 		t.Fatalf("cost is nil")
@@ -898,12 +903,13 @@ func TestNewAPIStyleAudioPerRequestChannelPricingStillUsesRequestCount(t *testin
 		PerRequestPrice: &perRequestPrice,
 	})
 
-	cost := svc.calculateRecordUsageCost(context.Background(), &ForwardResult{
+	cost, err := svc.calculateRecordUsageCost(context.Background(), &ForwardResult{
 		Model:            "glm-tts",
 		Usage:            ClaudeUsage{InputTokens: 32},
 		RequestCount:     1,
 		BillableUnitType: BillableUnitTypeRequest,
 	}, &APIKey{GroupID: &groupID}, "glm-tts", 1, 1, &recordUsageOpts{})
+	require.NoError(t, err)
 
 	if cost == nil {
 		t.Fatalf("cost is nil")
@@ -929,11 +935,12 @@ func TestNewAPIStyleAudioTokenChannelPricingWithoutUsageStaysZero(t *testing.T) 
 	for _, model := range []string{"glm-asr-2512", "glm-tts"} {
 		model := model
 		t.Run(model, func(t *testing.T) {
-			cost := svc.calculateRecordUsageCost(context.Background(), &ForwardResult{
+			cost, err := svc.calculateRecordUsageCost(context.Background(), &ForwardResult{
 				Model:            model,
 				RequestCount:     1,
 				BillableUnitType: BillableUnitTypeRequest,
 			}, &APIKey{GroupID: &groupID}, model, 1, 1, &recordUsageOpts{})
+			require.NoError(t, err)
 
 			if cost == nil {
 				t.Fatalf("cost is nil")

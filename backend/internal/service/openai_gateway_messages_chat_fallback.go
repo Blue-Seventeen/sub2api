@@ -132,14 +132,15 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 
 	// 5. Convert response
 	if clientStream {
-		return s.streamChatCompletionsAsAnthropic(c, resp, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+		return s.streamChatCompletionsAsAnthropic(c, resp, account, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
 	}
-	return s.bufferChatCompletionsAsAnthropic(c, resp, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+	return s.bufferChatCompletionsAsAnthropic(c, resp, account, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
 }
 
 func (s *OpenAIGatewayService) bufferChatCompletionsAsAnthropic(
 	c *gin.Context,
 	resp *http.Response,
+	account *Account,
 	originalModel string,
 	billingModel string,
 	upstreamModel string,
@@ -147,8 +148,9 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsAnthropic(
 	serviceTier *string,
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
+	beginUpstreamResponseModelObservation(c)
 	requestID := resp.Header.Get("x-request-id")
-	ccResp, usage, err := s.readCCUpstreamJSONResponse(c, resp, writeAnthropicError)
+	ccResp, usage, err := s.readCCUpstreamJSONResponse(c, resp, account, writeAnthropicError)
 	if err != nil {
 		return nil, err
 	}
@@ -177,6 +179,7 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsAnthropic(
 func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 	c *gin.Context,
 	resp *http.Response,
+	account *Account,
 	originalModel string,
 	billingModel string,
 	upstreamModel string,
@@ -184,11 +187,13 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 	serviceTier *string,
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
+	beginUpstreamResponseModelObservation(c)
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
 
 	anthropicState := apicompat.NewChatCompletionsToAnthropicStreamState(originalModel)
 	clientDisconnected := false
+	clientOutputStarted := false
 
 	// 与 responses 兄弟不同：客户端断开后仍继续做事件转换（喂 anthropicState），
 	// 仅跳过写出，保证 finalize 阶段的 usage 汇总不受断开影响。
@@ -208,6 +213,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 				clientDisconnected = true
 				break
 			}
+			clientOutputStarted = true
 		}
 		if !clientDisconnected && len(anthropicEvents) > 0 {
 			c.Writer.Flush()
@@ -236,6 +242,63 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 			FirstTokenMs:                scan.FirstTokenMs,
 			ClientDisconnect:            clientDisconnected,
 		}, fmt.Errorf("stream usage incomplete: %w", scan.Err)
+	}
+	if len(scan.ErrorPayload) > 0 {
+		message := extractOpenAISSEErrorMessage(scan.ErrorPayload)
+		status, passthroughType, passthroughMessage, matched := applyOpenAIStreamFailedErrorPassthroughRule(c, account.Platform, scan.ErrorPayload, message)
+		if !matched && !clientOutputStarted && openAIStreamErrorEventShouldFailover(scan.ErrorPayload, message) {
+			return &OpenAIForwardResult{
+				RequestID:                   requestID,
+				UpstreamHeaders:             resp.Header,
+				Usage:                       usage,
+				Model:                       originalModel,
+				BillingModel:                billingModel,
+				UpstreamModel:               upstreamModel,
+				ReasoningEffort:             reasoningEffort,
+				UpstreamResponseServiceTier: observedUpstreamResponseServiceTier(c),
+				ServiceTier:                 resolvedOpenAIUpstreamServiceTier(c, serviceTier),
+				Stream:                      true,
+				Duration:                    time.Since(startTime),
+				FirstTokenMs:                scan.FirstTokenMs,
+				ClientDisconnect:            clientDisconnected,
+			}, s.newOpenAIStreamFailoverError(c, account, false, requestID, scan.ErrorPayload, message, resp.Header)
+		}
+		message = s.recordOpenAIStreamUpstreamError(c, account, false, requestID, "http_error", scan.ErrorPayload, message)
+		errStatus, errType, errMsg := http.StatusBadGateway, "api_error", message
+		if matched {
+			errStatus, errType, errMsg = status, passthroughType, passthroughMessage
+			if errMsg == "" {
+				errMsg = message
+			}
+			MarkResponseCommitted(c)
+		}
+		errMsg = sanitizeUserVisibleErrorText(sanitizeUpstreamErrorMessage(errMsg))
+		if !clientDisconnected {
+			if !clientOutputStarted {
+				writeAnthropicError(c, errStatus, errType, errMsg)
+				clientOutputStarted = true
+			} else {
+				writeStreamHeaders()
+				if _, err := fmt.Fprint(c.Writer, buildAnthropicStreamErrorSSE(errType, errMsg)); err == nil {
+					c.Writer.Flush()
+				}
+			}
+		}
+		return &OpenAIForwardResult{
+			RequestID:                   requestID,
+			UpstreamHeaders:             resp.Header,
+			Usage:                       usage,
+			Model:                       originalModel,
+			BillingModel:                billingModel,
+			UpstreamModel:               upstreamModel,
+			ReasoningEffort:             reasoningEffort,
+			UpstreamResponseServiceTier: observedUpstreamResponseServiceTier(c),
+			ServiceTier:                 resolvedOpenAIUpstreamServiceTier(c, serviceTier),
+			Stream:                      true,
+			Duration:                    time.Since(startTime),
+			FirstTokenMs:                scan.FirstTokenMs,
+			ClientDisconnect:            clientDisconnected,
+		}, fmt.Errorf("upstream response failed: %s", errMsg)
 	}
 
 	// Finalize: close open blocks + emit message_delta/message_stop.

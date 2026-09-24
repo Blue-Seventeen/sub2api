@@ -76,6 +76,39 @@ func TestCalculateOpenAIRecordUsageCost_SearchOnlyWhenNoTokenPricing(t *testing.
 	require.InDelta(t, 1.0, cost.ActualCost, 1e-9)
 }
 
+func TestCalculateOpenAIRecordUsageCost_UnpricedTokensReportMissingPricingWithSearchCost(t *testing.T) {
+	t.Parallel()
+
+	price := 10.0
+	svc := &OpenAIGatewayService{
+		billingService: newTestBillingService(),
+	}
+	apiKey := &APIKey{
+		Group: &Group{SearchPricePer1k: &price},
+	}
+
+	cost, err := svc.calculateOpenAIRecordUsageCost(
+		context.Background(),
+		&OpenAIForwardResult{SearchCount: 100},
+		apiKey,
+		nil,
+		1.0,
+		1.0,
+		1.0,
+		1.0,
+		UsageTokens{InputTokens: 1000, OutputTokens: 500},
+		"",
+		boolPtr(false),
+		time.Time{},
+	)
+
+	require.ErrorIs(t, err, ErrModelPricingUnavailable,
+		"non-empty token usage with no billing candidates must not look like a search-only request")
+	require.NotNil(t, cost, "the independently priced search operation must remain billable")
+	require.InDelta(t, 1.0, cost.ActualCost, 1e-9)
+	require.InDelta(t, 1.0, cost.TotalCost, 1e-9)
+}
+
 func TestGroupMediaPricingLooksIncomplete_VideoModelPricesComplete(t *testing.T) {
 	t.Parallel()
 	require.True(t, groupMediaPricingLooksIncomplete(nil))

@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -66,7 +65,7 @@ func TestCalculateProgress_DailyUsage(t *testing.T) {
 	assert.Equal(t, 7.0, progress.Daily.RemainingUSD)
 	assert.Equal(t, 30.0, progress.Daily.Percentage)
 	assert.Equal(t, dailyStart, progress.Daily.WindowStart)
-	assert.Equal(t, timezone.StartOfDay(dailyStart).AddDate(0, 0, 1), progress.Daily.ResetsAt)
+	assert.Equal(t, dailyStart.Add(subscriptionDailyWindow), progress.Daily.ResetsAt)
 }
 
 func TestCalculateProgress_DailyCardUsesExpiryAsDailyResetTime(t *testing.T) {
@@ -119,7 +118,8 @@ func TestGetByID_NormalizesExpiredWindowSnapshot(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, 0.0, sub.DailyUsageUSD)
-	require.Nil(t, sub.DailyWindowStart)
+	require.NotNil(t, sub.DailyWindowStart)
+	require.WithinDuration(t, dailyStart.Add(subscriptionDailyWindow), *sub.DailyWindowStart, time.Second)
 	require.Equal(t, 0.0, sub.WeeklyUsageUSD)
 	require.WithinDuration(t, weeklyStart.Add(subscriptionWeeklyWindow), *sub.WeeklyWindowStart, time.Second)
 	require.Equal(t, 0.0, sub.MonthlyUsageUSD)
@@ -153,7 +153,10 @@ func TestGetSubscriptionProgress_NormalizesExpiredWindowSnapshot(t *testing.T) {
 	progress, err := svc.GetSubscriptionProgress(context.Background(), 3002)
 
 	require.NoError(t, err)
-	require.Nil(t, progress.Daily, "跨午夜后的展示快照应标记日窗口未激活，避免显示过期窗口")
+	require.NotNil(t, progress.Daily, "滚动窗口到期后应展示新的日窗口")
+	require.Zero(t, progress.Daily.UsedUSD)
+	require.WithinDuration(t, dailyStart.Add(subscriptionDailyWindow), progress.Daily.WindowStart, time.Second)
+	require.WithinDuration(t, dailyStart.Add(2*subscriptionDailyWindow), progress.Daily.ResetsAt, time.Second)
 }
 
 func TestCalculateProgress_WeeklyUsage(t *testing.T) {

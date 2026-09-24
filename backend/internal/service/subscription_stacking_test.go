@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -556,22 +557,23 @@ func TestBillingCacheInvalidationClearsSubscriptionL1(t *testing.T) {
 	require.Equal(t, 1, repo.calls)
 }
 
-func TestBillingCacheSubscriptionUsageUpdateCallsL1Updater(t *testing.T) {
-	billingCache := NewBillingCacheService(nil, nil, nil, nil, nil, nil, &config.Config{}, nil)
+func TestBillingCacheSubscriptionUsageUpdateInvalidatesL1RedisAndOtherInstances(t *testing.T) {
+	cache := &billingCacheWorkerStub{}
+	billingCache := NewBillingCacheService(cache, nil, nil, nil, nil, nil, &config.Config{}, nil)
 	t.Cleanup(billingCache.Stop)
 	var gotUserID, gotGroupID int64
-	var gotCost float64
-	billingCache.SetSubscriptionL1UsageUpdater(func(userID, groupID int64, costUSD float64) {
+	billingCache.SetSubscriptionL1Invalidator(func(userID, groupID int64) {
 		gotUserID = userID
 		gotGroupID = groupID
-		gotCost = costUSD
 	})
 
 	billingCache.QueueUpdateSubscriptionUsage(10, 20, 2.5)
 
 	require.Equal(t, int64(10), gotUserID)
 	require.Equal(t, int64(20), gotGroupID)
-	require.InDelta(t, 2.5, gotCost, 0.000001)
+	require.Equal(t, int64(1), atomic.LoadInt64(&cache.subscriptionInvalidations))
+	require.Equal(t, "sub:10:20", cache.publishedInvalidationCacheKey)
+	require.Equal(t, int64(0), atomic.LoadInt64(&cache.subscriptionUpdates))
 }
 
 func TestGetActiveSubscriptionDoesNotCacheInFlightResultAfterInvalidation(t *testing.T) {
@@ -666,6 +668,138 @@ func TestValidateAndCheckLimitsRejectsAggregateWithoutPerCardCapacity(t *testing
 	_, err := svc.ValidateAndCheckLimits(agg, agg.Group)
 
 	require.ErrorIs(t, err, ErrDailyLimitExceeded)
+}
+
+func TestValidateAndCheckLimitsUsesPositiveStackedCapacityDespiteAggregateOverdraw(t *testing.T) {
+	now := time.Now().UTC()
+	limit := 10.0
+	group := &Group{ID: 20, SubscriptionType: SubscriptionTypeSubscription, DailyLimitUSD: &limit}
+	available := 5.0
+	agg := aggregateActiveSubscriptionsForDisplay([]UserSubscription{
+		{ID: 1, UserID: 10, GroupID: 20, StartsAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour), Status: SubscriptionStatusActive, DailyUsageUSD: 30, DailyWindowStart: subscriptionTimePtr(now), Group: group},
+		{ID: 2, UserID: 10, GroupID: 20, StartsAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour), Status: SubscriptionStatusActive, DailyUsageUSD: 5, DailyWindowStart: subscriptionTimePtr(now), Group: group},
+	})
+	// The aggregate counter is overdrawn, but one constituent card still has
+	// positive admission capacity.
+	require.NotNil(t, agg.StackedAvailableUSD)
+	require.Equal(t, available, *agg.StackedAvailableUSD)
+	require.False(t, agg.CheckDailyLimit(group, 0))
+
+	svc := NewSubscriptionService(groupRepoNoop{}, userSubRepoNoop{}, nil, nil, nil)
+	_, err := svc.ValidateAndCheckLimits(agg, group)
+	require.NoError(t, err)
+}
+
+func TestSubscriptionCacheRefreshAtUsesEarliestCardBoundaryAndExpiry(t *testing.T) {
+	now := time.Now().UTC()
+	dailyLimit := 10.0
+	weeklyLimit := 20.0
+	monthlyLimit := 30.0
+	customLimit := 40.0
+	group := &Group{ID: 20, SubscriptionType: SubscriptionTypeSubscription, DailyLimitUSD: &dailyLimit, WeeklyLimitUSD: &weeklyLimit, MonthlyLimitUSD: &monthlyLimit, CustomLimitUSD: &customLimit, CustomLimitHours: 4}
+	dailyStart := now.Add(-23 * time.Hour)
+	weeklyStart := now.Add(-6 * 24 * time.Hour)
+	monthlyStart := now.Add(-29 * 24 * time.Hour)
+	customStart := now.Add(-3 * time.Hour)
+	subs := []UserSubscription{
+		{ID: 1, StartsAt: now.Add(-48 * time.Hour), ExpiresAt: now.Add(48 * time.Hour), Status: SubscriptionStatusActive, Group: group, DailyWindowStart: &dailyStart, WeeklyWindowStart: &weeklyStart, MonthlyWindowStart: &monthlyStart, CustomWindowStart: &customStart},
+		{ID: 2, StartsAt: now.Add(-time.Hour), ExpiresAt: now.Add(30 * time.Minute), Status: SubscriptionStatusActive, Group: group, DailyWindowStart: subscriptionTimePtr(now.Add(-time.Hour)), WeeklyWindowStart: subscriptionTimePtr(now.Add(-time.Hour)), MonthlyWindowStart: subscriptionTimePtr(now.Add(-time.Hour)), CustomWindowStart: subscriptionTimePtr(now.Add(-time.Hour))},
+	}
+
+	refreshAt := subscriptionCacheRefreshAt(subs, now)
+	require.WithinDuration(t, now.Add(30*time.Minute), refreshAt, time.Second)
+}
+
+func TestSubscriptionCacheRefreshAtUsesEachRollingWindow(t *testing.T) {
+	now := time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
+	for _, window := range []string{"daily", "weekly", "monthly", "custom", "one_time"} {
+		t.Run(window, func(t *testing.T) {
+			limit := 10.0
+			group := &Group{CustomLimitHours: 4, CustomLimitUSD: &limit}
+			sub := UserSubscription{StartsAt: now.Add(-60 * 24 * time.Hour), ExpiresAt: now.Add(3 * time.Hour), Group: group}
+			want := now.Add(time.Hour)
+			switch window {
+			case "daily":
+				sub.DailyWindowStart = subscriptionTimePtr(now.Add(-23 * time.Hour))
+			case "weekly":
+				sub.WeeklyWindowStart = subscriptionTimePtr(now.Add(-167 * time.Hour))
+			case "monthly":
+				sub.MonthlyWindowStart = subscriptionTimePtr(now.Add(-719 * time.Hour))
+			case "custom":
+				sub.CustomWindowStart = subscriptionTimePtr(now.Add(-3 * time.Hour))
+			case "one_time":
+				sub.StartsAt = now.Add(-time.Hour)
+				sub.DailyWindowStart = &sub.StartsAt
+				want = sub.ExpiresAt
+			}
+			require.Equal(t, want, subscriptionCacheRefreshAt([]UserSubscription{sub}, now))
+		})
+	}
+}
+
+func TestGetActiveSubscriptionRefreshesAtEarliestCardExpiry(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &activeSubscriptionListRepoStub{subs: []UserSubscription{{ID: 2, Status: SubscriptionStatusActive, StartsAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour), DailyUsageUSD: 2}}}
+	cfg := &config.Config{}
+	cfg.SubscriptionCache.L1Size, cfg.SubscriptionCache.L1TTLSeconds = 16, 60
+	svc := NewSubscriptionService(groupRepoNoop{}, repo, nil, nil, cfg)
+	t.Cleanup(svc.Stop)
+	svc.now = func() time.Time { return now }
+	key := subCacheKey(10, 20)
+	svc.subCacheL1.SetWithTTL(key, &subCacheEntry{
+		sub:       &UserSubscription{ID: 0, IsAggregate: true, DailyUsageUSD: 30, ExpiresAt: now.Add(time.Hour)},
+		refreshAt: now.Add(-time.Second),
+	}, 1, time.Minute)
+	svc.subCacheL1.Wait()
+	sub, err := svc.GetActiveSubscription(context.Background(), 10, 20)
+	require.NoError(t, err)
+	require.Equal(t, 1, repo.calls)
+	require.Equal(t, 2.0, sub.DailyUsageUSD)
+}
+
+func TestSubscriptionCacheGenerationDoesNotLoseConcurrentInvalidations(t *testing.T) {
+	svc := NewSubscriptionService(groupRepoNoop{}, userSubRepoNoop{}, nil, nil, nil)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < 128; i++ {
+		wg.Add(1)
+		go func() { defer wg.Done(); <-start; svc.InvalidateSubCache(10, 20) }()
+	}
+	close(start)
+	wg.Wait()
+	require.Equal(t, uint64(128), svc.subCacheVersion(subCacheKey(10, 20)))
+}
+
+func TestGetActiveSubscriptionRejectsBoundaryCrossedBeforeReturn(t *testing.T) {
+	for _, fallback := range []bool{false, true} {
+		t.Run(map[bool]string{false: "singleflight", true: "fallback"}[fallback], func(t *testing.T) {
+			now := time.Now().UTC()
+			surviving := UserSubscription{ID: 2, Status: SubscriptionStatusActive, StartsAt: now.Add(-time.Hour), ExpiresAt: now.Add(2 * time.Hour)}
+			repo := &activeSubscriptionListRepoStub{subs: []UserSubscription{
+				{ID: 1, Status: SubscriptionStatusActive, StartsAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Minute)}, surviving,
+			}}
+			svc := NewSubscriptionService(groupRepoNoop{}, repo, nil, nil, nil)
+			clockReads := 0
+			svc.now = func() time.Time {
+				clockReads++
+				if clockReads > 1 {
+					repo.subs = []UserSubscription{surviving}
+					return now.Add(time.Minute)
+				}
+				return now
+			}
+			var sub *UserSubscription
+			var err error
+			if fallback {
+				sub, err = svc.loadActiveSubscriptionFresh(context.Background(), 10, 20, subCacheKey(10, 20))
+			} else {
+				sub, err = svc.GetActiveSubscription(context.Background(), 10, 20)
+			}
+			require.NoError(t, err)
+			require.Equal(t, int64(2), sub.ID)
+			require.Equal(t, 2, repo.calls)
+		})
+	}
 }
 
 func TestValidateAndCheckLimitsDoesNotResetAggregateCustomUsage(t *testing.T) {

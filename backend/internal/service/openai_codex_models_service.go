@@ -63,8 +63,8 @@ func FilterCodexModelIDsForGroup(modelIDs []string, group *Group) []string {
 	if policy.Enabled {
 		for _, modelID := range policy.Models {
 			modelID = strings.TrimSpace(modelID)
-			if strings.HasPrefix(modelID, codexAutoModelPrefix) {
-				explicitlyEnabled[modelID] = struct{}{}
+			if isCodexAutoModel(modelID) {
+				explicitlyEnabled[normalizeCodexModelKey(modelID)] = struct{}{}
 			}
 		}
 	}
@@ -81,8 +81,8 @@ func FilterCodexModelIDsForGroup(modelIDs []string, group *Group) []string {
 		if strings.Contains(modelID, "*") {
 			continue
 		}
-		if strings.HasPrefix(modelID, codexAutoModelPrefix) {
-			if _, ok := explicitlyEnabled[modelID]; !ok {
+		if isCodexAutoModel(modelID) {
+			if _, ok := explicitlyEnabled[normalizeCodexModelKey(modelID)]; !ok {
 				continue
 			}
 		}
@@ -92,6 +92,14 @@ func FilterCodexModelIDsForGroup(modelIDs []string, group *Group) []string {
 		filtered = policy.FilterForListing(filtered)
 	}
 	return filtered
+}
+
+func isCodexAutoModel(modelID string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(modelID)), codexAutoModelPrefix)
+}
+
+func normalizeCodexModelKey(modelID string) string {
+	return strings.ToLower(strings.TrimSpace(modelID))
 }
 
 func isCodexDedicatedMediaModel(modelID string) bool {
@@ -1317,7 +1325,7 @@ func mergeConfiguredCodexModelsManifest(
 	for _, modelID := range selectedModels {
 		modelID = strings.TrimSpace(modelID)
 		if modelID != "" {
-			selected[modelID] = struct{}{}
+			selected[normalizeCodexModelKey(modelID)] = struct{}{}
 		}
 	}
 	// 白名单条目匹配统一走 GroupModelAllowlist.Allows（通配条目按前缀展开）。
@@ -1346,8 +1354,8 @@ func mergeConfiguredCodexModelsManifest(
 			changed = true
 			continue
 		}
-		if strings.HasPrefix(descriptor.Slug, codexAutoModelPrefix) {
-			_, explicitlyEnabled := selected[descriptor.Slug]
+		if isCodexAutoModel(descriptor.Slug) {
+			_, explicitlyEnabled := selected[normalizeCodexModelKey(descriptor.Slug)]
 			explicitlyEnabled = filterBySelection && explicitlyEnabled
 			if !explicitlyEnabled {
 				changed = true
@@ -1360,7 +1368,7 @@ func mergeConfiguredCodexModelsManifest(
 			rawModel = visibleModel
 			changed = changed || visibilityChanged
 		}
-		seen[descriptor.Slug] = struct{}{}
+		seen[normalizeCodexModelKey(descriptor.Slug)] = struct{}{}
 		merged = append(merged, rawModel)
 	}
 
@@ -1371,12 +1379,12 @@ func mergeConfiguredCodexModelsManifest(
 		if filterBySelection && !allowlist.Allows(modelID) {
 			continue
 		}
-		if strings.HasPrefix(modelID, codexAutoModelPrefix) {
-			if _, explicitlyEnabled := selected[modelID]; !filterBySelection || !explicitlyEnabled {
+		if isCodexAutoModel(modelID) {
+			if _, explicitlyEnabled := selected[normalizeCodexModelKey(modelID)]; !filterBySelection || !explicitlyEnabled {
 				continue
 			}
 		}
-		if _, exists := seen[modelID]; exists {
+		if _, exists := seen[normalizeCodexModelKey(modelID)]; exists {
 			continue
 		}
 		rawModel, err := json.Marshal(newConfiguredCodexModelDescriptor(modelID))
@@ -1384,7 +1392,7 @@ func mergeConfiguredCodexModelsManifest(
 			return nil, false, err
 		}
 		merged = append(merged, rawModel)
-		seen[modelID] = struct{}{}
+		seen[normalizeCodexModelKey(modelID)] = struct{}{}
 		changed = true
 	}
 	if !changed {
@@ -1828,7 +1836,11 @@ func (s *OpenAIGatewayService) refreshCachedOpenAIModels(cacheKey string, reques
 	return s.openAIModelsCache.refresh.DoChan(cacheKey, func() (any, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), codexModelsManifestRequestTimeout)
 		defer cancel()
-		cached, _ := s.openAIModelsCache.get(cacheKey, time.Now())
+		cached, state := s.openAIModelsCache.get(cacheKey, time.Now())
+		// A caller can observe a miss before another flight populates the cache.
+		if state == openAIModelsCacheFresh {
+			return cached, nil
+		}
 		ifNoneMatch := ""
 		if cached != nil {
 			ifNoneMatch = cached.upstreamETag

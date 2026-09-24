@@ -38,6 +38,10 @@ func TestDelayedFirstUseAnchorsMonthlyWindowAtActivation(t *testing.T) {
 	require.NoError(t, svc.CheckAndActivateWindow(context.Background(), sub))
 
 	require.Equal(t, activatedAt, *repo.windowStart)
+	require.Equal(t, activatedAt, *sub.DailyWindowStart)
+	require.Equal(t, activatedAt, *sub.WeeklyWindowStart)
+	require.Equal(t, activatedAt, *sub.MonthlyWindowStart)
+	require.Equal(t, activatedAt, *sub.CustomWindowStart)
 	monthlyWindowStart := *repo.windowStart
 	resetAt, ok := sub.automaticWindowStartAt(&monthlyWindowStart, 30*24*time.Hour, activatedAt.Add(30*24*time.Hour))
 	require.True(t, ok)

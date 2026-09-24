@@ -1100,7 +1100,7 @@ func openAICompatPayloadWithEventType(payload, eventType string) string {
 	if eventType == "" || strings.TrimSpace(payload) == "" || strings.TrimSpace(payload) == "[DONE]" {
 		return payload
 	}
-	if gjson.Get(payload, "type").Exists() {
+	if payloadType := strings.TrimSpace(gjson.Get(payload, "type").String()); payloadType != "" {
 		return payload
 	}
 	patched, err := sjson.Set(payload, "type", eventType)
@@ -1254,18 +1254,20 @@ func (s *OpenAIGatewayService) parseSSEUsageBytesWithType(data []byte, eventType
 	if !ok {
 		return
 	}
-	if !openAIStreamEventTypeIsTerminal(effectiveOpenAISSEEventType(data, eventType)) &&
-		effectiveOpenAISSEEventType(data, eventType) != "error" {
-		return
-	}
-	if openAIStreamEventTypeIsTerminal(effectiveOpenAISSEEventType(data, eventType)) {
+	effectiveType := effectiveOpenAISSEEventType(data, eventType)
+	if openAIStreamEventTypeIsTerminal(effectiveType) {
 		if !openAIUsageHasTokens(&parsedUsage) && openAIUsageHasTokens(usage) {
 			return
 		}
 		*usage = parsedUsage
 		return
 	}
-	mergeOpenAIUsageNonZero(usage, parsedUsage)
+	// Some Responses providers attach usage to response.in_progress or another
+	// non-terminal event. Use it only when no usage has been observed yet;
+	// terminal events remain authoritative and replace the complete snapshot.
+	if !openAIUsageHasTokens(usage) {
+		*usage = parsedUsage
+	}
 }
 
 func openAIResponsesCompletedEventIsEmpty(data []byte, usage *OpenAIUsage) bool {
@@ -1273,11 +1275,23 @@ func openAIResponsesCompletedEventIsEmpty(data []byte, usage *OpenAIUsage) bool 
 		return false
 	}
 	for _, path := range []string{"usage", "response.usage", "error", "response.error"} {
-		if gjson.GetBytes(data, path).Exists() {
+		if value := gjson.GetBytes(data, path); value.Exists() && value.Type != gjson.Null {
 			return false
 		}
 	}
 	return len(gjson.GetBytes(data, "response.output").Array()) == 0
+}
+
+func openAIResponsesFinalResponseIsEmpty(data []byte, usage *OpenAIUsage) bool {
+	if len(data) == 0 || !gjson.ValidBytes(data) || openAIUsageHasTokens(usage) {
+		return false
+	}
+	for _, path := range []string{"usage", "error"} {
+		if value := gjson.GetBytes(data, path); value.Exists() && value.Type != gjson.Null {
+			return false
+		}
+	}
+	return len(gjson.GetBytes(data, "output").Array()) == 0
 }
 
 func extractOpenAIUsageFromJSONBytes(body []byte) (OpenAIUsage, bool) {

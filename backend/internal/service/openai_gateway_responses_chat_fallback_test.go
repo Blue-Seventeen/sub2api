@@ -5,6 +5,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -321,10 +322,23 @@ func (c *reasoningRecordingCache) SetReasoningContent(_ context.Context, itemID 
 }
 
 func (c *reasoningRecordingCache) GetReasoningContent(_ context.Context, itemID string) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if v, ok := c.getResp[itemID]; ok {
 		return v, nil
 	}
+	if v, ok := c.sets[itemID]; ok {
+		return v, nil
+	}
 	return "", ErrReasoningContentNotFound
+}
+
+func (c *reasoningRecordingCache) SetScopedReasoningContent(ctx context.Context, userID, apiKeyID int64, itemID, content string, ttl time.Duration) error {
+	return c.SetReasoningContent(ctx, fmt.Sprintf("%d:%d:%s", userID, apiKeyID, itemID), content, ttl)
+}
+
+func (c *reasoningRecordingCache) GetScopedReasoningContent(ctx context.Context, userID, apiKeyID int64, itemID string) (string, error) {
+	return c.GetReasoningContent(ctx, fmt.Sprintf("%d:%d:%s", userID, apiKeyID, itemID))
 }
 
 func (c *reasoningRecordingCache) snapshotSets() map[string]string {
@@ -347,6 +361,7 @@ func TestForwardResponses_ChatFallbackCachesStreamedReasoning(t *testing.T) {
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("api_key", &APIKey{ID: 11, UserID: 1})
 
 	upstreamBody := strings.Join([]string{
 		`data: {"id":"chatcmpl_rc","object":"chat.completion.chunk","model":"deepseek-reasoner","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
@@ -381,7 +396,7 @@ func TestForwardResponses_ChatFallbackCachesStreamedReasoning(t *testing.T) {
 	sets := cache.snapshotSets()
 	require.Len(t, sets, 1, "应恰好缓存一个 reasoning item")
 	for itemID, content := range sets {
-		require.NotEmpty(t, itemID)
+		require.True(t, strings.HasPrefix(itemID, "1:11:"))
 		require.Equal(t, "think first", content)
 	}
 }
@@ -408,6 +423,7 @@ func TestForwardResponses_ChatFallbackRestoresReasoningFromCache(t *testing.T) {
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("api_key", &APIKey{ID: 11, UserID: 1})
 
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -417,7 +433,7 @@ func TestForwardResponses_ChatFallbackRestoresReasoningFromCache(t *testing.T) {
 		)),
 	}}
 	cache := &reasoningRecordingCache{
-		getResp: map[string]string{"item_enc1": "cached thinking"},
+		getResp: map[string]string{"1:11:item_enc1": "cached thinking"},
 	}
 	svc := &OpenAIGatewayService{
 		cfg:          rawChatCompletionsTestConfig(),
@@ -439,5 +455,5 @@ func TestForwardResponses_ChatFallbackRestoresReasoningFromCache(t *testing.T) {
 	require.Equal(t, "tool", gjson.GetBytes(upstream.lastBody, "messages.3.role").String())
 
 	// 明文 summary 的 item 被回写进缓存（自愈）。
-	require.Equal(t, "plain thinking", cache.snapshotSets()["item_plain"])
+	require.Equal(t, "plain thinking", cache.snapshotSets()["1:11:item_plain"])
 }

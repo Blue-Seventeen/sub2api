@@ -617,6 +617,10 @@ func (s *SchedulerSnapshotService) handleBulkAccountEvent(ctx context.Context, p
 			addPlatformGroups(PlatformAnthropic, accountGroupIDs)
 			addPlatformGroups(PlatformGemini, accountGroupIDs)
 		default:
+			if IsCompatiblePlatform(account.Platform) || account.Platform == PlatformKimi || account.Platform == PlatformZhipu || account.Platform == PlatformDeepseek || account.Platform == PlatformMiniMax {
+				addPlatformGroups(account.Platform, accountGroupIDs)
+				continue
+			}
 			return s.rebuildByGroupIDs(ctx, rebuildGroupIDs, "account_bulk_change", seen)
 		}
 	}
@@ -826,6 +830,7 @@ func (s *SchedulerSnapshotService) rebuildByAccount(ctx context.Context, account
 
 func schedulerSnapshotPlatforms() []string {
 	platforms := []string{PlatformAnthropic, PlatformGemini, PlatformOpenAI, PlatformAntigravity, PlatformGrok}
+	platforms = append(platforms, PlatformKimi, PlatformMiniMax)
 	return append(platforms, CompatiblePlatforms()...)
 }
 

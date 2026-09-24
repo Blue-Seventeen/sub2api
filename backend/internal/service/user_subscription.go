@@ -1,10 +1,6 @@
 package service
 
-import (
-	"time"
-
-	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
-)
+import "time"
 
 const (
 	subscriptionDailyWindow   = 24 * time.Hour
@@ -162,19 +158,13 @@ func (s *UserSubscription) canAutomaticallyResetDailyAt(now time.Time) bool {
 	return ok
 }
 
-// automaticDailyWindowStartAt keeps daily quota windows aligned to calendar
-// midnights in the configured server timezone. A persisted non-midnight
-// legacy/manual anchor is healed at the next calendar boundary.
+// automaticDailyWindowStartAt keeps daily quota windows aligned to their
+// persisted rolling anchor. One-time daily cards are intentionally excluded.
 func (s *UserSubscription) automaticDailyWindowStartAt(now time.Time) (time.Time, bool) {
 	if s.DailyWindowStart == nil || s.HasOneTimeDailyQuota() {
 		return time.Time{}, false
 	}
-
-	today := timezone.StartOfDay(now)
-	if !today.After(timezone.StartOfDay(*s.DailyWindowStart)) {
-		return time.Time{}, false
-	}
-	return today, true
+	return s.automaticWindowStartAt(s.DailyWindowStart, subscriptionDailyWindow, now)
 }
 
 func (s *UserSubscription) canAutomaticallyResetWeeklyAt(now time.Time) bool {
@@ -221,7 +211,7 @@ func (s *UserSubscription) DailyResetTime() *time.Time {
 		t := s.ExpiresAt
 		return &t
 	}
-	t := timezone.StartOfDay(*s.DailyWindowStart).AddDate(0, 0, 1)
+	t := s.windowResetAnchor(s.DailyWindowStart).Add(subscriptionDailyWindow)
 	return &t
 }
 
@@ -229,7 +219,7 @@ func (s *UserSubscription) EffectiveDisplayDailyResetTime() *time.Time {
 	if s.DailyWindowStart == nil || s.HasOneTimeDailyQuota() {
 		return nil
 	}
-	t := timezone.StartOfDay(*s.DailyWindowStart).AddDate(0, 0, 1)
+	t := s.windowResetAnchor(s.DailyWindowStart).Add(subscriptionDailyWindow)
 	return &t
 }
 

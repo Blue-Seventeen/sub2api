@@ -13,6 +13,7 @@ type SubscriptionCacheData struct {
 	MonthlyUsage float64
 	CustomUsage  float64
 	Version      int64
+	RefreshAt    time.Time
 
 	DailyLimitUSD       *float64
 	WeeklyLimitUSD      *float64

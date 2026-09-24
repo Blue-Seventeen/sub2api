@@ -28,7 +28,7 @@ func isOllamaCloudRawChatCompletionsAccount(account *Account) bool {
 		return false
 	}
 	baseURL, _ := account.Credentials["base_url"].(string)
-	return isOllamaCloudBaseURL(baseURL)
+	return isOllamaCloudBaseURL(strings.TrimRight(strings.TrimSpace(baseURL), "/"))
 }
 
 func accountHasOllamaCloudUsageExtra(account *Account) bool {

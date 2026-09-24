@@ -4,13 +4,12 @@ package repository
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
-	"strconv"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -18,263 +17,118 @@ import (
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	_ "github.com/Wei-Shaw/sub2api/ent/runtime"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
-	"github.com/docker/go-connections/nat"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
 
 	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 	redisclient "github.com/redis/go-redis/v9"
-	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
-	tcredis "github.com/testcontainers/testcontainers-go/modules/redis"
-)
-
-const (
-	redisImageTag    = "redis:7-alpine"
-	postgresImageTag = "postgres:16-alpine"
 )
 
 var (
-	integrationDB        *sql.DB
-	integrationEntClient *dbent.Client
-	integrationRedis     *redisclient.Client
+	integrationDB          *sql.DB
+	integrationEntClient   *dbent.Client
+	integrationRedis       *redisclient.Client
+	integrationRedisPrefix string
 
 	redisNamespaceSeq uint64
 )
 
 func TestMain(m *testing.M) {
-	ctx := context.Background()
-	_ = os.Setenv("TESTCONTAINERS_RYUK_DISABLED", "true")
+	os.Exit(runTests(m))
+}
 
+func runTests(m *testing.M) int {
+	cfg, err := loadIntegrationHarnessConfig(os.Getenv)
+	if err != nil {
+		log.Printf("integration harness configuration refused: %v; see INTEGRATION_TESTING.md", err)
+		return 1
+	}
 	if err := timezone.Init("UTC"); err != nil {
 		log.Printf("failed to init timezone: %v", err)
-		os.Exit(1)
+		return 1
 	}
-
-	if dsn := strings.TrimSpace(os.Getenv("SUB2API_TEST_POSTGRES_DSN")); dsn != "" {
-		redisAddr := strings.TrimSpace(os.Getenv("SUB2API_TEST_REDIS_ADDR"))
-		if redisAddr == "" {
-			log.Printf("SUB2API_TEST_REDIS_ADDR is required when SUB2API_TEST_POSTGRES_DSN is set")
-			os.Exit(1)
-		}
-		code := runIntegrationTestsWithExternalServices(ctx, m, dsn, redisAddr)
-		os.Exit(code)
-	}
-
-	if !dockerIsAvailable(ctx) {
-		// In CI we expect Docker to be available so integration tests should fail loudly.
-		if os.Getenv("CI") != "" {
-			log.Printf("docker is not available (CI=true); failing integration tests")
-			os.Exit(1)
-		}
-		log.Printf("docker is not available; skipping integration tests (start Docker to enable)")
-		os.Exit(0)
-	}
-
-	postgresImage := selectDockerImage(ctx, postgresImageTag)
-	pgContainer, err := tcpostgres.Run(
-		ctx,
-		postgresImage,
-		tcpostgres.WithDatabase("sub2api_test"),
-		tcpostgres.WithUsername("postgres"),
-		tcpostgres.WithPassword("postgres"),
-		testcontainers.WithWaitStrategy(
-			wait.ForListeningPort(nat.Port("5432/tcp")).WithStartupTimeout(2*time.Minute),
-			wait.ForLog("database system is ready to accept connections").WithOccurrence(2).WithStartupTimeout(2*time.Minute),
-		),
-	)
-	if err != nil {
-		log.Printf("failed to start postgres container: %v", err)
-		os.Exit(1)
-	}
-	defer func() { _ = pgContainer.Terminate(ctx) }()
-
-	redisContainer, err := tcredis.Run(
-		ctx,
-		redisImageTag,
-		testcontainers.WithWaitStrategy(
-			wait.ForListeningPort(nat.Port("6379/tcp")).WithStartupTimeout(time.Minute),
-			wait.ForLog("Ready to accept connections").WithStartupTimeout(time.Minute),
-		),
-	)
-	if err != nil {
-		log.Printf("failed to start redis container: %v", err)
-		os.Exit(1)
-	}
-	defer func() { _ = redisContainer.Terminate(ctx) }()
-
-	dsn, err := pgContainer.ConnectionString(ctx, "sslmode=disable", "TimeZone=UTC")
-	if err != nil {
-		log.Printf("failed to get postgres dsn: %v", err)
-		os.Exit(1)
-	}
-
-	integrationDB, err = openSQLWithRetry(ctx, dsn, 30*time.Second)
-	if err != nil {
-		log.Printf("failed to open sql db: %v", err)
-		os.Exit(1)
-	}
-	if err := ApplyMigrations(ctx, integrationDB); err != nil {
-		log.Printf("failed to apply db migrations: %v", err)
-		os.Exit(1)
-	}
-
-	// 创建 ent client 用于集成测试
-	drv := entsql.OpenDB(dialect.Postgres, integrationDB)
-	integrationEntClient = dbent.NewClient(dbent.Driver(drv))
-
-	redisHost, err := redisContainer.Host(ctx)
-	if err != nil {
-		log.Printf("failed to get redis host: %v", err)
-		os.Exit(1)
-	}
-	redisPort, err := redisContainer.MappedPort(ctx, "6379/tcp")
-	if err != nil {
-		log.Printf("failed to get redis port: %v", err)
-		os.Exit(1)
-	}
-
-	integrationRedis = redisclient.NewClient(&redisclient.Options{
-		Addr: fmt.Sprintf("%s:%d", redisHost, redisPort.Int()),
-		DB:   0,
-	})
-	if err := integrationRedis.Ping(ctx).Err(); err != nil {
-		log.Printf("failed to ping redis: %v", err)
-		os.Exit(1)
-	}
-
-	code := m.Run()
-
-	_ = integrationEntClient.Close()
-	_ = integrationRedis.Close()
-	_ = integrationDB.Close()
-
-	os.Exit(code)
+	return runIntegrationTestsWithExternalServices(m.Run, cfg)
 }
 
-func runIntegrationTestsWithExternalServices(ctx context.Context, m *testing.M, dsn string, redisAddr string) int {
+func runIntegrationTestsWithExternalServices(run func() int, cfg integrationHarnessConfig) int {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	var nonce [16]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		log.Printf("failed to generate integration Redis namespace")
+		return 1
+	}
+	integrationRedisPrefix = fmt.Sprintf("%s:%x:", cfg.database, nonce)
+	log.Printf("integration resources: database=%s redis_db=%d redis_prefix=%s", cfg.database, cfg.redisDB, integrationRedisPrefix)
+	integrationRedis = redisclient.NewClient(&redisclient.Options{
+		Addr: cfg.redisAddr, DB: cfg.redisDB, Username: cfg.redisUsername, Password: cfg.redisPassword,
+		Protocol: 2, DisableIdentity: true,
+		DialTimeout: 5 * time.Second, ReadTimeout: 5 * time.Second, WriteTimeout: 5 * time.Second,
+	})
+	defer integrationRedis.Close()
+	integrationRedis.AddHook(prefixHook{prefix: integrationRedisPrefix, db: cfg.redisDB, username: cfg.redisUsername, password: cfg.redisPassword})
+	if err := integrationRedis.Ping(ctx).Err(); err != nil {
+		log.Printf("failed to ping integration Redis; check explicit address, credentials and nonzero DB")
+		return 1
+	}
 	var err error
-	integrationDB, err = openSQLWithRetry(ctx, dsn, 30*time.Second)
+	integrationDB, err = openSQLWithRetry(ctx, cfg.dsn, 30*time.Second)
 	if err != nil {
-		log.Printf("failed to open external sql db: %v", err)
+		log.Printf("failed to open integration PostgreSQL; check explicit endpoint and restricted login")
 		return 1
 	}
-	if err := resetIntegrationDatabase(ctx, integrationDB); err != nil {
-		log.Printf("failed to reset external sql db: %v", err)
-		_ = integrationDB.Close()
+	defer integrationDB.Close()
+	// Register this before the pinned lock connection so it closes after the
+	// lock is released, but before the shared SQL pool is closed.
+	defer func() {
+		if integrationEntClient != nil {
+			_ = integrationEntClient.Close()
+		}
+	}()
+	// Keep the advisory lock on one session for the entire suite, not just reset.
+	lockConn, err := integrationDB.Conn(ctx)
+	if err != nil {
+		log.Printf("failed to acquire integration PostgreSQL connection")
+		return 1
+	}
+	defer lockConn.Close()
+	const suiteLockID int64 = 724082491865101
+	var locked bool
+	if err := lockConn.QueryRowContext(ctx, "SELECT pg_catalog.pg_try_advisory_lock($1)", suiteLockID).Scan(&locked); err != nil || !locked {
+		log.Printf("integration database is already in use or the suite lock is unavailable")
+		return 1
+	}
+	defer func() {
+		unlockCtx, unlockCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer unlockCancel()
+		_, _ = lockConn.ExecContext(unlockCtx, "SELECT pg_catalog.pg_advisory_unlock($1)", suiteLockID)
+	}()
+	if err := resetIntegrationDatabase(ctx, lockConn, cfg); err != nil {
+		log.Printf("failed to reset integration database: %v", err)
 		return 1
 	}
 	if err := ApplyMigrations(ctx, integrationDB); err != nil {
 		log.Printf("failed to apply db migrations: %v", err)
-		_ = integrationDB.Close()
 		return 1
 	}
 
 	drv := entsql.OpenDB(dialect.Postgres, integrationDB)
 	integrationEntClient = dbent.NewClient(dbent.Driver(drv))
-
-	integrationRedis = redisclient.NewClient(&redisclient.Options{
-		Addr: redisAddr,
-		DB:   0,
-	})
-	if err := integrationRedis.Ping(ctx).Err(); err != nil {
-		log.Printf("failed to ping external redis: %v", err)
-		_ = integrationEntClient.Close()
-		_ = integrationDB.Close()
-		return 1
-	}
-	if err := integrationRedis.FlushDB(ctx).Err(); err != nil {
-		log.Printf("failed to flush external redis: %v", err)
-		_ = integrationEntClient.Close()
-		_ = integrationRedis.Close()
-		_ = integrationDB.Close()
-		return 1
-	}
-
-	code := m.Run()
-
-	_ = integrationEntClient.Close()
-	if integrationRedis != nil {
-		_ = integrationRedis.Close()
-	}
-	_ = integrationDB.Close()
-	return code
-}
-
-func resetIntegrationDatabase(ctx context.Context, db *sql.DB) error {
-	if _, err := db.ExecContext(ctx, `
-		DO $$
-		DECLARE
-			schema_name text;
-		BEGIN
-			FOR schema_name IN
-				SELECT nspname
-				FROM pg_namespace
-				WHERE nspname NOT LIKE 'pg_%'
-				  AND nspname <> 'information_schema'
-			LOOP
-				EXECUTE format('DROP SCHEMA IF EXISTS %I CASCADE', schema_name);
-			END LOOP;
-		END $$;
-	`); err != nil {
-		return err
-	}
-	if _, err := db.ExecContext(ctx, `CREATE SCHEMA public`); err != nil {
-		return err
-	}
-	_, err := db.ExecContext(ctx, `GRANT ALL ON SCHEMA public TO public`)
-	return err
-}
-
-func dockerIsAvailable(ctx context.Context) bool {
-	cmd := exec.CommandContext(ctx, "docker", "info")
-	cmd.Env = os.Environ()
-	return cmd.Run() == nil
-}
-
-// selectDockerImage resolves the container image for the harness.
-//
-// SUB2API_TEST_POSTGRES_IMAGE overrides the PostgreSQL image so the suite can be
-// run against the oldest documented-supported server, not just the newest. That
-// matters for SQL that behaves differently across major versions: jsonpath
-// .datetime() only accepts the ISO-8601 "Z" designator from PostgreSQL 17 on, so
-// a suite pinned to 18 cannot observe breakage on 14-16.
-//
-//	SUB2API_TEST_POSTGRES_IMAGE=postgres:15-alpine go test -tags integration ./internal/repository/
-func selectDockerImage(ctx context.Context, preferred string) string {
-	if override := strings.TrimSpace(os.Getenv("SUB2API_TEST_POSTGRES_IMAGE")); override != "" &&
-		strings.HasPrefix(preferred, "postgres:") {
-		return override
-	}
-	if dockerImageExists(ctx, preferred) {
-		return preferred
-	}
-
-	return preferred
-}
-
-func dockerImageExists(ctx context.Context, image string) bool {
-	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", image)
-	cmd.Env = os.Environ()
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	return cmd.Run() == nil
+	return run()
 }
 
 func openSQLWithRetry(ctx context.Context, dsn string, timeout time.Duration) (*sql.DB, error) {
 	deadline := time.Now().Add(timeout)
 	var lastErr error
+	connector, err := pq.NewConnector(dsn)
+	if err != nil {
+		return nil, errors.New("invalid integration PostgreSQL connection options")
+	}
 
-	for time.Now().Before(deadline) {
-		db, err := sql.Open("postgres", dsn)
-		if err != nil {
-			lastErr = err
-			time.Sleep(250 * time.Millisecond)
-			continue
-		}
+	for time.Now().Before(deadline) && ctx.Err() == nil {
+		db := sql.OpenDB(connector)
 
 		if err := pingWithTimeout(ctx, db, 2*time.Second); err != nil {
 			lastErr = err
@@ -344,34 +198,27 @@ func testRedis(t *testing.T) *redisclient.Client {
 	t.Helper()
 
 	prefix := fmt.Sprintf(
-		"it:%s:%d:%d:",
-		sanitizeRedisNamespace(t.Name()),
-		time.Now().UnixNano(),
+		"%s%d:",
+		integrationRedisPrefix,
 		atomic.AddUint64(&redisNamespaceSeq, 1),
 	)
 
 	opts := *integrationRedis.Options()
 	rdb := redisclient.NewClient(&opts)
-	rdb.AddHook(prefixHook{prefix: prefix})
+	rdb.AddHook(prefixHook{prefix: prefix, db: opts.DB, username: opts.Username, password: opts.Password})
 
 	t.Cleanup(func() {
-		ctx := context.Background()
+		defer rdb.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
 
-		var cursor uint64
-		for {
-			keys, nextCursor, err := integrationRedis.Scan(ctx, cursor, prefix+"*", 500).Result()
-			require.NoError(t, err, "scan redis keys for cleanup")
-			if len(keys) > 0 {
-				require.NoError(t, integrationRedis.Unlink(ctx, keys...).Err(), "unlink redis keys for cleanup")
-			}
-
-			cursor = nextCursor
-			if cursor == 0 {
-				break
-			}
-		}
-
-		_ = rdb.Close()
+		err := cleanupIntegrationRedisNamespace(ctx, prefix,
+			func(ctx context.Context, cursor uint64, match string, count int64) ([]string, uint64, error) {
+				return rdb.Scan(ctx, cursor, match, count).Result()
+			},
+			func(ctx context.Context, keys ...string) error { return rdb.Unlink(ctx, keys...).Err() },
+		)
+		require.NoError(t, err, "clean up only this test's Redis namespace")
 	})
 
 	return rdb
@@ -381,92 +228,6 @@ func assertTTLWithin(t *testing.T, ttl time.Duration, min, max time.Duration) {
 	t.Helper()
 	require.GreaterOrEqual(t, ttl, min, "ttl should be >= min")
 	require.LessOrEqual(t, ttl, max, "ttl should be <= max")
-}
-
-func sanitizeRedisNamespace(name string) string {
-	name = strings.ReplaceAll(name, "/", "_")
-	name = strings.ReplaceAll(name, " ", "_")
-	return name
-}
-
-type prefixHook struct {
-	prefix string
-}
-
-func (h prefixHook) DialHook(next redisclient.DialHook) redisclient.DialHook { return next }
-
-func (h prefixHook) ProcessHook(next redisclient.ProcessHook) redisclient.ProcessHook {
-	return func(ctx context.Context, cmd redisclient.Cmder) error {
-		h.prefixCmd(cmd)
-		return next(ctx, cmd)
-	}
-}
-
-func (h prefixHook) ProcessPipelineHook(next redisclient.ProcessPipelineHook) redisclient.ProcessPipelineHook {
-	return func(ctx context.Context, cmds []redisclient.Cmder) error {
-		for _, cmd := range cmds {
-			h.prefixCmd(cmd)
-		}
-		return next(ctx, cmds)
-	}
-}
-
-func (h prefixHook) prefixCmd(cmd redisclient.Cmder) {
-	args := cmd.Args()
-	if len(args) < 2 {
-		return
-	}
-
-	prefixOne := func(i int) {
-		if i < 0 || i >= len(args) {
-			return
-		}
-
-		switch v := args[i].(type) {
-		case string:
-			if v != "" && !strings.HasPrefix(v, h.prefix) {
-				args[i] = h.prefix + v
-			}
-		case []byte:
-			s := string(v)
-			if s != "" && !strings.HasPrefix(s, h.prefix) {
-				args[i] = []byte(h.prefix + s)
-			}
-		}
-	}
-
-	switch strings.ToLower(cmd.Name()) {
-	case "get", "set", "setnx", "setex", "psetex", "incr", "decr", "incrby", "expire", "pexpire", "ttl", "pttl",
-		"hgetall", "hget", "hset", "hdel", "hincrbyfloat", "exists",
-		"zadd", "zcard", "zrange", "zrangebyscore", "zrem", "zremrangebyscore", "zrevrange", "zrevrangebyscore", "zscore":
-		prefixOne(1)
-	case "mget":
-		for i := 1; i < len(args); i++ {
-			prefixOne(i)
-		}
-	case "del", "unlink":
-		for i := 1; i < len(args); i++ {
-			prefixOne(i)
-		}
-	case "eval", "evalsha", "eval_ro", "evalsha_ro":
-		if len(args) < 3 {
-			return
-		}
-		numKeys, err := strconv.Atoi(fmt.Sprint(args[2]))
-		if err != nil || numKeys <= 0 {
-			return
-		}
-		for i := 0; i < numKeys && 3+i < len(args); i++ {
-			prefixOne(3 + i)
-		}
-	case "scan":
-		for i := 2; i+1 < len(args); i++ {
-			if strings.EqualFold(fmt.Sprint(args[i]), "match") {
-				prefixOne(i + 1)
-				break
-			}
-		}
-	}
 }
 
 // IntegrationRedisSuite provides a base suite for Redis integration tests.

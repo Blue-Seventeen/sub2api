@@ -22,7 +22,7 @@ func groupContractFixture() *service.Group {
 	return &service.Group{
 		ID: 7, Name: "contract", Platform: service.PlatformOpenAI,
 		Status: service.StatusActive, SubscriptionType: service.SubscriptionTypeSubscription,
-		ModelAllowlist:   service.GroupModelAllowlist{Enabled: true, Models: []string{"gpt-5*"}},
+		ModelAllowlist:   service.GroupModelAllowlist{Enabled: true, Models: []string{"gpt-5"}},
 		ModelsListConfig: service.GroupModelsListConfig{Enabled: true, Models: []string{"gpt-5"}},
 		CodexModelsManifestConfig: domain.GroupCodexModelsManifestConfig{
 			Enabled: true, AccountIDs: []int64{9, 3}, FallbackToScheduler: true,
@@ -38,6 +38,50 @@ func groupContractFixture() *service.Group {
 		PeakRateEnabled: true, PeakStart: "09:00", PeakEnd: "12:00", PeakRateMultiplier: 1.5,
 		PeakRateWindows: []service.PeakRateWindow{{Start: "09:00", End: "12:00", Multiplier: 1.5}},
 	}
+}
+
+func TestGroupPersistenceContractMirrorsCanonicalPolicyAndSynchronizesInput(t *testing.T) {
+	for _, update := range []bool{false, true} {
+		name := "create"
+		if update {
+			name = "update"
+		}
+		t.Run(name, func(t *testing.T) {
+			g := &service.Group{
+				ID: 7,
+				ModelsListConfig: service.GroupModelsListConfig{
+					Enabled: true,
+					Models:  []string{"canonical-model"},
+				},
+				ModelAllowlist: service.GroupModelAllowlist{
+					Enabled: true,
+					Models:  []string{"stale-legacy-model"},
+				},
+			}
+
+			m := captureGroupMutation(t, g, update)
+
+			expectedMirror := service.GroupModelAllowlist{Enabled: true, Models: []string{"canonical-model"}}
+			gotMirror, ok := m.Field(group.FieldModelAllowlist)
+			require.True(t, ok)
+			require.Equal(t, service.DomainGroupModelAllowlist(expectedMirror), gotMirror)
+			gotCanonical, ok := m.Field(group.FieldModelsListConfig)
+			require.True(t, ok)
+			require.Equal(t, service.GroupModelsListConfig{Enabled: expectedMirror.Enabled, Models: expectedMirror.Models}, gotCanonical)
+			require.Equal(t, expectedMirror, g.ModelAllowlist)
+		})
+	}
+}
+
+func TestGroupModelPolicyContractRejectsEnabledEmptyCanonicalConfig(t *testing.T) {
+	_, err := service.NormalizeGroupModelPolicy(service.GroupModelsListConfig{Enabled: true})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "INVALID_MODEL_ALLOWLIST")
+
+	policy, err := service.NormalizeGroupModelPolicy(service.GroupModelsListConfig{})
+	require.NoError(t, err)
+	require.Equal(t, service.GroupModelAllowlist{}, policy.ModelAllowlist)
 }
 
 // Observe the real Ent builder at the database boundary, before issuing SQL.

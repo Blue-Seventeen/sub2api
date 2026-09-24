@@ -183,6 +183,47 @@ func TestFilterCodexModelIDsForGroupUsesCanonicalPolicyOverLegacyMirror(t *testi
 	require.Equal(t, []string{"codex-auto-canonical"}, got)
 }
 
+func TestFilterCodexModelIDsForGroupMatchesAutomaticModelsCaseInsensitively(t *testing.T) {
+	group := &Group{
+		Platform:         PlatformOpenAI,
+		ModelsListConfig: GroupModelsListConfig{Enabled: true, Models: []string{"CODEX-AUTO-FAST"}},
+	}
+
+	got := FilterCodexModelIDsForGroup([]string{"codex-auto-fast", "codex-auto-review"}, group)
+
+	require.Equal(t, []string{"CODEX-AUTO-FAST"}, got)
+}
+
+func TestMergeConfiguredCodexModelsManifestMatchesAutomaticModelsCaseInsensitively(t *testing.T) {
+	body := []byte(`{"models":[{"slug":"codex-auto-fast"},{"slug":"codex-auto-review"}]}`)
+
+	got, changed, err := mergeConfiguredCodexModelsManifest(
+		body,
+		nil,
+		[]string{"CODEX-AUTO-FAST"},
+		true,
+	)
+
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, []string{"codex-auto-fast"}, codexManifestModelSlugs(t, got))
+}
+
+func TestMergeConfiguredCodexModelsManifestDeduplicatesAutomaticModelsCaseInsensitively(t *testing.T) {
+	body := []byte(`{"models":[{"slug":"codex-auto-fast"}]}`)
+
+	got, changed, err := mergeConfiguredCodexModelsManifest(
+		body,
+		[]string{"CODEX-AUTO-FAST", "CODEX-AUTO-NEW"},
+		[]string{"CODEX-AUTO-FAST", "CODEX-AUTO-NEW"},
+		true,
+	)
+
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, []string{"codex-auto-fast", "CODEX-AUTO-NEW"}, codexManifestModelSlugs(t, got))
+}
+
 func decodeCodexManifestModels(t *testing.T, body []byte) []map[string]any {
 	t.Helper()
 

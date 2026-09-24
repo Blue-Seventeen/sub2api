@@ -265,10 +265,10 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	}
 
 	// 6. Build upstream request
-	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
+	upstreamCtx, releaseUpstreamCtx := newChatCompletionsUpstreamContext(ctx)
 	upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, responsesBody, token, true, promptCacheKey, false)
-	releaseUpstreamCtx()
 	if err != nil {
+		releaseUpstreamCtx()
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
 
@@ -284,7 +284,16 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	}
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
+		releaseUpstreamCtx()
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
+	}
+	if resp == nil || resp.Body == nil {
+		releaseUpstreamCtx()
+		return nil, errors.New("openai upstream returned an empty response body")
+	}
+	resp.Body = &openAIRequestContextReadCloser{
+		ReadCloser: resp.Body,
+		cleanup:    releaseUpstreamCtx,
 	}
 	defer func() { _ = resp.Body.Close() }()
 

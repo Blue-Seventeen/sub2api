@@ -68,9 +68,14 @@ type OpsCleanupService struct {
 	cron      *cron.Cron
 	started   bool
 	stopped   bool
-	effective config.OpsCleanupConfig
+	effective opsCleanupEffectiveConfig
 
 	warnNoRedisOnce sync.Once
+}
+
+type opsCleanupEffectiveConfig struct {
+	config.OpsCleanupConfig
+	SystemLogRetentionDays int
 }
 
 func NewOpsCleanupService(
@@ -173,10 +178,11 @@ func (s *OpsCleanupService) applyScheduleLocked(ctx context.Context) error {
 	s.cron = c
 	logger.LegacyPrintf(
 		"service.ops_cleanup",
-		"[OpsCleanup] scheduled (schedule=%q tz=%s retention_days=err:%d/min:%d/hour:%d)",
+		"[OpsCleanup] scheduled (schedule=%q tz=%s retention_days=err:%d/system:%d/min:%d/hour:%d)",
 		schedule,
 		loc.String(),
 		s.effective.ErrorLogRetentionDays,
+		s.effective.SystemLogRetentionDays,
 		s.effective.MinuteMetricsRetentionDays,
 		s.effective.HourlyMetricsRetentionDays,
 	)
@@ -196,9 +202,11 @@ func (s *OpsCleanupService) Reload(ctx context.Context) error {
 }
 
 func (s *OpsCleanupService) computeEffectiveLocked(ctx context.Context) {
-	base := config.OpsCleanupConfig{}
+	base := opsCleanupEffectiveConfig{
+		SystemLogRetentionDays: defaultOpsRuntimeLogConfig(s.cfg).RetentionDays,
+	}
 	if s.cfg != nil {
-		base = s.cfg.Ops.Cleanup
+		base.OpsCleanupConfig = s.cfg.Ops.Cleanup
 	}
 	defer func() { s.effective = base }()
 
@@ -208,42 +216,55 @@ func (s *OpsCleanupService) computeEffectiveLocked(ctx context.Context) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	raw, err := s.settingRepo.GetValue(ctx, SettingKeyOpsAdvancedSettings)
+	values, err := s.settingRepo.GetMultiple(ctx, []string{
+		SettingKeyOpsAdvancedSettings,
+		SettingKeyOpsRuntimeLogConfig,
+	})
 	if err != nil {
 		if !errors.Is(err, ErrSettingNotFound) {
-			logger.LegacyPrintf("service.ops_cleanup", "[OpsCleanup] read advanced settings failed, using cfg: %v", err)
+			logger.LegacyPrintf("service.ops_cleanup", "[OpsCleanup] read cleanup settings failed, using defaults: %v", err)
 		}
 		return
 	}
-	var adv OpsAdvancedSettings
-	if err := json.Unmarshal([]byte(raw), &adv); err != nil {
-		logger.LegacyPrintf("service.ops_cleanup", "[OpsCleanup] parse advanced settings failed, using cfg: %v", err)
-		return
+	if raw, ok := values[SettingKeyOpsAdvancedSettings]; ok {
+		adv := defaultOpsAdvancedSettingsForConfig(s.cfg)
+		if err := json.Unmarshal([]byte(raw), adv); err != nil {
+			logger.LegacyPrintf("service.ops_cleanup", "[OpsCleanup] parse advanced settings failed, using cfg: %v", err)
+		} else {
+			dr := adv.DataRetention
+			base.Enabled = dr.CleanupEnabled
+			if sched := strings.TrimSpace(dr.CleanupSchedule); sched != "" {
+				base.Schedule = sched
+			}
+			if dr.ErrorLogRetentionDays >= 0 {
+				base.ErrorLogRetentionDays = dr.ErrorLogRetentionDays
+			}
+			if dr.MinuteMetricsRetentionDays >= 0 {
+				base.MinuteMetricsRetentionDays = dr.MinuteMetricsRetentionDays
+			}
+			if dr.HourlyMetricsRetentionDays >= 0 {
+				base.HourlyMetricsRetentionDays = dr.HourlyMetricsRetentionDays
+			}
+		}
 	}
-	dr := adv.DataRetention
-	base.Enabled = dr.CleanupEnabled
-	if sched := strings.TrimSpace(dr.CleanupSchedule); sched != "" {
-		base.Schedule = sched
-	}
-	if dr.ErrorLogRetentionDays >= 0 {
-		base.ErrorLogRetentionDays = dr.ErrorLogRetentionDays
-	}
-	if dr.MinuteMetricsRetentionDays >= 0 {
-		base.MinuteMetricsRetentionDays = dr.MinuteMetricsRetentionDays
-	}
-	if dr.HourlyMetricsRetentionDays >= 0 {
-		base.HourlyMetricsRetentionDays = dr.HourlyMetricsRetentionDays
+	if raw, ok := values[SettingKeyOpsRuntimeLogConfig]; ok {
+		defaults := defaultOpsRuntimeLogConfig(s.cfg)
+		runtimeCfg := *defaults
+		if err := json.Unmarshal([]byte(raw), &runtimeCfg); err != nil {
+			logger.LegacyPrintf("service.ops_cleanup", "[OpsCleanup] parse runtime log config failed, using default system-log retention: %v", err)
+		} else {
+			normalizeOpsRuntimeLogConfig(&runtimeCfg, defaults)
+			if runtimeCfg.RetentionDays >= 1 && runtimeCfg.RetentionDays <= 3650 {
+				base.SystemLogRetentionDays = runtimeCfg.RetentionDays
+			}
+		}
 	}
 }
 
-func (s *OpsCleanupService) snapshotEffective() config.OpsCleanupConfig {
+func (s *OpsCleanupService) snapshotEffective() opsCleanupEffectiveConfig {
 	s.mu.Lock()
-	effective := s.effective
-	s.mu.Unlock()
-	if effective == (config.OpsCleanupConfig{}) && s != nil && s.cfg != nil {
-		return s.cfg.Ops.Cleanup
-	}
-	return effective
+	defer s.mu.Unlock()
+	return s.effective
 }
 
 func (s *OpsCleanupService) refreshEffectiveBeforeRun(ctx context.Context) {
@@ -370,17 +391,20 @@ func (s *OpsCleanupService) runCleanupOnce(ctx context.Context) (opsCleanupDelet
 		}
 		out.alertEvents = n
 
-		n, err = runOne(truncate, cutoff, "ops_system_logs", "created_at", false)
-		if err != nil {
-			return out, err
-		}
-		out.systemLogs = n
+		systemCutoff, systemTruncate, systemOK := opsCleanupPlan(now, effective.SystemLogRetentionDays)
+		if systemOK {
+			n, err = runOne(systemTruncate, systemCutoff, "ops_system_logs", "created_at", false)
+			if err != nil {
+				return out, err
+			}
+			out.systemLogs = n
 
-		n, err = runOne(truncate, cutoff, "ops_system_log_cleanup_audits", "created_at", false)
-		if err != nil {
-			return out, err
+			n, err = runOne(systemTruncate, systemCutoff, "ops_system_log_cleanup_audits", "created_at", false)
+			if err != nil {
+				return out, err
+			}
+			out.logAudits = n
 		}
-		out.logAudits = n
 	}
 
 	// Minute-level metrics snapshots.

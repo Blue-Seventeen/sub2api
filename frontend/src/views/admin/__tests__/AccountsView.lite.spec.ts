@@ -182,6 +182,20 @@ describe('admin AccountsView lite account list', () => {
     wrapper.unmount()
   })
 
+  it.each([undefined, null])('ignores an empty upstream billing probe settings response (%s)', async (settings) => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    getUpstreamBillingProbeSettings.mockResolvedValueOnce(settings)
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(consoleError).not.toHaveBeenCalledWith(
+      'Failed to load upstream billing probe settings:',
+      expect.anything()
+    )
+    wrapper.unmount()
+  })
+
   it('maps group_ids through the group catalog for the table cell', async () => {
     const wrapper = mountView()
     await flushPromises()

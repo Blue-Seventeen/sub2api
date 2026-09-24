@@ -129,6 +129,9 @@ tests
 CLAUDE.md
 .claude
 scripts
+!deploy/scripts/
+deploy/scripts/*
+!deploy/scripts/resolve-release-tag.sh
 !backend/scripts/
 !backend/scripts/resolve-version.sh
 .code-review-state

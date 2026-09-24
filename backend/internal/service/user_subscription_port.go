@@ -32,12 +32,12 @@ type UserSubscriptionRepository interface {
 	UpdateStatus(ctx context.Context, subscriptionID int64, status string) error
 	UpdateNotes(ctx context.Context, subscriptionID int64, notes string) error
 
-	// ActivateWindows 首次使用时激活用量窗口。日窗口按日历日对齐，锚点为当天 0 点
-	// （dailyStart）；周/月窗口为期限对齐滚动窗口，锚点为激活时刻（periodicStart）。
-	// 仅当三个窗口均未激活时生效。
+	// ActivateWindows 首次使用时激活用量窗口。日窗口和周期窗口都使用调用方
+	// 提供的滚动锚点；dailyStart 与 periodicStart 分开保留，便于不同窗口独立演进。
+	// 仅当窗口尚未激活时生效。
 	ActivateWindows(ctx context.Context, id int64, dailyStart, periodicStart time.Time) error
-	// ResetUsageWindows 手动重置所选窗口的用量。日窗口锚点写入 dailyStart（当天 0 点，
-	// 保持 0 点刷新节奏不漂移）；周/月窗口锚点写入 periodicStart（重置时刻）。
+	// ResetUsageWindows 手动重置所选窗口的用量。日窗口使用 dailyStart，周/月窗口
+	// 使用 periodicStart；SubscriptionService 会为两者传入同一实际重置时刻。
 	ResetUsageWindows(ctx context.Context, id int64, resetDaily, resetWeekly, resetMonthly bool, dailyStart, periodicStart time.Time) error
 	ResetDailyUsage(ctx context.Context, id int64, expectedWindowStart *time.Time, newWindowStart time.Time) error
 	ResetWeeklyUsage(ctx context.Context, id int64, expectedWindowStart *time.Time, newWindowStart time.Time) error

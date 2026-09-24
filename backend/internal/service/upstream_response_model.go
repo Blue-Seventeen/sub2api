@@ -7,6 +7,8 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+const responseModelBillingCostEpsilon = 1e-12
+
 const (
 	upstreamResponseModelObserverContextKey = "upstream_response_model_observer"
 	upstreamResponseModelMaxLength          = 200
@@ -269,6 +271,26 @@ func isUpstreamResponseModelTerminalEvent(eventType string) bool {
 	default:
 		return false
 	}
+}
+
+func responseModelBillingDeclaration(source, responseModel string, conflict, mediaBilled bool) string {
+	if source != BillingModelSourceResponse || conflict || mediaBilled {
+		return ""
+	}
+	return strings.TrimSpace(responseModel)
+}
+
+func responseModelBillingAdoptable(baseline, response *CostBreakdown, baselineChannelPriced, responseChannelPriced bool) bool {
+	if baseline == nil || response == nil {
+		return false
+	}
+	if response.TotalCost > baseline.TotalCost+responseModelBillingCostEpsilon {
+		return false
+	}
+	if response.TotalCost <= 0 && baseline.TotalCost > 0 {
+		return false
+	}
+	return !baselineChannelPriced || responseChannelPriced
 }
 
 func upstreamModelMismatch(sentModel, responseModel string) *bool {

@@ -972,14 +972,20 @@ func (h *GroupHandler) GetStats(c *gin.Context) {
 		return
 	}
 
-	// Return mock data for now
-	response.Success(c, gin.H{
-		"total_api_keys":  0,
-		"active_api_keys": 0,
-		"total_requests":  0,
-		"total_cost":      0.0,
+	provider, ok := h.adminService.(interface {
+		GetGroupStats(context.Context, int64) (map[string]any, error)
 	})
-	_ = groupID // TODO: implement actual stats
+	if !ok {
+		response.Error(c, 503, "Group statistics service unavailable")
+		return
+	}
+
+	stats, err := provider.GetGroupStats(c.Request.Context(), groupID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, stats)
 }
 
 // GetUsageSummary returns today's and cumulative cost for all groups.

@@ -13,8 +13,9 @@ const (
 	ProxySubscriptionStatusActive   = StatusActive
 	ProxySubscriptionStatusInactive = "inactive"
 
-	ProxySubscriptionNodeStatusActive   = StatusActive
-	ProxySubscriptionNodeStatusInactive = "inactive"
+	ProxySubscriptionNodeStatusActive        = StatusActive
+	ProxySubscriptionNodeStatusInactive      = "inactive"
+	ProxySubscriptionNodeStatusSourceMissing = "source_missing"
 
 	ManagedProxyRuntimeStatusDisabled = "disabled"
 	ManagedProxyRuntimeStatusStarting = "starting"

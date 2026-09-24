@@ -496,6 +496,7 @@
     <BaseDialog
       :show="showCreateModal"
       :title="t('admin.groups.createGroup')"
+      :close-on-escape="!modelListScopeDialog.show"
       width="normal"
       @close="closeCreateModal"
     >
@@ -2274,6 +2275,7 @@
     <BaseDialog
       :show="showEditModal"
       :title="t('admin.groups.editGroup')"
+      :close-on-escape="!modelListScopeDialog.show"
       width="normal"
       @close="closeEditModal"
     >
@@ -5476,6 +5478,7 @@ const closeModelsListScopeDialog = () => {
 };
 
 const applyModelsListScope = (scope: ModelListOperationScope) => {
+  if (!modelListScopeDialog.show) return;
   const { mode, operation, item } = modelListScopeDialog;
   const state = modelsListStateForMode(mode);
   if (operation === "add") {
@@ -5822,8 +5825,8 @@ const resetModelsListState = (
 const modelsListSummaryMessage = (summary?: GroupModelOperationSummary) => {
   if (!summary) return "";
   const operationNames = [
-    ...summary.added_models.map((model) => t("admin.groups.modelsList.summaryAdded", { model })),
-    ...summary.removed_models.map((model) => t("admin.groups.modelsList.summaryRemoved", { model })),
+    ...(summary.added_models ?? []).map((model) => t("admin.groups.modelsList.summaryAdded", { model })),
+    ...(summary.removed_models ?? []).map((model) => t("admin.groups.modelsList.summaryRemoved", { model })),
   ];
   return t("admin.groups.modelsList.summary", {
     platform: platformDisplayName(summary.target_platform),
@@ -6369,6 +6372,7 @@ const openCreateModal = () => {
 };
 
 const closeCreateModal = () => {
+  if (modelListScopeDialog.mode === "create") closeModelsListScopeDialog();
   showCreateModal.value = false;
   createPlatformSearchQuery.value = "";
   createModelRoutingRules.value.forEach((rule) => {
@@ -6713,6 +6717,7 @@ const handleEdit = async (group: AdminGroup) => {
 };
 
 const closeEditModal = () => {
+  if (modelListScopeDialog.mode === "edit") closeModelsListScopeDialog();
   editModelRoutingRules.value.forEach((rule) => {
     accountSearchRunner.clearKey(getEditRuleSearchKey(rule));
   });
@@ -7166,6 +7171,7 @@ watch(
 watch(
   () => createForm.platform,
   (newVal) => {
+    if (modelListScopeDialog.mode === "create") closeModelsListScopeDialog();
     if (!["anthropic", "antigravity"].includes(newVal)) {
       createForm.fallback_group_id_on_invalid_request = null;
     }
@@ -7218,6 +7224,7 @@ watch(
 watch(
   () => editForm.platform,
   (newVal) => {
+    if (modelListScopeDialog.mode === "edit") closeModelsListScopeDialog();
     if (!["anthropic", "antigravity"].includes(newVal)) {
       editForm.fallback_group_id_on_invalid_request = null;
     }

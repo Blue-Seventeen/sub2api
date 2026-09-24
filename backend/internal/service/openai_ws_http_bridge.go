@@ -16,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 const (
@@ -791,6 +792,12 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		}
 
 		upstreamMessage := []byte(openAICompatPayloadWithEventType(trimmedData, pendingSSEEventType))
+		if gjson.GetBytes(upstreamMessage, "type").String() == "response.fail" {
+			// Classify the compatible alias before usage, failure and terminal handling.
+			if normalized, err := sjson.SetBytes(upstreamMessage, "type", "response.failed"); err == nil {
+				upstreamMessage = normalized
+			}
+		}
 		if normalized, changed := normalizeCompletedImageGenerationStatus(upstreamMessage); changed {
 			upstreamMessage = normalized
 		}
@@ -873,16 +880,16 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 					s.handleGrokAccountUpstreamError(ctx, account, statusCode, resp.Header, upstreamMessage)
 				}
 			}
+			if account.Platform != PlatformGrok && !failureAccountSideEffectsApplied &&
+				(eventType == "response.failed" || (eventType == "error" && shouldFailover && !requestScopedCapacity) ||
+					(!officialOpenAIResponses && shouldFailover && !requestScopedCapacity)) {
+				failureAccountSideEffectsApplied = s.handleOpenAIWSFailureAccountSideEffects(ctx, account, mappedModel, resp.Header, upstreamMessage)
+			}
 			if !wroteDownstream && shouldFailover && (turn == 1 || statusCode == http.StatusTooManyRequests) {
 				if account.Platform == PlatformGrok {
 					return nil, newOpenAIUpstreamFailoverError(statusCode, resp.Header, upstreamMessage, errMessage, false)
 				}
 				return nil, s.newOpenAIStreamFailoverErrorWithModel(c, account, true, resp.Header.Get("x-request-id"), upstreamMessage, errMessage, mappedModel, resp.Header)
-			}
-			if account.Platform != PlatformGrok && !failureAccountSideEffectsApplied {
-				if eventType == "response.failed" || (!officialOpenAIResponses && shouldFailover && !requestScopedCapacity) {
-					failureAccountSideEffectsApplied = s.handleOpenAIWSFailureAccountSideEffects(ctx, account, mappedModel, resp.Header, upstreamMessage)
-				}
 			}
 			if wroteDownstream && requestScopedCapacity && !capacityFailoverSuppressedLogged {
 				logOpenAICapacityFailoverSuppressed(ctx, account, "ws_http_bridge", resp.Header.Get("x-request-id"), eventType)
@@ -967,6 +974,13 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if isOpenAIWSTerminalEvent(eventType) && !bareErrorPending {
 			if eventType == "response.failed" {
 				upstreamTerminalEvent = "response.failed"
+				errMessage := extractOpenAISSEErrorMessage(upstreamMessage)
+				if errMessage == "" {
+					errMessage = "upstream response failed"
+				}
+				// Preserve partial output/usage for diagnostics and existing image
+				// settlement, but do not report a failed text turn as billable success.
+				return resultWithUsage(), errors.New(errMessage)
 			} else {
 				upstreamTerminalEvent = s.handleOpenAIWSTerminalTransientFailure(ctx, account, mappedModel, resp.Header, upstreamMessage)
 			}

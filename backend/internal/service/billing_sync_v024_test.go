@@ -11,8 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func testPtrInt(v int) *int { return &v }
-
 func TestSyncV024ChannelContract(t *testing.T) {
 	var pricing ChannelModelPricing
 	require.NoError(t, json.Unmarshal([]byte(`{"cache_write_1h_price":0.2,"fast_multiplier":3,"intervals":[{"min_tokens":10,"input_multiplier":2}],"time_pricing":{"timezone":"UTC","periods":[{"start_time":"09:00","end_time":"10:00","multiplier":2}]}}`), &pricing))

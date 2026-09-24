@@ -484,7 +484,9 @@ type GatewayCache interface {
 	GetGrokVideoPendingBilling(ctx context.Context, key string) ([]byte, error)
 	ClaimGrokVideoBilled(ctx context.Context, key string, ttl time.Duration) (bool, error)
 	ReleaseGrokVideoBilled(ctx context.Context, key string) error
+	// Deprecated: use ScopedReasoningContentCache. Unscoped access is disabled.
 	SetReasoningContent(ctx context.Context, itemID string, content string, ttl time.Duration) error
+	// Deprecated: use ScopedReasoningContentCache. Unscoped access always misses.
 	GetReasoningContent(ctx context.Context, itemID string) (string, error)
 }
 

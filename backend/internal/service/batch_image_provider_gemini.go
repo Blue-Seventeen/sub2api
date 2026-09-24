@@ -276,6 +276,16 @@ func BuildGeminiBatchJSONL(input BatchImageInput) ([]byte, error) {
 	if len(input.Items) == 0 {
 		return nil, batchImageProviderInputError("at least one item is required")
 	}
+	for _, option := range []struct{ name, value string }{
+		{"response_mime_type", input.ResponseMimeType},
+		{"aspect_ratio", input.AspectRatio},
+		{"image_size", input.ImageSize},
+	} {
+		if option.value != "" {
+			return nil, infraerrors.Newf(http.StatusBadRequest, ErrBatchImageProviderInvalidInput.Reason,
+				"%s is unsupported by the Gemini batch image provider", option.name)
+		}
+	}
 
 	seen := make(map[string]struct{}, len(input.Items))
 	var buf bytes.Buffer
@@ -299,8 +309,6 @@ func BuildGeminiBatchJSONL(input BatchImageInput) ([]byte, error) {
 			return nil, err
 		}
 
-		// TODO(batch-image): add response_mime_type/aspect_ratio/image_size once the
-		// Gemini batch image REST shape is stabilized for those options.
 		line := geminiJSONLLine{
 			Key: customID,
 			Request: geminiGenerateRequest{

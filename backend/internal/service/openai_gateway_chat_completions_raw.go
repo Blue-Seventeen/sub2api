@@ -151,6 +151,8 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 			return nil, fmt.Errorf("remove Responses-only Grok prompt cache key: %w", err)
 		}
 	}
+	upstreamBody = applyOllamaCloudRawChatCompletionsRequest(account, upstreamBody)
+	upstreamBody = clampOllamaCloudUpstreamMaxTokens(account, upstreamBody)
 
 	logger.L().Debug("openai chat_completions raw: forwarding without protocol conversion",
 		zap.Int64("account_id", account.ID),
@@ -275,6 +277,8 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	refusalDetector := newOpenAIChatSilentRefusalDetector(requestBodyLen)
 	outputReleased := !refusalDetector.Enabled()
 	bufferedLines := make([]string, 0, 8)
+	var namedEvent string
+	var terminalErr error
 
 	writeLine := func(line string) {
 		if clientDisconnected {
@@ -304,6 +308,33 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 
 	for scanner.Scan() {
 		line := scanner.Text()
+		if line == "" {
+			namedEvent = ""
+		}
+		if name, ok := extractOpenAISSEEventLine(line); ok {
+			namedEvent = strings.TrimSpace(name)
+			// Do not commit HTTP 200 for an error event's name before its
+			// payload can select a custom status or an early failover.
+			if namedEvent == "error" || namedEvent == "response.failed" {
+				continue
+			}
+		}
+		if payload, ok := extractOpenAISSEDataLine(line); ok && isCCUpstreamErrorPayload(namedEvent, []byte(payload)) {
+			terminalErr = s.handleCCUpstreamErrorPayload(c, resp, account, []byte(payload), !clientOutputStarted && !clientDisconnected,
+				func(c *gin.Context, status int, errType, message string) {
+					if clientDisconnected {
+						return
+					}
+					if !clientOutputStarted {
+						writeChatCompletionsError(c, status, errType, message)
+						return
+					}
+					if _, err := fmt.Fprint(c.Writer, buildAnthropicStreamErrorSSE(errType, message)); err == nil {
+						c.Writer.Flush()
+					}
+				})
+			break
+		}
 		refusalDetector.ObserveSSELine(line)
 		if payload, ok := extractOpenAISSEDataLine(line); ok {
 			trimmedPayload := strings.TrimSpace(payload)
@@ -321,6 +352,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 			}
 		}
 		line = stripEmptyChatToolCallIdentityFromSSELine(line)
+		line = applyOllamaCloudRawChatCompletionsSSELine(account, line)
 
 		if clientDisconnected {
 			continue
@@ -336,6 +368,23 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		}
 	}
 
+	if terminalErr != nil {
+		return &OpenAIForwardResult{
+			RequestID:                     requestID,
+			Usage:                         usage,
+			Model:                         originalModel,
+			BillingModel:                  billingModel,
+			UpstreamModel:                 upstreamModel,
+			UpstreamResponseModel:         observedUpstreamResponseModel(c),
+			UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
+			ReasoningEffort:               reasoningEffort,
+			ServiceTier:                   serviceTier,
+			Stream:                        true,
+			Duration:                      time.Since(startTime),
+			FirstTokenMs:                  firstTokenMs,
+			ClientDisconnect:              clientDisconnected,
+		}, terminalErr
+	}
 	scanErr := scanner.Err()
 	clientCanceled := errors.Is(scanErr, context.Canceled) || errors.Is(scanErr, context.DeadlineExceeded)
 	if scanErr != nil {
@@ -458,6 +507,9 @@ func (s *OpenAIGatewayService) bufferRawChatCompletions(
 		return nil, fmt.Errorf("read upstream body: %w", err)
 	}
 
+	if isCCUpstreamErrorPayload("", respBody) {
+		return nil, s.handleCCUpstreamErrorPayload(c, resp, account, respBody, true, writeChatCompletionsError)
+	}
 	var usage OpenAIUsage
 	if parsedUsage, ok := extractOpenAIUsageFromJSONBytes(respBody); ok {
 		usage = parsedUsage
@@ -469,6 +521,7 @@ func (s *OpenAIGatewayService) bufferRawChatCompletions(
 			ResponseHeaders: resp.Header.Clone(),
 		}
 	}
+	respBody = applyOllamaCloudRawChatCompletionsResponse(account, respBody)
 	observer.ObserveOpenAI(respBody, strings.TrimSpace(gjson.GetBytes(respBody, "type").String()))
 
 	if s.responseHeaderFilter != nil {

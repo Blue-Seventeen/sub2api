@@ -259,6 +259,41 @@ func (s *GroupRepoSuite) TestGlobalModelOperationsScopesTargetsAndWritesOneEvent
 	}
 }
 
+func (s *GroupRepoSuite) TestUpdateRejectsStaleSnapshotAfterGlobalModelOperation() {
+	group := &service.Group{
+		Name:             "global-stale-update",
+		Platform:         service.PlatformOpenAI,
+		RateMultiplier:   1,
+		Status:           service.StatusActive,
+		SubscriptionType: service.SubscriptionTypeStandard,
+		ModelsListConfig: service.GroupModelsListConfig{Enabled: true, Models: []string{"before"}},
+		ModelAllowlist:   service.GroupModelAllowlist{Enabled: true, Models: []string{"before"}},
+	}
+	s.Require().NoError(s.repo.Create(s.ctx, group), "Create")
+
+	stale, err := s.repo.GetByID(s.ctx, group.ID)
+	s.Require().NoError(err, "GetByID stale snapshot")
+	current, err := s.repo.GetByID(s.ctx, group.ID)
+	s.Require().NoError(err, "GetByID current snapshot")
+
+	_, err = s.repo.UpdateWithGlobalModelOperations(s.ctx, current, []service.GroupModelOperation{
+		{Operation: "add", Model: "after-global"},
+	})
+	s.Require().NoError(err, "UpdateWithGlobalModelOperations")
+
+	stale.Name = "stale-write"
+	staleUpdateErr := s.repo.Update(s.ctx, stale)
+	s.Require().Error(staleUpdateErr, "stale update must not overwrite global policy")
+	s.Require().ErrorContains(staleUpdateErr, "modified")
+
+	got, err := s.repo.GetByID(s.ctx, group.ID)
+	s.Require().NoError(err, "GetByID after stale update")
+	s.Require().Equal("global-stale-update", got.Name)
+	s.Require().Equal([]string{"before", "after-global"}, got.ModelsListConfig.Models)
+	s.Require().Equal(got.ModelsListConfig.Enabled, got.ModelAllowlist.Enabled)
+	s.Require().Equal(got.ModelsListConfig.Models, got.ModelAllowlist.Models)
+}
+
 func TestGlobalModelOperationsRollBackWhenOutboxFails(t *testing.T) {
 	ctx := context.Background()
 	client := testEntClient(t)

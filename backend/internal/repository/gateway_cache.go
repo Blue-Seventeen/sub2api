@@ -233,33 +233,48 @@ const reasoningContentPrefix = "reasoning_content:"
 // 跨多天恢复，取 7 天；调用方传入非正 TTL 时兜底。
 const reasoningContentDefaultTTL = 7 * 24 * time.Hour
 
-// SetReasoningContent 按 reasoning item id 缓存 reasoning 全文。
-// itemID 或 content 为空时直接返回 nil（无可缓存内容，属正常情况而非错误）。
-func (c *gatewayCache) SetReasoningContent(ctx context.Context, itemID string, content string, ttl time.Duration) error {
+// Deprecated: unscoped writes are disabled. Use SetScopedReasoningContent.
+func (c *gatewayCache) SetReasoningContent(context.Context, string, string, time.Duration) error {
+	return nil
+}
+
+// Deprecated: unscoped reads always miss. Legacy entries must expire unread.
+func (c *gatewayCache) GetReasoningContent(context.Context, string) (string, error) {
+	return "", service.ErrReasoningContentNotFound
+}
+
+func scopedReasoningContentKey(userID, apiKeyID int64, itemID string) string {
+	itemID = strings.TrimSpace(itemID)
+	if userID <= 0 || apiKeyID <= 0 || itemID == "" {
+		return ""
+	}
+	digest := sha256.Sum256([]byte(itemID))
+	return fmt.Sprintf("%sv2:%d:%d:%x", reasoningContentPrefix, userID, apiKeyID, digest)
+}
+
+func (c *gatewayCache) SetScopedReasoningContent(ctx context.Context, userID, apiKeyID int64, itemID, content string, ttl time.Duration) error {
+	key := scopedReasoningContentKey(userID, apiKeyID, itemID)
+	if key == "" || content == "" {
+		return nil
+	}
 	if c == nil || c.rdb == nil {
 		return errors.New("gateway cache unavailable")
-	}
-	itemID = strings.TrimSpace(itemID)
-	if itemID == "" || content == "" {
-		return nil
 	}
 	if ttl <= 0 {
 		ttl = reasoningContentDefaultTTL
 	}
-	return c.rdb.Set(ctx, reasoningContentPrefix+itemID, content, ttl).Err()
+	return c.rdb.Set(ctx, key, content, ttl).Err()
 }
 
-// GetReasoningContent 返回缓存的 reasoning 全文；未命中返回
-// service.ErrReasoningContentNotFound。
-func (c *gatewayCache) GetReasoningContent(ctx context.Context, itemID string) (string, error) {
+func (c *gatewayCache) GetScopedReasoningContent(ctx context.Context, userID, apiKeyID int64, itemID string) (string, error) {
+	key := scopedReasoningContentKey(userID, apiKeyID, itemID)
+	if key == "" {
+		return "", service.ErrReasoningContentNotFound
+	}
 	if c == nil || c.rdb == nil {
 		return "", errors.New("gateway cache unavailable")
 	}
-	itemID = strings.TrimSpace(itemID)
-	if itemID == "" {
-		return "", service.ErrReasoningContentNotFound
-	}
-	val, err := c.rdb.Get(ctx, reasoningContentPrefix+itemID).Result()
+	val, err := c.rdb.Get(ctx, key).Result()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
 			return "", service.ErrReasoningContentNotFound
@@ -268,6 +283,8 @@ func (c *gatewayCache) GetReasoningContent(ctx context.Context, itemID string) (
 	}
 	return val, nil
 }
+
+var _ service.ScopedReasoningContentCache = (*gatewayCache)(nil)
 
 const (
 	cyberSessionBlockPrefix         = "cyber_session_block:"

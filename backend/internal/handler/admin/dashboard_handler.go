@@ -1,8 +1,11 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"math"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -17,18 +20,32 @@ import (
 
 // DashboardHandler handles admin dashboard statistics
 type DashboardHandler struct {
-	dashboardService   *service.DashboardService
-	aggregationService *service.DashboardAggregationService
-	startTime          time.Time // Server start time for uptime calculation
+	dashboardService     *service.DashboardService
+	aggregationService   *service.DashboardAggregationService
+	realtimeStatsService dashboardRealtimeStatsService
+	startTime            time.Time // Server start time for uptime calculation
+}
+
+type dashboardRealtimeStatsService interface {
+	GetDashboardOverview(context.Context, *service.OpsDashboardFilter) (*service.OpsDashboardOverview, error)
+	GetConcurrencyStats(context.Context, string, *int64) (map[string]*service.PlatformConcurrencyInfo, map[int64]*service.GroupConcurrencyInfo, map[int64]*service.AccountConcurrencyInfo, *time.Time, error)
 }
 
 // NewDashboardHandler creates a new admin dashboard handler
-func NewDashboardHandler(dashboardService *service.DashboardService, aggregationService *service.DashboardAggregationService) *DashboardHandler {
-	return &DashboardHandler{
+func NewDashboardHandler(
+	dashboardService *service.DashboardService,
+	aggregationService *service.DashboardAggregationService,
+	realtimeStatsService ...dashboardRealtimeStatsService,
+) *DashboardHandler {
+	handler := &DashboardHandler{
 		dashboardService:   dashboardService,
 		aggregationService: aggregationService,
 		startTime:          time.Now(),
 	}
+	if len(realtimeStatsService) > 0 {
+		handler.realtimeStatsService = realtimeStatsService[0]
+	}
+	return handler
 }
 
 // parseTimeRange parses start_date, end_date query parameters
@@ -192,11 +209,63 @@ func (h *DashboardHandler) BackfillAggregation(c *gin.Context) {
 // GetRealtimeMetrics handles getting real-time system metrics
 // GET /api/v1/admin/dashboard/realtime
 func (h *DashboardHandler) GetRealtimeMetrics(c *gin.Context) {
-	// Return mock data for now
+	now := time.Now().UTC()
+	if h.realtimeStatsService != nil {
+		filter := &service.OpsDashboardFilter{
+			StartTime: now.Add(-time.Minute),
+			EndTime:   now,
+			QueryMode: service.OpsQueryModeRaw,
+		}
+		overview, err := h.realtimeStatsService.GetDashboardOverview(c.Request.Context(), filter)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+
+		activeRequests := int64(0)
+		_, _, accounts, _, concurrencyErr := h.realtimeStatsService.GetConcurrencyStats(c.Request.Context(), "", nil)
+		if concurrencyErr == nil {
+			for _, account := range accounts {
+				if account != nil {
+					activeRequests += account.CurrentInUse
+				}
+			}
+		}
+
+		averageResponseTime := float64(0)
+		if overview != nil && overview.Duration.Avg != nil {
+			averageResponseTime = float64(*overview.Duration.Avg)
+		}
+		requestsPerMinute := float64(0)
+		errorRate := float64(0)
+		if overview != nil {
+			requestsPerMinute = math.Round(overview.QPS.Avg * 60)
+			errorRate = overview.ErrorRate
+		}
+
+		response.Success(c, gin.H{
+			"active_requests":       activeRequests,
+			"requests_per_minute":   requestsPerMinute,
+			"average_response_time": averageResponseTime,
+			"error_rate":            errorRate,
+		})
+		return
+	}
+
+	if h.dashboardService == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Realtime statistics service unavailable")
+		return
+	}
+	stats, err := h.dashboardService.GetDashboardStats(c.Request.Context())
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "Failed to get realtime statistics")
+		return
+	}
+
 	response.Success(c, gin.H{
 		"active_requests":       0,
-		"requests_per_minute":   0,
-		"average_response_time": 0,
+		"requests_per_minute":   stats.Rpm,
+		"average_response_time": stats.AverageDurationMs,
 		"error_rate":            0.0,
 	})
 }

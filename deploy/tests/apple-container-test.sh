@@ -2,6 +2,15 @@
 
 set -euo pipefail
 
+case "$(uname -s)" in
+    Darwin*)
+        ;;
+    *)
+        printf 'Skipping Apple container test on non-Darwin host.\n'
+        exit 0
+        ;;
+esac
+
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_DIR="$(cd "${TEST_DIR}/.." && pwd)"
 SCRIPT="${DEPLOY_DIR}/apple-container.sh"
@@ -27,6 +36,20 @@ assert_missing() {
     [[ ! -e "$1" ]] || fail "Expected path to be absent: $1"
 }
 
+file_mode() {
+    stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1"
+}
+
+assert_private_env_file() {
+    case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*)
+            printf 'Skipping mode-bit assertion on Windows compatibility filesystem.\n'
+            return
+            ;;
+    esac
+    [[ "$(file_mode "$1")" == "600" ]] || fail "init did not create a mode-600 env file"
+}
+
 export FAKE_CONTAINER_STATE="${STATE_DIR}"
 export PATH="${TEST_DIR}/fixtures/bin:${PATH}"
 export SUB2API_ENV_FILE="${ENV_FILE}"
@@ -34,7 +57,7 @@ export SUB2API_ENV_FILE="${ENV_FILE}"
 mkdir -p "${STATE_DIR}"
 
 "${SCRIPT}" init
-[[ "$(stat -f '%Lp' "${ENV_FILE}")" == "600" ]] || fail "init did not create a mode-600 env file"
+assert_private_env_file "${ENV_FILE}"
 grep -q '^POSTGRES_PASSWORD=change_this_secure_password$' "${ENV_FILE}" && fail "init retained the placeholder password"
 
 chmod 644 "${ENV_FILE}"

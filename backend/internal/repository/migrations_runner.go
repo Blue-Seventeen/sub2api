@@ -61,7 +61,10 @@ const latestAPIKeyIPIndex = "idx_usage_logs_api_key_latest_ip"
 const emailAliasDedupIndexMigration = "190_add_users_email_alias_dedup_index_notx.sql"
 const emailAliasDedupIndex = "idx_users_email_dot_stripped"
 const upstreamModelMismatchIndexMigration = "195_add_usage_log_upstream_model_mismatch_index_notx.sql"
+const usageLogsUpstreamModelMismatchIndex = "idx_usage_logs_upstream_model_mismatch_created_at"
 const effectiveModelIndexesMigration = "226_add_usage_log_effective_model_indexes_notx.sql"
+const usageLogsEffectiveRequestedModelIndex = "idx_usage_logs_effective_requested_model_created"
+const usageLogsEffectiveUpstreamModelIndex = "idx_usage_logs_effective_upstream_model_created"
 const upstreamRequestIDIndexMigration = "233_add_usage_log_upstream_request_id_index_notx.sql"
 
 var accountGroupSchedulerIndexes = []string{
@@ -102,6 +105,9 @@ var migrationChecksumCompatibilityRules = map[string]migrationChecksumCompatibil
 	"146_subscription_custom_hour_limit.sql":                  newMigrationChecksumCompatibilityRule("2da1855df7d0295b69219d8fe4da55bac18c6dc1998a1ff1963932fa2f722b0f", "e37b17f291d50b1ac96404f3dd56e23e2e8a6e7dba0fd9c4d148b943709c806c"),
 	"159_batch_image_foundation.sql":                          newMigrationChecksumCompatibilityRule("d902b70982025ec519749faf058aab7631e82c3f48167b9a4ae4db718eb72cce", "82da85b5d98e67a0507647b873a40373e84538e4adafdeed6767c0ac8b6570b2"),
 	"161_batch_image_pricing_snapshot.sql":                    newMigrationChecksumCompatibilityRule("4012af3e43636cb6af22e0176d59d1fcc70615c0f310194329461ae462c4fbd6", "96d915c9b7a6941ae99039e0ff3f1a61481eb9bddd933d11c6fadb2274554e87"),
+	// Exact v0.2.4 -> current-byte pairs audited before migration 238's forward repair.
+	"235_group_model_allowlist.sql":        newMigrationChecksumCompatibilityRule("ae77820b57e67383ac10a5f65dce0b350d24be7433238cdc72965b3e01bffc26", "546fd53d114f9a8c402b019af71bf4685dc1968fd5cd25d054d095a58d806fbc"),
+	"236_group_model_allowlist_repair.sql": newMigrationChecksumCompatibilityRule("0c3199adbee50ed838f522d2a972255cf059c646e2141263b863480ab0506e6d", "0d8fbcd98750be1a58cec45fe2b866031b656ac6286b073ca061f8fa8fdc040e"),
 }
 
 // ApplyMigrations 将嵌入的 SQL 迁移文件应用到指定的数据库。

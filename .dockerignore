@@ -31,6 +31,10 @@ Thumbs.db
 # Build artifacts
 dist/
 build/
+artifacts/
+release-artifacts/
+.superpowers/
+.codex/
 
 # Node modules (will be installed in container)
 frontend/node_modules/

@@ -60,11 +60,31 @@ jobs:
       - name: Unit tests
         working-directory: backend
         run: make test-unit
+      - name: Prepare owned integration database
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: postgres
+        run: |
+          set -euo pipefail
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE sub2api_it_ci LOGIN PASSWORD 'integration-ci-only' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT;
+          CREATE DATABASE sub2api_it_ci OWNER sub2api_it_ci TEMPLATE template0;
+          REVOKE ALL ON DATABASE sub2api_it_ci FROM PUBLIC;
+          COMMENT ON DATABASE sub2api_it_ci IS 'sub2api-it:ci';
+          \connect sub2api_it_ci
+          ALTER SCHEMA public OWNER TO sub2api_it_ci;
+          REVOKE ALL ON SCHEMA public FROM PUBLIC;
+          SQL
       - name: Integration tests
         working-directory: backend
         env:
-          SUB2API_TEST_POSTGRES_DSN: postgres://postgres:postgres@localhost:5432/sub2api_test?sslmode=disable&TimeZone=UTC
+          SUB2API_TEST_RUN_ID: ci
+          SUB2API_TEST_POSTGRES_DSN: postgres://sub2api_it_ci:integration-ci-only@localhost:5432/sub2api_it_ci?sslmode=disable
           SUB2API_TEST_REDIS_ADDR: localhost:6379
+          SUB2API_TEST_REDIS_DB: '9'
         run: make test-integration
 
   frontend:
@@ -74,18 +94,25 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 9
+          version: 10.33.0
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'pnpm'
           cache-dependency-path: frontend/pnpm-lock.yaml
       - name: Install frontend dependencies
         working-directory: frontend
         run: pnpm install --frozen-lockfile
-      - name: Frontend typecheck and critical vitest
-        run: make test-frontend
+      - name: Frontend typecheck
+        working-directory: frontend
+        run: pnpm run typecheck
+      - name: Full frontend tests
+        working-directory: frontend
+        run: pnpm run test:run -- --maxWorkers=1 --minWorkers=1
+      - name: Frontend build
+        working-directory: frontend
+        run: pnpm run build
 
   golangci-lint:
     runs-on: ubuntu-latest

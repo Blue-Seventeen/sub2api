@@ -16,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
 
+	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"
 )
 
@@ -87,6 +88,9 @@ func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) er
 }
 
 func (r *groupRepository) CreateWithGlobalModelOperations(ctx context.Context, groupIn *service.Group, operations []service.GroupModelOperation) (*service.GlobalModelOperationSummary, error) {
+	if groupIn == nil {
+		return nil, errors.New("group is nil")
+	}
 	tx, err := r.client.Tx(ctx)
 	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
 		return nil, err
@@ -100,6 +104,9 @@ func (r *groupRepository) CreateWithGlobalModelOperations(ctx context.Context, g
 		defer func() { _ = tx.Rollback() }()
 		txClient = tx.Client()
 	}
+	if err := lockGlobalModelOperationPlatform(ctx, txClient, groupIn.Platform); err != nil {
+		return nil, err
+	}
 	if err := createGroupRecord(ctx, txClient, groupIn); err != nil {
 		return nil, err
 	}
@@ -107,7 +114,7 @@ func (r *groupRepository) CreateWithGlobalModelOperations(ctx context.Context, g
 	if err != nil {
 		return nil, err
 	}
-	currentPolicy, _, _, _, err := service.ApplyGlobalModelOperations(groupIn.ModelsListConfig, operations)
+	currentGroup, err := txClient.Group.Get(ctx, groupIn.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -121,8 +128,9 @@ func (r *groupRepository) CreateWithGlobalModelOperations(ctx context.Context, g
 			return nil, err
 		}
 	}
-	groupIn.ModelsListConfig = currentPolicy
-	groupIn.ModelAllowlist = service.GroupModelAllowlist{Enabled: currentPolicy.Enabled, Models: append([]string(nil), currentPolicy.Models...)}
+	groupIn.ModelsListConfig = currentGroup.ModelsListConfig
+	groupIn.ModelAllowlist = service.GroupModelAllowlistFromDomain(currentGroup.ModelAllowlist)
+	groupIn.UpdatedAt = currentGroup.UpdatedAt
 	groupIn.GlobalModelOperationSummary = summary
 	return summary, nil
 }
@@ -130,6 +138,10 @@ func (r *groupRepository) CreateWithGlobalModelOperations(ctx context.Context, g
 func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *service.Group) error {
 	if groupIn == nil {
 		return errors.New("group is nil")
+	}
+	modelPolicy, err := syncGroupModelPolicy(groupIn)
+	if err != nil {
+		return err
 	}
 	modelPricing, err := json.Marshal(groupIn.ModelPricing)
 	if err != nil {
@@ -185,9 +197,9 @@ func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 		SetRequirePrivacySet(groupIn.RequirePrivacySet).
 		SetDefaultMappedModel(groupIn.DefaultMappedModel).
 		SetMessagesDispatchModelConfig(groupIn.MessagesDispatchModelConfig).
-		SetModelAllowlist(service.DomainGroupModelAllowlist(groupIn.ModelAllowlist)).
+		SetModelAllowlist(service.DomainGroupModelAllowlist(modelPolicy.ModelAllowlist)).
 		SetCodexModelsManifestConfig(groupIn.CodexModelsManifestConfig).
-		SetModelsListConfig(groupIn.ModelsListConfig).
+		SetModelsListConfig(modelPolicy.ModelsListConfig).
 		SetRpmLimit(groupIn.RPMLimit).
 		SetNewapiStyleInterfaceEnabled(groupIn.NewAPIStyleInterfaceEnabled).
 		SetMaxReasoningEffort(groupIn.MaxReasoningEffort).
@@ -334,6 +346,10 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 }
 
 func updateGroupRecord(ctx context.Context, client *dbent.Client, groupIn *service.Group) error {
+	modelPolicy, err := syncGroupModelPolicy(groupIn)
+	if err != nil {
+		return err
+	}
 	modelPricing, err := json.Marshal(groupIn.ModelPricing)
 	if err != nil {
 		return fmt.Errorf("marshal group model pricing: %w", err)
@@ -380,9 +396,9 @@ func updateGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 		SetRequirePrivacySet(groupIn.RequirePrivacySet).
 		SetDefaultMappedModel(groupIn.DefaultMappedModel).
 		SetMessagesDispatchModelConfig(groupIn.MessagesDispatchModelConfig).
-		SetModelAllowlist(service.DomainGroupModelAllowlist(groupIn.ModelAllowlist)).
+		SetModelAllowlist(service.DomainGroupModelAllowlist(modelPolicy.ModelAllowlist)).
 		SetCodexModelsManifestConfig(groupIn.CodexModelsManifestConfig).
-		SetModelsListConfig(groupIn.ModelsListConfig).
+		SetModelsListConfig(modelPolicy.ModelsListConfig).
 		SetRpmLimit(groupIn.RPMLimit).
 		SetNewapiStyleInterfaceEnabled(groupIn.NewAPIStyleInterfaceEnabled).
 		SetMaxReasoningEffort(groupIn.MaxReasoningEffort).
@@ -396,6 +412,9 @@ func updateGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 		SetProfitControlEnabled(groupIn.ProfitControlEnabled).
 		SetProfitMinMargin(groupIn.ProfitMinMargin).
 		SetProfitSafetyBuffer(groupIn.ProfitSafetyBuffer)
+	if !groupIn.UpdatedAt.IsZero() {
+		builder = builder.Where(group.UpdatedAtEQ(groupIn.UpdatedAt))
+	}
 
 	// 显式处理可空字段：nil 需要 clear，非 nil 需要 set。
 	if groupIn.DailyLimitUSD != nil {
@@ -499,13 +518,32 @@ func updateGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 
 	updated, err := builder.Save(ctx)
 	if err != nil {
+		if !groupIn.UpdatedAt.IsZero() && dbent.IsNotFound(err) {
+			return service.ErrGroupConcurrentUpdate
+		}
 		return translatePersistenceError(err, service.ErrGroupNotFound, service.ErrGroupExists)
 	}
 	groupIn.UpdatedAt = updated.UpdatedAt
 	return nil
 }
 
+func syncGroupModelPolicy(groupIn *service.Group) (service.GroupModelPolicy, error) {
+	if groupIn == nil {
+		return service.GroupModelPolicy{}, errors.New("group is nil")
+	}
+	policy, err := service.NormalizeGroupModelPolicy(groupIn.ModelsListConfig)
+	if err != nil {
+		return service.GroupModelPolicy{}, err
+	}
+	groupIn.ModelsListConfig = policy.ModelsListConfig
+	groupIn.ModelAllowlist = policy.ModelAllowlist
+	return policy, nil
+}
+
 func (r *groupRepository) UpdateWithGlobalModelOperations(ctx context.Context, groupIn *service.Group, operations []service.GroupModelOperation) (*service.GlobalModelOperationSummary, error) {
+	if groupIn == nil {
+		return nil, errors.New("group is nil")
+	}
 	tx, err := r.client.Tx(ctx)
 	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
 		return nil, err
@@ -518,6 +556,9 @@ func (r *groupRepository) UpdateWithGlobalModelOperations(ctx context.Context, g
 		defer func() { _ = tx.Rollback() }()
 		txClient = tx.Client()
 	}
+	if err := lockGlobalModelOperationPlatform(ctx, txClient, groupIn.Platform); err != nil {
+		return nil, err
+	}
 	targets, err := lockGlobalModelOperationTargets(ctx, txClient, groupIn.Platform)
 	if err != nil {
 		return nil, err
@@ -529,7 +570,7 @@ func (r *groupRepository) UpdateWithGlobalModelOperations(ctx context.Context, g
 	if err != nil {
 		return nil, err
 	}
-	currentPolicy, _, _, _, err := service.ApplyGlobalModelOperations(groupIn.ModelsListConfig, operations)
+	currentGroup, err := txClient.Group.Get(ctx, groupIn.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -543,10 +584,29 @@ func (r *groupRepository) UpdateWithGlobalModelOperations(ctx context.Context, g
 			return nil, err
 		}
 	}
-	groupIn.ModelsListConfig = currentPolicy
-	groupIn.ModelAllowlist = service.GroupModelAllowlist{Enabled: currentPolicy.Enabled, Models: append([]string(nil), currentPolicy.Models...)}
+	groupIn.ModelsListConfig = currentGroup.ModelsListConfig
+	groupIn.ModelAllowlist = service.GroupModelAllowlistFromDomain(currentGroup.ModelAllowlist)
+	groupIn.UpdatedAt = currentGroup.UpdatedAt
 	groupIn.GlobalModelOperationSummary = summary
 	return summary, nil
+}
+
+const globalModelOperationLockPrefix = "sub2api:global-model-policy:"
+
+// Row locks alone cannot serialize global creates on an empty platform or
+// refresh a waiting query's snapshot to include another transaction's insert.
+func lockGlobalModelOperationPlatform(ctx context.Context, client *dbent.Client, platform string) error {
+	if client == nil || client.Driver().Dialect() != dialect.Postgres {
+		return nil
+	}
+	rows, err := client.QueryContext(ctx,
+		"SELECT pg_advisory_xact_lock(hashtext($1))",
+		globalModelOperationLockPrefix+platform,
+	)
+	if err != nil {
+		return fmt.Errorf("lock global model operations for platform %s: %w", platform, err)
+	}
+	return rows.Close()
 }
 
 func summaryContainsGroup(summary *service.GlobalModelOperationSummary, groupID int64) bool {
@@ -584,7 +644,9 @@ func lockGlobalModelOperationTargets(ctx context.Context, client *dbent.Client, 
 }
 
 func applyGlobalModelOperationsToLockedTargets(ctx context.Context, client *dbent.Client, platform string, groups []*dbent.Group, currentGroupID int64, currentPolicy service.GroupModelsListConfig, operations []service.GroupModelOperation) (*service.GlobalModelOperationSummary, error) {
-	summary := &service.GlobalModelOperationSummary{TargetPlatform: platform}
+	summary := &service.GlobalModelOperationSummary{
+		TargetPlatform: platform, AddedModels: []string{}, RemovedModels: []string{}, AffectedGroupIDs: []int64{},
+	}
 	for _, target := range groups {
 		policy := target.ModelsListConfig
 		if target.ID == currentGroupID {

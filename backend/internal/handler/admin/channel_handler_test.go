@@ -545,11 +545,24 @@ func TestSyncPricingModels_UnsupportedPlatform(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestSyncPricingModels_ValidPlatform_EmptyService(t *testing.T) {
+func TestSyncPricingModels_ValidPlatformsUseExpectedProviders(t *testing.T) {
 	svc := service.NewPricingService(nil, nil)
 	router := setupSyncPricingModelsRouter(svc)
 
-	for _, platform := range []string{"anthropic", "openai", "gemini", "antigravity", "grok", "kimi", "zhipu", "deepseek", "minimax"} {
+	expectedProviders := map[string]string{
+		service.PlatformAnthropic:   "anthropic",
+		service.PlatformOpenAI:      "openai",
+		service.PlatformGemini:      "google",
+		service.PlatformAntigravity: "anthropic",
+		service.PlatformGrok:        "xai",
+		service.PlatformKimi:        "moonshot",
+		service.PlatformZhipu:       "zhipuai",
+		service.PlatformDeepseek:    "deepseek",
+		service.PlatformMiniMax:     "minimax",
+	}
+	require.Equal(t, expectedProviders, platformToLiteLLMProvider)
+
+	for platform := range expectedProviders {
 		req := httptest.NewRequest(http.MethodGet, "/channels/pricing/sync-models?platform="+platform, nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -596,9 +609,16 @@ func TestGetModelDefaultPricing_ReturnsFable51CacheTTLs(t *testing.T) {
 	require.InDelta(t, 20e-6, *body.Data.CacheWrite1hPrice, 1e-12)
 	require.NotNil(t, body.Data.MaxReasoningEffortMultiplier)
 	require.Equal(t, 3.0, *body.Data.MaxReasoningEffortMultiplier)
+
+	var rawBody struct {
+		Data map[string]json.RawMessage `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &rawBody))
+	require.JSONEq(t, "0.00002", string(rawBody.Data["cache_write_1h_price"]))
+	require.JSONEq(t, "3", string(rawBody.Data["max_reasoning_effort_multiplier"]))
 }
 
-func TestGetModelDefaultPricing_OmitsUnsupportedCache1hPrice(t *testing.T) {
+func TestGetModelDefaultPricing_ReturnsNullForUnsupportedCache1hPrice(t *testing.T) {
 	router := setupModelDefaultPricingRouter()
 	req := httptest.NewRequest(http.MethodGet, "/channels/model-pricing?model=claude-sonnet-4", nil)
 	w := httptest.NewRecorder()
@@ -606,12 +626,11 @@ func TestGetModelDefaultPricing_OmitsUnsupportedCache1hPrice(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 	var body struct {
-		Data struct {
-			Found             bool     `json:"found"`
-			CacheWrite1hPrice *float64 `json:"cache_write_1h_price"`
-		} `json:"data"`
+		Data map[string]json.RawMessage `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
-	require.True(t, body.Data.Found)
-	require.Nil(t, body.Data.CacheWrite1hPrice)
+	require.Equal(t, json.RawMessage("true"), body.Data["found"])
+	cacheWrite1hPrice, ok := body.Data["cache_write_1h_price"]
+	require.True(t, ok, "unsupported 1h cache pricing must remain in the response schema")
+	require.Equal(t, json.RawMessage("null"), cacheWrite1hPrice)
 }

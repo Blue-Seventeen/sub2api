@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"entgo.io/ent/dialect"
@@ -16,7 +17,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/dgraph-io/ristretto"
 	"golang.org/x/sync/singleflight"
 )
@@ -100,7 +100,6 @@ func NewSubscriptionService(groupRepo GroupRepository, userSubRepo UserSubscript
 	svc.initMaintenanceQueue(cfg)
 	if billingCacheService != nil {
 		billingCacheService.SetSubscriptionL1Invalidator(svc.InvalidateSubCache)
-		billingCacheService.SetSubscriptionL1UsageUpdater(svc.IncrementSubCacheUsage)
 	}
 	svc.StartSubCacheInvalidationSubscriber(context.Background())
 	return svc
@@ -158,29 +157,42 @@ func subCacheKey(userID, groupID int64) string {
 type invalidatedSubCacheEntry struct{}
 
 type subCacheEntry struct {
-	sub     *UserSubscription
-	version uint64
+	sub       *UserSubscription
+	version   uint64
+	refreshAt time.Time
+}
+
+func (s *SubscriptionService) subCacheVersionCounter(key string) *atomic.Uint64 {
+	if s == nil {
+		return nil
+	}
+	if v, ok := s.subCacheVersions.Load(key); ok {
+		if counter, ok := v.(*atomic.Uint64); ok {
+			return counter
+		}
+	}
+	counter := &atomic.Uint64{}
+	actual, _ := s.subCacheVersions.LoadOrStore(key, counter)
+	if stored, ok := actual.(*atomic.Uint64); ok {
+		return stored
+	}
+	return counter
 }
 
 func (s *SubscriptionService) subCacheVersion(key string) uint64 {
-	if s == nil {
+	counter := s.subCacheVersionCounter(key)
+	if counter == nil {
 		return 0
 	}
-	v, ok := s.subCacheVersions.Load(key)
-	if !ok {
-		return 0
-	}
-	n, ok := v.(uint64)
-	if !ok {
-		return 0
-	}
-	return n
+	return counter.Load()
 }
 
 func (s *SubscriptionService) bumpSubCacheVersion(key string) uint64 {
-	next := s.subCacheVersion(key) + 1
-	s.subCacheVersions.Store(key, next)
-	return next
+	counter := s.subCacheVersionCounter(key)
+	if counter == nil {
+		return 0
+	}
+	return counter.Add(1)
 }
 
 // jitteredTTL 为 TTL 添加抖动，避免集中过期
@@ -202,43 +214,7 @@ func (s *SubscriptionService) jitteredTTL(ttl time.Duration) time.Duration {
 
 // InvalidateSubCache 失效指定用户+分组的订阅 L1 缓存
 func (s *SubscriptionService) InvalidateSubCache(userID, groupID int64) {
-	if s.subCacheL1 == nil {
-		return
-	}
-	key := subCacheKey(userID, groupID)
-	s.bumpSubCacheVersion(key)
-	s.subCacheL1.Del(key)
-	_ = s.subCacheL1.SetWithTTL(key, invalidatedSubCacheEntry{}, 1, time.Second)
-	s.subCacheL1.Wait()
-}
-
-func (s *SubscriptionService) IncrementSubCacheUsage(userID, groupID int64, costUSD float64) {
-	if s == nil || s.subCacheL1 == nil || costUSD <= 0 {
-		return
-	}
-	key := subCacheKey(userID, groupID)
-	v, ok := s.subCacheL1.Get(key)
-	if !ok {
-		return
-	}
-	entry, ok := v.(*subCacheEntry)
-	if !ok || entry == nil || entry.sub == nil || entry.version != s.subCacheVersion(key) {
-		return
-	}
-	cp := *entry.sub
-	cp.DailyUsageUSD += costUSD
-	cp.WeeklyUsageUSD += costUSD
-	cp.MonthlyUsageUSD += costUSD
-	cp.CustomUsageUSD += costUSD
-	if cp.StackedAvailableUSD != nil {
-		remaining := *cp.StackedAvailableUSD - costUSD
-		if remaining < 0 {
-			remaining = 0
-		}
-		cp.StackedAvailableUSD = &remaining
-	}
-	_ = s.subCacheL1.SetWithTTL(key, &subCacheEntry{sub: &cp, version: entry.version}, 1, s.jitteredTTL(s.subCacheTTL))
-	s.subCacheL1.Wait()
+	s.invalidateSubCacheKeySync(subCacheKey(userID, groupID))
 }
 
 // InvalidateSubCacheSync 失效订阅 L1 缓存并等待 Ristretto 删除操作生效。
@@ -247,10 +223,13 @@ func (s *SubscriptionService) InvalidateSubCacheSync(userID, groupID int64) {
 }
 
 func (s *SubscriptionService) invalidateSubCacheKeySync(key string) {
-	if s.subCacheL1 == nil {
+	if s == nil {
 		return
 	}
 	s.bumpSubCacheVersion(key)
+	if s.subCacheL1 == nil {
+		return
+	}
 	s.subCacheL1.Del(key)
 	_ = s.subCacheL1.SetWithTTL(key, invalidatedSubCacheEntry{}, 1, time.Second)
 	s.subCacheL1.Wait()
@@ -595,7 +574,7 @@ func (s *SubscriptionService) withSubscriptionUpdateTx(ctx context.Context, fn f
 
 func renewedSubscriptionTerm(existingSub *UserSubscription, notes string, startsAt, expiresAt time.Time) *UserSubscription {
 	renewed := *existingSub
-	dailyWindowStart := timezone.StartOfDay(startsAt)
+	dailyWindowStart := startsAt
 	periodicWindowStart := startsAt
 	customWindowStart := startsAt
 	renewed.StartsAt = startsAt
@@ -1411,7 +1390,7 @@ func (s *SubscriptionService) GetActiveSubscription(ctx context.Context, userID,
 	// L1 缓存命中：返回浅拷贝
 	if s.subCacheL1 != nil {
 		if v, ok := s.subCacheL1.Get(key); ok {
-			if entry, ok := v.(*subCacheEntry); ok && entry != nil && entry.sub != nil && entry.version == s.subCacheVersion(key) {
+			if entry, ok := v.(*subCacheEntry); ok && entry != nil && entry.sub != nil && entry.version == s.subCacheVersion(key) && (entry.refreshAt.IsZero() || s.now().Before(entry.refreshAt)) {
 				cp := *entry.sub
 				return &cp, nil
 			}
@@ -1429,10 +1408,14 @@ func (s *SubscriptionService) GetActiveSubscription(ctx context.Context, userID,
 		if len(subs) == 0 {
 			return nil, ErrSubscriptionNotFound
 		}
-		sub := aggregateActiveSubscriptionsForDisplay(subs)
-		entry := &subCacheEntry{sub: sub, version: cacheVersion}
+		now := s.now()
+		sub := aggregateActiveSubscriptionsInternalAt(subs, true, now)
+		refreshAt := subscriptionCacheRefreshAt(subs, now)
+		entry := &subCacheEntry{sub: sub, version: cacheVersion, refreshAt: refreshAt}
 		if s.subCacheL1 != nil {
-			_ = s.subCacheL1.SetWithTTL(key, entry, 1, s.jitteredTTL(s.subCacheTTL))
+			if cacheVersion == s.subCacheVersion(key) {
+				_ = s.subCacheL1.SetWithTTL(key, entry, 1, s.jitteredTTL(s.subCacheTTL))
+			}
 		}
 		return entry, nil
 	})
@@ -1444,7 +1427,7 @@ func (s *SubscriptionService) GetActiveSubscription(ctx context.Context, userID,
 	if !ok || entry == nil || entry.sub == nil {
 		return nil, ErrSubscriptionNotFound
 	}
-	if entry.version != s.subCacheVersion(key) {
+	if entry.version != s.subCacheVersion(key) || (!entry.refreshAt.IsZero() && !s.now().Before(entry.refreshAt)) {
 		return s.loadActiveSubscriptionFresh(ctx, userID, groupID, key)
 	}
 	sub := entry.sub
@@ -1453,23 +1436,67 @@ func (s *SubscriptionService) GetActiveSubscription(ctx context.Context, userID,
 }
 
 func (s *SubscriptionService) loadActiveSubscriptionFresh(ctx context.Context, userID, groupID int64, key string) (*UserSubscription, error) {
-	subs, err := s.userSubRepo.ListActiveByUserIDAndGroupID(ctx, userID, groupID)
-	if err != nil {
-		return nil, err
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		version := s.subCacheVersion(key)
+		subs, err := s.userSubRepo.ListActiveByUserIDAndGroupID(ctx, userID, groupID)
+		if err != nil {
+			return nil, err
+		}
+		if version != s.subCacheVersion(key) {
+			continue
+		}
+		if len(subs) == 0 {
+			return nil, ErrSubscriptionNotFound
+		}
+		now := s.now()
+		sub := aggregateActiveSubscriptionsInternalAt(subs, true, now)
+		if sub == nil {
+			return nil, ErrSubscriptionNotFound
+		}
+		refreshAt := subscriptionCacheRefreshAt(subs, now)
+		if !refreshAt.IsZero() && !s.now().Before(refreshAt) {
+			continue
+		}
+		if s.subCacheL1 != nil && version == s.subCacheVersion(key) {
+			_ = s.subCacheL1.SetWithTTL(key, &subCacheEntry{sub: sub, version: version, refreshAt: refreshAt}, 1, s.jitteredTTL(s.subCacheTTL))
+		}
+		cp := *sub
+		if version != s.subCacheVersion(key) {
+			continue
+		}
+		return &cp, nil
 	}
-	if len(subs) == 0 {
-		return nil, ErrSubscriptionNotFound
+}
+
+// A stacked policy expires at the first constituent-card boundary, not the
+// aggregate's latest expiry or a synthesized window shared by all cards.
+func subscriptionCacheRefreshAt(subs []UserSubscription, now time.Time) time.Time {
+	var earliest time.Time
+	consider := func(boundary time.Time) {
+		if !boundary.IsZero() && (earliest.IsZero() || boundary.Before(earliest)) {
+			earliest = boundary
+		}
 	}
-	sub := aggregateActiveSubscriptionsForDisplay(subs)
-	if sub == nil {
-		return nil, ErrSubscriptionNotFound
+	for i := range subs {
+		sub := subs[i]
+		consider(sub.ExpiresAt)
+		if !sub.StartsAt.IsZero() && sub.StartsAt.After(now) {
+			consider(sub.StartsAt)
+		}
+		normalizeSubscriptionWindowsAt(&sub, now)
+		for _, reset := range []*time.Time{
+			sub.EffectiveDisplayDailyResetTime(), sub.WeeklyResetTime(),
+			sub.MonthlyResetTime(), sub.CustomResetTime(sub.Group),
+		} {
+			if reset != nil && reset.After(now) && (sub.ExpiresAt.IsZero() || reset.Before(sub.ExpiresAt)) {
+				consider(*reset)
+			}
+		}
 	}
-	version := s.subCacheVersion(key)
-	if s.subCacheL1 != nil {
-		_ = s.subCacheL1.SetWithTTL(key, &subCacheEntry{sub: sub, version: version}, 1, s.jitteredTTL(s.subCacheTTL))
-	}
-	cp := *sub
-	return &cp, nil
+	return earliest
 }
 
 // ListUserSubscriptions 获取用户的所有订阅
@@ -1491,10 +1518,14 @@ func aggregateActiveSubscriptionsForUserDisplay(subs []UserSubscription) *UserSu
 }
 
 func aggregateActiveSubscriptionsInternal(subs []UserSubscription, normalizeWindows bool) *UserSubscription {
+	return aggregateActiveSubscriptionsInternalAt(subs, normalizeWindows, time.Now())
+}
+
+// Cache callers must normalize capacity and derive its deadline at the same instant.
+func aggregateActiveSubscriptionsInternalAt(subs []UserSubscription, normalizeWindows bool, now time.Time) *UserSubscription {
 	if len(subs) == 0 {
 		return nil
 	}
-	now := time.Now()
 	normalized := make([]UserSubscription, 0, len(subs))
 	for i := range subs {
 		sub := subs[i]
@@ -2262,9 +2293,9 @@ func normalizeSubscriptionWindowsAt(sub *UserSubscription, now time.Time) {
 	if sub == nil {
 		return
 	}
-	// 日窗口过期：清零展示数据
-	if sub.canAutomaticallyResetDailyAt(now) {
-		sub.DailyWindowStart = nil
+	// 日窗口过期：推进到当前滚动周期并清零展示数据
+	if windowStart, ok := sub.automaticDailyWindowStartAt(now); ok {
+		sub.DailyWindowStart = &windowStart
 		sub.DailyUsageUSD = 0
 	}
 	// 周窗口过期：清零展示数据
@@ -2334,7 +2365,7 @@ func (s *SubscriptionService) checkAndActivateWindowAt(ctx context.Context, sub 
 		return nil
 	}
 
-	dailyWindowStart := timezone.StartOfDay(now)
+	dailyWindowStart := now
 	periodicWindowStart := now
 	if err := s.userSubRepo.ActivateWindows(ctx, sub.ID, dailyWindowStart, periodicWindowStart); err != nil {
 		return err
@@ -2358,7 +2389,7 @@ func (s *SubscriptionService) AdminResetQuota(ctx context.Context, subscriptionI
 		return nil, err
 	}
 	now := s.now()
-	dailyWindowStart := timezone.StartOfDay(now)
+	dailyWindowStart := now
 	periodicWindowStart := now
 	if err := s.userSubRepo.ResetUsageWindows(ctx, sub.ID, resetDaily, resetWeekly, resetMonthly, dailyWindowStart, periodicWindowStart); err != nil {
 		return nil, err
@@ -2531,8 +2562,11 @@ func (s *SubscriptionService) ValidateAndCheckLimits(sub *UserSubscription, grou
 		return false, ErrSubscriptionExpired
 	}
 	if sub.IsAggregate {
-		if sub.StackedAvailableUSD != nil && *sub.StackedAvailableUSD <= 0 {
-			return false, ErrDailyLimitExceeded
+		if sub.StackedAvailableUSD != nil {
+			if *sub.StackedAvailableUSD <= 0 {
+				return false, ErrDailyLimitExceeded
+			}
+			return false, nil
 		}
 		if !sub.CheckDailyLimit(group, 0) {
 			return false, ErrDailyLimitExceeded

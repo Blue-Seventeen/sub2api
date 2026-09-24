@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"net/http"
 	"slices"
 	"strings"
@@ -25,6 +26,18 @@ type GlobalModelOperationSummary struct {
 	AddedModels        []string `json:"added_models"`
 	RemovedModels      []string `json:"removed_models"`
 	AffectedGroupIDs   []int64  `json:"-"`
+}
+
+func (s GlobalModelOperationSummary) MarshalJSON() ([]byte, error) {
+	type summary GlobalModelOperationSummary
+	out := summary(s)
+	if out.AddedModels == nil {
+		out.AddedModels = []string{}
+	}
+	if out.RemovedModels == nil {
+		out.RemovedModels = []string{}
+	}
+	return json.Marshal(out)
 }
 
 // ApplyGlobalModelOperations applies ordered exact model operations to one
@@ -59,7 +72,11 @@ func ApplyGlobalModelOperations(config GroupModelsListConfig, operations []Group
 			return GroupModelsListConfig{}, false, nil, nil, infraerrors.Newf(http.StatusBadRequest, "INVALID_GLOBAL_MODEL_OPERATION", "unsupported global model operation: %s", operation.Operation)
 		}
 	}
-	var added, removed []string
+	if err := ValidateModelsListConfig(updated); err != nil {
+		return GroupModelsListConfig{}, false, nil, nil, err
+	}
+	updated = normalizeGroupModelsListConfig(updated)
+	added, removed := []string{}, []string{}
 	for _, model := range updated.Models {
 		if !containsExactModel(original, model) {
 			added = appendUniqueFold(added, model)
@@ -133,6 +150,9 @@ func groupModelAllowlistFromModelsListConfig(cfg GroupModelsListConfig) GroupMod
 // NormalizeGroupModelPolicy normalizes the canonical models_list_config and
 // returns the exact compatibility mirror that must be persisted alongside it.
 func NormalizeGroupModelPolicy(cfg GroupModelsListConfig) (GroupModelPolicy, error) {
+	if err := ValidateModelsListConfig(cfg); err != nil {
+		return GroupModelPolicy{}, err
+	}
 	normalized := normalizeGroupModelsListConfig(cfg)
 	return GroupModelPolicy{
 		ModelsListConfig: normalized,

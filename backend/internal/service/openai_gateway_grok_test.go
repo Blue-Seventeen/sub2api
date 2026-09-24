@@ -215,6 +215,10 @@ func TestSanitizeGrokResponsesToolsKeepsToolChoiceOnlyWithSupportedTools(t *test
 			if tt.wantToolChoice {
 				require.Equal(t, "auto", gjson.GetBytes(patched, "tool_choice").String())
 			}
+			if tt.name == "malformed non-array tools remain untouched" {
+				require.JSONEq(t, `{"type":"function","name":"lookup"}`, gjson.GetBytes(patched, "tools").Raw)
+				require.Equal(t, "auto", gjson.GetBytes(patched, "tool_choice").String())
+			}
 		})
 	}
 }

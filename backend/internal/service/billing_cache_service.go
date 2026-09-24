@@ -60,6 +60,7 @@ type subscriptionCacheData struct {
 	WeeklyWindowStart   *time.Time
 	MonthlyWindowStart  *time.Time
 	CustomWindowStart   *time.Time
+	refreshAt           time.Time
 }
 
 // 缓存写入任务类型
@@ -68,9 +69,9 @@ type cacheWriteKind int
 const (
 	cacheWriteSetBalance cacheWriteKind = iota
 	cacheWriteSetSubscription
-	cacheWriteUpdateSubscriptionUsage
 	cacheWriteDeductBalance
 	cacheWriteUpdateRateLimitUsage
+	cacheWriteRepairSubscription
 )
 
 // 异步缓存写入工作池配置
@@ -87,23 +88,45 @@ const (
 // 3. 非阻塞写入，队列满时关键任务同步回退，非关键任务丢弃并告警
 // 4. 统一超时控制，避免慢操作阻塞工作池
 const (
-	cacheWriteWorkerCount     = 10              // 工作协程数量
-	cacheWriteBufferSize      = 1000            // 任务队列缓冲大小
-	cacheWriteTimeout         = 2 * time.Second // 单个写入操作超时
-	cacheWriteDropLogInterval = 5 * time.Second // 丢弃日志节流间隔
-	balanceLoadTimeout        = 3 * time.Second
-	rateLimitResetDedupeTTL   = time.Second
+	cacheWriteWorkerCount            = 10              // 工作协程数量
+	cacheWriteBufferSize             = 1000            // 任务队列缓冲大小
+	cacheWriteTimeout                = 2 * time.Second // 单个写入操作超时
+	cacheWriteDropLogInterval        = 5 * time.Second // 丢弃日志节流间隔
+	balanceLoadTimeout               = 3 * time.Second
+	rateLimitResetDedupeTTL          = time.Second
+	subscriptionInvalidationAttempts = 3
+	subscriptionInvalidationBackoff  = 25 * time.Millisecond
 )
 
 // cacheWriteTask 缓存写入任务
 type cacheWriteTask struct {
-	kind             cacheWriteKind
-	userID           int64
-	groupID          int64
-	apiKeyID         int64
-	balance          float64
-	amount           float64
-	subscriptionData *subscriptionCacheData
+	kind                        cacheWriteKind
+	userID                      int64
+	groupID                     int64
+	apiKeyID                    int64
+	balance                     float64
+	amount                      float64
+	subscriptionData            *subscriptionCacheData
+	subscriptionGeneration      int64
+	subscriptionGenerationAware bool
+	subscriptionLocalVersion    uint64
+}
+
+// Retain the local version after repair so pre-invalidation queued fills cannot
+// resurrect an entry even for a cache implementation without Redis CAS.
+type billingSubscriptionCacheState struct {
+	mu           sync.Mutex
+	version      uint64
+	dirty        bool
+	writers      int
+	repairing    bool
+	repairQueued bool
+}
+
+func (s *billingSubscriptionCacheState) snapshot() (uint64, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.version, s.dirty
 }
 
 // apiKeyRateLimitLoader defines the interface for loading rate limit data from DB.
@@ -114,6 +137,11 @@ type apiKeyRateLimitLoader interface {
 type subscriptionCacheInvalidationPubSub interface {
 	PublishSubscriptionCacheInvalidation(ctx context.Context, cacheKey string) error
 	SubscribeSubscriptionCacheInvalidation(ctx context.Context, handler func(cacheKey string)) error
+}
+
+type subscriptionCacheGenerationStore interface {
+	GetSubscriptionCacheGeneration(ctx context.Context, userID, groupID int64) (int64, error)
+	SetSubscriptionCacheIfGeneration(ctx context.Context, userID, groupID, generation int64, data *SubscriptionCacheData) (bool, error)
 }
 
 // BillingCacheService 计费缓存服务
@@ -130,17 +158,17 @@ type BillingCacheService struct {
 	circuitBreaker        *billingCircuitBreaker
 	userPlatformQuotaRepo UserPlatformQuotaRepository
 
-	cacheWriteChan             chan cacheWriteTask
-	cacheWriteWg               sync.WaitGroup
-	cacheWriteStopOnce         sync.Once
-	cacheWriteMu               sync.RWMutex
-	stopped                    atomic.Bool
-	balanceLoadSF              singleflight.Group
-	rateLimitResetInFlight     sync.Map
-	quotaLoadSF                singleflight.Group
-	subscriptionInvalidatorMu  sync.RWMutex
-	subscriptionL1Invalidator  func(userID, groupID int64)
-	subscriptionL1UsageUpdater func(userID, groupID int64, costUSD float64)
+	cacheWriteChan            chan cacheWriteTask
+	cacheWriteWg              sync.WaitGroup
+	cacheWriteStopOnce        sync.Once
+	cacheWriteMu              sync.RWMutex
+	stopped                   atomic.Bool
+	balanceLoadSF             singleflight.Group
+	rateLimitResetInFlight    sync.Map
+	quotaLoadSF               singleflight.Group
+	subscriptionInvalidatorMu sync.RWMutex
+	subscriptionL1Invalidator func(userID, groupID int64)
+	subscriptionCacheStates   sync.Map
 	// 丢弃日志节流计数器（减少高负载下日志噪音）
 	cacheWriteDropFullCount     uint64
 	cacheWriteDropFullLastLog   int64
@@ -225,15 +253,6 @@ func (s *BillingCacheService) SetSubscriptionL1Invalidator(fn func(userID, group
 	s.subscriptionL1Invalidator = fn
 }
 
-func (s *BillingCacheService) SetSubscriptionL1UsageUpdater(fn func(userID, groupID int64, costUSD float64)) {
-	if s == nil {
-		return
-	}
-	s.subscriptionInvalidatorMu.Lock()
-	defer s.subscriptionInvalidatorMu.Unlock()
-	s.subscriptionL1UsageUpdater = fn
-}
-
 func (s *BillingCacheService) invalidateSubscriptionL1(userID, groupID int64) {
 	if s == nil {
 		return
@@ -243,18 +262,6 @@ func (s *BillingCacheService) invalidateSubscriptionL1(userID, groupID int64) {
 	s.subscriptionInvalidatorMu.RUnlock()
 	if fn != nil {
 		fn(userID, groupID)
-	}
-}
-
-func (s *BillingCacheService) updateSubscriptionL1Usage(userID, groupID int64, costUSD float64) {
-	if s == nil || costUSD <= 0 {
-		return
-	}
-	s.subscriptionInvalidatorMu.RLock()
-	fn := s.subscriptionL1UsageUpdater
-	s.subscriptionInvalidatorMu.RUnlock()
-	if fn != nil {
-		fn(userID, groupID, costUSD)
 	}
 }
 
@@ -300,13 +307,13 @@ func (s *BillingCacheService) cacheWriteWorker(ch <-chan cacheWriteTask) {
 		case cacheWriteSetBalance:
 			s.setBalanceCache(ctx, task.userID, task.balance)
 		case cacheWriteSetSubscription:
-			s.setSubscriptionCache(ctx, task.userID, task.groupID, task.subscriptionData)
-		case cacheWriteUpdateSubscriptionUsage:
-			if s.cache != nil {
-				if err := s.cache.UpdateSubscriptionUsage(ctx, task.userID, task.groupID, task.amount); err != nil {
-					logger.LegacyPrintf("service.billing_cache", "Warning: update subscription cache failed for user %d group %d: %v", task.userID, task.groupID, err)
-				}
-			}
+			s.setSubscriptionCache(ctx, task.userID, task.groupID, task.subscriptionData, task.subscriptionGeneration, task.subscriptionGenerationAware, task.subscriptionLocalVersion)
+		case cacheWriteRepairSubscription:
+			state := s.subscriptionCacheState(task.userID, task.groupID)
+			_ = s.repairSubscriptionInvalidation(context.Background(), task.userID, task.groupID, state)
+			state.mu.Lock()
+			state.repairQueued = false
+			state.mu.Unlock()
 		case cacheWriteDeductBalance:
 			if s.cache != nil {
 				if err := s.cache.DeductUserBalance(ctx, task.userID, task.amount); err != nil {
@@ -331,8 +338,8 @@ func cacheWriteKindName(kind cacheWriteKind) string {
 		return "set_balance"
 	case cacheWriteSetSubscription:
 		return "set_subscription"
-	case cacheWriteUpdateSubscriptionUsage:
-		return "update_subscription_usage"
+	case cacheWriteRepairSubscription:
+		return "repair_subscription"
 	case cacheWriteDeductBalance:
 		return "deduct_balance"
 	case cacheWriteUpdateRateLimitUsage:
@@ -495,32 +502,79 @@ func (s *BillingCacheService) GetSubscriptionStatus(ctx context.Context, userID,
 	if s.cache == nil {
 		return s.getSubscriptionFromDB(ctx, userID, groupID)
 	}
+	state := s.subscriptionCacheState(userID, groupID)
+	version, dirty := state.snapshot()
+	if dirty {
+		s.queueSubscriptionRepair(userID, groupID, state)
+		return s.getSubscriptionFromDB(ctx, userID, groupID)
+	}
 
 	// 尝试从缓存读取
 	cacheData, err := s.cache.GetSubscriptionCache(ctx, userID, groupID)
+	if current, dirty := state.snapshot(); dirty || current != version {
+		return s.getSubscriptionFromDB(ctx, userID, groupID)
+	}
 	if err == nil && cacheData != nil {
 		data := s.convertFromPortsData(cacheData)
 		if !subscriptionCacheSchemaStale(data) && !subscriptionCacheNeedsWindowRefresh(data, time.Now()) {
 			return data, nil
 		}
-		_ = s.cache.InvalidateSubscriptionCache(ctx, userID, groupID)
+		state.mu.Lock()
+		state.version++
+		state.dirty = true
+		state.mu.Unlock()
+		s.invalidateSubscriptionL1(userID, groupID)
+		s.queueSubscriptionRepair(userID, groupID, state)
+		return s.getSubscriptionFromDB(ctx, userID, groupID)
 	}
 
-	// 缓存未命中，从数据库读取
-	data, err := s.getSubscriptionFromDB(ctx, userID, groupID)
-	if err != nil {
-		return nil, err
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		version, dirty := state.snapshot()
+		if dirty {
+			return s.getSubscriptionFromDB(ctx, userID, groupID)
+		}
+		generation, generationAware, err := s.subscriptionGeneration(ctx, userID, groupID)
+		if err != nil {
+			// Cache outages must not deny DB admission or permit unfenced refills.
+			return s.getSubscriptionFromDB(ctx, userID, groupID)
+		}
+		data, err := s.getSubscriptionFromDB(ctx, userID, groupID)
+		if err != nil {
+			return nil, err
+		}
+		if generationAware {
+			current, err := s.subscriptionGenerationAfterLoad(ctx, userID, groupID)
+			if err != nil {
+				current, dirty := state.snapshot()
+				if dirty || current != version || subscriptionCacheDeadlinePassed(data, time.Now()) {
+					return s.getSubscriptionFromDB(ctx, userID, groupID)
+				}
+				return data, nil
+			}
+			if current != generation {
+				continue
+			}
+		}
+		if subscriptionCacheDeadlinePassed(data, time.Now()) {
+			continue
+		}
+		if current, dirty := state.snapshot(); dirty || current != version {
+			continue
+		}
+		_ = s.enqueueCacheWrite(cacheWriteTask{
+			kind:                        cacheWriteSetSubscription,
+			userID:                      userID,
+			groupID:                     groupID,
+			subscriptionData:            data,
+			subscriptionGeneration:      generation,
+			subscriptionGenerationAware: generationAware,
+			subscriptionLocalVersion:    version,
+		})
+		return data, nil
 	}
-
-	// 异步建立缓存
-	_ = s.enqueueCacheWrite(cacheWriteTask{
-		kind:             cacheWriteSetSubscription,
-		userID:           userID,
-		groupID:          groupID,
-		subscriptionData: data,
-	})
-
-	return data, nil
 }
 
 func (s *BillingCacheService) convertFromPortsData(data *SubscriptionCacheData) *subscriptionCacheData {
@@ -542,6 +596,7 @@ func (s *BillingCacheService) convertFromPortsData(data *SubscriptionCacheData) 
 		WeeklyWindowStart:   cloneTimePtr(data.WeeklyWindowStart),
 		MonthlyWindowStart:  cloneTimePtr(data.MonthlyWindowStart),
 		CustomWindowStart:   cloneTimePtr(data.CustomWindowStart),
+		refreshAt:           data.RefreshAt,
 	}
 }
 
@@ -564,17 +619,34 @@ func (s *BillingCacheService) convertToPortsData(data *subscriptionCacheData) *S
 		WeeklyWindowStart:   cloneTimePtr(data.WeeklyWindowStart),
 		MonthlyWindowStart:  cloneTimePtr(data.MonthlyWindowStart),
 		CustomWindowStart:   cloneTimePtr(data.CustomWindowStart),
+		RefreshAt:           data.refreshAt,
 	}
 }
 
 // getSubscriptionFromDB 从数据库获取订阅数据
 func (s *BillingCacheService) getSubscriptionFromDB(ctx context.Context, userID, groupID int64) (*subscriptionCacheData, error) {
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		data, err := s.loadSubscriptionFromDB(ctx, userID, groupID)
+		if err != nil {
+			return nil, err
+		}
+		if !subscriptionCacheDeadlinePassed(data, time.Now()) {
+			return data, nil
+		}
+	}
+}
+
+func (s *BillingCacheService) loadSubscriptionFromDB(ctx context.Context, userID, groupID int64) (*subscriptionCacheData, error) {
 	subs, err := s.subRepo.ListActiveByUserIDAndGroupID(ctx, userID, groupID)
 	if err != nil {
 		return nil, fmt.Errorf("get subscription: %w", err)
 	}
-	normalizedSubs := normalizeSubscriptionsForCache(subs)
-	sub := aggregateActiveSubscriptionsInternal(normalizedSubs, false)
+	now := time.Now()
+	normalizedSubs := normalizeSubscriptionsForCacheAt(subs, now)
+	sub := aggregateActiveSubscriptionsInternalAt(normalizedSubs, false, now)
 	if sub == nil {
 		return nil, fmt.Errorf("get subscription: %w", ErrSubscriptionNotFound)
 	}
@@ -597,12 +669,33 @@ func (s *BillingCacheService) getSubscriptionFromDB(ctx context.Context, userID,
 		WeeklyWindowStart:   cloneTimePtr(sub.WeeklyWindowStart),
 		MonthlyWindowStart:  cloneTimePtr(sub.MonthlyWindowStart),
 		CustomWindowStart:   cloneTimePtr(sub.CustomWindowStart),
+		refreshAt:           subscriptionCacheRefreshAt(normalizedSubs, now),
 	}, nil
+}
+
+func (s *BillingCacheService) subscriptionGeneration(ctx context.Context, userID, groupID int64) (int64, bool, error) {
+	if s == nil || s.cache == nil {
+		return 0, false, nil
+	}
+	store, ok := s.cache.(subscriptionCacheGenerationStore)
+	if !ok {
+		return 0, false, nil
+	}
+	generation, err := store.GetSubscriptionCacheGeneration(ctx, userID, groupID)
+	return generation, true, err
+}
+
+func (s *BillingCacheService) subscriptionGenerationAfterLoad(ctx context.Context, userID, groupID int64) (int64, error) {
+	generation, _, err := s.subscriptionGeneration(ctx, userID, groupID)
+	return generation, err
 }
 
 func subscriptionCacheNeedsWindowRefresh(data *subscriptionCacheData, now time.Time) bool {
 	if data == nil {
 		return false
+	}
+	if !data.refreshAt.IsZero() && !now.Before(data.refreshAt) {
+		return true
 	}
 	if data.DailyWindowStart != nil && data.ExpiresAt.After(data.DailyWindowStart.Add(subscriptionDailyWindow)) && subscriptionWindowExpired(data.DailyWindowStart, subscriptionDailyWindow, now) {
 		return true
@@ -619,9 +712,17 @@ func subscriptionCacheNeedsWindowRefresh(data *subscriptionCacheData, now time.T
 	return false
 }
 
+func subscriptionCacheDeadlinePassed(data *subscriptionCacheData, now time.Time) bool {
+	return data != nil && ((!data.refreshAt.IsZero() && !now.Before(data.refreshAt)) ||
+		(!data.ExpiresAt.IsZero() && !now.Before(data.ExpiresAt)))
+}
+
 func subscriptionCacheSchemaStale(data *subscriptionCacheData) bool {
 	if data == nil {
 		return false
+	}
+	if data.refreshAt.IsZero() {
+		return true
 	}
 	if data.DailyLimitUSD != nil && data.DailyWindowStart == nil {
 		return true
@@ -639,13 +740,21 @@ func subscriptionCacheSchemaStale(data *subscriptionCacheData) bool {
 }
 
 func normalizeSubscriptionsForCache(subs []UserSubscription) []UserSubscription {
+	return normalizeSubscriptionsForCacheAt(subs, time.Now())
+}
+
+func normalizeSubscriptionsForCacheAt(subs []UserSubscription, now time.Time) []UserSubscription {
 	if len(subs) == 0 {
 		return nil
 	}
-	now := time.Now()
 	normalized := make([]UserSubscription, 0, len(subs))
 	for i := range subs {
 		sub := subs[i]
+		// A query can finish after one of its selected cards expires. Zero
+		// expiry remains compatible with existing in-memory snapshots.
+		if !sub.ExpiresAt.IsZero() && !sub.ExpiresAt.After(now) {
+			continue
+		}
 		normalizeSubscriptionWindowsAt(&sub, now)
 		normalized = append(normalized, sub)
 	}
@@ -653,61 +762,162 @@ func normalizeSubscriptionsForCache(subs []UserSubscription) []UserSubscription 
 }
 
 // setSubscriptionCache 设置订阅缓存
-func (s *BillingCacheService) setSubscriptionCache(ctx context.Context, userID, groupID int64, data *subscriptionCacheData) {
-	if s.cache == nil || data == nil {
+func (s *BillingCacheService) setSubscriptionCache(ctx context.Context, userID, groupID int64, data *subscriptionCacheData, generation int64, generationAware bool, localVersion uint64) {
+	if s.cache == nil || data == nil || subscriptionCacheDeadlinePassed(data, time.Now()) {
 		return
 	}
-	if err := s.cache.SetSubscriptionCache(ctx, userID, groupID, s.convertToPortsData(data)); err != nil {
+	state := s.subscriptionCacheState(userID, groupID)
+	state.mu.Lock()
+	if state.dirty || state.version != localVersion {
+		state.mu.Unlock()
+		return
+	}
+	state.writers++
+	state.mu.Unlock()
+	defer func() {
+		state.mu.Lock()
+		state.writers--
+		repair := state.dirty && state.writers == 0
+		state.mu.Unlock()
+		if repair {
+			// The writer's own timeout may already be spent. A separate bounded
+			// repair must remove any late write before lifting the dirty barrier.
+			_ = s.repairSubscriptionInvalidation(context.Background(), userID, groupID, state)
+		}
+	}()
+	portsData := s.convertToPortsData(data)
+	if generationAware {
+		store, ok := s.cache.(subscriptionCacheGenerationStore)
+		if !ok {
+			return
+		}
+		written, err := store.SetSubscriptionCacheIfGeneration(ctx, userID, groupID, generation, portsData)
+		if err != nil {
+			logger.LegacyPrintf("service.billing_cache", "Warning: set subscription cache failed for user %d group %d: %v", userID, groupID, err)
+		} else if !written {
+			logger.LegacyPrintf("service.billing_cache", "INFO: skipped stale subscription cache refill for user %d group %d", userID, groupID)
+		}
+		return
+	}
+	if err := s.cache.SetSubscriptionCache(ctx, userID, groupID, portsData); err != nil {
 		logger.LegacyPrintf("service.billing_cache", "Warning: set subscription cache failed for user %d group %d: %v", userID, groupID, err)
 	}
 }
 
-// UpdateSubscriptionUsage 更新订阅用量缓存（同步调用）
+// UpdateSubscriptionUsage invalidates derived cache state after the committed usage update.
 func (s *BillingCacheService) UpdateSubscriptionUsage(ctx context.Context, userID, groupID int64, costUSD float64) error {
-	s.updateSubscriptionL1Usage(userID, groupID, costUSD)
-	return s.updateSubscriptionUsageRedis(ctx, userID, groupID, costUSD)
-}
-
-func (s *BillingCacheService) updateSubscriptionUsageRedis(ctx context.Context, userID, groupID int64, costUSD float64) error {
-	if s.cache == nil {
+	if s == nil || costUSD <= 0 {
 		return nil
 	}
-	return s.cache.UpdateSubscriptionUsage(ctx, userID, groupID, costUSD)
+	return s.InvalidateSubscription(ctx, userID, groupID)
 }
 
-// QueueUpdateSubscriptionUsage 异步更新订阅用量缓存
+// QueueUpdateSubscriptionUsage invalidates aggregate cache state after committed usage.
 func (s *BillingCacheService) QueueUpdateSubscriptionUsage(userID, groupID int64, costUSD float64) {
-	s.updateSubscriptionL1Usage(userID, groupID, costUSD)
-	if s.cache == nil {
+	if s == nil || costUSD <= 0 {
 		return
 	}
-	// 队列满时同步回退，确保订阅用量及时更新。
-	if s.enqueueCacheWrite(cacheWriteTask{
-		kind:    cacheWriteUpdateSubscriptionUsage,
-		userID:  userID,
-		groupID: groupID,
-		amount:  costUSD,
-	}) {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), cacheWriteTimeout)
-	defer cancel()
-	if err := s.updateSubscriptionUsageRedis(ctx, userID, groupID, costUSD); err != nil {
-		logger.LegacyPrintf("service.billing_cache", "Warning: update subscription cache fallback failed for user %d group %d: %v", userID, groupID, err)
+	if err := s.UpdateSubscriptionUsage(context.Background(), userID, groupID, costUSD); err != nil {
+		logger.LegacyPrintf("service.billing_cache", "ALERT: invalidate subscription cache after usage failed for user %d group %d: %v", userID, groupID, err)
 	}
 }
 
 // InvalidateSubscription 失效指定订阅缓存
 func (s *BillingCacheService) InvalidateSubscription(ctx context.Context, userID, groupID int64) error {
+	state := s.subscriptionCacheState(userID, groupID)
+	state.mu.Lock()
+	state.version++
+	state.dirty = true
+	state.mu.Unlock()
 	s.invalidateSubscriptionL1(userID, groupID)
-	if s.cache == nil {
+	return s.repairSubscriptionInvalidation(ctx, userID, groupID, state)
+}
+
+func (s *BillingCacheService) subscriptionCacheState(userID, groupID int64) *billingSubscriptionCacheState {
+	key := subCacheKey(userID, groupID)
+	if state, ok := s.subscriptionCacheStates.Load(key); ok {
+		return state.(*billingSubscriptionCacheState)
+	}
+	state, _ := s.subscriptionCacheStates.LoadOrStore(key, &billingSubscriptionCacheState{})
+	return state.(*billingSubscriptionCacheState)
+}
+
+func (s *BillingCacheService) queueSubscriptionRepair(userID, groupID int64, state *billingSubscriptionCacheState) {
+	state.mu.Lock()
+	if !state.dirty || state.repairing || state.repairQueued {
+		state.mu.Unlock()
+		return
+	}
+	state.repairQueued = true
+	state.mu.Unlock()
+	if !s.enqueueCacheWrite(cacheWriteTask{kind: cacheWriteRepairSubscription, userID: userID, groupID: groupID}) {
+		state.mu.Lock()
+		state.repairQueued = false
+		state.mu.Unlock()
+	}
+}
+
+func (s *BillingCacheService) repairSubscriptionInvalidation(ctx context.Context, userID, groupID int64, state *billingSubscriptionCacheState) error {
+	state.mu.Lock()
+	if !state.dirty {
+		state.mu.Unlock()
 		return nil
 	}
-	if err := s.cache.InvalidateSubscriptionCache(ctx, userID, groupID); err != nil {
-		logger.LegacyPrintf("service.billing_cache", "Warning: invalidate subscription cache failed for user %d group %d: %v", userID, groupID, err)
-		return err
+	if state.repairing {
+		state.mu.Unlock()
+		return errBillingCacheUnavailable
 	}
-	return nil
+	state.repairing = true
+	state.mu.Unlock()
+	defer func() {
+		state.mu.Lock()
+		state.repairing = false
+		state.mu.Unlock()
+	}()
+
+	var lastErr error
+	for attempt := 0; attempt < subscriptionInvalidationAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		version, _ := state.snapshot()
+		var cacheErr error
+		if s.cache != nil {
+			cacheCtx, cancel := context.WithTimeout(ctx, cacheWriteTimeout)
+			cacheErr = s.cache.InvalidateSubscriptionCache(cacheCtx, userID, groupID)
+			cancel()
+		}
+		// Publishing gets its own budget even when invalidation times out.
+		publishCtx, cancel := context.WithTimeout(ctx, cacheWriteTimeout)
+		publishErr := s.PublishSubscriptionCacheInvalidation(publishCtx, subCacheKey(userID, groupID))
+		cancel()
+		lastErr = errors.Join(cacheErr, publishErr)
+		state.mu.Lock()
+		if lastErr == nil && state.version == version && state.writers == 0 {
+			state.dirty = false
+			state.mu.Unlock()
+			return nil
+		}
+		pendingWriter := state.writers > 0
+		state.mu.Unlock()
+		if lastErr == nil && pendingWriter {
+			// The last writer will repair again, including a possible late fill.
+			return nil
+		}
+		if lastErr == nil {
+			lastErr = errBillingCacheUnavailable
+		}
+		if attempt+1 < subscriptionInvalidationAttempts {
+			timer := time.NewTimer(subscriptionInvalidationBackoff * time.Duration(attempt+1))
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			case <-timer.C:
+			}
+		}
+	}
+	return lastErr
 }
 
 func (s *BillingCacheService) PublishSubscriptionCacheInvalidation(ctx context.Context, cacheKey string) error {
@@ -1143,6 +1353,11 @@ func (s *BillingCacheService) checkBalanceEligibility(ctx context.Context, userI
 // checkSubscriptionEligibility 检查订阅模式资格
 func (s *BillingCacheService) checkSubscriptionEligibility(ctx context.Context, userID int64, group *Group, subscription *UserSubscription) error {
 	now := time.Now()
+	if subscription != nil && group != nil {
+		if _, dirty := s.subscriptionCacheState(userID, group.ID).snapshot(); dirty {
+			subscription = nil
+		}
+	}
 	if subscription != nil {
 		effectiveGroup := subscription.EffectiveGroup(group)
 		if subscription.Status != SubscriptionStatusActive {
@@ -1150,6 +1365,15 @@ func (s *BillingCacheService) checkSubscriptionEligibility(ctx context.Context, 
 		}
 		if !subscription.ExpiresAt.After(now) {
 			return ErrSubscriptionInvalid
+		}
+		if subscription.IsAggregate && subscription.StackedAvailableUSD != nil {
+			if *subscription.StackedAvailableUSD <= 0 {
+				return ErrDailyLimitExceeded
+			}
+			if s.circuitBreaker != nil {
+				s.circuitBreaker.OnSuccess()
+			}
+			return nil
 		}
 
 		sub := *subscription
@@ -1187,6 +1411,11 @@ func (s *BillingCacheService) checkSubscriptionEligibility(ctx context.Context, 
 	}
 	// 获取订阅缓存数据
 	subData, err := s.GetSubscriptionStatus(ctx, userID, group.ID)
+	for err == nil && subscriptionCacheDeadlinePassed(subData, time.Now()) {
+		// Recheck at admission too: scheduling can cross a constituent-card
+		// boundary after GetSubscriptionStatus returned a valid snapshot.
+		subData, err = s.getSubscriptionFromDB(ctx, userID, group.ID)
+	}
 	if err != nil {
 		if s.circuitBreaker != nil {
 			s.circuitBreaker.OnFailure(err)
@@ -1204,7 +1433,8 @@ func (s *BillingCacheService) checkSubscriptionEligibility(ctx context.Context, 
 	}
 
 	// 检查是否过期
-	if now.After(subData.ExpiresAt) {
+	now = time.Now()
+	if !subData.ExpiresAt.IsZero() && !subData.ExpiresAt.After(now) {
 		return ErrSubscriptionInvalid
 	}
 

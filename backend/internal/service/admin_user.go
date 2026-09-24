@@ -15,6 +15,7 @@ import (
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 )
 
 // User management implementations
@@ -691,14 +692,45 @@ func (s *adminServiceImpl) GetUserRPMStatus(ctx context.Context, userID int64) (
 }
 
 func (s *adminServiceImpl) GetUserUsageStats(ctx context.Context, userID int64, period string) (any, error) {
-	// Return mock data for now
+	startTime, endTime, err := userUsageStatsPeriodRange(timezone.Now(), period)
+	if err != nil {
+		return nil, err
+	}
+	if s == nil || s.usageService == nil {
+		return nil, infraerrors.InternalServer("USER_USAGE_STATS_UNAVAILABLE", "user usage statistics service is not configured")
+	}
+
+	stats, err := s.usageService.GetStatsByUser(ctx, userID, startTime, endTime)
+	if err != nil {
+		return nil, err
+	}
+	if stats == nil {
+		return nil, infraerrors.InternalServer("USER_USAGE_STATS_UNAVAILABLE", "user usage statistics service returned no statistics")
+	}
+
 	return map[string]any{
 		"period":          period,
-		"total_requests":  0,
-		"total_cost":      0.0,
-		"total_tokens":    0,
-		"avg_duration_ms": 0,
+		"total_requests":  stats.TotalRequests,
+		"total_cost":      stats.TotalCost,
+		"total_tokens":    stats.TotalTokens,
+		"avg_duration_ms": stats.AverageDurationMs,
 	}, nil
+}
+
+func userUsageStatsPeriodRange(now time.Time, period string) (time.Time, time.Time, error) {
+	switch strings.ToLower(strings.TrimSpace(period)) {
+	case "today":
+		return timezone.StartOfDay(now), now, nil
+	case "week":
+		return now.AddDate(0, 0, -7), now, nil
+	case "month":
+		return now.AddDate(0, -1, 0), now, nil
+	default:
+		return time.Time{}, time.Time{}, infraerrors.BadRequest(
+			"INVALID_USAGE_PERIOD",
+			fmt.Sprintf("unsupported usage period %q", period),
+		)
+	}
 }
 
 // GetUserBalanceHistory returns paginated balance/concurrency change records for a user.

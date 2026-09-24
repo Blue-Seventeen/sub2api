@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/require"
@@ -258,4 +259,76 @@ func TestReleaseUsageBillingBatchImageBalance_SkipsWhenHoldNeverReserved(t *test
 	require.Nil(t, result.FrozenBalance)
 	require.NoError(t, tx.Commit())
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestNormalizeBillingSubscriptionCandidate_UsesStartsAtForInitialLegacyRollingAnchors(t *testing.T) {
+	startsAt := time.Date(2026, 7, 31, 13, 37, 6, 0, time.UTC)
+	legacyAnchor := time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC)
+	now := startsAt.Add(30 * 24 * time.Hour)
+
+	candidate := billingSubscriptionCandidate{
+		startsAt:           startsAt,
+		expiresAt:          startsAt.Add(90 * 24 * time.Hour),
+		dailyUsage:         1,
+		weeklyUsage:        2,
+		monthlyUsage:       3,
+		dailyWindowStart:   sql.NullTime{Time: legacyAnchor, Valid: true},
+		weeklyWindowStart:  sql.NullTime{Time: legacyAnchor, Valid: true},
+		monthlyWindowStart: sql.NullTime{Time: legacyAnchor, Valid: true},
+	}
+
+	normalizeBillingSubscriptionCandidate(&candidate, now)
+
+	require.Equal(t, startsAt.Add(30*24*time.Hour), candidate.dailyWindowStart.Time)
+	require.Equal(t, startsAt.Add(28*24*time.Hour), candidate.weeklyWindowStart.Time)
+	require.Equal(t, startsAt.Add(30*24*time.Hour), candidate.monthlyWindowStart.Time)
+	require.Zero(t, candidate.dailyUsage)
+	require.Zero(t, candidate.weeklyUsage)
+	require.Zero(t, candidate.monthlyUsage)
+}
+
+func TestNormalizeBillingSubscriptionCandidate_PreservesLaterMidnightAnchors(t *testing.T) {
+	startsAt := time.Date(2026, 7, 31, 13, 37, 6, 0, time.UTC)
+	manualAnchor := time.Date(2026, 8, 30, 0, 0, 0, 0, time.UTC)
+	candidate := billingSubscriptionCandidate{
+		startsAt:           startsAt,
+		expiresAt:          startsAt.Add(90 * 24 * time.Hour),
+		dailyUsage:         1,
+		weeklyUsage:        2,
+		monthlyUsage:       3,
+		dailyWindowStart:   sql.NullTime{Time: manualAnchor, Valid: true},
+		weeklyWindowStart:  sql.NullTime{Time: manualAnchor, Valid: true},
+		monthlyWindowStart: sql.NullTime{Time: manualAnchor, Valid: true},
+	}
+
+	normalizeBillingSubscriptionCandidate(&candidate, manualAnchor.Add(time.Hour))
+
+	require.Equal(t, manualAnchor, candidate.dailyWindowStart.Time)
+	require.Equal(t, manualAnchor, candidate.weeklyWindowStart.Time)
+	require.Equal(t, manualAnchor, candidate.monthlyWindowStart.Time)
+	require.Equal(t, 1.0, candidate.dailyUsage)
+	require.Equal(t, 2.0, candidate.weeklyUsage)
+	require.Equal(t, 3.0, candidate.monthlyUsage)
+}
+
+func TestNormalizeBillingSubscriptionCandidate_PreservesOneTimeDailyAndCustomWindowBehavior(t *testing.T) {
+	startsAt := time.Date(2026, 7, 31, 13, 37, 6, 0, time.UTC)
+	legacyAnchor := time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC)
+	candidate := billingSubscriptionCandidate{
+		startsAt:          startsAt,
+		expiresAt:         startsAt.AddDate(0, 0, 1),
+		dailyUsage:        4,
+		customUsage:       5,
+		dailyWindowStart:  sql.NullTime{Time: legacyAnchor, Valid: true},
+		customWindowStart: sql.NullTime{Time: legacyAnchor, Valid: true},
+		customLimitHours:  sql.NullInt64{Int64: 2, Valid: true},
+		customLimit:       sql.NullFloat64{Float64: 100, Valid: true},
+	}
+
+	normalizeBillingSubscriptionCandidate(&candidate, startsAt.Add(4*time.Hour))
+
+	require.Equal(t, legacyAnchor, candidate.dailyWindowStart.Time)
+	require.Equal(t, 4.0, candidate.dailyUsage)
+	require.Equal(t, legacyAnchor.Add(16*time.Hour), candidate.customWindowStart.Time)
+	require.Zero(t, candidate.customUsage)
 }

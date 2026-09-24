@@ -430,9 +430,10 @@ func normalizeBillingSubscriptionCandidate(c *billingSubscriptionCandidate, now 
 	if c == nil {
 		return
 	}
-	c.dailyWindowStart = normalizeBillingWindow(c.dailyWindowStart, c.startsAt, 24*time.Hour, now, !c.expiresAt.After(c.startsAt.AddDate(0, 0, 1)), &c.dailyUsage)
-	c.weeklyWindowStart = normalizeBillingWindow(c.weeklyWindowStart, c.startsAt, 7*24*time.Hour, now, false, &c.weeklyUsage)
-	c.monthlyWindowStart = normalizeBillingWindow(c.monthlyWindowStart, c.startsAt, 30*24*time.Hour, now, false, &c.monthlyUsage)
+	dailyOneTime := !c.expiresAt.After(c.startsAt.AddDate(0, 0, 1))
+	c.dailyWindowStart = normalizeBillingWindow(c.dailyWindowStart, c.startsAt, 24*time.Hour, now, dailyOneTime, &c.dailyUsage, true)
+	c.weeklyWindowStart = normalizeBillingWindow(c.weeklyWindowStart, c.startsAt, 7*24*time.Hour, now, false, &c.weeklyUsage, true)
+	c.monthlyWindowStart = normalizeBillingWindow(c.monthlyWindowStart, c.startsAt, 30*24*time.Hour, now, false, &c.monthlyUsage, true)
 	customPeriod := time.Duration(0)
 	if c.customLimitHours.Valid && c.customLimitHours.Int64 > 0 && c.customLimit.Valid && c.customLimit.Float64 > 0 {
 		hours := c.customLimitHours.Int64
@@ -441,12 +442,19 @@ func normalizeBillingSubscriptionCandidate(c *billingSubscriptionCandidate, now 
 		}
 		customPeriod = time.Duration(hours) * time.Hour
 	}
-	c.customWindowStart = normalizeBillingWindow(c.customWindowStart, c.startsAt, customPeriod, now, false, &c.customUsage)
+	c.customWindowStart = normalizeBillingWindow(c.customWindowStart, c.startsAt, customPeriod, now, false, &c.customUsage, false)
 }
 
-func normalizeBillingWindow(start sql.NullTime, fallback time.Time, period time.Duration, now time.Time, oneTime bool, usage *float64) sql.NullTime {
+func normalizeBillingWindow(start sql.NullTime, fallback time.Time, period time.Duration, now time.Time, oneTime bool, usage *float64, useInitialLegacyAnchor bool) sql.NullTime {
 	if !start.Valid {
 		start = sql.NullTime{Time: fallback, Valid: true}
+	}
+	if useInitialLegacyAnchor && !oneTime {
+		year, month, day := fallback.Date()
+		legacyAnchor := time.Date(year, month, day, 0, 0, 0, 0, fallback.Location())
+		if legacyAnchor.Before(fallback) && start.Time.Equal(legacyAnchor) {
+			start.Time = fallback
+		}
 	}
 	if oneTime || period <= 0 || now.Before(start.Time.Add(period)) {
 		return start

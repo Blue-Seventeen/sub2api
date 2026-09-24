@@ -23,13 +23,37 @@ func TestUsageLog_UpstreamModelMismatchFilterAndPartialIndex(t *testing.T) {
 	apiKey := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: "sk-model-audit", Name: "model-audit"})
 	account := mustCreateAccount(t, client, &service.Account{Name: "model-audit-account"})
 	now := time.Now().UTC()
-	responseModel := "gpt-5.4"
-	for _, mismatch := range []bool{true, false} {
-		mismatchValue := mismatch
+	trueValue, falseValue := true, false
+	for _, row := range []struct {
+		mismatch               *bool
+		requested, upstream    string
+		response               string
+		inbound, outbound      string
+		inputTokens, outTokens int
+	}{
+		{&trueValue, " gpt-5.5 ", " gpt-5.5 ", "gpt-5.4", " /v1/messages ", " /v1/responses ", 1, 1},
+		{&falseValue, " ", " ", "gpt-5.5", "/v1/responses", "/v1/chat/completions", 2, 3},
+		{nil, "", "", "", " ", "", 4, 5},
+	} {
+		var upstreamModel, responseModel, inboundEndpoint, upstreamEndpoint *string
+		if row.upstream != "" {
+			upstreamModel = &row.upstream
+		}
+		if row.response != "" {
+			responseModel = &row.response
+		}
+		if row.inbound != "" {
+			inboundEndpoint = &row.inbound
+		}
+		if row.outbound != "" {
+			upstreamEndpoint = &row.outbound
+		}
 		_, err := repo.Create(ctx, &service.UsageLog{
 			UserID: user.ID, APIKeyID: apiKey.ID, AccountID: account.ID,
-			Model: "gpt-5.5", InputTokens: 1, OutputTokens: 1,
-			UpstreamResponseModel: &responseModel, UpstreamModelMismatch: &mismatchValue,
+			Model: "gpt-5.5", RequestedModel: row.requested, UpstreamModel: upstreamModel,
+			InputTokens: row.inputTokens, OutputTokens: row.outTokens,
+			UpstreamResponseModel: responseModel, UpstreamModelMismatch: row.mismatch,
+			InboundEndpoint: inboundEndpoint, UpstreamEndpoint: upstreamEndpoint,
 			CreatedAt: now,
 		})
 		require.NoError(t, err)
@@ -37,30 +61,69 @@ func TestUsageLog_UpstreamModelMismatchFilterAndPartialIndex(t *testing.T) {
 
 	start := now.Add(-time.Hour)
 	end := now.Add(time.Hour)
-	trueValue := true
-	stats, err := repo.GetStatsWithFilters(ctx, usagestats.UsageLogFilters{
-		UserID: user.ID, StartTime: &start, EndTime: &end, UpstreamModelMismatch: &trueValue,
-	})
-	require.NoError(t, err)
-	require.Equal(t, int64(1), stats.TotalRequests)
-	require.Equal(t, []usagestats.EndpointStat{{
-		Endpoint: "unknown", Requests: 1, TotalTokens: 2,
-	}}, stats.Endpoints)
-	require.Equal(t, []usagestats.EndpointStat{{
-		Endpoint: "unknown", Requests: 1, TotalTokens: 2,
-	}}, stats.UpstreamEndpoints)
-	require.Equal(t, []usagestats.EndpointStat{{
-		Endpoint: "unknown -> unknown", Requests: 1, TotalTokens: 2,
-	}}, stats.EndpointPaths)
+	for _, tc := range []struct {
+		name                                string
+		mismatch                            *bool
+		requests, tokens                    int64
+		endpoints, upstreamEndpoints, paths []usagestats.EndpointStat
+	}{
+		{
+			name: "mismatched", mismatch: &trueValue, requests: 1, tokens: 2,
+			endpoints:         []usagestats.EndpointStat{{Endpoint: "/v1/messages", Requests: 1, TotalTokens: 2}},
+			upstreamEndpoints: []usagestats.EndpointStat{{Endpoint: "/v1/responses", Requests: 1, TotalTokens: 2}},
+			paths:             []usagestats.EndpointStat{{Endpoint: "/v1/messages -> /v1/responses", Requests: 1, TotalTokens: 2}},
+		},
+		{
+			name: "matched_excludes_null", mismatch: &falseValue, requests: 1, tokens: 5,
+			endpoints:         []usagestats.EndpointStat{{Endpoint: "/v1/responses", Requests: 1, TotalTokens: 5}},
+			upstreamEndpoints: []usagestats.EndpointStat{{Endpoint: "/v1/chat/completions", Requests: 1, TotalTokens: 5}},
+			paths:             []usagestats.EndpointStat{{Endpoint: "/v1/responses -> /v1/chat/completions", Requests: 1, TotalTokens: 5}},
+		},
+		{
+			name: "unfiltered_includes_null", requests: 3, tokens: 16,
+			endpoints: []usagestats.EndpointStat{
+				{Endpoint: "/v1/messages", Requests: 1, TotalTokens: 2},
+				{Endpoint: "/v1/responses", Requests: 1, TotalTokens: 5},
+				{Endpoint: "unknown", Requests: 1, TotalTokens: 9},
+			},
+			upstreamEndpoints: []usagestats.EndpointStat{
+				{Endpoint: "/v1/responses", Requests: 1, TotalTokens: 2},
+				{Endpoint: "/v1/chat/completions", Requests: 1, TotalTokens: 5},
+				{Endpoint: "unknown", Requests: 1, TotalTokens: 9},
+			},
+			paths: []usagestats.EndpointStat{
+				{Endpoint: "/v1/messages -> /v1/responses", Requests: 1, TotalTokens: 2},
+				{Endpoint: "/v1/responses -> /v1/chat/completions", Requests: 1, TotalTokens: 5},
+				{Endpoint: "unknown -> unknown", Requests: 1, TotalTokens: 9},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Requested/upstream filters retain their TRIM and empty-field fallback
+			// semantics while the same mismatch predicate limits every aggregate.
+			for _, source := range []string{"", usagestats.ModelSourceRequested, usagestats.ModelSourceUpstream} {
+				filters := usagestats.UsageLogFilters{
+					UserID: user.ID, StartTime: &start, EndTime: &end,
+					Model: "gpt-5.5", ModelFilterSource: source, UpstreamModelMismatch: tc.mismatch,
+				}
+				stats, err := repo.GetStatsWithFilters(ctx, filters)
+				require.NoError(t, err, "model source %q", source)
+				require.Equal(t, tc.requests, stats.TotalRequests, "model source %q", source)
+				require.Equal(t, tc.tokens, stats.TotalTokens, "model source %q", source)
+				require.ElementsMatch(t, tc.endpoints, stats.Endpoints, "model source %q", source)
+				require.ElementsMatch(t, tc.upstreamEndpoints, stats.UpstreamEndpoints, "model source %q", source)
+				require.ElementsMatch(t, tc.paths, stats.EndpointPaths, "model source %q", source)
 
-	trend, err := repo.GetUsageTrendWithUsageFilters(ctx, start, end, "hour", usagestats.UsageLogFilters{
-		UserID: user.ID, UpstreamModelMismatch: &trueValue,
-	})
-	require.NoError(t, err)
-	require.Len(t, trend, 1)
-	require.Equal(t, int64(1), trend[0].Requests)
+				trend, err := repo.GetUsageTrendWithUsageFilters(ctx, start, end, "hour", filters)
+				require.NoError(t, err, "model source %q", source)
+				require.Len(t, trend, 1)
+				require.Equal(t, tc.requests, trend[0].Requests, "model source %q", source)
+				require.Equal(t, tc.tokens, trend[0].TotalTokens, "model source %q", source)
+			}
+		})
+	}
 
-	_, err = tx.ExecContext(ctx, "SET LOCAL enable_seqscan = off")
+	_, err := tx.ExecContext(ctx, "SET LOCAL enable_seqscan = off")
 	require.NoError(t, err)
 	assertPlanUsesIndex := func(query, indexName string, args ...any) {
 		rows, queryErr := tx.QueryContext(ctx, query, args...)

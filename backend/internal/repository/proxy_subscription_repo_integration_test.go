@@ -119,6 +119,108 @@ func TestProxySubscriptionRepository_SyncNodesDoesNotRecreateDisabledNode(t *tes
 	require.Empty(t, got.Nodes, "disabled nodes should not become active again on refresh")
 }
 
+func TestProxySubscriptionRepository_SyncNodesDeactivatesMissingNodeAndPreservesAccountProxy(t *testing.T) {
+	ctx := context.Background()
+	tx := testTx(t)
+	repo := newProxySubscriptionRepositoryWithSQL(tx)
+
+	sub, proxies, err := repo.CreateWithNodes(ctx, &service.ProxySubscription{
+		Name:               "managed-sub-source-removal",
+		SubscriptionURL:    "https://example.com/clash.yaml",
+		RefreshIntervalSec: 3600,
+		TestURL:            "https://example.com/health",
+	}, []service.ProxySubscriptionNode{
+		{
+			NodeKey:      "kept-node",
+			Name:         "HK-01",
+			ProviderName: "node-hk01",
+			Type:         "ss",
+			Server:       "203.0.113.10",
+			Port:         8388,
+			Username:     "mpu_hk",
+			Password:     "mpp_hk",
+			RawConfig:    "name: HK-01\ntype: ss\nserver: 203.0.113.10\nport: 8388\n",
+			Status:       service.ProxySubscriptionNodeStatusActive,
+		},
+		{
+			NodeKey:      "missing-node",
+			Name:         "JP-01",
+			ProviderName: "node-jp01",
+			Type:         "trojan",
+			Server:       "203.0.113.20",
+			Port:         443,
+			Username:     "mpu_jp",
+			Password:     "mpp_jp",
+			RawConfig:    "name: JP-01\ntype: trojan\nserver: 203.0.113.20\nport: 443\n",
+			Status:       service.ProxySubscriptionNodeStatusActive,
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, proxies, 2)
+
+	var accountID int64
+	require.NoError(t, scanSingleRow(ctx, tx,
+		"INSERT INTO accounts (name, platform, type, proxy_id) VALUES ($1, $2, $3, $4) RETURNING id",
+		[]any{"account-with-removed-source-node", service.PlatformAnthropic, service.AccountTypeOAuth, proxies[1].ID},
+		&accountID,
+	))
+
+	_, err = repo.SyncNodes(ctx, sub.ID, "", []service.ProxySubscriptionNode{
+		{
+			NodeKey:      "kept-node",
+			Name:         "HK-01-updated",
+			ProviderName: "node-hk01",
+			Type:         "ss",
+			Server:       "203.0.113.10",
+			Port:         8388,
+			RawConfig:    "name: HK-01-updated\ntype: ss\nserver: 203.0.113.10\nport: 8388\n",
+			Status:       service.ProxySubscriptionNodeStatusActive,
+		},
+	})
+	require.NoError(t, err)
+
+	got, err := repo.Get(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, got.Nodes, 1)
+	require.Equal(t, "kept-node", got.Nodes[0].NodeKey)
+	require.Equal(t, "HK-01-updated", got.Nodes[0].Name)
+
+	var missingNodeStatus string
+	require.NoError(t, scanSingleRow(ctx, tx,
+		"SELECT status FROM proxy_subscription_nodes WHERE proxy_id = $1",
+		[]any{proxies[1].ID}, &missingNodeStatus))
+	require.Equal(t, service.ProxySubscriptionNodeStatusSourceMissing, missingNodeStatus)
+
+	var proxyDeleted bool
+	require.NoError(t, scanSingleRow(ctx, tx,
+		"SELECT deleted_at IS NOT NULL FROM proxies WHERE id = $1",
+		[]any{proxies[1].ID}, &proxyDeleted))
+	require.False(t, proxyDeleted)
+
+	var accountProxyID int64
+	require.NoError(t, scanSingleRow(ctx, tx,
+		"SELECT proxy_id FROM accounts WHERE id = $1",
+		[]any{accountID}, &accountProxyID))
+	require.Equal(t, proxies[1].ID, accountProxyID)
+
+	_, err = repo.SyncNodes(ctx, sub.ID, "", []service.ProxySubscriptionNode{
+		{NodeKey: "kept-node", Name: "HK-returned", ProviderName: "node-hk01", Type: "ss", RawConfig: "type: ss"},
+		{NodeKey: "missing-node", Name: "JP-returned", ProviderName: "node-jp01", Type: "trojan", RawConfig: "type: trojan"},
+	})
+	require.NoError(t, err)
+	got, err = repo.Get(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, got.Nodes, 2)
+	require.NoError(t, scanSingleRow(ctx, tx,
+		"SELECT status FROM proxy_subscription_nodes WHERE proxy_id = $1",
+		[]any{proxies[1].ID}, &missingNodeStatus))
+	require.Equal(t, service.ProxySubscriptionNodeStatusActive, missingNodeStatus)
+	require.NoError(t, scanSingleRow(ctx, tx,
+		"SELECT proxy_id FROM accounts WHERE id = $1",
+		[]any{accountID}, &accountProxyID))
+	require.Equal(t, proxies[1].ID, accountProxyID)
+}
+
 func TestProxySubscriptionRepository_SyncNodesDeletesUnusedLegacyManagedProxyRow(t *testing.T) {
 	ctx := context.Background()
 	tx := testTx(t)

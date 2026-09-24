@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/stretchr/testify/require"
 )
 
@@ -92,8 +91,8 @@ type activateWindowUserSubRepo struct {
 	windowStart *time.Time
 }
 
-func (r *activateWindowUserSubRepo) ActivateWindows(_ context.Context, _ int64, windowStart, _ time.Time) error {
-	r.windowStart = &windowStart
+func (r *activateWindowUserSubRepo) ActivateWindows(_ context.Context, _ int64, dailyStart, _ time.Time) error {
+	r.windowStart = &dailyStart
 	return nil
 }
 
@@ -137,7 +136,7 @@ func TestAssignOrExtendSubscription_ExpiredDailyCardStartsNewOneTimeQuota(t *tes
 	require.True(t, renewed.StartsAt.After(oldStart), "重新购买过期订阅时应重置当前周期 StartsAt")
 	require.False(t, renewed.ExpiresAt.After(renewed.StartsAt.AddDate(0, 0, 1)))
 	require.NotNil(t, renewed.DailyWindowStart)
-	require.Equal(t, timezone.StartOfDay(renewed.StartsAt), *renewed.DailyWindowStart, "续期后日窗口应锚定当天 0 点")
+	require.Equal(t, renewed.StartsAt, *renewed.DailyWindowStart, "续期后日窗口应与 StartsAt 使用同一滚动锚点")
 	require.NotNil(t, renewed.WeeklyWindowStart)
 	require.Equal(t, renewed.StartsAt, *renewed.WeeklyWindowStart)
 	require.NotNil(t, renewed.MonthlyWindowStart)
@@ -194,7 +193,7 @@ func TestUserSubscriptionNeedsDailyReset_DailyCardKeepsOneTimeQuota(t *testing.T
 	require.False(t, sub.NeedsDailyResetAt(dailyWindowStart.Add(25*time.Hour)), "日卡应作为一次性配额，跨 0 点后不再刷新日额度")
 }
 
-func TestUserSubscriptionNeedsDailyReset_MultiDaySubscriptionStillRefreshesAtMidnight(t *testing.T) {
+func TestUserSubscriptionNeedsDailyReset_MultiDaySubscriptionUsesRollingWindow(t *testing.T) {
 	start := time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC)
 	dailyWindowStart := start
 	sub := &UserSubscription{
@@ -205,10 +204,11 @@ func TestUserSubscriptionNeedsDailyReset_MultiDaySubscriptionStillRefreshesAtMid
 
 	require.False(t, sub.HasOneTimeDailyQuota())
 	require.False(t, sub.NeedsDailyResetAt(time.Date(2026, 5, 18, 23, 59, 59, 0, time.UTC)))
-	require.True(t, sub.NeedsDailyResetAt(time.Date(2026, 5, 19, 0, 0, 0, 0, time.UTC)), "多日订阅应在配置时区午夜刷新")
+	require.False(t, sub.NeedsDailyResetAt(time.Date(2026, 5, 19, 11, 59, 59, 0, time.UTC)))
+	require.True(t, sub.NeedsDailyResetAt(start.Add(24*time.Hour)), "多日订阅应在日窗口锚点+24h 刷新")
 }
 
-func TestUserSubscriptionNeedsDailyReset_UsesCalendarMidnightWindow(t *testing.T) {
+func TestUserSubscriptionNeedsDailyReset_DoesNotUseCalendarMidnightWindow(t *testing.T) {
 	start := time.Date(2026, 5, 18, 16, 0, 0, 0, time.UTC)
 	dailyWindowStart := start
 	sub := &UserSubscription{
@@ -218,7 +218,8 @@ func TestUserSubscriptionNeedsDailyReset_UsesCalendarMidnightWindow(t *testing.T
 	}
 
 	require.False(t, sub.NeedsDailyResetAt(time.Date(2026, 5, 18, 23, 59, 59, 0, time.UTC)))
-	require.True(t, sub.NeedsDailyResetAt(time.Date(2026, 5, 19, 0, 0, 0, 0, time.UTC)))
+	require.False(t, sub.NeedsDailyResetAt(time.Date(2026, 5, 19, 0, 0, 0, 0, time.UTC)))
+	require.True(t, sub.NeedsDailyResetAt(start.Add(24*time.Hour)))
 	require.Equal(t, time.Date(2026, 5, 20, 16, 0, 0, 0, time.UTC), sub.ExpiresAt)
 }
 
@@ -272,13 +273,15 @@ func TestCheckAndActivateWindow_UsesCurrentTimeAsAnchor(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, repo.windowStart)
-	require.Equal(t, timezone.StartOfDay(activatedAt), *repo.windowStart)
+	require.Equal(t, activatedAt, *repo.windowStart)
 	require.NotNil(t, sub.DailyWindowStart)
-	require.Equal(t, timezone.StartOfDay(activatedAt), *sub.DailyWindowStart)
+	require.Equal(t, activatedAt, *sub.DailyWindowStart)
 	require.NotNil(t, sub.WeeklyWindowStart)
 	require.Equal(t, activatedAt, *sub.WeeklyWindowStart)
 	require.NotNil(t, sub.MonthlyWindowStart)
 	require.Equal(t, activatedAt, *sub.MonthlyWindowStart)
+	require.NotNil(t, sub.CustomWindowStart)
+	require.Equal(t, activatedAt, *sub.CustomWindowStart)
 }
 
 func TestCheckAndActivateWindow_FallsBackToNowWhenStartsAtMissing(t *testing.T) {
@@ -292,10 +295,12 @@ func TestCheckAndActivateWindow_FallsBackToNowWhenStartsAtMissing(t *testing.T) 
 	after := time.Now()
 	require.NoError(t, err)
 	require.NotNil(t, repo.windowStart)
-	require.Equal(t, timezone.StartOfDay(before), *repo.windowStart)
-	require.Equal(t, timezone.StartOfDay(before), *sub.DailyWindowStart)
-	require.False(t, repo.windowStart.Before(timezone.StartOfDay(before)))
+	require.False(t, repo.windowStart.Before(before))
 	require.False(t, repo.windowStart.After(after))
+	require.Equal(t, *repo.windowStart, *sub.DailyWindowStart)
+	require.Equal(t, *repo.windowStart, *sub.WeeklyWindowStart)
+	require.Equal(t, *repo.windowStart, *sub.MonthlyWindowStart)
+	require.Equal(t, *repo.windowStart, *sub.CustomWindowStart)
 }
 
 func TestCheckAndResetWindows_DailyCardDoesNotResetDailyUsage(t *testing.T) {
@@ -372,7 +377,7 @@ func TestCheckAndResetWindows_RollsExpiredWindowsToCurrentPeriod(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, repo.dailyWindowStart)
-	require.Equal(t, timezone.StartOfDay(now), *repo.dailyWindowStart)
+	require.WithinDuration(t, dailyStart.Add(48*time.Hour), *repo.dailyWindowStart, time.Second)
 	require.Equal(t, 10.0, repo.dailyPreviousUsage)
 	require.Equal(t, sub.UpdatedAt, repo.dailyExpectedAt)
 	require.NotNil(t, repo.weeklyWindowStart)

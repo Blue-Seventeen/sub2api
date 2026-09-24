@@ -198,7 +198,8 @@ func TestBillingService_GPT56CacheWritePricingUsesOfficialMultiplier(t *testing.
 			require.NoError(t, err)
 			require.InDelta(t, tt.input*1.25, pricing.CacheCreationPricePerToken, 1e-12)
 			require.InDelta(t, tt.inputPriority*1.25, pricing.CacheCreationPricePerTokenPriority, 1e-12)
-			// 阶梯由目录数据驱动：条目无 above/long_context 字段时不再由策略强补。
+			// GPT-5.6 cards have no long-context ladder unless the catalog supplies
+			// one; this remains distinct from the official GPT-5.4 fallback card.
 			require.Zero(t, pricing.LongContextInputThreshold)
 
 			tokens := UsageTokens{InputTokens: 700, OutputTokens: 50, CacheCreationTokens: 200, CacheReadTokens: 100}

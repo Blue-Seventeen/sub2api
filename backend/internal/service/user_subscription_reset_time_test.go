@@ -4,7 +4,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -67,7 +66,6 @@ func TestWeeklyResetTime_MatchesAutomaticWindowStart(t *testing.T) {
 }
 
 // 月窗口与周窗口同属期限对齐滚动窗口，应用同一 legacy 锚点修正。
-// 日窗口按日历日对齐（见 automaticDailyWindowStartAt），不走此修正，故不在此覆盖。
 func TestMonthlyResetTime_LegacyMidnightAnchor_UsesStartsAt(t *testing.T) {
 	startsAt := time.Date(2026, 7, 31, 13, 37, 6, 0, time.FixedZone("UTC+8", 8*3600))
 	windowStart := startOfDay(startsAt)
@@ -84,13 +82,10 @@ func TestMonthlyResetTime_LegacyMidnightAnchor_UsesStartsAt(t *testing.T) {
 		"legacy 午夜锚点应按 StartsAt+30d 计算重置时间，而不是窗口起点+30d")
 }
 
-// 日窗口不受本修正影响：DailyResetTime 保持 #5380 的日历日对齐语义。
-// 基准取配置时区的 0 点（与 subscription_daily_midnight_reset_test.go 同构），
-// 保证断言在任意本地时区下都成立。
-func TestDailyResetTime_UnaffectedByWindowResetAnchor(t *testing.T) {
-	base := timezone.StartOfDay(time.Date(2026, 7, 31, 12, 0, 0, 0, timezone.Location()))
-	startsAt := base.Add(13*time.Hour + 37*time.Minute + 6*time.Second)
-	windowStart := base // legacy 锚点：开通日 0 点
+// 日窗口展示与执行都使用当前持久化的滚动窗口起点。
+func TestDailyResetTime_UsesRollingWindowStart(t *testing.T) {
+	startsAt := time.Date(2026, 7, 31, 13, 37, 6, 0, time.FixedZone("UTC+8", 8*3600))
+	windowStart := startsAt
 
 	sub := &UserSubscription{
 		StartsAt:         startsAt,
@@ -100,8 +95,6 @@ func TestDailyResetTime_UnaffectedByWindowResetAnchor(t *testing.T) {
 
 	got := sub.DailyResetTime()
 	require.NotNil(t, got)
-	assert.True(t, got.Equal(base.AddDate(0, 0, 1)),
-		"日窗口应保持日历日对齐（窗口起点所在日的次日 0 点）")
-	assert.False(t, got.Equal(startsAt.Add(24*time.Hour)),
-		"日窗口不应被 windowResetAnchor 修正成 StartsAt+24h（那是周/月的语义）")
+	assert.True(t, got.Equal(windowStart.Add(24*time.Hour)),
+		"日窗口应按持久化窗口起点滚动 24 小时")
 }

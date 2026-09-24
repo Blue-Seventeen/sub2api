@@ -32,18 +32,23 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Resolve release tag
+        id: release_metadata
+        env:
+          RELEASE_TAG_INPUT: ${{ github.event.inputs.tag }}
+        run: sh deploy/scripts/resolve-release-tag.sh "$RELEASE_TAG_INPUT" "$GITHUB_REF" "$GITHUB_OUTPUT"
 
       - name: Update VERSION file
+        env:
+          RELEASE_TAG: ${{ steps.release_metadata.outputs.tag }}
+          RUNTIME_VERSION: ${{ steps.release_metadata.outputs.runtime_version }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            RELEASE_TAG=${{ github.event.inputs.tag }}
-          else
-            RELEASE_TAG=${GITHUB_REF#refs/tags/}
-          fi
-          RUNTIME_VERSION=${RELEASE_TAG#v}
-          RUNTIME_VERSION=${RUNTIME_VERSION%-custom}
-          echo "$RUNTIME_VERSION" > backend/cmd/server/VERSION
-          echo "Updated VERSION file to runtime version: $RUNTIME_VERSION (release tag: $RELEASE_TAG)"
+          printf '%s\n' "$RUNTIME_VERSION" > backend/cmd/server/VERSION
+          printf 'Updated VERSION file to runtime version: %s (release tag: %s)\n' "$RUNTIME_VERSION" "$RELEASE_TAG"
 
       - name: Upload VERSION artifact
         uses: actions/upload-artifact@v7
@@ -57,16 +62,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 9
+          version: 10.33.0
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'pnpm'
           cache-dependency-path: frontend/pnpm-lock.yaml
 
@@ -85,9 +93,92 @@ jobs:
           path: backend/internal/web/dist/
           retention-days: 1
 
-  release:
-    needs: [update-version, build-frontend]
+  deployment-gate:
     runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          check-latest: false
+          cache-dependency-path: backend/go.sum
+
+      - name: Verify Go version
+        run: |
+          go version | grep -q 'go1.27.0'
+
+      - name: Run backend tests
+        working-directory: backend
+        run: go test -p 1 -parallel 1 ./... -count=1
+
+      - name: Run backend vet
+        working-directory: backend
+        run: go vet -p 1 ./...
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.33.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: frontend
+
+      - name: Run frontend typecheck
+        run: pnpm run typecheck
+        working-directory: frontend
+
+      - name: Run full frontend Vitest suite
+        run: pnpm run test:run
+        working-directory: frontend
+
+      - name: Build frontend
+        run: pnpm run build
+        working-directory: frontend
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Validate root Dockerfile with BuildKit
+        run: docker buildx build --check -f Dockerfile .
+
+      - name: Run deployment tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for test_file in deploy/tests/*-test.sh; do
+            echo "=== ${test_file} ==="
+            bash "${test_file}"
+          done
+          bash deploy/test-caddyfile-cache.sh
+
+      - name: Run mocked backup reproducibility tests
+        shell: pwsh
+        run: ./deploy/tests/backup-local-acceptance-unit-test.ps1
+
+      - name: Check diff whitespace
+        run: git diff --check
+
+  release:
+    needs: [update-version, build-frontend, deployment-gate]
+    runs-on: ubuntu-latest
+    outputs:
+      runtime_version: ${{ steps.release_metadata.outputs.runtime_version }}
+    env:
+      HAS_DOCKERHUB_CREDENTIALS: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -125,8 +216,14 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Resolve release tag
+        id: release_metadata
+        env:
+          RELEASE_TAG_INPUT: ${{ github.event.inputs.tag }}
+        run: sh deploy/scripts/resolve-release-tag.sh "$RELEASE_TAG_INPUT" "$GITHUB_REF" "$GITHUB_OUTPUT"
+
       - name: Login to DockerHub
-        if: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+        if: ${{ env.HAS_DOCKERHUB_CREDENTIALS == 'true' }}
         uses: docker/login-action@v3
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -148,12 +245,10 @@ jobs:
 
       - name: Get tag message
         id: tag_message
+        env:
+          RELEASE_TAG: ${{ steps.release_metadata.outputs.tag }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG_NAME=${{ github.event.inputs.tag }}
-          else
-            TAG_NAME=${GITHUB_REF#refs/tags/}
-          fi
+          TAG_NAME="$RELEASE_TAG"
           echo "Processing tag: $TAG_NAME"
 
           # 获取完整的 tag message（跳过第一行标题）
@@ -164,20 +259,25 @@ jobs:
           echo "Tag message preview:"
           echo "$TAG_MESSAGE" | head -10
 
-          # 使用 EOF 分隔符处理多行内容
-          echo "message<<EOF" >> $GITHUB_OUTPUT
-          echo "$TAG_MESSAGE" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          # Use a random delimiter so tag text cannot terminate the output value.
+          DELIMITER="$(openssl rand -hex 16)"
+          {
+            printf 'message<<%s\n' "$DELIMITER"
+            printf '%s\n' "$TAG_MESSAGE"
+            printf '%s\n' "$DELIMITER"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Set lowercase owner for GHCR
         id: lowercase
-        run: echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+        env:
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+        run: printf 'owner=%s\n' "$(printf '%s' "$REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v7
         with:
           version: '~> v2'
-          args: release --clean --skip=validate ${{ env.SIMPLE_RELEASE == 'true' && '--config=.goreleaser.simple.yaml' || '' }}
+          args: release --clean ${{ env.SIMPLE_RELEASE == 'true' && '--config=.goreleaser.simple.yaml' || '' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_MESSAGE: ${{ steps.tag_message.outputs.message }}
@@ -188,7 +288,7 @@ jobs:
 
       # Update DockerHub description
       - name: Update DockerHub description
-        if: ${{ env.SIMPLE_RELEASE != 'true' && secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+        if: ${{ env.SIMPLE_RELEASE != 'true' && env.HAS_DOCKERHUB_CREDENTIALS == 'true' }}
         uses: peter-evans/dockerhub-description@v5
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -206,6 +306,9 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          RELEASE_TAG: ${{ steps.release_metadata.outputs.tag }}
+          RELEASE_MESSAGE: ${{ steps.tag_message.outputs.message }}
+          REPOSITORY: ${{ github.repository }}
         continue-on-error: true
         run: |
           # 检查必要的环境变量
@@ -214,18 +317,13 @@ jobs:
             exit 0
           fi
 
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG_NAME=${{ github.event.inputs.tag }}
-          else
-            TAG_NAME=${GITHUB_REF#refs/tags/}
-          fi
+          TAG_NAME="$RELEASE_TAG"
           VERSION=${TAG_NAME#v}
-          REPO="${{ github.repository }}"
+          REPO="$REPOSITORY"
           GHCR_IMAGE="ghcr.io/${REPO,,}"  # ${,,} converts to lowercase
 
           # 获取 tag message 内容并转义 Markdown 特殊字符
-          TAG_MESSAGE='${{ steps.tag_message.outputs.message }}'
-          TAG_MESSAGE=$(echo "$TAG_MESSAGE" | sed 's/\([_*`\[]\)/\\\1/g')
+          TAG_MESSAGE=$(printf '%s' "$RELEASE_MESSAGE" | sed 's/\([_*`\[]\)/\\\1/g')
 
           # 限制消息长度（Telegram 消息限制 4096 字符，预留空间给头尾固定内容）
           if [ ${#TAG_MESSAGE} -gt 3500 ]; then
@@ -284,15 +382,10 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
 
       - name: Sync VERSION file to released tag
+        env:
+          RUNTIME_VERSION: ${{ needs.release.outputs.runtime_version }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            RELEASE_TAG=${{ github.event.inputs.tag }}
-          else
-            RELEASE_TAG=${GITHUB_REF#refs/tags/}
-          fi
-          RUNTIME_VERSION=${RELEASE_TAG#v}
-          RUNTIME_VERSION=${RUNTIME_VERSION%-custom}
-
           CURRENT_VERSION=$(tr -d '\r\n' < backend/cmd/server/VERSION || true)
           if [ "$CURRENT_VERSION" = "$RUNTIME_VERSION" ]; then
             echo "VERSION file already matches runtime version $RUNTIME_VERSION"
@@ -305,4 +398,4 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add backend/cmd/server/VERSION
           git commit -m "chore: sync VERSION to ${RUNTIME_VERSION} [skip ci]"
-          git push origin HEAD:${{ github.event.repository.default_branch }}
+          git push origin "HEAD:${DEFAULT_BRANCH}"

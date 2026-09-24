@@ -14,6 +14,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 // Forward forwards request to OpenAI API
@@ -1198,6 +1199,13 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	}
 	targetURL = appendOpenAIResponsesRequestPathSuffix(targetURL, openAIResponsesRequestPathSuffix(c))
 	body = normalizeDeepSeekResponsesRequestBody(account, body)
+	if cap, ok := ollamaCloudResponsesMaxOutputTokensClamp(account, strings.TrimSpace(gjson.GetBytes(body, "model").String()), body); ok {
+		var err error
+		body, err = sjson.SetBytes(body, "max_output_tokens", cap)
+		if err != nil {
+			return nil, fmt.Errorf("clamp Ollama Cloud max_output_tokens: %w", err)
+		}
+	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(body))
 	if err != nil {

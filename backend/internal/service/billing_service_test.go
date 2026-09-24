@@ -247,10 +247,11 @@ func TestGetModelPricing_OpenAIGPT54Fallback(t *testing.T) {
 	require.InDelta(t, 2.5e-6, pricing.InputPricePerToken, 1e-12)
 	require.InDelta(t, 15e-6, pricing.OutputPricePerToken, 1e-12)
 	require.InDelta(t, 0.25e-6, pricing.CacheReadPricePerToken, 1e-12)
-	// 静态兜底价不携带长上下文阶梯：阶梯一律由目录数据（above_272k 折算）驱动。
-	require.Zero(t, pricing.LongContextInputThreshold)
-	require.Zero(t, pricing.LongContextInputMultiplier)
-	require.Zero(t, pricing.LongContextOutputMultiplier)
+	// GPT-5.4's official fallback card retains the same long-context contract
+	// as the catalog path when LiteLLM data is unavailable.
+	require.Equal(t, openAIGPT54LongContextInputThreshold, pricing.LongContextInputThreshold)
+	require.InDelta(t, openAIGPT54LongContextInputMultiplier, pricing.LongContextInputMultiplier, 1e-12)
+	require.InDelta(t, openAIGPT54LongContextOutputMultiplier, pricing.LongContextOutputMultiplier, 1e-12)
 }
 
 func TestGetModelPricing_CatalogAboveTierFieldsDriveLongContext(t *testing.T) {
@@ -275,7 +276,7 @@ func TestGetModelPricing_OpenAICompactAliasesFallback(t *testing.T) {
 		longContext int
 	}{
 		{model: "gpt5.5", inputPrice: 5e-6, outputPrice: 30e-6, cacheRead: 0.5e-6, longContext: 0},
-		{model: "openai/gpt5.4", inputPrice: 2.5e-6, outputPrice: 15e-6, cacheRead: 0.25e-6, longContext: 0},
+		{model: "openai/gpt5.4", inputPrice: 2.5e-6, outputPrice: 15e-6, cacheRead: 0.25e-6, longContext: openAIGPT54LongContextInputThreshold},
 		{model: "gpt5.4-mini", inputPrice: 7.5e-7, outputPrice: 4.5e-6, cacheRead: 7.5e-8, longContext: 0},
 		{model: "gpt5.3codexspark", inputPrice: 1.5e-6, outputPrice: 12e-6, cacheRead: 0.15e-6, longContext: 0},
 	}

@@ -15,13 +15,14 @@ import (
 )
 
 const (
-	billingBalanceKeyPrefix   = "billing:balance:"
-	billingSubKeyPrefix       = "billing:sub:"
-	billingRateLimitKeyPrefix = "apikey:rate:"
-	subCacheInvalidateChannel = "subscription:cache:invalidate"
-	billingCacheTTL           = 5 * time.Minute
-	billingCacheJitter        = 30 * time.Second
-	rateLimitCacheTTL         = 7 * 24 * time.Hour // 7 days matches the longest window
+	billingBalanceKeyPrefix       = "billing:balance:"
+	billingSubKeyPrefix           = "billing:sub:"
+	billingSubGenerationKeyPrefix = "billing:sub:generation:"
+	billingRateLimitKeyPrefix     = "apikey:rate:"
+	subCacheInvalidateChannel     = "subscription:cache:invalidate"
+	billingCacheTTL               = 5 * time.Minute
+	billingCacheJitter            = 30 * time.Second
+	rateLimitCacheTTL             = 7 * 24 * time.Hour // 7 days matches the longest window
 
 	// Rate limit window durations — must match service.RateLimitWindow* constants.
 	rateLimitWindow5h = 5 * time.Hour
@@ -49,6 +50,10 @@ func billingSubKey(userID, groupID int64) string {
 	return fmt.Sprintf("%s%d:%d", billingSubKeyPrefix, userID, groupID)
 }
 
+func billingSubGenerationKey(userID, groupID int64) string {
+	return fmt.Sprintf("%s%d:%d", billingSubGenerationKeyPrefix, userID, groupID)
+}
+
 const (
 	subFieldStatus       = "status"
 	subFieldExpiresAt    = "expires_at"
@@ -68,6 +73,7 @@ const (
 	subFieldWeeklyWindowStart  = "weekly_window_start"
 	subFieldMonthlyWindowStart = "monthly_window_start"
 	subFieldCustomWindowStart  = "custom_window_start"
+	subFieldRefreshAt          = "refresh_at"
 )
 
 // billingRateLimitKey generates the Redis key for API key rate limit cache.
@@ -96,24 +102,39 @@ var (
 		return 1
 	`)
 
-	updateSubUsageScript = redis.NewScript(`
-		local exists = redis.call('EXISTS', KEYS[1])
-		if exists == 0 then
+	invalidateSubscriptionScript = redis.NewScript(`
+		local generation = redis.call('INCR', KEYS[2])
+		redis.call('DEL', KEYS[1])
+		return generation
+	`)
+
+	setSubscriptionIfGenerationScript = redis.NewScript(`
+		local current = redis.call('GET', KEYS[2])
+		if current == false then
+			current = '0'
+		end
+		if tostring(current) ~= tostring(ARGV[1]) then
 			return 0
 		end
-		local cost = tonumber(ARGV[1])
-		redis.call('HINCRBYFLOAT', KEYS[1], 'daily_usage', cost)
-		redis.call('HINCRBYFLOAT', KEYS[1], 'weekly_usage', cost)
-		redis.call('HINCRBYFLOAT', KEYS[1], 'monthly_usage', cost)
-		redis.call('HINCRBYFLOAT', KEYS[1], 'custom_usage', cost)
-		local stacked = redis.call('HGET', KEYS[1], 'stacked_available')
-		if stacked ~= false and stacked ~= '' then
-			local next_stacked = tonumber(stacked) - cost
-			if next_stacked < 0 then
-				next_stacked = 0
-			end
-			redis.call('HSET', KEYS[1], 'stacked_available', tostring(next_stacked))
-		end
+		redis.call('HSET', KEYS[1],
+			'status', ARGV[3],
+			'expires_at', ARGV[4],
+			'daily_usage', ARGV[5],
+			'weekly_usage', ARGV[6],
+			'monthly_usage', ARGV[7],
+			'custom_usage', ARGV[8],
+			'version', ARGV[9],
+			'daily_limit', ARGV[10],
+			'weekly_limit', ARGV[11],
+			'monthly_limit', ARGV[12],
+			'custom_limit', ARGV[13],
+			'custom_limit_hours', ARGV[14],
+			'stacked_available', ARGV[15],
+			'daily_window_start', ARGV[16],
+			'weekly_window_start', ARGV[17],
+			'monthly_window_start', ARGV[18],
+			'custom_window_start', ARGV[19],
+			'refresh_at', ARGV[20])
 		redis.call('EXPIRE', KEYS[1], ARGV[2])
 		return 1
 	`)
@@ -252,6 +273,9 @@ func (c *billingCache) parseSubscriptionCache(data map[string]string) (*service.
 	result.WeeklyWindowStart = parseBillingTimePtr(data[subFieldWeeklyWindowStart])
 	result.MonthlyWindowStart = parseBillingTimePtr(data[subFieldMonthlyWindowStart])
 	result.CustomWindowStart = parseBillingTimePtr(data[subFieldCustomWindowStart])
+	if refreshAt := parseBillingTimePtr(data[subFieldRefreshAt]); refreshAt != nil {
+		result.RefreshAt = *refreshAt
+	}
 
 	return result, nil
 }
@@ -262,16 +286,24 @@ func (c *billingCache) SetSubscriptionCache(ctx context.Context, userID, groupID
 	}
 
 	key := billingSubKey(userID, groupID)
+	fields := subscriptionCacheFields(data)
 
-	fields := map[string]any{
-		subFieldStatus:       data.Status,
-		subFieldExpiresAt:    data.ExpiresAt.Unix(),
-		subFieldDailyUsage:   data.DailyUsage,
-		subFieldWeeklyUsage:  data.WeeklyUsage,
-		subFieldMonthlyUsage: data.MonthlyUsage,
-		subFieldCustomUsage:  data.CustomUsage,
-		subFieldVersion:      data.Version,
+	pipe := c.rdb.Pipeline()
+	pipe.HSet(ctx, key, fields)
+	pipe.Expire(ctx, key, jitteredTTL())
+	_, err := pipe.Exec(ctx)
+	return err
+}
 
+func subscriptionCacheFields(data *service.SubscriptionCacheData) map[string]any {
+	return map[string]any{
+		subFieldStatus:             data.Status,
+		subFieldExpiresAt:          data.ExpiresAt.Unix(),
+		subFieldDailyUsage:         data.DailyUsage,
+		subFieldWeeklyUsage:        data.WeeklyUsage,
+		subFieldMonthlyUsage:       data.MonthlyUsage,
+		subFieldCustomUsage:        data.CustomUsage,
+		subFieldVersion:            data.Version,
 		subFieldDailyLimit:         fmtBillingFloatPtr(data.DailyLimitUSD),
 		subFieldWeeklyLimit:        fmtBillingFloatPtr(data.WeeklyLimitUSD),
 		subFieldMonthlyLimit:       fmtBillingFloatPtr(data.MonthlyLimitUSD),
@@ -282,13 +314,36 @@ func (c *billingCache) SetSubscriptionCache(ctx context.Context, userID, groupID
 		subFieldWeeklyWindowStart:  fmtBillingTimePtr(data.WeeklyWindowStart),
 		subFieldMonthlyWindowStart: fmtBillingTimePtr(data.MonthlyWindowStart),
 		subFieldCustomWindowStart:  fmtBillingTimePtr(data.CustomWindowStart),
+		subFieldRefreshAt:          fmtBillingTime(data.RefreshAt),
 	}
+}
 
-	pipe := c.rdb.Pipeline()
-	pipe.HSet(ctx, key, fields)
-	pipe.Expire(ctx, key, jitteredTTL())
-	_, err := pipe.Exec(ctx)
-	return err
+func (c *billingCache) GetSubscriptionCacheGeneration(ctx context.Context, userID, groupID int64) (int64, error) {
+	generation, err := c.rdb.Get(ctx, billingSubGenerationKey(userID, groupID)).Int64()
+	if errors.Is(err, redis.Nil) {
+		return 0, nil
+	}
+	return generation, err
+}
+
+func (c *billingCache) SetSubscriptionCacheIfGeneration(ctx context.Context, userID, groupID, generation int64, data *service.SubscriptionCacheData) (bool, error) {
+	if data == nil {
+		return false, nil
+	}
+	fields := subscriptionCacheFields(data)
+	args := []any{
+		generation,
+		int(jitteredTTL().Seconds()),
+		fields[subFieldStatus], fields[subFieldExpiresAt], fields[subFieldDailyUsage], fields[subFieldWeeklyUsage],
+		fields[subFieldMonthlyUsage], fields[subFieldCustomUsage], fields[subFieldVersion], fields[subFieldDailyLimit],
+		fields[subFieldWeeklyLimit], fields[subFieldMonthlyLimit], fields[subFieldCustomLimit], fields[subFieldCustomLimitHours],
+		fields[subFieldStackedAvailable], fields[subFieldDailyWindowStart], fields[subFieldWeeklyWindowStart],
+		fields[subFieldMonthlyWindowStart], fields[subFieldCustomWindowStart], fields[subFieldRefreshAt],
+	}
+	result, err := setSubscriptionIfGenerationScript.Run(ctx, c.rdb, []string{
+		billingSubKey(userID, groupID), billingSubGenerationKey(userID, groupID),
+	}, args...).Int()
+	return result == 1, err
 }
 
 func parseBillingFloatPtr(s string) *float64 {
@@ -328,19 +383,26 @@ func fmtBillingTimePtr(p *time.Time) string {
 	return strconv.FormatInt(p.Unix(), 10)
 }
 
-func (c *billingCache) UpdateSubscriptionUsage(ctx context.Context, userID, groupID int64, cost float64) error {
-	key := billingSubKey(userID, groupID)
-	_, err := updateSubUsageScript.Run(ctx, c.rdb, []string{key}, cost, int(jitteredTTL().Seconds())).Result()
-	if err != nil && !errors.Is(err, redis.Nil) {
-		log.Printf("Warning: update subscription usage cache failed for user %d group %d: %v", userID, groupID, err)
-		return err
+func fmtBillingTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
 	}
+	return strconv.FormatInt(t.Unix(), 10)
+}
+
+func (c *billingCache) UpdateSubscriptionUsage(ctx context.Context, userID, groupID int64, cost float64) error {
+	// Subscription aggregate usage is derived from multiple cards and cannot be
+	// safely incremented in Redis. Committed usage invalidates the aggregate via
+	// BillingCacheService.UpdateSubscriptionUsage instead.
 	return nil
 }
 
 func (c *billingCache) InvalidateSubscriptionCache(ctx context.Context, userID, groupID int64) error {
-	key := billingSubKey(userID, groupID)
-	return c.rdb.Del(ctx, key).Err()
+	_, err := invalidateSubscriptionScript.Run(ctx, c.rdb, []string{
+		billingSubKey(userID, groupID),
+		billingSubGenerationKey(userID, groupID),
+	}).Result()
+	return err
 }
 
 func (c *billingCache) PublishSubscriptionCacheInvalidation(ctx context.Context, cacheKey string) error {

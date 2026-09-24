@@ -58,6 +58,36 @@ func TestBuildGeminiBatchJSONL_WritesValidLinesAndPreservesCustomID(t *testing.T
 	requireJSONLLine(t, lines[1], "cover_002", "Second prompt")
 }
 
+func TestGeminiProvider_RejectsUnsupportedOptionsBeforeUpload(t *testing.T) {
+	for _, option := range []string{"response_mime_type", "aspect_ratio", "image_size"} {
+		for _, value := range []string{"supplied-value", " "} {
+			t.Run(option+"/"+value, func(t *testing.T) {
+				input := validGeminiBatchInput()
+				switch option {
+				case "response_mime_type":
+					input.ResponseMimeType = value
+				case "aspect_ratio":
+					input.AspectRatio = value
+				case "image_size":
+					input.ImageSize = value
+				}
+				jsonl, err := BuildGeminiBatchJSONL(input)
+				require.ErrorIs(t, err, ErrBatchImageProviderInvalidInput)
+				require.ErrorContains(t, err, option)
+				require.ErrorContains(t, err, "unsupported")
+				require.Contains(t, infraerrors.Message(err), option)
+				require.Equal(t, 400, infraerrors.Code(err))
+				require.Nil(t, jsonl)
+				client := &fakeGeminiBatchClient{}
+				job, err := NewGeminiAPIBatchImageProvider(client).Submit(context.Background(), nil, geminiAPIKeyAccount("key"), input)
+				require.ErrorIs(t, err, ErrBatchImageProviderInvalidInput)
+				require.Nil(t, job)
+				require.Empty(t, client.calls)
+			})
+		}
+	}
+}
+
 func TestBuildGeminiBatchJSONL_RejectsDuplicateCustomIDs(t *testing.T) {
 	input := validGeminiBatchInput()
 	input.Items = append(input.Items, BatchImageInputItem{CustomID: "cover_001", Prompt: "Duplicate"})

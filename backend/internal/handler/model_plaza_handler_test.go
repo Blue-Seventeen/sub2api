@@ -3,11 +3,15 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -25,7 +29,7 @@ func plazaGroups() []service.PlazaGroup {
 
 func TestFilterPlazaVisibleGroups_AnonymousSeesOnlyNonExclusive(t *testing.T) {
 	// 匿名(allowedExclusive == nil):仅非专属分组;订阅型公开分组照常可见(橱窗语义)。
-	visible := filterPlazaVisibleGroups(plazaGroups(), nil, false)
+	visible := filterPlazaVisibleGroups(plazaGroups(), nil)
 	require.Len(t, visible, 2)
 	ids := []int64{visible[0].ID, visible[1].ID}
 	require.ElementsMatch(t, []int64{1, 3}, ids)
@@ -34,7 +38,7 @@ func TestFilterPlazaVisibleGroups_AnonymousSeesOnlyNonExclusive(t *testing.T) {
 func TestFilterPlazaVisibleGroups_AuthedSeesGrantedExclusive(t *testing.T) {
 	// 登录:非专属 + 授权的专属;未授权的专属仍不可见。
 	allowed := map[int64]struct{}{2: {}}
-	visible := filterPlazaVisibleGroups(plazaGroups(), allowed, false)
+	visible := filterPlazaVisibleGroups(plazaGroups(), allowed)
 	require.Len(t, visible, 3)
 	ids := make([]int64, 0, len(visible))
 	for _, g := range visible {
@@ -46,30 +50,22 @@ func TestFilterPlazaVisibleGroups_AuthedSeesGrantedExclusive(t *testing.T) {
 func TestFilterPlazaVisibleGroups_AuthedEmptySetSeesNoExclusive(t *testing.T) {
 	// 登录但无任何专属授权(空集合,非 nil):与匿名同样只见非专属,
 	// 但语义区分要保持——空集合不能被当作 nil 匿名分支。
-	visible := filterPlazaVisibleGroups(plazaGroups(), map[int64]struct{}{}, false)
+	visible := filterPlazaVisibleGroups(plazaGroups(), map[int64]struct{}{})
 	require.Len(t, visible, 2)
 }
 
-func TestFilterPlazaVisibleGroups_RestrictedUserSeesOnlyGrantedPublic(t *testing.T) {
+func TestModelPlazaHandler_RestrictedUserSeesOnlyGrantedPublic(t *testing.T) {
 	// 开启公开分组限制后，公开分组也必须落在授权集合内，否则用户会在广场
 	// 看到自己实际绑定不了的分组。
-	allowed := map[int64]struct{}{1: {}, 2: {}}
-	visible := filterPlazaVisibleGroups(plazaGroups(), allowed, true)
-	ids := make([]int64, 0, len(visible))
-	for _, g := range visible {
-		ids = append(ids, g.ID)
-	}
+	user := &service.User{ID: 7, AllowedGroups: []int64{1, 2}, RestrictPublicGroups: true}
+	ids := modelPlazaVisibleIDs(t, user, plazaGroups(), nil)
 	// 3 是未授权的公开分组，受限后不可见；4 是未授权的专属分组，一贯不可见。
 	require.ElementsMatch(t, []int64{1, 2}, ids)
 }
 
-func TestFilterPlazaVisibleGroups_RestrictionDoesNotAffectAnonymous(t *testing.T) {
+func TestModelPlazaHandler_RestrictionDoesNotAffectAnonymous(t *testing.T) {
 	// 匿名没有用户记录，限制标志无从谈起，可见性必须与未受限时一致。
-	visible := filterPlazaVisibleGroups(plazaGroups(), nil, true)
-	ids := make([]int64, 0, len(visible))
-	for _, g := range visible {
-		ids = append(ids, g.ID)
-	}
+	ids := modelPlazaVisibleIDs(t, nil, plazaGroups(), nil)
 	require.ElementsMatch(t, []int64{1, 3}, ids)
 }
 
@@ -229,7 +225,8 @@ func TestToModelPlazaGroupDTO_TimePricing(t *testing.T) {
 	var decoded map[string]any
 	require.NoError(t, json.Unmarshal(raw, &decoded))
 	model := decoded["models"].([]any)[0].(map[string]any)
-	tp := model["time_pricing"].(map[string]any)
+	tp, ok := model["time_pricing"].(map[string]any)
+	require.True(t, ok, "configured time_pricing must be an object")
 	require.Equal(t, "Asia/Shanghai", tp["timezone"])
 	_, hasWeekdaysOnly := tp["weekdays_only"]
 	require.False(t, hasWeekdaysOnly, "未开启仅工作日时字段省略")
@@ -245,16 +242,103 @@ func TestToModelPlazaGroupDTO_TimePricing(t *testing.T) {
 	require.Equal(t, true, weekdaysTP["weekdays_only"])
 }
 
-func TestFilterPlazaVisibleGroups_SubscribedExclusiveGroup(t *testing.T) {
+func TestModelPlazaHandler_SubscribedExclusiveGroup(t *testing.T) {
 	groups := []service.PlazaGroup{
-		{ID: 42, IsExclusive: true, SubscriptionType: "subscription"},
-		{ID: 43, IsExclusive: true, SubscriptionType: "subscription"},
-		{ID: 44, IsExclusive: true, SubscriptionType: "standard"},
+		{ID: 42, Platform: service.PlatformOpenAI, IsExclusive: true, SubscriptionType: "subscription"},
+		{ID: 43, Platform: service.PlatformOpenAI, IsExclusive: true, SubscriptionType: "subscription"},
+		{ID: 44, Platform: service.PlatformOpenAI, IsExclusive: true, SubscriptionType: "standard"},
 	}
-	require.Empty(t, filterPlazaVisibleGroups(groups, nil, false))
+	require.Empty(t, modelPlazaVisibleIDs(t, nil, groups, nil))
 	for _, restricted := range []bool{false, true} {
-		visible := filterPlazaVisibleGroups(groups, map[int64]struct{}{42: {}}, restricted)
-		require.Len(t, visible, 1)
-		require.Equal(t, int64(42), visible[0].ID)
+		user := &service.User{ID: 7, RestrictPublicGroups: restricted}
+		ids := modelPlazaVisibleIDs(t, user, groups, []service.UserSubscription{{
+			UserID: 7, GroupID: 42, Status: service.SubscriptionStatusActive,
+			StartsAt: time.Now().Add(-time.Hour), ExpiresAt: time.Now().Add(time.Hour),
+		}})
+		require.Len(t, ids, 1)
+		require.Equal(t, int64(42), ids[0])
 	}
+}
+
+type modelPlazaUserRepoStub struct {
+	service.UserRepository
+	user *service.User
+}
+
+func (r *modelPlazaUserRepoStub) GetByID(context.Context, int64) (*service.User, error) {
+	return r.user, nil
+}
+
+type modelPlazaGroupRepoStub struct {
+	service.GroupRepository
+	groups []service.Group
+}
+
+func (r *modelPlazaGroupRepoStub) ListActive(context.Context) ([]service.Group, error) {
+	return r.groups, nil
+}
+
+type modelPlazaChannelRepoStub struct {
+	service.ChannelRepository
+	channels []service.Channel
+}
+
+func (r *modelPlazaChannelRepoStub) ListAll(context.Context) ([]service.Channel, error) {
+	return r.channels, nil
+}
+
+type modelPlazaSubscriptionRepoStub struct {
+	service.UserSubscriptionRepository
+	active []service.UserSubscription
+}
+
+func (r *modelPlazaSubscriptionRepoStub) ListActiveByUserID(context.Context, int64) ([]service.UserSubscription, error) {
+	return r.active, nil
+}
+
+// Exercise identity-dependent visibility through the handler. The filter's
+// current signature cannot express a user's public-group restriction itself.
+func modelPlazaVisibleIDs(t *testing.T, user *service.User, groups []service.PlazaGroup, active []service.UserSubscription) []int64 {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	groupRepo := &modelPlazaGroupRepoStub{}
+	channel := service.Channel{ID: 1, Name: "test", Status: service.StatusActive,
+		ModelMapping: map[string]map[string]string{
+			service.PlatformOpenAI:    {"gpt-test": "gpt-test"},
+			service.PlatformAnthropic: {"claude-test": "claude-test"},
+		},
+	}
+	for _, group := range groups {
+		groupRepo.groups = append(groupRepo.groups, service.Group{
+			ID: group.ID, Name: group.Name, Platform: group.Platform,
+			Status: service.StatusActive, IsExclusive: group.IsExclusive,
+			SubscriptionType: group.SubscriptionType, RateMultiplier: group.RateMultiplier,
+		})
+		channel.GroupIDs = append(channel.GroupIDs, group.ID)
+	}
+	settings := service.NewSettingService(&settingHandlerPublicRepoStub{
+		values: map[string]string{service.SettingKeyModelPlazaEnabled: "true"},
+	}, &config.Config{})
+	apiKeys := service.NewAPIKeyService(nil, &modelPlazaUserRepoStub{user: user}, groupRepo,
+		&modelPlazaSubscriptionRepoStub{active: active}, nil, nil, &config.Config{})
+	h := NewModelPlazaHandler(service.NewModelPlazaService(
+		&modelPlazaChannelRepoStub{channels: []service.Channel{channel}}, groupRepo, nil, nil, nil,
+	), apiKeys, settings)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/model-plaza", nil)
+	if user != nil {
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: user.ID})
+	}
+	h.Get(c)
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	var response struct {
+		Data modelPlazaResponse `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	ids := make([]int64, 0, len(response.Data.Groups))
+	for _, group := range response.Data.Groups {
+		ids = append(ids, group.ID)
+	}
+	return ids
 }

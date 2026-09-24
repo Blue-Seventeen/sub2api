@@ -41,11 +41,11 @@ func (r *resetQuotaUserSubRepoStub) GetByID(_ context.Context, id int64) (*UserS
 	return &cp, nil
 }
 
-func (r *resetQuotaUserSubRepoStub) ResetUsageWindows(_ context.Context, _ int64, resetDaily, resetWeekly, resetMonthly bool, windowStart time.Time) error {
+func (r *resetQuotaUserSubRepoStub) ResetUsageWindows(_ context.Context, _ int64, resetDaily, resetWeekly, resetMonthly bool, dailyStart, periodicStart time.Time) error {
 	r.resetDailyCalled = resetDaily
 	r.resetWeeklyCalled = resetWeekly
 	r.resetMonthlyCalled = resetMonthly
-	r.windowStart = windowStart
+	r.windowStart = periodicStart
 	if resetDaily && r.resetDailyErr != nil {
 		return r.resetDailyErr
 	}
@@ -59,19 +59,19 @@ func (r *resetQuotaUserSubRepoStub) ResetUsageWindows(_ context.Context, _ int64
 		return nil
 	}
 	if resetDaily {
-		r.dailyWindowStart = &windowStart
+		r.dailyWindowStart = &dailyStart
 		r.sub.DailyUsageUSD = 0
-		r.sub.DailyWindowStart = &windowStart
+		r.sub.DailyWindowStart = &dailyStart
 	}
 	if resetWeekly {
-		r.weeklyWindowStart = &windowStart
+		r.weeklyWindowStart = &periodicStart
 		r.sub.WeeklyUsageUSD = 0
-		r.sub.WeeklyWindowStart = &windowStart
+		r.sub.WeeklyWindowStart = &periodicStart
 	}
 	if resetMonthly {
-		r.monthlyWindowStart = &windowStart
+		r.monthlyWindowStart = &periodicStart
 		r.sub.MonthlyUsageUSD = 0
-		r.sub.MonthlyWindowStart = &windowStart
+		r.sub.MonthlyWindowStart = &periodicStart
 	}
 	return nil
 }
@@ -147,7 +147,7 @@ func TestAdminResetQuota_UsesResetTimestampAsWindowStart(t *testing.T) {
 	svc := newResetQuotaSvc(stub)
 	before := time.Now()
 
-	result, err := svc.AdminResetQuota(context.Background(), 10, true, true, true)
+	result, err := svc.AdminResetQuota(context.Background(), 10, true, true, true, true)
 
 	after := time.Now()
 	require.NoError(t, err)
@@ -159,6 +159,9 @@ func TestAdminResetQuota_UsesResetTimestampAsWindowStart(t *testing.T) {
 	require.Equal(t, *stub.dailyWindowStart, *stub.weeklyWindowStart)
 	require.NotNil(t, stub.monthlyWindowStart)
 	require.Equal(t, *stub.dailyWindowStart, *stub.monthlyWindowStart)
+	require.NotNil(t, stub.customWindowStart)
+	require.Equal(t, *stub.dailyWindowStart, *stub.customWindowStart)
+	require.True(t, stub.resetCustomCalled)
 }
 
 func TestAdminResetQuota_ResetDailyOnly(t *testing.T) {

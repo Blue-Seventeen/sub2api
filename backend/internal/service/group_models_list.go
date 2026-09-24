@@ -1,6 +1,23 @@
 package service
 
-import "strings"
+import (
+	"strings"
+
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+)
+
+// ValidateModelsListConfig validates canonical policy without changing enabled.
+func ValidateModelsListConfig(cfg GroupModelsListConfig) error {
+	for _, model := range cfg.Models {
+		if !validateModelsListPattern(model) {
+			return infraerrors.BadRequest("INVALID_MODEL_ALLOWLIST", `wildcard "*" is only allowed at the end of an allowlist entry`)
+		}
+	}
+	if cfg.Enabled && len(normalizeGroupModelsListConfig(cfg).Models) == 0 {
+		return infraerrors.BadRequest("INVALID_MODEL_ALLOWLIST", "model allowlist cannot be enabled with an empty model list")
+	}
+	return nil
+}
 
 func normalizeGroupModelsListConfig(cfg GroupModelsListConfig) GroupModelsListConfig {
 	out := GroupModelsListConfig{Enabled: cfg.Enabled}
@@ -65,4 +82,9 @@ func ModelsListAllowsModel(patterns []string, model string) bool {
 
 func normalizeModelsListMatchKey(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func validateModelsListPattern(value string) bool {
+	value = strings.TrimSpace(value)
+	return !strings.Contains(strings.TrimSuffix(value, "*"), "*")
 }

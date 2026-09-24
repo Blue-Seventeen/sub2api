@@ -13,8 +13,11 @@ import (
 )
 
 type billingCacheWorkerStub struct {
-	balanceUpdates      int64
-	subscriptionUpdates int64
+	balanceUpdates                  int64
+	subscriptionUpdates             int64
+	subscriptionInvalidations       int64
+	publishedInvalidationCacheKey   string
+	subscriptionInvalidationHandler func(cacheKey string)
 }
 
 type billingCacheUserGroupRateRepoStub struct {
@@ -35,6 +38,90 @@ type billingCacheSubRepoStub struct {
 	UserSubscriptionRepository
 	calls int
 	subs  []UserSubscription
+}
+
+type generationBillingCacheStub struct {
+	billingCacheWorkerStub
+	mu         sync.Mutex
+	generation int64
+	sets       []int64
+	setStarted chan struct{}
+	setRelease chan struct{}
+	setDone    chan bool
+}
+
+func (c *generationBillingCacheStub) GetSubscriptionCache(context.Context, int64, int64) (*SubscriptionCacheData, error) {
+	return nil, errors.New("cache miss")
+}
+
+func (c *generationBillingCacheStub) GetSubscriptionCacheGeneration(context.Context, int64, int64) (int64, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.generation, nil
+}
+
+func (c *generationBillingCacheStub) InvalidateSubscriptionCache(context.Context, int64, int64) error {
+	c.mu.Lock()
+	c.generation++
+	c.mu.Unlock()
+	return nil
+}
+
+func (c *generationBillingCacheStub) SetSubscriptionCacheIfGeneration(_ context.Context, _ int64, _ int64, generation int64, _ *SubscriptionCacheData) (bool, error) {
+	if c.setStarted != nil {
+		select {
+		case c.setStarted <- struct{}{}:
+		default:
+		}
+	}
+	if c.setRelease != nil {
+		<-c.setRelease
+	}
+	c.mu.Lock()
+	c.sets = append(c.sets, generation)
+	written := generation == c.generation
+	c.mu.Unlock()
+	if c.setDone != nil {
+		c.setDone <- written
+	}
+	return written, nil
+}
+
+func (c *generationBillingCacheStub) setGenerations() []int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]int64(nil), c.sets...)
+}
+
+type blockingSubscriptionStatusRepo struct {
+	billingCacheSubRepoStub
+	firstStarted chan struct{}
+	firstRelease chan struct{}
+	mu           sync.Mutex
+	loads        int
+}
+
+func (r *blockingSubscriptionStatusRepo) ListActiveByUserIDAndGroupID(ctx context.Context, userID, groupID int64) ([]UserSubscription, error) {
+	r.mu.Lock()
+	r.loads++
+	load := r.loads
+	subs := append([]UserSubscription(nil), r.subs...)
+	r.mu.Unlock()
+	if load == 1 {
+		close(r.firstStarted)
+		select {
+		case <-r.firstRelease:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return subs, nil
+}
+
+func (r *blockingSubscriptionStatusRepo) loadCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.loads
 }
 
 func (r *billingCacheSubRepoStub) ListActiveByUserIDAndGroupID(context.Context, int64, int64) ([]UserSubscription, error) {
@@ -104,6 +191,20 @@ func (b *billingCacheWorkerStub) UpdateSubscriptionUsage(ctx context.Context, us
 }
 
 func (b *billingCacheWorkerStub) InvalidateSubscriptionCache(ctx context.Context, userID, groupID int64) error {
+	atomic.AddInt64(&b.subscriptionInvalidations, 1)
+	return nil
+}
+
+func (b *billingCacheWorkerStub) PublishSubscriptionCacheInvalidation(ctx context.Context, cacheKey string) error {
+	b.publishedInvalidationCacheKey = cacheKey
+	if b.subscriptionInvalidationHandler != nil {
+		b.subscriptionInvalidationHandler(cacheKey)
+	}
+	return nil
+}
+
+func (b *billingCacheWorkerStub) SubscribeSubscriptionCacheInvalidation(ctx context.Context, handler func(cacheKey string)) error {
+	b.subscriptionInvalidationHandler = handler
 	return nil
 }
 
@@ -168,9 +269,50 @@ func TestBillingCacheServiceQueueHighLoad(t *testing.T) {
 		return atomic.LoadInt64(&cache.balanceUpdates) > 0
 	}, 2*time.Second, 10*time.Millisecond)
 
-	require.Eventually(t, func() bool {
-		return atomic.LoadInt64(&cache.subscriptionUpdates) > 0
-	}, 2*time.Second, 10*time.Millisecond)
+	require.Equal(t, int64(1), atomic.LoadInt64(&cache.subscriptionInvalidations))
+}
+
+func TestBillingCacheServiceRefillRetriesAfterSecondInvalidation(t *testing.T) {
+	now := time.Now().UTC()
+	group := &Group{ID: 2, SubscriptionType: SubscriptionTypeSubscription}
+	repo := &blockingSubscriptionStatusRepo{
+		billingCacheSubRepoStub: billingCacheSubRepoStub{subs: []UserSubscription{{
+			ID: 1, UserID: 1, GroupID: 2, StartsAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour), Status: SubscriptionStatusActive, Group: group, DailyUsageUSD: 1,
+		}}},
+		firstStarted: make(chan struct{}),
+		firstRelease: make(chan struct{}),
+	}
+	cache := &generationBillingCacheStub{
+		setStarted: make(chan struct{}, 1),
+		setRelease: make(chan struct{}),
+		setDone:    make(chan bool, 1),
+	}
+	svc := NewBillingCacheService(cache, nil, repo, nil, nil, nil, &config.Config{}, nil)
+	t.Cleanup(svc.Stop)
+
+	resultCh := make(chan *subscriptionCacheData, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		data, err := svc.GetSubscriptionStatus(context.Background(), 1, 2)
+		resultCh <- data
+		errCh <- err
+	}()
+	<-repo.firstStarted
+	err := svc.InvalidateSubscription(context.Background(), 1, 2)
+	require.NoError(t, err)
+	close(repo.firstRelease)
+
+	require.NoError(t, <-errCh)
+	require.NotNil(t, <-resultCh)
+	require.GreaterOrEqual(t, repo.loadCount(), 2)
+	<-cache.setStarted
+	require.NoError(t, svc.InvalidateSubscription(context.Background(), 1, 2))
+	close(cache.setRelease)
+	require.False(t, <-cache.setDone)
+	sets := cache.setGenerations()
+	require.NotEmpty(t, sets)
+	require.NotContains(t, sets, int64(0))
+	require.NotContains(t, sets, int64(2))
 }
 
 func TestBillingCacheServiceEnqueueAfterStopReturnsFalse(t *testing.T) {
@@ -299,6 +441,7 @@ func TestBillingCacheServiceCheckBillingEligibility_UsesStackedSubscriptionCache
 		data: &SubscriptionCacheData{
 			Status:              SubscriptionStatusActive,
 			ExpiresAt:           now.Add(24 * time.Hour),
+			RefreshAt:           now.Add(24 * time.Hour),
 			DailyUsage:          100,
 			DailyLimitUSD:       &stackedDailyLimit,
 			DailyWindowStart:    &now,
@@ -330,6 +473,7 @@ func TestBillingCacheServiceFreshSubscriptionCheckUsesCurrentCacheInsteadOfSnaps
 		data: &SubscriptionCacheData{
 			Status:           SubscriptionStatusActive,
 			ExpiresAt:        now.Add(24 * time.Hour),
+			RefreshAt:        now.Add(24 * time.Hour),
 			DailyUsage:       100,
 			DailyLimitUSD:    &limit,
 			DailyWindowStart: &now,
@@ -360,6 +504,7 @@ func TestBillingCacheServiceFreshSubscriptionCheckAllowsCurrentCacheWhenSnapshot
 		data: &SubscriptionCacheData{
 			Status:           SubscriptionStatusActive,
 			ExpiresAt:        now.Add(24 * time.Hour),
+			RefreshAt:        now.Add(24 * time.Hour),
 			DailyUsage:       0,
 			DailyLimitUSD:    &limit,
 			DailyWindowStart: &now,
@@ -560,7 +705,7 @@ func TestBillingCacheServiceQueueSubscriptionUsageFallsBackWhenWorkerUnavailable
 
 	svc.QueueUpdateSubscriptionUsage(1, 2, 1.5)
 
-	require.Equal(t, int64(1), atomic.LoadInt64(&cache.subscriptionUpdates))
+	require.Equal(t, int64(1), atomic.LoadInt64(&cache.subscriptionInvalidations))
 }
 
 func TestBillingCacheServiceRateLimitReset_DeduplicatesConcurrentExpiredWindow(t *testing.T) {

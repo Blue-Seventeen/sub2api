@@ -367,7 +367,7 @@ func isPlatformPricingMatch(groupPlatform, pricingPlatform string) bool {
 // fallback used before a request target has been resolved.
 func matchingPlatforms(groupPlatform string) []string {
 	if groupPlatform == PlatformComposite {
-		return []string{PlatformAnthropic, PlatformGemini, PlatformOpenAI, PlatformAntigravity, PlatformGrok}
+		return []string{PlatformAnthropic, PlatformGemini, PlatformOpenAI, PlatformAntigravity, PlatformGrok, PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax}
 	}
 	return []string{groupPlatform}
 }
@@ -684,7 +684,47 @@ func validatePricingEntries(pricing []ChannelModelPricing) error {
 	if err := validatePricingIntervals(pricing); err != nil {
 		return err
 	}
-	return validatePricingBillingMode(pricing)
+	if err := validatePricingBillingMode(pricing); err != nil {
+		return err
+	}
+	return validatePricingTimePricing(pricing)
+}
+
+func validatePricingTimePricing(pricing []ChannelModelPricing) error {
+	for i := range pricing {
+		config := pricing[i].TimePricing
+		if config == nil {
+			continue
+		}
+		if len(config.Periods) == 0 {
+			pricing[i].TimePricing = nil
+			continue
+		}
+		mode := pricing[i].BillingMode
+		if mode != "" && mode != BillingModeToken {
+			return infraerrors.BadRequest("TIME_PRICING_UNSUPPORTED_MODE", "time pricing only supports token billing mode")
+		}
+		if err := validateChannelTimePricing(config); err != nil {
+			return infraerrors.BadRequest("INVALID_TIME_PRICING", fmt.Sprintf(
+				"invalid time pricing for platform '%s' models %v: %v", pricing[i].Platform, pricing[i].Models, err))
+		}
+	}
+	return nil
+}
+
+func validateAccountStatsPricingRules(rules []AccountStatsPricingRule) error {
+	for i := range rules {
+		for _, pricing := range rules[i].Pricing {
+			if pricing.TimePricing != nil && len(pricing.TimePricing.Periods) > 0 {
+				return fmt.Errorf("account stats pricing rule #%d: %w", i+1,
+					infraerrors.BadRequest("ACCOUNT_STATS_TIME_PRICING_UNSUPPORTED", "account stats pricing does not support time pricing"))
+			}
+		}
+		if err := validatePricingEntries(rules[i].Pricing); err != nil {
+			return fmt.Errorf("account stats pricing rule #%d: %w", i+1, err)
+		}
+	}
+	return nil
 }
 
 // validatePricingBillingMode 校验计费模式配置：按次/图片模式必须配价格或区间，所有价格字段不能为负，区间至少有一个价格字段。
@@ -814,10 +854,8 @@ func (s *ChannelService) Create(ctx context.Context, input *CreateChannelInput) 
 	if err := validateChannelConfig(channel.ModelPricing, channel.ModelMapping); err != nil {
 		return nil, err
 	}
-	for i, rule := range channel.AccountStatsPricingRules {
-		if err := validatePricingEntries(rule.Pricing); err != nil {
-			return nil, fmt.Errorf("account stats pricing rule #%d: %w", i+1, err)
-		}
+	if err := validateAccountStatsPricingRules(channel.AccountStatsPricingRules); err != nil {
+		return nil, err
 	}
 
 	if err := s.repo.Create(ctx, channel); err != nil {
@@ -858,10 +896,8 @@ func (s *ChannelService) Update(ctx context.Context, id int64, input *UpdateChan
 	if err := validateChannelConfig(channel.ModelPricing, channel.ModelMapping); err != nil {
 		return nil, err
 	}
-	for i, rule := range channel.AccountStatsPricingRules {
-		if err := validatePricingEntries(rule.Pricing); err != nil {
-			return nil, fmt.Errorf("account stats pricing rule #%d: %w", i+1, err)
-		}
+	if err := validateAccountStatsPricingRules(channel.AccountStatsPricingRules); err != nil {
+		return nil, err
 	}
 
 	oldGroupIDs := s.getOldGroupIDs(ctx, id)
@@ -1030,7 +1066,8 @@ func conflictsBetween(a, b modelEntry) bool {
 
 // toModelEntry 将模型名转换为 modelEntry
 func toModelEntry(pattern string) modelEntry {
-	prefix, isWild := splitWildcardSuffix(strings.ToLower(pattern))
+	normalized := normalizeChannelPricingModelName(pattern)
+	prefix, isWild := splitWildcardSuffix(normalized)
 	return modelEntry{pattern: pattern, prefix: prefix, wildcard: isWild}
 }
 
@@ -1056,13 +1093,22 @@ func validateNoConflictingMappings(mapping map[string]map[string]string) error {
 	for platform, platformMapping := range mapping {
 		entries := make([]modelEntry, 0, len(platformMapping))
 		for src := range platformMapping {
-			entries = append(entries, toModelEntry(src))
+			entries = append(entries, toMappingModelEntry(src))
 		}
 		if err := detectConflicts(entries, platform, "MAPPING_PATTERN_CONFLICT", "mapping source patterns"); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// toMappingModelEntry deliberately does not apply provider-specific model
+// aliases. A mapping is an exact source-name policy; for example, the dot and
+// hyphen spellings of an Anthropic model remain distinct mapping keys.
+func toMappingModelEntry(pattern string) modelEntry {
+	normalized := strings.ToLower(strings.TrimSpace(pattern))
+	prefix, isWild := splitWildcardSuffix(normalized)
+	return modelEntry{pattern: pattern, prefix: prefix, wildcard: isWild}
 }
 
 func validatePricingIntervals(pricingList []ChannelModelPricing) error {

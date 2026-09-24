@@ -1,10 +1,12 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -656,6 +658,23 @@ func (s *OpenAIGatewayService) forwardGrokChatCompletionsViaResponses(
 	if clientStream {
 		result, err = s.handleChatStreamingResponse(resp, c, account, originalModel, billingModel, upstreamModel, startTime, len(body))
 	} else {
+		// The shared buffered Chat handler commits the translated JSON before it
+		// returns. Preflight the SSE body for Grok so a successful response with
+		// no billable usage cannot be exposed before failover is selected.
+		bufferedBody, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return nil, readErr
+		}
+		_ = resp.Body.Close()
+		resp.Body = io.NopCloser(bytes.NewReader(bufferedBody))
+		preflightUsage := s.parseSSEUsageFromBody(string(bufferedBody))
+		if preflightUsage == nil || !hasBillableGrokChatUsage(*preflightUsage) {
+			return nil, newGrokMissingUsageFailoverError(
+				c,
+				account,
+				firstNonEmpty(resp.Header.Get("x-request-id"), resp.Header.Get("xai-request-id")),
+			)
+		}
 		result, err = s.handleChatBufferedStreamingResponse(resp, c, account, originalModel, billingModel, upstreamModel, startTime)
 	}
 	if result != nil {

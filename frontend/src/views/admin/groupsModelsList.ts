@@ -238,10 +238,21 @@ export const clearGlobalModelOperations = (state: ModelsListState) => {
   state.globalModelOperations = []
 }
 
-export const buildModelsListPayload = (state: ModelsListState): ModelsListPayload => ({
-  models_list_config: buildModelsListConfig(state),
-  global_model_operations: getGlobalModelOperations(state),
-})
+export const buildModelsListPayload = (state: ModelsListState): ModelsListPayload => {
+  // Submit active drafts without consuming the form's pending edits on failure.
+  const snapshot: ModelsListState = {
+    ...state,
+    items: state.items.map(item => ({ ...item })),
+    globalModelOperations: getGlobalModelOperations(state),
+  }
+  for (const item of [...snapshot.items]) {
+    if (item.editing) commitModelsListItemEdit(snapshot, item)
+  }
+  return {
+    models_list_config: buildModelsListConfig(snapshot),
+    global_model_operations: getGlobalModelOperations(snapshot),
+  }
+}
 
 export const buildModelsListConfig = (state: ModelsListState): ModelsListConfig => ({
   enabled: state.enabled,

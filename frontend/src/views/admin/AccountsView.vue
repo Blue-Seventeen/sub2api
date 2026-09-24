@@ -1535,7 +1535,7 @@ const handleManualRefresh = async () => {
 const loadUpstreamBillingProbeGlobalState = async () => {
   try {
     const settings = await adminAPI.accounts.getUpstreamBillingProbeSettings()
-    upstreamBillingProbeGloballyEnabled.value = settings.enabled
+    upstreamBillingProbeGloballyEnabled.value = settings?.enabled
   } catch (error) {
     console.error('Failed to load upstream billing probe settings:', error)
   }

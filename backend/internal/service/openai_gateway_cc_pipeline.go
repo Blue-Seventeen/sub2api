@@ -16,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 )
 
@@ -40,6 +41,24 @@ func (s *OpenAIGatewayService) newUpstreamSSEScanner(r io.Reader) *bufio.Scanner
 	}
 	scanner.Buffer(make([]byte, 0, 64*1024), maxLineSize)
 	return scanner
+}
+
+// newChatCompletionsUpstreamContext detaches the request from client
+// cancellation while retaining an explicit lifecycle cancel for the response
+// body. Chat Completions must cancel that context before closing the body so
+// transports and custom response readers can terminate promptly.
+func newChatCompletionsUpstreamContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	base := context.Background()
+	if ctx != nil {
+		base = context.WithoutCancel(ctx)
+		// A request that was already canceled before forwarding is kept fully
+		// detached for the existing billing/drain behavior. Active requests get
+		// an explicit lifecycle cancel below.
+		if ctx.Err() != nil {
+			return base, func() {}
+		}
+	}
+	return context.WithCancel(base)
 }
 
 // newStreamHeaderWriter 返回幂等的 SSE 响应头写入闭包：首次调用时透传过滤后的
@@ -90,9 +109,12 @@ func (s *OpenAIGatewayService) failoverOpenAIUpstreamHTTPError(
 ) *UpstreamFailoverError {
 	shouldFailover := s.shouldFailoverOpenAIUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody)
 	tempUnscheduled := false
-	if c != nil && account != nil && account.Platform != PlatformGrok && !shouldFailover && !IsResponseCommitted(c) && s.rateLimitService != nil {
+	responseNotCommitted := c == nil || !IsResponseCommitted(c)
+	shouldCheckPolicy := c != nil || (account != nil && account.IsPoolMode())
+	if account != nil && account.Platform != PlatformGrok && responseNotCommitted && shouldCheckPolicy &&
+		(!shouldFailover || account.IsPoolMode()) && s.rateLimitService != nil {
 		tempUnscheduled = s.rateLimitService.CheckErrorPolicy(ctx, account, resp.StatusCode, respBody, upstreamModel) == ErrorPolicyTempUnscheduled
-		shouldFailover = tempUnscheduled
+		shouldFailover = shouldFailover || tempUnscheduled
 	}
 	if account != nil && account.Platform == PlatformGrok {
 		shouldFailover = s.shouldFailoverGrokUpstreamError(resp.StatusCode, respBody)
@@ -194,8 +216,8 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 ) (*http.Response, error) {
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, http.MethodPost, targetURL, bytes.NewReader(body))
-	releaseUpstreamCtx()
 	if err != nil {
+		releaseUpstreamCtx()
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
 	// 记录本次实际选择的协议端点，供错误日志和用量日志在没有
@@ -241,7 +263,16 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	}
 	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 	if err != nil {
+		releaseUpstreamCtx()
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
+	}
+	if resp == nil || resp.Body == nil {
+		releaseUpstreamCtx()
+		return nil, errors.New("openai upstream returned an empty response body")
+	}
+	resp.Body = &openAIRequestContextReadCloser{
+		ReadCloser: resp.Body,
+		cleanup:    releaseUpstreamCtx,
 	}
 	return resp, nil
 }
@@ -259,6 +290,9 @@ type ccStreamScanState struct {
 	// 非 nil 时调用方必须跳过 finalize 并返回 usage-incomplete 错误，避免
 	// 把上游截断伪装成正常收尾。
 	Err error
+	// ErrorPayload is a terminal bare error event emitted by a Responses-like
+	// provider over the Chat Completions SSE transport.
+	ErrorPayload []byte
 }
 
 // scanCCStream 驱动两条 CC 回退路径共享的 SSE 读循环：提取 data 行、在 [DONE]
@@ -276,8 +310,17 @@ func (s *OpenAIGatewayService) scanCCStream(
 	var st ccStreamScanState
 
 	scanner := s.newUpstreamSSEScanner(resp.Body)
+	var namedEvent string
 	for scanner.Scan() {
 		line := scanner.Text()
+		if line == "" {
+			namedEvent = ""
+			continue
+		}
+		if name, ok := extractOpenAISSEEventLine(line); ok {
+			namedEvent = strings.TrimSpace(name)
+			continue
+		}
 		payload, ok := extractOpenAISSEDataLine(line)
 		if !ok {
 			continue
@@ -288,6 +331,10 @@ func (s *OpenAIGatewayService) scanCCStream(
 		}
 		if payload == "[DONE]" {
 			st.SawDone = true
+			break
+		}
+		if isCCUpstreamErrorPayload(namedEvent, []byte(payload)) {
+			st.ErrorPayload = append(st.ErrorPayload[:0], []byte(payload)...)
 			break
 		}
 		// 观察上游 CC chunk 回显的 model / service_tier（计费以回显为准）。
@@ -340,6 +387,7 @@ func logCCStreamMissingDoneSentinel(logPrefix, requestID string) {
 func (s *OpenAIGatewayService) readCCUpstreamJSONResponse(
 	c *gin.Context,
 	resp *http.Response,
+	account *Account,
 	writeError compatErrorWriter,
 ) (*apicompat.ChatCompletionsResponse, OpenAIUsage, error) {
 	respBody, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
@@ -350,6 +398,9 @@ func (s *OpenAIGatewayService) readCCUpstreamJSONResponse(
 		return nil, OpenAIUsage{}, fmt.Errorf("read upstream body: %w", err)
 	}
 
+	if isCCUpstreamErrorPayload("", respBody) {
+		return nil, OpenAIUsage{}, s.handleCCUpstreamErrorPayload(c, resp, account, respBody, true, writeError)
+	}
 	var ccResp apicompat.ChatCompletionsResponse
 	if err := json.Unmarshal(respBody, &ccResp); err != nil {
 		writeError(c, http.StatusBadGateway, "api_error", "Failed to parse upstream response")
@@ -366,6 +417,51 @@ func (s *OpenAIGatewayService) readCCUpstreamJSONResponse(
 		usage = parsed
 	}
 	return &ccResp, usage, nil
+}
+
+func isCCUpstreamErrorPayload(namedEvent string, payload []byte) bool {
+	if namedEvent == "error" || namedEvent == "response.failed" {
+		return true
+	}
+	event := gjson.ParseBytes(payload)
+	eventType := strings.TrimSpace(event.Get("type").String())
+	return eventType == "error" || eventType == "response.failed" ||
+		hasClientVisibleErrorValue(event.Get("error")) || hasClientVisibleErrorValue(event.Get("response.error"))
+}
+
+// HTTP 200 is only the transport status: an error envelope must never enter
+// successful conversion/billing. Custom rules take precedence over retries.
+func (s *OpenAIGatewayService) handleCCUpstreamErrorPayload(
+	c *gin.Context,
+	resp *http.Response,
+	account *Account,
+	payload []byte,
+	allowFailover bool,
+	writeError compatErrorWriter,
+) error {
+	message := extractOpenAISSEErrorMessage(payload)
+	platform := PlatformOpenAI
+	if account != nil {
+		platform = account.Platform
+	}
+	status, errType, errMsg, matched := applyOpenAIStreamFailedErrorPassthroughRule(c, platform, payload, message)
+	if !matched {
+		if allowFailover && openAIStreamErrorEventShouldFailover(payload, message) {
+			return s.newOpenAIStreamFailoverError(c, account, false, resp.Header.Get("x-request-id"), payload, message, resp.Header)
+		}
+		status = openAIStreamFailedEventSemanticStatus(payload, message)
+		errType = firstNonEmpty(gjson.GetBytes(payload, "error.type").String(), gjson.GetBytes(payload, "response.error.type").String(), "upstream_error")
+		errMsg = message
+	}
+	s.recordOpenAIStreamUpstreamError(c, account, false, resp.Header.Get("x-request-id"), "http_error", payload, message)
+	if strings.TrimSpace(errMsg) == "" {
+		errMsg = "Upstream request failed"
+	}
+	errMsg = sanitizeUserVisibleErrorText(sanitizeUpstreamErrorMessage(errMsg))
+	errType = sanitizeUserVisibleErrorText(sanitizeUpstreamErrorMessage(errType))
+	MarkResponseCommitted(c)
+	writeError(c, status, errType, errMsg)
+	return fmt.Errorf("upstream response failed: %s", errMsg)
 }
 
 // writeOpenAIResponsesFallbackError 以 /v1/responses 回退路径的既有错误格式回写

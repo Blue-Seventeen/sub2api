@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# Use Docker's bundled BuildKit frontend so cached builds need no syntax-image pull.
 # =============================================================================
 # Sub2API Multi-Stage Dockerfile
 # =============================================================================
@@ -17,6 +17,8 @@ ARG MIHOMO_VERSION=1.19.24
 ARG MIHOMO_AMD64_SHA256=7c8678fc20a1d3af9bfb87ccee428112b74398f7e04b6ddb044f1e7b94539870
 ARG MIHOMO_ARM64_SHA256=6d4a278e7ace1016f23d7245f6f8911f6f7a4adfba2095704473d937e1911840
 ARG NPM_CONFIG_REGISTRY=
+ARG VERSION=0.2.4
+ARG COMMIT=docker
 
 # -----------------------------------------------------------------------------
 # Stage 1: Frontend Builder
@@ -57,8 +59,8 @@ RUN pnpm run build
 FROM --platform=${BUILDPLATFORM} ${GOLANG_IMAGE} AS backend-builder
 
 # Build arguments for version info (set by CI)
-ARG VERSION=
-ARG COMMIT=docker
+ARG VERSION
+ARG COMMIT
 ARG DATE
 ARG GOPROXY
 ARG GOSUMDB
@@ -134,10 +136,15 @@ RUN apk add --no-cache ca-certificates wget gzip && \
 # -----------------------------------------------------------------------------
 FROM ${ALPINE_IMAGE}
 
+ARG VERSION
+ARG COMMIT
+
 # Labels
 LABEL maintainer="Wei-Shaw <github.com/Wei-Shaw>"
 LABEL description="Sub2API - AI API Gateway Platform"
 LABEL org.opencontainers.image.source="https://github.com/Blue-Seventeen/sub2api"
+LABEL org.opencontainers.image.version="${VERSION}"
+LABEL org.opencontainers.image.revision="${COMMIT}"
 
 # Install runtime dependencies
 RUN apk add --no-cache \
