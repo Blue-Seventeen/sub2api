@@ -1449,14 +1449,14 @@ func TestAPIKeyAuthUsageStillTouchesLastUsed(t *testing.T) {
 
 	user := &service.User{ID: 7, Role: service.RoleUser, Status: service.StatusActive, Balance: 10}
 	apiKey := &service.APIKey{ID: 100, UserID: user.ID, Key: "usage-touch", Status: service.StatusActive, User: user}
-	touchCalls := 0
+	var touchCalls atomic.Int32
 	apiKeyRepo := &stubApiKeyRepo{
 		getByKey: func(context.Context, string) (*service.APIKey, error) {
 			clone := *apiKey
 			return &clone, nil
 		},
 		updateLastUsed: func(context.Context, int64, time.Time) error {
-			touchCalls++
+			touchCalls.Add(1)
 			return nil
 		},
 	}
@@ -1470,7 +1470,7 @@ func TestAPIKeyAuthUsageStillTouchesLastUsed(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
-	require.Eventually(t, func() bool { return touchCalls == 1 }, time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool { return touchCalls.Load() == 1 }, time.Second, 10*time.Millisecond)
 }
 
 func TestAPIKeyAuthAllowsBalanceBelowMinimumReserve(t *testing.T) {
