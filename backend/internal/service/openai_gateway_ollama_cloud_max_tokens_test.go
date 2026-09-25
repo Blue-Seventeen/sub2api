@@ -317,7 +317,6 @@ func TestClampOllamaCloudUpstreamMaxTokens(t *testing.T) {
 // TestForwardAsRawChatCompletions_DeepseekOllamaCloudClampsMaxTokens 端到端验证 raw
 // CC 出站钩子：判定用模型映射后的真实出站 model，官方 DeepSeek 字节级不变。
 func TestForwardAsRawChatCompletions_DeepseekOllamaCloudClampsMaxTokens(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	account := ollamaUpstreamTestAccount(PlatformDeepseek, 311)
 	account.Credentials["api_protocol"] = APIProtocolChatCompletions
@@ -348,7 +347,6 @@ func TestForwardAsRawChatCompletions_DeepseekOllamaCloudClampsMaxTokens(t *testi
 // /v1/responses 降级到 raw CC 的路径确实经过同一个独立 token 钩子（Responses 请求的
 // max_output_tokens 经 apicompat 转成 CC 的 max_completion_tokens）。
 func TestForwardResponsesViaRawChatCompletions_DeepseekOllamaCloudClampsMaxTokens(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	account := ollamaUpstreamTestAccount(PlatformDeepseek, 321)
 	account.Credentials["api_protocol"] = APIProtocolChatCompletions
@@ -369,7 +367,6 @@ func TestForwardResponsesViaRawChatCompletions_DeepseekOllamaCloudClampsMaxToken
 // clamp，实测依据：POST ollama.com/v1/responses max_output_tokens=256000 被上游以
 // "max_tokens (256000) exceeds model's maximum output tokens (65536)" 400 拒绝。
 func TestForwardResponsesClampsOllamaCloudMaxOutputTokens(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	responsesBody := []byte(`{"model":"deepseek-v4-flash","input":"Reply with exactly OK and nothing else.","max_output_tokens":256000,"stream":false}`)
 
@@ -428,7 +425,6 @@ func TestForwardResponsesClampsOllamaCloudMaxOutputTokens(t *testing.T) {
 // 实际 Responses 上游判定：adaptive 账号取 api_base_urls 的 responses 地址，而非 CC
 // 地址（与 buildUpstreamRequest 的 URL 选择一致）。
 func TestForwardResponsesClampUsesResponsesUpstreamBaseURL(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	body := []byte(`{"model":"deepseek-v4-flash","input":"hi","max_output_tokens":256000,"stream":false}`)
 	run := func(account *Account) (*httpUpstreamRecorder, error) {
@@ -469,7 +465,6 @@ func TestForwardResponsesClampUsesResponsesUpstreamBaseURL(t *testing.T) {
 // /v1/responses 的 Ollama Cloud clamp 必须对真实 Codex 客户端同样生效（clamp 曾位于
 // !isCodexCLI 块内被跳过，ollama.com 对 >65535 的 max_output_tokens 一律 400）。
 func TestForwardResponsesClampsOllamaCloudMaxOutputTokensForCodexClients(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	responsesBody := []byte(`{"model":"deepseek-v4-flash","input":"Reply with exactly OK and nothing else.","max_output_tokens":256000,"stream":false}`)
 

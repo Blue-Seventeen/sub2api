@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,6 +21,35 @@ type compatibleGatewayHTTPUpstreamRecorder struct {
 	urls      []string
 	profiles  []HTTPUpstreamProfile
 	err       error
+}
+
+type lockedGinResponseWriter struct {
+	gin.ResponseWriter
+	mu *sync.Mutex
+}
+
+func (w *lockedGinResponseWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.ResponseWriter.Write(p)
+}
+
+func (w *lockedGinResponseWriter) WriteString(s string) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.ResponseWriter.WriteString(s)
+}
+
+func (w *lockedGinResponseWriter) Flush() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.ResponseWriter.Flush()
+}
+
+func synchronizedRecorderBody(mu *sync.Mutex, recorder *httptest.ResponseRecorder) string {
+	mu.Lock()
+	defer mu.Unlock()
+	return recorder.Body.String()
 }
 
 func (u *compatibleGatewayHTTPUpstreamRecorder) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
@@ -773,6 +803,8 @@ func TestCompatibleGatewayServiceForward_MoonshotMessagesStreamEmitsStopBeforeEO
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
+	var responseMu sync.Mutex
+	c.Writer = &lockedGinResponseWriter{ResponseWriter: c.Writer, mu: &responseMu}
 
 	release := make(chan struct{})
 	chunks := []string{
@@ -819,13 +851,13 @@ func TestCompatibleGatewayServiceForward_MoonshotMessagesStreamEmitsStopBeforeEO
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		body := rec.Body.String()
+		body := synchronizedRecorderBody(&responseMu, rec)
 		if strings.Contains(body, `event: message_stop`) && strings.Contains(body, `"output_tokens":7`) {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	body := rec.Body.String()
+	body := synchronizedRecorderBody(&responseMu, rec)
 	if !strings.Contains(body, `event: message_stop`) {
 		close(release)
 		t.Fatalf("stream body = %s, want message_stop before EOF", body)

@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -25,6 +26,7 @@ func swapMonitorHTTPClient(t *testing.T) {
 
 // captureHandler 把每次收到的请求 body 和 headers 存起来，测试断言用。
 type captureHandler struct {
+	mu          sync.Mutex
 	lastBody    map[string]any
 	lastHeaders http.Header
 	respondText string // 写到 Anthropic content[0].text 里（校验用）
@@ -32,21 +34,25 @@ type captureHandler struct {
 }
 
 func (h *captureHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	h.lastHeaders = r.Header.Clone()
 	defer func() { _ = r.Body.Close() }()
 	var parsed map[string]any
 	_ = json.NewDecoder(r.Body).Decode(&parsed)
+	h.mu.Lock()
+	h.lastHeaders = r.Header.Clone()
 	h.lastBody = parsed
+	status := h.status
+	respondText := h.respondText
+	h.mu.Unlock()
 
-	if h.status == 0 {
-		h.status = 200
+	if status == 0 {
+		status = 200
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(h.status)
+	w.WriteHeader(status)
 	// 构造 Anthropic 格式的响应：content[0].text = h.respondText
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"content": []map[string]any{
-			{"type": "text", "text": h.respondText},
+			{"type": "text", "text": respondText},
 		},
 	})
 }
@@ -60,6 +66,7 @@ func setupFakeAnthropic(t *testing.T, handler *captureHandler) string {
 }
 
 type openAICaptureHandler struct {
+	mu                        sync.Mutex
 	lastBody                  map[string]any
 	lastHeaders               http.Header
 	lastPath                  string
@@ -69,27 +76,33 @@ type openAICaptureHandler struct {
 }
 
 func (h *openAICaptureHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	h.lastHeaders = r.Header.Clone()
-	h.lastPath = r.URL.Path
 	defer func() { _ = r.Body.Close() }()
 	var parsed map[string]any
 	_ = json.NewDecoder(r.Body).Decode(&parsed)
+	path := r.URL.Path
+	h.mu.Lock()
+	h.lastHeaders = r.Header.Clone()
+	h.lastPath = path
 	h.lastBody = parsed
+	status := h.status
+	rawResponse := h.rawResponse
+	responsesLeadingReasoning := h.responsesLeadingReasoning
+	h.mu.Unlock()
 
-	if h.status == 0 {
-		h.status = http.StatusOK
+	if status == 0 {
+		status = http.StatusOK
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(h.status)
-	if h.rawResponse != "" {
-		_, _ = w.Write([]byte(h.rawResponse))
+	w.WriteHeader(status)
+	if rawResponse != "" {
+		_, _ = w.Write([]byte(rawResponse))
 		return
 	}
 
 	answer := answerFromOpenAIRequest(parsed)
-	if h.lastPath == providerOpenAIResponsesPath {
+	if path == providerOpenAIResponsesPath {
 		output := []map[string]any{}
-		if h.responsesLeadingReasoning {
+		if responsesLeadingReasoning {
 			output = append(output, map[string]any{
 				"type":    "reasoning",
 				"summary": []any{},

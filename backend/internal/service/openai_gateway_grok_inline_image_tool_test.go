@@ -18,7 +18,6 @@ import (
 )
 
 func TestForwardGrokChatViaResponsesDropsRedundantViewImage(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := grokChatInlineImageRequest()
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -45,7 +44,6 @@ func TestForwardGrokChatViaResponsesDropsRedundantViewImage(t *testing.T) {
 }
 
 func TestForwardGrokRawChatDropsRedundantViewImage(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := grokChatInlineImageRequest()
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -73,7 +71,6 @@ func TestForwardGrokRawChatDropsRedundantViewImage(t *testing.T) {
 }
 
 func TestForwardGrokMessagesDropsRedundantViewImage(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := []byte(`{
 		"model":"grok-4.6","max_tokens":32,"stream":false,
 		"messages":[{"role":"user","content":[
