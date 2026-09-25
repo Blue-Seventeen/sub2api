@@ -15,7 +15,6 @@ import (
 )
 
 func TestForwardResponsesInputTokensCustomRelayUsesLocalEstimate(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/input_tokens", nil)
@@ -47,7 +46,6 @@ func TestForwardResponsesInputTokensCustomRelayUsesLocalEstimate(t *testing.T) {
 }
 
 func TestForwardResponsesInputTokensGrokOAuthUsesLocalEstimate(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/input_tokens", nil)
@@ -67,7 +65,6 @@ func TestForwardResponsesInputTokensGrokOAuthUsesLocalEstimate(t *testing.T) {
 }
 
 func TestForwardResponsesInputTokensUpstream404FallsBackLocally(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/input_tokens", nil)

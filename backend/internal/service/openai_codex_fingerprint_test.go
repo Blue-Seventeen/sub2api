@@ -802,7 +802,6 @@ func TestApplyCodexFingerprintClientMetadataRaw_Noop(t *testing.T) {
 
 func newFingerprintStageTestContext(t *testing.T) *gin.Context {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	return c

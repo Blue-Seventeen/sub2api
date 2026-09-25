@@ -594,7 +594,6 @@ func runOpenAIResponseFlushTest(recorder *openAIResponseFlushRecorder, body io.R
 }
 
 func runOpenAIResponseFlushTestWithAccount(recorder *openAIResponseFlushRecorder, body io.ReadCloser, gatewayCfg config.GatewayConfig, account *Account) (*openaiStreamingResult, error) {
-	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	svc := &OpenAIGatewayService{

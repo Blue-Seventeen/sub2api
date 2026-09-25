@@ -62,7 +62,6 @@ func (s *stubClaudeKimiToolRestoreCache) PutClaudeKimiToolRestoreEntry(_ context
 
 func newClaudeKimiToolRestoreTestHarness(t *testing.T, stream bool, restoreCtx ClaudeKimiToolRestoreContext) (*CompatibleGatewayService, *stubClaudeKimiToolRestoreCache, *gin.Context, *httptest.ResponseRecorder, *compatiblePreparedRequest) {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)

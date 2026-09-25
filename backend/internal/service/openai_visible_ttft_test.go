@@ -185,7 +185,6 @@ func TestOpenAIResponsesTTFTStartsAtCompletedImage(t *testing.T) {
 }
 
 func TestOpenAINativeMetadataDoesNotDisarmFirstOutputTimeout(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{
 		MaxLineSize:                     defaultMaxLineSize,
 		OpenAIFirstOutputTimeoutSeconds: 1,
@@ -235,7 +234,6 @@ func TestOpenAIResponsesTTFTDefaultsToSemanticOutput(t *testing.T) {
 
 func runSyntheticVisibleTTFTStream(t *testing.T, passthrough bool, visibleDelay time.Duration, timeoutSeconds int, ttftMode string, visibleEvent string) *openaiStreamingResult {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
 	mode := ttftMode
 	if mode == "" {
 		mode = OpenAITTFTModeSemantic

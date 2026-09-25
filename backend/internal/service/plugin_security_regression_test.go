@@ -180,7 +180,6 @@ func TestPluginManagerPersistsPluginNormalizedConfig(t *testing.T) {
 }
 
 func TestPluginRequestSentErrorDoesNotFailOver(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest("POST", "/v1/responses", nil)

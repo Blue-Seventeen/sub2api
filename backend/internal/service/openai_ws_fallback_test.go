@@ -163,7 +163,6 @@ func TestResolveOpenAIWSFallbackErrorResponse(t *testing.T) {
 }
 
 func TestWriteOpenAIWSFallbackErrorResponseMarksDefaultClientRouteUnknown(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	svc := &OpenAIGatewayService{}
 	account := &Account{ID: 42, Name: "default-client", Platform: PlatformOpenAI}
@@ -185,7 +184,6 @@ func TestWriteOpenAIWSFallbackErrorResponseMarksDefaultClientRouteUnknown(t *tes
 }
 
 func TestWriteOpenAIWSFallbackErrorResponseKeepsManagedProxy(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	svc := &OpenAIGatewayService{}
 	proxyID := int64(10060)

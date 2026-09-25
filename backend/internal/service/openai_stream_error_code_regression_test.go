@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -40,7 +39,6 @@ func TestOpenAIStreamErrorCodeRetainsNestedPrecedence(t *testing.T) {
 }
 
 func TestOpenAIStreamTopLevelRateLimitCustomRuleStillWins(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	c, rec := closureRelayContext("/v1/chat/completions")
 	bindPassthroughRule(c, PlatformOpenAI, []string{"rate limit"}, http.StatusTeapot)
 	payload := []byte(fmt.Sprintf(`{"type":"error","code":"rate_limit_exceeded","message":%q}`, "rate limit: "+closurePrivateError))

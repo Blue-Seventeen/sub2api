@@ -651,7 +651,6 @@ func TestNewAPIStyleBinaryStreamReadErrorDoesNotAppendSSE(t *testing.T) {
 }
 
 func newAPIStyleTestContext() *gin.Context {
-	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	return c

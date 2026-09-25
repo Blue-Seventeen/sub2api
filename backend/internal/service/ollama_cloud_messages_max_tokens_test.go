@@ -28,7 +28,6 @@ func messagesClampTestConfig() *config.Config {
 
 func newMessagesClampTestContext(t *testing.T) *gin.Context {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)

@@ -130,7 +130,6 @@ func TestGrokContentPolicy403DoesNotMutateOrFailover(t *testing.T) {
 	require.False(t, svc.isOpenAIAccountRuntimeBlocked(account))
 	require.False(t, svc.shouldFailoverGrokUpstreamError(http.StatusForbidden, body))
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
@@ -141,7 +140,6 @@ func TestGrokContentPolicy403DoesNotMutateOrFailover(t *testing.T) {
 }
 
 func TestGrokNonFailoverDoesNotApplyGenericTempUnschedulablePolicy(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	repo := &grokQuotaAccountRepo{}
 	svc := &OpenAIGatewayService{
 		accountRepo:      repo,
@@ -178,7 +176,6 @@ func TestGrokNonFailoverDoesNotApplyGenericTempUnschedulablePolicy(t *testing.T)
 }
 
 func TestGrokContentPolicy403SharedErrorFallbackDoesNotMutate(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := []byte(`{"error":{"code":"content_filter","message":"prohibited content"}}`)
 	repo := &grokQuotaAccountRepo{}
 	svc := &OpenAIGatewayService{accountRepo: repo}
@@ -227,7 +224,6 @@ func TestGrokContentPolicy403SharedErrorFallbackDoesNotMutate(t *testing.T) {
 }
 
 func TestGrokContentPolicy403MediaResponseBypassesCustomErrorCodes(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := `{"error":{"code":"new_sensitive","message":"image is sensitive"}}`
 	repo := &grokQuotaAccountRepo{}
 	svc := &OpenAIGatewayService{accountRepo: repo}
@@ -259,7 +255,6 @@ func TestGrokContentPolicy403MediaResponseBypassesCustomErrorCodes(t *testing.T)
 }
 
 func TestGrokContentPolicySSEErrorDoesNotMutateOrFailover(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	repo := &grokQuotaAccountRepo{}
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,

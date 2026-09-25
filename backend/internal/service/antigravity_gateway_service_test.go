@@ -286,7 +286,6 @@ func TestResolveAntigravityProjectID(t *testing.T) {
 }
 
 func TestAntigravityGatewayService_ForwardGemini_UsesConfiguredProjectFallback(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	writer := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(writer)
 
@@ -341,7 +340,6 @@ func TestAntigravityGatewayService_ForwardGemini_UsesConfiguredProjectFallback(t
 }
 
 func TestAntigravityGatewayService_ForwardGemini_ImageUsesDefaultMappingAndOAuth(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	writer := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(writer)
 	body := []byte(`{"contents":[{"role":"user","parts":[{"text":"draw a cat"}]}],"generationConfig":{"responseModalities":["TEXT","IMAGE"],"imageConfig":{"aspectRatio":"1:1"}}}`)
@@ -400,7 +398,6 @@ func TestAntigravityGatewayService_ForwardGemini_ImageUsesDefaultMappingAndOAuth
 }
 
 func TestAntigravityGatewayService_ForwardGemini_PreservesServerSideToolInvocationConfig(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := []byte(`{"contents":[{"role":"user","parts":[{"text":"hello"}]}],"tools":[{"functionDeclarations":[{"name":"get_weather","parameters":{"type":"object","additionalProperties":false}}]},{"googleSearch":{}}],"toolConfig":{"includeServerSideToolInvocations":true}}`)
 	writer := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(writer)
@@ -438,7 +435,6 @@ func TestAntigravityGatewayService_ForwardGemini_PreservesServerSideToolInvocati
 }
 
 func TestAntigravityGatewayService_ForwardGemini_MissingProjectReturnsLocalError(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	writer := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(writer)
 
@@ -484,7 +480,6 @@ func TestAntigravityGatewayService_ForwardGemini_MissingProjectReturnsLocalError
 }
 
 func TestAntigravityGatewayService_Forward_PromptTooLong(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	writer := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(writer)
 
@@ -548,7 +543,6 @@ func TestAntigravityGatewayService_Forward_PromptTooLong(t *testing.T) {
 // 验证：当账号存在模型限流且剩余时间 >= antigravityRateLimitThreshold 时，
 // Forward 方法应返回 UpstreamFailoverError，触发 Handler 切换账号
 func TestAntigravityGatewayService_Forward_ModelRateLimitTriggersFailover(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	writer := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(writer)
 
@@ -608,7 +602,6 @@ func TestAntigravityGatewayService_Forward_ModelRateLimitTriggersFailover(t *tes
 // TestAntigravityGatewayService_ForwardGemini_ModelRateLimitTriggersFailover
 // 验证：ForwardGemini 方法同样能正确将 AntigravityAccountSwitchError 转换为 UpstreamFailoverError
 func TestAntigravityGatewayService_ForwardGemini_ModelRateLimitTriggersFailover(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	writer := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(writer)
 
@@ -665,7 +658,6 @@ func TestAntigravityGatewayService_ForwardGemini_ModelRateLimitTriggersFailover(
 // TestAntigravityGatewayService_Forward_StickySessionForceCacheBilling
 // 验证：粘性会话切换时，UpstreamFailoverError.ForceCacheBilling 应为 true
 func TestAntigravityGatewayService_Forward_StickySessionForceCacheBilling(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	writer := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(writer)
 
@@ -720,7 +712,6 @@ func TestAntigravityGatewayService_Forward_StickySessionForceCacheBilling(t *tes
 // TestAntigravityGatewayService_ForwardGemini_StickySessionForceCacheBilling verifies
 // that ForwardGemini sets ForceCacheBilling=true for sticky session switch.
 func TestAntigravityGatewayService_ForwardGemini_StickySessionForceCacheBilling(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	writer := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(writer)
 
@@ -774,7 +765,6 @@ func TestAntigravityGatewayService_ForwardGemini_StickySessionForceCacheBilling(
 }
 
 func TestAntigravityGatewayService_ForwardGemini_ClearsStickySessionOnGeminiRateLimit(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	writer := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(writer)
 
@@ -856,7 +846,6 @@ func TestAntigravityGatewayService_ForwardGemini_ClearsStickySessionOnGeminiRate
 // TestAntigravityGatewayService_Forward_BillsWithMappedModel
 // 验证：Antigravity Claude 转发返回的计费模型使用映射后的模型
 func TestAntigravityGatewayService_Forward_BillsWithMappedModel(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	writer := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(writer)
 
@@ -913,7 +902,6 @@ func TestAntigravityGatewayService_Forward_BillsWithMappedModel(t *testing.T) {
 // TestAntigravityGatewayService_ForwardGemini_BillsWithMappedModel
 // 验证：Antigravity Gemini 转发返回的计费模型使用映射后的模型
 func TestAntigravityGatewayService_ForwardGemini_BillsWithMappedModel(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	writer := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(writer)
 
@@ -965,7 +953,6 @@ func TestAntigravityGatewayService_ForwardGemini_BillsWithMappedModel(t *testing
 }
 
 func TestAntigravityGatewayService_ForwardGemini_FallbackReportsActualUpstreamModel(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	writer := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(writer)
 
@@ -1032,7 +1019,6 @@ func TestAntigravityGatewayService_ForwardGemini_FallbackReportsActualUpstreamMo
 }
 
 func TestAntigravityGatewayService_ForwardGemini_RetriesCorruptedThoughtSignature(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	writer := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(writer)
 
@@ -1120,7 +1106,6 @@ func TestAntigravityGatewayService_ForwardGemini_RetriesCorruptedThoughtSignatur
 }
 
 func TestAntigravityGatewayService_ForwardGemini_SignatureRetryPropagatesFailover(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	writer := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(writer)
 
@@ -1208,7 +1193,6 @@ func TestAntigravityGatewayService_ForwardGemini_SignatureRetryPropagatesFailove
 // TestStreamUpstreamResponse_UsageAndFirstToken
 // 验证：usage 字段可被累积/覆盖更新，并且能记录首 token 时间
 func TestStreamUpstreamResponse_UsageAndFirstToken(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	svc := newAntigravityTestService(&config.Config{
 		Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
 	})
@@ -1248,7 +1232,6 @@ func TestStreamUpstreamResponse_UsageAndFirstToken(t *testing.T) {
 // TestStreamUpstreamResponse_NormalComplete
 // 验证：正常流式转发完成时，数据正确透传、usage 正确收集、clientDisconnect=false
 func TestStreamUpstreamResponse_NormalComplete(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	svc := newAntigravityTestService(&config.Config{
 		Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
 	})
@@ -1292,7 +1275,6 @@ func TestStreamUpstreamResponse_NormalComplete(t *testing.T) {
 // TestHandleGeminiStreamingResponse_NormalComplete
 // 验证：正常 Gemini 流式转发，数据正确透传、usage 正确收集
 func TestHandleGeminiStreamingResponse_NormalComplete(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	svc := newAntigravityTestService(&config.Config{
 		Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
 	})
@@ -1339,7 +1321,6 @@ func TestHandleGeminiStreamingResponse_NormalComplete(t *testing.T) {
 // TestHandleClaudeStreamingResponse_NormalComplete
 // 验证：正常 Claude 流式转发（Gemini→Claude 转换），数据正确转换并输出
 func TestHandleClaudeStreamingResponse_NormalComplete(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	svc := newAntigravityTestService(&config.Config{
 		Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
 	})
@@ -1382,7 +1363,6 @@ func TestHandleClaudeStreamingResponse_NormalComplete(t *testing.T) {
 // TestHandleGeminiStreamingResponse_ThoughtsTokenCount
 // 验证：Gemini 流式转发时 thoughtsTokenCount 被计入 OutputTokens
 func TestHandleGeminiStreamingResponse_ThoughtsTokenCount(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	svc := newAntigravityTestService(&config.Config{
 		Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
 	})
@@ -1418,7 +1398,6 @@ func TestHandleGeminiStreamingResponse_ThoughtsTokenCount(t *testing.T) {
 // TestHandleClaudeStreamingResponse_ThoughtsTokenCount
 // 验证：Gemini→Claude 流式转换时 thoughtsTokenCount 被计入 OutputTokens
 func TestHandleClaudeStreamingResponse_ThoughtsTokenCount(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	svc := newAntigravityTestService(&config.Config{
 		Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
 	})
@@ -1453,7 +1432,6 @@ func TestHandleClaudeStreamingResponse_ThoughtsTokenCount(t *testing.T) {
 // TestStreamUpstreamResponse_ClientDisconnectDrainsUsage
 // 验证：客户端写入失败后，streamUpstreamResponse 继续读取上游以收集 usage
 func TestStreamUpstreamResponse_ClientDisconnectDrainsUsage(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	svc := newAntigravityTestService(&config.Config{
 		Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
 	})
@@ -1488,7 +1466,6 @@ func TestStreamUpstreamResponse_ClientDisconnectDrainsUsage(t *testing.T) {
 // TestStreamUpstreamResponse_ContextCanceled
 // 验证：context 取消时返回 usage 且标记 clientDisconnect
 func TestStreamUpstreamResponse_ContextCanceled(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	svc := newAntigravityTestService(&config.Config{
 		Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
 	})
@@ -1511,7 +1488,6 @@ func TestStreamUpstreamResponse_ContextCanceled(t *testing.T) {
 // TestStreamUpstreamResponse_Timeout
 // 验证：上游超时时返回已收集的 usage
 func TestStreamUpstreamResponse_Timeout(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	svc := newAntigravityTestService(&config.Config{
 		Gateway: config.GatewayConfig{StreamDataIntervalTimeout: 1, MaxLineSize: defaultMaxLineSize},
 	})
@@ -1534,7 +1510,6 @@ func TestStreamUpstreamResponse_Timeout(t *testing.T) {
 // TestStreamUpstreamResponse_TimeoutAfterClientDisconnect
 // 验证：客户端断开后上游超时，返回 usage 并标记 clientDisconnect
 func TestStreamUpstreamResponse_TimeoutAfterClientDisconnect(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	svc := newAntigravityTestService(&config.Config{
 		Gateway: config.GatewayConfig{StreamDataIntervalTimeout: 1, MaxLineSize: defaultMaxLineSize},
 	})
@@ -1564,7 +1539,6 @@ func TestStreamUpstreamResponse_TimeoutAfterClientDisconnect(t *testing.T) {
 // TestHandleGeminiStreamingResponse_ClientDisconnect
 // 验证：Gemini 流式转发中客户端断开后继续 drain 上游
 func TestHandleGeminiStreamingResponse_ClientDisconnect(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	svc := newAntigravityTestService(&config.Config{
 		Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
 	})
@@ -1595,7 +1569,6 @@ func TestHandleGeminiStreamingResponse_ClientDisconnect(t *testing.T) {
 // TestHandleGeminiStreamingResponse_ContextCanceled
 // 验证：context 取消时不注入错误事件
 func TestHandleGeminiStreamingResponse_ContextCanceled(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	svc := newAntigravityTestService(&config.Config{
 		Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
 	})
@@ -1619,7 +1592,6 @@ func TestHandleGeminiStreamingResponse_ContextCanceled(t *testing.T) {
 // TestHandleClaudeStreamingResponse_ClientDisconnect
 // 验证：Claude 流式转发中客户端断开后继续 drain 上游
 func TestHandleClaudeStreamingResponse_ClientDisconnect(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	svc := newAntigravityTestService(&config.Config{
 		Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
 	})
@@ -1650,7 +1622,6 @@ func TestHandleClaudeStreamingResponse_ClientDisconnect(t *testing.T) {
 // TestHandleClaudeStreamingResponse_EmptyStream
 // 验证：上游只返回无法解析的 SSE 行时，触发 UpstreamFailoverError 而不是向客户端发出残缺流
 func TestHandleClaudeStreamingResponse_EmptyStream(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	svc := newAntigravityTestService(&config.Config{
 		Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
 	})
@@ -1690,7 +1661,6 @@ func TestHandleClaudeStreamingResponse_EmptyStream(t *testing.T) {
 // TestHandleClaudeStreamingResponse_ContextCanceled
 // 验证：context 取消时不注入错误事件
 func TestHandleClaudeStreamingResponse_ContextCanceled(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	svc := newAntigravityTestService(&config.Config{
 		Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
 	})
@@ -1783,7 +1753,6 @@ func TestExtractSSEUsage_StreamingSequence(t *testing.T) {
 // TestAntigravityClientWriter 验证 antigravityClientWriter 的断开检测
 func TestAntigravityClientWriter(t *testing.T) {
 	t.Run("normal write succeeds", func(t *testing.T) {
-		gin.SetMode(gin.TestMode)
 		rec := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(rec)
 		flusher, _ := c.Writer.(http.Flusher)
@@ -1796,7 +1765,6 @@ func TestAntigravityClientWriter(t *testing.T) {
 	})
 
 	t.Run("write failure marks disconnected", func(t *testing.T) {
-		gin.SetMode(gin.TestMode)
 		rec := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(rec)
 		fw := &antigravityFailingWriter{ResponseWriter: c.Writer, failAfter: 0}
@@ -1809,7 +1777,6 @@ func TestAntigravityClientWriter(t *testing.T) {
 	})
 
 	t.Run("subsequent writes are no-op", func(t *testing.T) {
-		gin.SetMode(gin.TestMode)
 		rec := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(rec)
 		fw := &antigravityFailingWriter{ResponseWriter: c.Writer, failAfter: 0}

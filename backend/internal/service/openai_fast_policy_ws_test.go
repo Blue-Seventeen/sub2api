@@ -433,8 +433,6 @@ func TestPolicyEnforcingFrameConn_WithoutCapturedFallbackPolicyMisses(t *testing
 func TestWSResponseCreate_IngressFiltersServiceTierBeforeUpstream(t *testing.T) {
 	resetOpenAIFastPolicySettingsCache(t)
 
-	gin.SetMode(gin.TestMode)
-
 	cfg := &config.Config{}
 	cfg.Security.URLAllowlist.Enabled = false
 	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
@@ -556,8 +554,6 @@ func TestWSResponseCreate_IngressFiltersServiceTierBeforeUpstream(t *testing.T) 
 // error event AND the upstream FrameConn never receives the offending frame.
 func TestWSResponseCreate_IngressBlockSendsErrorEventAndSkipsUpstream(t *testing.T) {
 	resetOpenAIFastPolicySettingsCache(t)
-
-	gin.SetMode(gin.TestMode)
 
 	cfg := &config.Config{}
 	cfg.Security.URLAllowlist.Enabled = false

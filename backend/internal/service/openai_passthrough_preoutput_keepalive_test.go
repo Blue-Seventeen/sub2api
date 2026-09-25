@@ -21,7 +21,6 @@ import (
 
 func newPassthroughKeepaliveTestContext(t *testing.T) (*gin.Context, *httptest.ResponseRecorder) {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	// 刻意【不】调用 MarkOpenAICompactClientStream：普通 /v1/responses 透传不带

@@ -19,7 +19,6 @@ import (
 // reproduces the HTTP/SSE ingress bug: the client cancels after partial output,
 // while the upstream WS still has a terminal event available for usage billing.
 func TestForwardOpenAIWSV2_ClientCancellationDrainsWithoutSyntheticFailure(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

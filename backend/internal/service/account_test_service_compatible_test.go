@@ -7,12 +7,10 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
-	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
 func TestAccountTestService_CompatibleAccountUsesRelayChatEndpointForThirdPartyZhipu(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	ctx, recorder := newTestContext()
 
 	upstream := &queuedHTTPUpstream{

@@ -216,7 +216,6 @@ func TestCompatibleGatewayServicePrepareRequest_UsesNativeZhipuMessages(t *testi
 }
 
 func TestCompatibleGatewayServiceHandleMessagesResponse_TracksDurationAndFirstToken(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -261,7 +260,6 @@ func TestCompatibleGatewayServiceHandleMessagesResponse_TracksDurationAndFirstTo
 }
 
 func TestCompatibleGatewayServiceHandleChatPassthrough_NonStreamTracksDuration(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -300,7 +298,6 @@ func TestCompatibleGatewayServiceHandleChatPassthrough_NonStreamTracksDuration(t
 }
 
 func TestCompatibleGatewayServiceHandleChatAsMessages_NonStreamPreservesCacheCreation(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -328,7 +325,6 @@ func TestCompatibleGatewayServiceHandleChatAsMessages_NonStreamPreservesCacheCre
 }
 
 func TestCompatibleGatewayServiceHandleChatAsMessages_CanonicalZeroOverridesLegacyCacheCreation(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -356,7 +352,6 @@ func TestCompatibleGatewayServiceHandleChatAsMessages_CanonicalZeroOverridesLega
 }
 
 func TestCompatibleGatewayServiceHandleChatPassthrough_ASRDurationBilling(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -399,7 +394,6 @@ func TestCompatibleGatewayServiceHandleChatPassthrough_ASRDurationBilling(t *tes
 }
 
 func TestCompatibleGatewayService_NonStreamTooLargeReturnsBadGateway(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	cfg := &config.Config{}
 	cfg.Gateway.UpstreamResponseReadMaxBytes = 3
@@ -460,7 +454,6 @@ func TestCompatibleGatewayService_NonStreamTooLargeReturnsBadGateway(t *testing.
 }
 
 func TestCompatibleGatewayStreamWithoutTerminalSkipsBilling(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	svc := &CompatibleGatewayService{}
 	prepared := &compatiblePreparedRequest{
 		OriginalModel: "glm-4.5-air",
@@ -486,7 +479,6 @@ func TestCompatibleGatewayStreamWithoutTerminalSkipsBilling(t *testing.T) {
 }
 
 func TestCompatibleGatewayStreamWithDoneKeepsBilling(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	svc := &CompatibleGatewayService{}
 	prepared := &compatiblePreparedRequest{
 		OriginalModel: "glm-4.5-air",

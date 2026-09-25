@@ -80,7 +80,6 @@ func newAnthropicOAuthAccountForPartialUsageTest() *Account {
 }
 
 func TestGatewayService_Forward_StreamMissingTerminalPreservesPartialUsage(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -128,7 +127,6 @@ func TestGatewayService_Forward_StreamMissingTerminalPreservesPartialUsage(t *te
 }
 
 func TestGatewayService_Forward_StreamReadErrorAfterOutputPreservesPartialUsage(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -159,7 +157,6 @@ func TestGatewayService_Forward_StreamReadErrorAfterOutputPreservesPartialUsage(
 }
 
 func TestGatewayService_Forward_StreamErrorWithoutUsageReturnsNilResult(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -185,7 +182,6 @@ func TestGatewayService_Forward_StreamErrorWithoutUsageReturnsNilResult(t *testi
 }
 
 func TestGatewayService_Forward_FailoverErrorKeepsNilResult(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -215,7 +211,6 @@ func TestGatewayService_Forward_FailoverErrorKeepsNilResult(t *testing.T) {
 }
 
 func TestGatewayService_Forward_PreOutputSSEOverloadedErrorUsesSemantic529(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -262,7 +257,6 @@ func TestGatewayService_Forward_PreOutputSSEOverloadedErrorUsesSemantic529(t *te
 }
 
 func TestGatewayService_Forward_PostOutputSSEOverloadedErrorKeepsExistingStatus(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -303,7 +297,6 @@ func TestGatewayService_Forward_PostOutputSSEOverloadedErrorKeepsExistingStatus(
 }
 
 func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardStreamMissingTerminalPreservesPartialUsage(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)

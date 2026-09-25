@@ -77,7 +77,6 @@ func TestOpenAIGatewayService_HandleOpenAIAccountUpstreamError_ImageRateLimitDoe
 }
 
 func TestOpenAIGatewayServiceForwardImages_ImageRateLimitReturnsFailoverAndCoolsCapability(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	repo := &modelNotFoundAccountRepoStub{}
 	body := []byte(`{"model":"gpt-image-2","prompt":"draw a cat"}`)
 	errorBody := `{"error":{"type":"rate_limit_exceeded","message":"Rate limit reached for gpt-image-2-codex (for limit gpt-image) in organization org on input-images per min: Limit 4000, Used 4000. Please try again in 1s."}}`
@@ -126,7 +125,6 @@ func TestOpenAIGatewayServiceForwardImages_ImageRateLimitReturnsFailoverAndCools
 // 回复就会沿号池把每个被重试到的账号依次冷却掉。冷却仍保留给结构化上游证据，见
 // TestOpenAIGatewayServiceForwardImages_StructuredUnavailableCoolsImageCapability。
 func TestOpenAIGatewayServiceForwardImages_TextFallbackDoesNotCoolImageCapability(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	repo := &modelNotFoundAccountRepoStub{}
 	body := []byte(`{"model":"gpt-image-2","prompt":"draw a cat"}`)
 	upstreamSSE := "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"r\",\"status\":\"completed\",\"model\":\"gpt-5.4-mini\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"Here's a polished image prompt for your request.\"}]}]}}\n\n"
@@ -176,7 +174,6 @@ func TestOpenAIGatewayServiceForwardImages_TextFallbackDoesNotCoolImageCapabilit
 // 对照不变式：上游 error 帧点名 image_generation_unavailable 时仍写冷却，
 // 保证 #6171 的修复没有把这项能力保护整个废掉。
 func TestOpenAIGatewayServiceForwardImages_StructuredUnavailableCoolsImageCapability(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	repo := &modelNotFoundAccountRepoStub{}
 	body := []byte(`{"model":"gpt-image-2","prompt":"draw a cat"}`)
 	upstreamSSE := "data: {\"type\":\"response.failed\",\"response\":{\"id\":\"r\",\"error\":" +
@@ -241,7 +238,6 @@ func TestOpenAIGatewayService_CoolOpenAIImagesOAuthToolUsesConfiguredCooldown(t 
 }
 
 func TestOpenAIGatewayServiceForwardImages_CapabilityLossCoolsImageScope(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	repo := &modelNotFoundAccountRepoStub{}
 	body := []byte(`{"model":"gpt-image-2","prompt":"draw a cat"}`)
 	errorBody := `{"error":{"message":"Tool choice 'image_generation' not found in 'tools' parameter.","param":"tool_choice","type":"invalid_request_error"}}`

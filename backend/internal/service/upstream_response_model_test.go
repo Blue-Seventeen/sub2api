@@ -35,7 +35,6 @@ func TestUpstreamResponseModelObserverSupportsAnthropicAndGeminiShapes(t *testin
 }
 
 func TestUpstreamResponseModelObservationAttemptReset(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(nil)
 
 	first := beginUpstreamResponseModelObservation(c)

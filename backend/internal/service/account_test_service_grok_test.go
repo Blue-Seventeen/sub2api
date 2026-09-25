@@ -89,7 +89,6 @@ func (r *grokAccountTestRateLimitRepo) SetRateLimited(_ context.Context, _ int64
 }
 
 func TestAccountTestService_TestAccountConnection_GrokUsesXAIResponses(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	account := &Account{
 		ID:          13,
@@ -147,7 +146,6 @@ func TestAccountTestService_TestAccountConnection_GrokUsesXAIResponses(t *testin
 }
 
 func TestAccountTestService_TestAccountConnection_GrokDefaultsEmptyModelTo45(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	account := &Account{
 		ID:          16,
@@ -189,7 +187,6 @@ func TestAccountTestService_TestAccountConnection_GrokDefaultsEmptyModelTo45(t *
 }
 
 func TestAccountTestService_TestAccountConnection_GrokAPIKeyUsesXAIResponses(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	account := &Account{
 		ID:          14,
@@ -233,7 +230,6 @@ func TestAccountTestService_TestAccountConnection_GrokAPIKeyUsesXAIResponses(t *
 }
 
 func TestAccountTestService_Grok429PersistsRateLimitReset(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	account := &Account{
 		ID:          15,
@@ -273,7 +269,6 @@ func TestAccountTestService_Grok429PersistsRateLimitReset(t *testing.T) {
 }
 
 func TestAccountTestService_Grok429WithoutQuotaHeadersUsesFallback(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	account := &Account{
 		ID:          16,
@@ -313,7 +308,6 @@ func TestAccountTestService_Grok429WithoutQuotaHeadersUsesFallback(t *testing.T)
 }
 
 func TestAccountTestService_GrokImageModelUsesImagesGenerations(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	account := &Account{
 		ID: 17, Name: "grok-oauth-image", Platform: PlatformGrok,
 		Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1,
@@ -354,7 +348,6 @@ func TestAccountTestService_GrokImageModelUsesImagesGenerations(t *testing.T) {
 }
 
 func TestAccountTestService_GrokWebSearchModeUsesResponsesWebSearchTool(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	account := &Account{
 		ID: 18, Name: "grok-oauth-search", Platform: PlatformGrok,
 		Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1,
@@ -393,7 +386,6 @@ func TestAccountTestService_GrokWebSearchModeUsesResponsesWebSearchTool(t *testi
 }
 
 func TestAccountTestService_GrokTTSIncludesLanguage(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	account := &Account{
 		ID: 19, Name: "grok-oauth-tts", Platform: PlatformGrok,
 		Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1,
@@ -431,7 +423,6 @@ func TestAccountTestService_GrokTTSIncludesLanguage(t *testing.T) {
 }
 
 func TestAccountTestService_GrokImageEditUsesUploadedImage(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	account := &Account{
 		ID: 24, Name: "grok-oauth-image-edit", Platform: PlatformGrok,
 		Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1,
@@ -475,7 +466,6 @@ func TestAccountTestService_GrokImageEditUsesUploadedImage(t *testing.T) {
 }
 
 func TestAccountTestService_GrokImageEditRejectsTinySource(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	account := &Account{
 		ID: 25, Name: "grok-oauth-image-tiny", Platform: PlatformGrok,
 		Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1,
@@ -518,7 +508,6 @@ func minimalAccountTestPNGDataURL(w, h int) string {
 }
 
 func TestAccountTestService_GrokExplicitImageModeDefaultsModel(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	account := &Account{
 		ID: 20, Name: "grok-oauth-image-mode", Platform: PlatformGrok,
 		Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1,
@@ -555,7 +544,6 @@ func TestAccountTestService_GrokExplicitImageModeDefaultsModel(t *testing.T) {
 }
 
 func TestAccountTestService_GrokVideoUpstreamErrorIsNotMaskedAsSuccess(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	account := &Account{
 		ID: 21, Name: "grok-oauth-video-err", Platform: PlatformGrok,
 		Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1,
@@ -628,7 +616,6 @@ func (d *grokRealtimeTestDialer) Dial(_ context.Context, wsURL string, headers h
 }
 
 func TestAccountTestService_GrokRealtimeModeDialsWS(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	account := &Account{
 		ID: 22, Name: "grok-oauth-realtime", Platform: PlatformGrok,
 		Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1,
@@ -664,7 +651,6 @@ func TestAccountTestService_GrokRealtimeModeDialsWS(t *testing.T) {
 }
 
 func TestAccountTestService_GrokRealtimeModeDialFailure(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	account := &Account{
 		ID: 23, Name: "grok-oauth-realtime-fail", Platform: PlatformGrok,
 		Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1,

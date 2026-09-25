@@ -71,7 +71,6 @@ func (u *compatibleGatewayHTTPUpstreamRecorder) DoWithTLS(req *http.Request, _ s
 }
 
 func TestCompatibleGatewayServiceForward_TransportErrorTriggersFailover(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	upstream := &compatibleGatewayHTTPUpstreamRecorder{err: errors.New("dial tcp 10.0.0.8:443: connection refused")}
@@ -168,7 +167,6 @@ func newCompatibleGatewayServiceForTest(upstream HTTPUpstream) *CompatibleGatewa
 }
 
 func TestCompatibleGatewayServiceForward_UsesRelayChatEndpointDirectlyForThirdPartyZhipu(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 
@@ -274,7 +272,6 @@ func TestCompatibleGatewayServiceForward_UsesRelayChatEndpointDirectlyForThirdPa
 }
 
 func TestCompatibleGatewayServiceForward_FallsBackToRelayChatEndpointForOfficialZhipuWhenPrimaryReturnsHTMLSuccessPage(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 
@@ -336,7 +333,6 @@ func TestCompatibleGatewayServiceForward_FallsBackToRelayChatEndpointForOfficial
 }
 
 func TestCompatibleGatewayServiceForward_RetriesTransientCompatibleStatusOnSameEndpoint(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 
@@ -389,7 +385,6 @@ func TestCompatibleGatewayServiceForward_RetriesTransientCompatibleStatusOnSameE
 }
 
 func TestCompatibleGatewayServiceForward_MoonshotCustomRelayMessagesFallbackToChatAfterUnsupportedMessages(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 
@@ -456,7 +451,6 @@ func TestCompatibleGatewayServiceForward_MoonshotCustomRelayMessagesFallbackToCh
 }
 
 func TestCompatibleGatewayServiceForward_MoonshotMessagesFallbackToChatAfterHTMLSuccessPage(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 
@@ -517,7 +511,6 @@ func TestCompatibleGatewayServiceForward_MoonshotMessagesFallbackToChatAfterHTML
 }
 
 func TestCompatibleGatewayServiceForward_MoonshotMessagesFallbackToChatAfterReasoningContentValidationError(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 
@@ -578,7 +571,6 @@ func TestCompatibleGatewayServiceForward_MoonshotMessagesFallbackToChatAfterReas
 }
 
 func TestCompatibleGatewayServiceForward_MoonshotMessagesCachesChatFallbackModeAndInvalidates(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 
@@ -670,7 +662,6 @@ func TestCompatibleGatewayServiceForward_MoonshotMessagesCachesChatFallbackModeA
 }
 
 func TestCompatibleGatewayServiceForward_MoonshotMessagesFallbackPreservesToolUseResponse(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 
@@ -722,7 +713,6 @@ func TestCompatibleGatewayServiceForward_MoonshotMessagesFallbackPreservesToolUs
 }
 
 func TestCompatibleGatewayServiceForward_MoonshotMessagesStreamKeepsLateUsageChunk(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 
@@ -800,7 +790,6 @@ func TestCompatibleGatewayServiceForward_MoonshotMessagesStreamKeepsLateUsageChu
 }
 
 func TestCompatibleGatewayServiceForward_MoonshotMessagesStreamEmitsStopBeforeEOFWhenLateUsageArrives(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	var responseMu sync.Mutex
@@ -889,7 +878,6 @@ func TestCompatibleGatewayServiceForward_MoonshotMessagesStreamEmitsStopBeforeEO
 }
 
 func TestCompatibleGatewayServiceForward_MoonshotMessagesStreamFallbackPreservesStructuredToolEvents(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 
@@ -958,7 +946,6 @@ func TestCompatibleGatewayServiceForward_MoonshotMessagesStreamFallbackPreserves
 }
 
 func TestCompatibleGatewayServiceForward_ParsesChatUsagePromptCompletionForZhipu(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 
@@ -1001,7 +988,6 @@ func TestCompatibleGatewayServiceForward_ParsesChatUsagePromptCompletionForZhipu
 }
 
 func TestCompatibleGatewayServiceForward_KeepsStreamingChatUsageAfterFinishChunkForZhipu(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 
@@ -1056,7 +1042,6 @@ func TestCompatibleGatewayServiceForward_KeepsStreamingChatUsageAfterFinishChunk
 }
 
 func TestCompatibleGatewayServiceForward_UsesRelayMessagesEndpointDirectlyForThirdPartyZhipu(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 

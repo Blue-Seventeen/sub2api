@@ -65,7 +65,6 @@ func TestBuildNormalizedOpenAIImageResponseItems_MergesPointerInfoAndDedupes(t *
 }
 
 func TestHandleOpenAIImagesNonStreamingResponse_NormalizesLegacyPayload(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)

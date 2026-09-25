@@ -35,7 +35,6 @@ func (r *errAfterBytesReadCloser) Read(p []byte) (int, error) {
 func (r *errAfterBytesReadCloser) Close() error { return nil }
 
 func TestCompatibleGatewayService_StreamReadErrorSkipsUsageBilling(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -73,7 +72,6 @@ func TestCompatibleGatewayService_StreamReadErrorSkipsUsageBilling(t *testing.T)
 }
 
 func TestNewAPIStyleGatewayService_StreamCopyErrorSkipsUsageBilling(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	upstream := &httpUpstreamRecorder{
 		resp: &http.Response{

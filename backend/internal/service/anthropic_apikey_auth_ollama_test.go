@@ -233,7 +233,6 @@ func TestSetAnthropicAPIKeyAuthHeader_CNAdaptiveBaseURL(t *testing.T) {
 // builder 真实构造 http.Request 验证最终 header——Ollama Cloud 强制 Bearer 且
 // 不泄漏客户端入站认证；非 Ollama 上游保持 x-api-key。
 func TestGatewayService_AnthropicPassthrough_OllamaCloudBearer(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	buildReq := func(t *testing.T, baseURL string) *http.Request {
 		t.Helper()
@@ -267,7 +266,6 @@ func TestGatewayService_AnthropicPassthrough_OllamaCloudBearer(t *testing.T) {
 // TestGatewayService_BuildUpstreamRequest_OllamaCloudBearer：经 Anthropic 原生
 // GetBaseURL builder 真实构造 http.Request 验证最终 header。
 func TestGatewayService_BuildUpstreamRequest_OllamaCloudBearer(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	buildReq := func(t *testing.T, baseURL string) *http.Request {
 		t.Helper()
@@ -299,7 +297,6 @@ func TestGatewayService_BuildUpstreamRequest_OllamaCloudBearer(t *testing.T) {
 // Anthropic 桥接 builder（CC/Responses → /v1/messages）真实构造 http.Request
 // 验证最终 header。
 func TestOpenAIGatewayService_NativeAnthropicBridge_OllamaCloudBearer(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	svc := &OpenAIGatewayService{cfg: &config.Config{}}
 	account := &Account{

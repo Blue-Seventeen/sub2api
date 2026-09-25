@@ -69,7 +69,6 @@ func TestOpenAIGatewayServiceGetAccessTokenSetupToken(t *testing.T) {
 }
 
 func TestOpenAISetupTokenImagesUsesOAuthResponsesPath(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
 
@@ -105,7 +104,6 @@ func TestOpenAISetupTokenImagesUsesOAuthResponsesPath(t *testing.T) {
 }
 
 func TestOpenAISetupTokenWSCompatibility(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest("POST", "/v1/responses", strings.NewReader(`{}`))
 	c.Request.Header.Set("session_id", "session-one")
@@ -145,7 +143,6 @@ func TestOpenAISetupTokenWSCompatibility(t *testing.T) {
 }
 
 func TestOpenAISetupTokenChatCompletionsUsesCodexTransform(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"system","content":"setup instructions"},{"role":"user","content":"hello"}],"stream":false}`)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -176,7 +173,6 @@ func TestOpenAISetupTokenChatCompletionsUsesCodexTransform(t *testing.T) {
 }
 
 func TestOpenAISetupTokenMessagesUsesCodexBridgeAndTurnState(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	firstResp := openAICompatSSECompletedResponse("resp_setup_first", "gpt-5.4")
 	firstResp.Header.Set("x-codex-turn-state", "turn_state_setup")

@@ -52,7 +52,6 @@ func (u *blockingOpenAIResponseHeaderUpstream) DoWithTLS(req *http.Request, _ st
 }
 
 func TestOpenAIForwardFirstOutputTimeoutIncludesResponseHeaderWait(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	upstream := &blockingOpenAIResponseHeaderUpstream{canceled: make(chan struct{})}
 	svc := &OpenAIGatewayService{
 		cfg: &config.Config{Gateway: config.GatewayConfig{
@@ -153,7 +152,6 @@ func TestOpenAINativeFirstOutputTimeoutIgnoresPreambleAndCleansReader(t *testing
 }
 
 func TestNewOpenAIFirstOutputTimeoutErrorRecordsCallerProxyAttribution(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	svc := &OpenAIGatewayService{}
 	proxyID := int64(10060)

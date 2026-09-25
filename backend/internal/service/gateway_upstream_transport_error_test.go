@@ -32,7 +32,6 @@ func (r *transportTempUnschedRepoStub) SetTempUnschedulable(_ context.Context, i
 
 func newTransportErrorTestGin(t *testing.T) *gin.Context {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 	return c

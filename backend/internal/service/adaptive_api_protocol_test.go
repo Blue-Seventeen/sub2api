@@ -80,7 +80,6 @@ func cnProtocolIngressCases() []cnProtocolIngressCase {
 }
 
 func TestAdaptiveProtocolRoutesChatCompletionsToNativeChat(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"glm-4.7","messages":[{"role":"user","content":"hello"}],"stream":false}`)
 	upstream := &httpUpstreamRecorder{err: errors.New("stop after capture")}
 	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
@@ -97,7 +96,6 @@ func TestAdaptiveProtocolRoutesChatCompletionsToNativeChat(t *testing.T) {
 }
 
 func TestAdaptiveProtocolRoutesResponsesShapedChatToNativeResponses(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"deepseek-v4","input":"hello","max_output_tokens":32,"stream":false}`)
 	upstream := &httpUpstreamRecorder{err: errors.New("stop after capture")}
 	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
@@ -115,7 +113,6 @@ func TestAdaptiveProtocolRoutesResponsesShapedChatToNativeResponses(t *testing.T
 }
 
 func TestAdaptiveProtocolConvertsResponsesShapedChatForChatOnlyProvider(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"glm-4.7","input":"hello","max_output_tokens":32,"stream":false}`)
 	upstream := &httpUpstreamRecorder{err: errors.New("stop after capture")}
 	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
@@ -132,7 +129,6 @@ func TestAdaptiveProtocolConvertsResponsesShapedChatForChatOnlyProvider(t *testi
 }
 
 func TestAdaptiveProtocolRoutesKimiResponsesShapedChatToNativeResponses(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"k3-256k","input":"hello","max_output_tokens":32,"stream":false}`)
 	upstream := &httpUpstreamRecorder{err: errors.New("stop after capture")}
 	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
@@ -150,7 +146,6 @@ func TestAdaptiveProtocolRoutesKimiResponsesShapedChatToNativeResponses(t *testi
 }
 
 func TestAdaptiveProtocolRoutesMessagesToNativeAnthropic(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"glm-4.7","max_tokens":32,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
 	upstream := &httpUpstreamRecorder{err: errors.New("stop after capture")}
 	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
@@ -166,7 +161,6 @@ func TestAdaptiveProtocolRoutesMessagesToNativeAnthropic(t *testing.T) {
 }
 
 func TestAdaptiveProtocolRoutesKimiResponsesToNativeResponses(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"k3-256k","input":"hello","store":true,"previous_response_id":"resp_old","stream":false}`)
 	upstream := &httpUpstreamRecorder{err: errors.New("stop after capture")}
 	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
@@ -186,7 +180,6 @@ func TestAdaptiveProtocolRoutesKimiResponsesToNativeResponses(t *testing.T) {
 }
 
 func TestAdaptiveProtocolRoutesKimiCodingResponsesToNativeResponses(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"k3-256k","input":"hello","stream":false}`)
 	upstream := &httpUpstreamRecorder{err: errors.New("stop after capture")}
 	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
@@ -204,7 +197,6 @@ func TestAdaptiveProtocolRoutesKimiCodingResponsesToNativeResponses(t *testing.T
 }
 
 func TestAdaptiveProtocolRoutesDeepSeekResponsesToNativeResponses(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"deepseek-v4","input":"hello","max_output_tokens":32,"store":true,"previous_response_id":"resp_old","stream":false}`)
 	upstream := &httpUpstreamRecorder{err: errors.New("stop after capture")}
 	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
@@ -224,7 +216,6 @@ func TestAdaptiveProtocolRoutesDeepSeekResponsesToNativeResponses(t *testing.T) 
 }
 
 func TestFixedCNChatProtocolOverridesStaleResponsesMode(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	for _, tc := range cnProtocolIngressCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			upstream := &httpUpstreamRecorder{err: errors.New("stop after capture")}
@@ -245,7 +236,6 @@ func TestFixedCNChatProtocolOverridesStaleResponsesMode(t *testing.T) {
 }
 
 func TestFixedCNResponsesProtocolOverridesStaleChatMode(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	for _, tc := range cnProtocolIngressCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			upstream := &httpUpstreamRecorder{err: errors.New("stop after capture")}

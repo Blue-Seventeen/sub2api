@@ -34,7 +34,6 @@ func (r *countingModelRateLimitRepo) SetModelRateLimit(_ context.Context, _ int6
 
 func newImagesCooldownContext(t *testing.T) (*gin.Context, *httptest.ResponseRecorder) {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)

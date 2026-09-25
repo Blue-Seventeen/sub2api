@@ -19,7 +19,6 @@ import (
 
 func TestForwardGrokMediaAppliesChannelMappedModelBeforeNormalization(t *testing.T) {
 	t.Setenv(xai.EnvAllowUnsafeURLOverrides, "true")
-	gin.SetMode(gin.TestMode)
 
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -43,7 +42,6 @@ func TestForwardGrokMediaAppliesChannelMappedModelBeforeNormalization(t *testing
 
 func TestForwardGrokMediaAppliesChannelMappedModelAfterMultipartConversion(t *testing.T) {
 	t.Setenv(xai.EnvAllowUnsafeURLOverrides, "true")
-	gin.SetMode(gin.TestMode)
 
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)

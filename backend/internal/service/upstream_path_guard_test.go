@@ -103,7 +103,6 @@ func TestSanitizedUpstreamPathSuffixEnforcesBounds(t *testing.T) {
 // /responses/*subpath 的子路径不得改变上游请求的路径结构；不合规时既不参与拼接，
 // 也不会被误判成 compact 请求。
 func TestOpenAIResponsesRequestPathSuffixRejectsNonConformingSubpaths(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	nonConformingPaths := []string{
 		"/v1/responses/../../x/y",

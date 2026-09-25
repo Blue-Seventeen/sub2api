@@ -39,7 +39,6 @@ func (r *openAIWSIngressCapacityShedRepo) UpdateExtra(context.Context, int64, ma
 //
 // 第二个用例锁住改写范围：非容量类错误码必须原样下发，客户端依赖原码各自处理。
 func TestProxyResponsesWebSocketFromClient_RewritesCapacityShedCodeForClient(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	tests := []struct {
 		name           string
@@ -186,7 +185,6 @@ func TestProxyResponsesWebSocketFromClient_RewritesCapacityShedCodeForClient(t *
 }
 
 func TestProxyResponsesWebSocketFromClient_MarksCyberPolicyBeforeEarlyReturn(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	tests := []struct {
 		name          string

@@ -20,7 +20,6 @@ func TestNewAPIStyleAliImagesGenerationsConvertsOpenAIRequestToDashScope(t *test
 		"output":{"choices":[{"message":{"content":[{"image":"https://example.test/a.png"},{"image":"https://example.test/b.png"}]}}]}
 	}`)}
 	svc := &NewAPIStyleGatewayService{httpUpstream: upstream}
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 
@@ -83,7 +82,6 @@ func TestNewAPIStyleAliImagesBillingUsesOriginalUsageBeforeResponseNormalization
 		"output":{"choices":[{"message":{"content":[{"image":"https://example.test/a.png"},{"image":"https://example.test/b.png"}]}}]}
 	}`)}
 	svc := &NewAPIStyleGatewayService{httpUpstream: upstream}
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 

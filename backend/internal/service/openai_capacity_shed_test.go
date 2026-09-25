@@ -139,7 +139,6 @@ func TestOpenAIStreamErrorFrameDoesNotStartClientOutput(t *testing.T) {
 }
 
 func TestOpenAIStreamMetadataPreambleAndMessageOnlyOverloadFailOver(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	largeMetadata := strings.Repeat("x", 16*1024)
 	stream := strings.Join([]string{
 		"event: response.created",
@@ -206,7 +205,6 @@ func TestOpenAIStreamMetadataPreambleAndMessageOnlyOverloadFailOver(t *testing.T
 // 回归用例（真实上游降载序列）：created → in_progress → error 帧 → response.failed。
 // 期望仍然走 pre-output failover（同账号重试 + 请求级瞬时标记），且不向客户端写出任何字节。
 func TestOpenAIStreamCapacityShedErrorFramePrecedingFailedStillFailsOver(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	cfg := &config.Config{
 		Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
 	}
@@ -249,7 +247,6 @@ func TestOpenAIStreamCapacityShedErrorFramePrecedingFailedStillFailsOver(t *test
 // 可重试的 server_error 再通过唯一 response.failed 终态转发——Codex 对
 // server_is_overloaded/slow_down 判致命并终止会话，对其余错误码执行内置退避重试。
 func TestOpenAIStreamCapacityShedAfterOutputRewritesCodeForClient(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	logSink, restore := captureStructuredLog(t)
 	defer restore()
 	cfg := &config.Config{
@@ -299,7 +296,6 @@ func TestOpenAIStreamCapacityShedAfterOutputRewritesCodeForClient(t *testing.T) 
 }
 
 func TestOpenAIStreamProcessingFailureAfterOutputIsRecorded(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	stream := strings.Join([]string{
 		"event: response.created",
 		`data: {"type":"response.created","response":{"id":"resp_processing_failure"}}`,

@@ -348,7 +348,6 @@ func TestOpenAIStreamPairedFailureAppliesAccountSideEffectsOnce(t *testing.T) {
 		"data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_failed\",\"error\":{\"status_code\":403,\"code\":\"workspace_suspended\",\"message\":\"workspace is suspended\"}}}\n\n"
 
 	t.Run("native", func(t *testing.T) {
-		gin.SetMode(gin.TestMode)
 		repo := &openAIStream403AccountRepo{}
 		svc := &OpenAIGatewayService{
 			cfg:              &config.Config{},
@@ -373,7 +372,6 @@ func TestOpenAIStreamPairedFailureAppliesAccountSideEffectsOnce(t *testing.T) {
 	})
 
 	t.Run("passthrough", func(t *testing.T) {
-		gin.SetMode(gin.TestMode)
 		repo := &openAIStream403AccountRepo{}
 		svc := &OpenAIGatewayService{
 			cfg:              &config.Config{},

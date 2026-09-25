@@ -9,7 +9,6 @@ import (
 )
 
 func TestCompatibilityRuntimeContextRoundTrip(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest("POST", "/v1/messages", nil)

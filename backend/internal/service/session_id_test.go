@@ -15,7 +15,6 @@ import (
 
 func newSessionHeaderContext(t *testing.T, headers map[string]string) *gin.Context {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 	for k, v := range headers {

@@ -17,7 +17,6 @@ const geminiTestPNG = "iVBORw0KGgoAAAANSUhEUg=="
 
 func newGeminiImageTestContext(t *testing.T) *gin.Context {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost,
 		"/v1beta/models/nana-banana-2:generateContent", strings.NewReader("{}"))

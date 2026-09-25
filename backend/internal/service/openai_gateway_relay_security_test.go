@@ -17,7 +17,6 @@ import (
 )
 
 func TestResponsesChatFallbackTerminalErrorNeverCompletes(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	for name, payload := range map[string]string{
 		"error":   `{"type":"error","error":{"message":"Authorization: Bearer sk-private upstream.internal","code":"private-code"}}`,
 		"failed":  `{"type":"response.failed","response":{"error":{"message":"Authorization: Bearer sk-private upstream.internal"}}}`,

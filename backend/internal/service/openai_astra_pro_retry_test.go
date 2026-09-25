@@ -17,7 +17,6 @@ const openAICodexResponsesTestURL = "https://chatgpt.com/backend-api/codex/respo
 // newOpenAIAstraProRetryContext returns a gin context plus its recorder so the
 // caller can assert the service-layer client error shape (type/code/param/message).
 func newOpenAIAstraProRetryContext(body []byte) (*gin.Context, *httptest.ResponseRecorder) {
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))

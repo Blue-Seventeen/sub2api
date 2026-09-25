@@ -38,7 +38,6 @@ func requireClosureErrorRedacted(t *testing.T, text string) {
 }
 
 func TestRelayClosureMessagesChatErrorRedaction(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	for _, partial := range []bool{false, true} {
 		for _, custom := range []bool{false, true} {
 			t.Run(fmt.Sprintf("partial=%v/custom=%v", partial, custom), func(t *testing.T) {
@@ -83,7 +82,6 @@ func TestRelayClosureMessagesChatErrorRedaction(t *testing.T) {
 }
 
 func TestRelayClosureResponsesChatStreamCustomErrorRule(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	for _, upstreamType := range []string{"invalid_request_error", "rate_limit_error"} {
 		for _, partial := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/partial=%v", upstreamType, partial), func(t *testing.T) {
@@ -136,7 +134,6 @@ func TestRelayClosureResponsesChatStreamCustomErrorRule(t *testing.T) {
 }
 
 func TestRelayClosureRawChatErrorIsTerminal(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	for _, shape := range []struct{ name, prefix, payload string }{
 		{"typed", "", fmt.Sprintf(`{"type":"error","error":{"type":"invalid_request_error","message":%q}}`, closurePrivateError)},
 		{"untyped", "", fmt.Sprintf(`{"error":{"type":"invalid_request_error","message":%q}}`, closurePrivateError)},
@@ -189,7 +186,6 @@ func TestRelayClosureRawChatErrorIsTerminal(t *testing.T) {
 }
 
 func TestRelayClosureRawChatNullErrorPreservesSuccessfulBody(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	stream := "event: chunk\ndata: {\"error\":null,\"choices\":[{\"delta\":{\"content\":\"Visit public.example\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2}}\n\ndata: [DONE]\n\n"
 	c, rec := closureRelayContext("/v1/chat/completions")
 	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}
@@ -211,7 +207,6 @@ func TestRelayClosureNullFieldsDoNotHideEmptyCompletion(t *testing.T) {
 }
 
 func TestRelayClosureNullFieldsEmptyCompletionFailsOver(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	for _, stream := range []bool{false, true} {
 		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {
 			upstream := &httpUpstreamRecorder{resp: closureRelayResponse("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_empty\",\"status\":\"completed\",\"output\":[],\"error\":null,\"usage\":null}}\n\n")}
@@ -228,7 +223,6 @@ func TestRelayClosureNullFieldsEmptyCompletionFailsOver(t *testing.T) {
 }
 
 func TestRelayClosureNullErrorDoesNotHideSilentRefusal(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	c, rec := closureRelayContext("/v1/chat/completions")
 	stream := "data: {\"error\":null,\"choices\":[{\"delta\":{\"content\":\"\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
 	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}
@@ -241,7 +235,6 @@ func TestRelayClosureNullErrorDoesNotHideSilentRefusal(t *testing.T) {
 }
 
 func TestRelayClosureBufferedHTTP200Errors(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	for _, route := range []string{"responses", "messages", "chat"} {
 		for _, custom := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/custom=%v", route, custom), func(t *testing.T) {
@@ -279,7 +272,6 @@ func TestRelayClosureBufferedHTTP200Errors(t *testing.T) {
 }
 
 func TestRelayClosureBufferedNullErrorRemainsSuccessful(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := `{"id":"chat_ok","error":null,"choices":[{"index":0,"message":{"role":"assistant","content":"Visit public.example"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2}}`
 	c, rec := closureRelayContext("/v1/responses")
 	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: &httpUpstreamRecorder{resp: closureRelayResponse(body)}}

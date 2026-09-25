@@ -17,7 +17,6 @@ import (
 // `missing field 'created_at'`。writeOpenAICompactSSEFailureMessage 存在的理由就是
 // 让 Codex 能把这帧识别成合法终止事件；解析不了就退化回它想避免的盲重连。
 func TestWriteOpenAICompactSSEFailureMessage_CarriesCreatedAt(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)

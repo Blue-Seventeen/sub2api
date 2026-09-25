@@ -103,7 +103,6 @@ func TestOpenAIRequestView_HasPatches(t *testing.T) {
 }
 
 func TestOpenAIGatewayService_Forward_APIKeyMissingInstructionsKeepsLargeInputRaw(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	upstream := &httpUpstreamRecorder{
 		resp: &http.Response{
 			StatusCode: http.StatusOK,
@@ -145,7 +144,6 @@ func TestOpenAIGatewayService_Forward_APIKeyMissingInstructionsKeepsLargeInputRa
 }
 
 func TestOpenAIGatewayService_Forward_DecodedMutationKeepsLaterFieldDeletes(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	upstream := &httpUpstreamRecorder{
 		resp: &http.Response{
 			StatusCode: http.StatusOK,
@@ -185,7 +183,6 @@ func TestOpenAIGatewayService_Forward_DecodedMutationKeepsLaterFieldDeletes(t *t
 // #4417：/v1/responses 原生转发路径需将 Chat-Completions 风格的 max_tokens 归一化为
 // max_output_tokens，并移除兼容上游不接受的 prompt_cache_options。
 func TestOpenAIGatewayService_Forward_NormalizesMaxTokensAndStripsPromptCacheOptions(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	runForward := func(t *testing.T, body []byte) []byte {
 		t.Helper()
@@ -237,7 +234,6 @@ func TestOpenAIGatewayService_Forward_NormalizesMaxTokensAndStripsPromptCacheOpt
 }
 
 func TestOpenAIGatewayService_Forward_MappedImageModelUsesImageGate(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	upstream := &httpUpstreamRecorder{
 		resp: &http.Response{
 			StatusCode: http.StatusOK,
@@ -294,7 +290,6 @@ func TestOpenAIGatewayService_Forward_MappedImageModelUsesImageGate(t *testing.T
 }
 
 func TestOpenAIGatewayService_Forward_TextResponsesSetsBillingModelToMappedModel(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	upstream := &httpUpstreamRecorder{
 		resp: &http.Response{
 			StatusCode: http.StatusOK,
@@ -337,7 +332,6 @@ func TestOpenAIGatewayService_Forward_TextResponsesSetsBillingModelToMappedModel
 }
 
 func TestOpenAIGatewayService_Forward_TextResponsesWithoutMappingKeepsRequestedBillingModel(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	upstream := &httpUpstreamRecorder{
 		resp: &http.Response{
 			StatusCode: http.StatusOK,
@@ -374,7 +368,6 @@ func TestOpenAIGatewayService_Forward_TextResponsesWithoutMappingKeepsRequestedB
 }
 
 func TestOpenAIGatewayService_Forward_TextResponsesBillingModelMatchesChatCompletions(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	cfg := &config.Config{}
 	cfg.Security.URLAllowlist.Enabled = false
 	account := &Account{
@@ -432,7 +425,6 @@ func TestOpenAIGatewayService_Forward_TextResponsesBillingModelMatchesChatComple
 }
 
 func TestOpenAIGatewayService_Forward_TextDataImageDoesNotForceMapMarshal(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	upstream := &httpUpstreamRecorder{
 		resp: &http.Response{
 			StatusCode: http.StatusOK,
@@ -468,7 +460,6 @@ func TestOpenAIGatewayService_Forward_TextDataImageDoesNotForceMapMarshal(t *tes
 }
 
 func TestOpenAIGatewayService_Forward_ImageToolBillingDoesNotForceFullDecode(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	upstream := &httpUpstreamRecorder{
 		resp: &http.Response{
 			StatusCode: http.StatusOK,
@@ -509,7 +500,6 @@ func TestOpenAIGatewayService_Forward_ImageToolBillingDoesNotForceFullDecode(t *
 }
 
 func TestOpenAIGatewayService_Forward_ImageToolWithImageOnlyModelIsNormalized(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	upstream := &httpUpstreamRecorder{
 		resp: &http.Response{
 			StatusCode: http.StatusOK,
@@ -545,7 +535,6 @@ func TestOpenAIGatewayService_Forward_ImageToolWithImageOnlyModelIsNormalized(t 
 }
 
 func TestOpenAIGatewayService_Forward_HTTPRetryRecoveryDoesNotDecodeBeforeError(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	upstream := &httpUpstreamRecorder{
 		responses: []*http.Response{
 			{
@@ -592,7 +581,6 @@ func TestOpenAIGatewayService_Forward_HTTPRetryRecoveryDoesNotDecodeBeforeError(
 }
 
 func TestOpenAIGatewayService_Forward_HTTPRetryRecoveryDropsCompaction(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	upstream := &httpUpstreamRecorder{
 		responses: []*http.Response{
 			{
@@ -638,7 +626,6 @@ func TestOpenAIGatewayService_Forward_HTTPRetryRecoveryDropsCompaction(t *testin
 }
 
 func TestOpenAIGatewayService_Forward_CodexSparkRejectsEscapedInputImage(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	upstream := &httpUpstreamRecorder{
 		resp: &http.Response{
 			StatusCode: http.StatusOK,
@@ -675,7 +662,6 @@ func TestOpenAIGatewayService_Forward_CodexSparkRejectsEscapedInputImage(t *test
 }
 
 func TestOpenAIGatewayService_Forward_CodexBridgeInjectionSetsImageBilling(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	upstream := &httpUpstreamRecorder{
 		resp: &http.Response{
 			StatusCode: http.StatusOK,
@@ -718,7 +704,6 @@ func TestOpenAIGatewayService_Forward_CodexBridgeInjectionSetsImageBilling(t *te
 }
 
 func TestOpenAIGatewayService_Forward_HTTPPreservesPreviousResponseIDForAPIKey(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	cfg := &config.Config{}
 	cfg.Security.URLAllowlist.Enabled = false
 	account := &Account{
@@ -759,7 +744,6 @@ func TestOpenAIGatewayService_Forward_HTTPPreservesPreviousResponseIDForAPIKey(t
 }
 
 func TestOpenAIGatewayService_Forward_StripsImageGenerationToolForSparkAPIKey(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	upstream := &httpUpstreamRecorder{
 		resp: &http.Response{
 			StatusCode: http.StatusOK,
@@ -818,7 +802,6 @@ func TestOpenAIRequestBodyMayContainEmptyBase64InputImageSeesEscapedInputPrefix(
 }
 
 func TestOpenAIGatewayService_Forward_ImageOnlyModelKeepsSupportedVerbosity(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	upstream := &httpUpstreamRecorder{
 		resp: &http.Response{
 			StatusCode: http.StatusOK,
@@ -972,7 +955,6 @@ func TestGetOpenAIRequestBodyMap_ParseError(t *testing.T) {
 }
 
 func TestGetOpenAIRequestBodyMap_DoesNotWriteContextCache(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 

@@ -19,7 +19,6 @@ import (
 )
 
 func TestForwardGrokResponses_PropagatesSearchCountFromJSON(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"grok","input":"search something","tools":[{"type":"web_search"}],"stream":false}`)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -59,7 +58,6 @@ func TestForwardGrokResponses_PropagatesSearchCountFromJSON(t *testing.T) {
 }
 
 func TestForwardGrokResponses_PropagatesSearchCountFromSSE(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"grok","input":"search","tools":[{"type":"web_search"}],"stream":true}`)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
