@@ -137,13 +137,15 @@
     <div class="mb-3 flex items-center justify-between">
       <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('dashboard.platformBreakdown') }}</h3>
       <span class="text-xs text-gray-500 dark:text-gray-400">
-        {{ t('dashboard.platformCount', { count: sortedPlatforms.length }) }}
+        {{ t('dashboard.platformCount', { count: platformCount }) }}
       </span>
     </div>
     <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <div
         v-for="item in platformCards"
         :key="item.platform"
+        data-testid="platform-card"
+        :data-platform="item.platform"
         :class="[
           'rounded-lg border p-3',
           item.isOther
@@ -230,6 +232,7 @@ import type { PlatformDashboardStats, UserDashboardStats as UserStatsType } from
 import type { PlatformQuotaItem } from '@/types'
 import { formatCostAmount, formatCurrencyAmount } from '@/utils/format'
 import { platformLabel } from '@/utils/platformColors'
+import { CONCRETE_PLATFORM_OPTIONS } from '@/constants/platforms'
 
 const props = defineProps<{
   stats: UserStatsType
@@ -256,36 +259,46 @@ interface PlatformCard extends PlatformDashboardStats {
 }
 
 const OTHER_THRESHOLD = 0.0001
-
-const sortedPlatforms = computed<PlatformDashboardStats[]>(() =>
-  [...(props.stats?.by_platform ?? [])].sort((a, b) => b.total_actual_cost - a.total_actual_cost)
-)
+const platformOrder = CONCRETE_PLATFORM_OPTIONS.map((item) => item.value)
 
 const platformCards = computed<PlatformCard[]>(() => {
+  const byPlatform = new Map<string, PlatformDashboardStats>()
+  for (const stat of props.stats?.by_platform ?? []) {
+    byPlatform.set(stat.platform, stat)
+  }
+
   const byQuota = new Map<string, PlatformQuotaItem>()
   for (const quota of props.platformQuotas ?? []) {
     byQuota.set(quota.platform, quota)
   }
 
-  const rows: PlatformCard[] = sortedPlatforms.value.map((item) => ({
-    ...item,
-    quota: byQuota.get(item.platform)
-  }))
+  const platforms = new Set<string>(byPlatform.keys())
   for (const [platform, quota] of byQuota) {
-    if (rows.some((item) => item.platform === platform)) {
-      continue
-    }
-    rows.push({
-      platform,
-      total_requests: 0,
-      total_tokens: 0,
-      total_actual_cost: 0,
-      today_requests: 0,
-      today_tokens: 0,
-      today_actual_cost: 0,
-      quota
-    })
+    if (hasAnyLimit(quota)) platforms.add(platform)
   }
+
+  const rows: PlatformCard[] = [...platforms].map((platform) => {
+    const stat = byPlatform.get(platform)
+    return {
+      platform,
+      total_requests: stat?.total_requests ?? 0,
+      total_tokens: stat?.total_tokens ?? 0,
+      total_actual_cost: stat?.total_actual_cost ?? 0,
+      today_requests: stat?.today_requests ?? 0,
+      today_tokens: stat?.today_tokens ?? 0,
+      today_actual_cost: stat?.today_actual_cost ?? 0,
+      quota: byQuota.get(platform)
+    }
+  })
+  rows.sort((a, b) => {
+    const ai = platformOrder.indexOf(a.platform as typeof platformOrder[number])
+    const bi = platformOrder.indexOf(b.platform as typeof platformOrder[number])
+    if (ai === -1 && bi === -1) return a.platform.localeCompare(b.platform)
+    if (ai === -1) return 1
+    if (bi === -1) return -1
+    return ai - bi
+  })
+
   const sumTotalCost = rows.reduce((sum, item) => sum + item.total_actual_cost, 0)
   const sumTodayCost = rows.reduce((sum, item) => sum + item.today_actual_cost, 0)
   const otherTotalCost = Math.max(0, (props.stats?.total_actual_cost ?? 0) - sumTotalCost)
@@ -305,6 +318,8 @@ const platformCards = computed<PlatformCard[]>(() => {
   }
   return rows
 })
+
+const platformCount = computed(() => platformCards.value.filter((item) => !item.isOther).length)
 
 const platformDisplayName = (platform: string) => platformLabel(platform, t)
 
@@ -357,138 +372,4 @@ function formatResetTime(iso: string | null | undefined): string {
   })
 }
 
-/*
-const platformLabel = (p: string) => PLATFORM_LABELS[p] ?? p
-
-const sortedPlatforms = computed(() => {
-  const list = props.stats?.by_platform ?? []
-  return [...list].sort((a, b) => b.total_actual_cost - a.total_actual_cost)
-})
-
-// 处理"各平台之和 < 总值"的差值：后端按平台聚合时过滤了无法归属平台的行
-// （group 与 account 都缺 platform）。这里把差值作为"其他"卡片显式展示，
-// 避免 Row 1 总值与 Row 3 平台拆分加总对不上、用户困惑。
-const OTHER_THRESHOLD = 0.0001
-const platformCards = computed<FusedPlatformCard[]>(() => {
-  // 建立 by_platform Map
-  const byPlat = new Map<string, (typeof sortedPlatforms.value)[number]>()
-  for (const item of props.stats?.by_platform ?? []) byPlat.set(item.platform, item)
-
-  // 建立 quota Map
-  const byQuota = new Map<string, PlatformQuotaItem>()
-  for (const q of props.platformQuotas ?? []) byQuota.set(q.platform, q)
-
-  // union 平台集合。后端 by_platform / quota 接口均不会返回 platform='__other__'，
-  // 无需显式排除；__other__ 由下方差值补差逻辑单独追加。
-  const platforms = new Set<string>([...byPlat.keys(), ...byQuota.keys()])
-
-  const cards: FusedPlatformCard[] = []
-
-  for (const p of platforms) {
-    const stat = byPlat.get(p)
-    cards.push({
-      platform: p,
-      total_actual_cost: stat?.total_actual_cost ?? 0,
-      today_actual_cost: stat?.today_actual_cost ?? 0,
-      total_requests: stat?.total_requests ?? 0,
-      total_tokens: stat?.total_tokens ?? 0,
-      quota: byQuota.get(p),
-    })
-  }
-
-  // 排序：按 PLATFORM_ORDER，未知平台按名称排序
-  cards.sort((a, b) => {
-    const ai = PLATFORM_ORDER.indexOf(a.platform)
-    const bi = PLATFORM_ORDER.indexOf(b.platform)
-    if (ai === -1 && bi === -1) return a.platform.localeCompare(b.platform)
-    if (ai === -1) return 1
-    if (bi === -1) return -1
-    return ai - bi
-  })
-
-  // __other__ 补差逻辑：只对 by_platform 有 usage 数据的总和计算
-  const total = props.stats?.total_actual_cost ?? 0
-  const today = props.stats?.today_actual_cost ?? 0
-  const sumTotal = cards.reduce((s, c) => s + c.total_actual_cost, 0)
-  const sumToday = cards.reduce((s, c) => s + c.today_actual_cost, 0)
-  const diffTotal = Math.max(0, total - sumTotal)
-  const diffToday = Math.max(0, today - sumToday)
-
-  if (diffTotal > OTHER_THRESHOLD || diffToday > OTHER_THRESHOLD) {
-    cards.push({
-      platform: '__other__',
-      total_actual_cost: diffTotal,
-      today_actual_cost: diffToday,
-      total_requests: 0,
-      total_tokens: 0,
-      isOther: true,
-    })
-  }
-
-  return cards
-})
-
-// Quota helpers
-
-type QuotaWindow = 'daily' | 'weekly' | 'monthly'
-type QuotaField = `${QuotaWindow}_limit_usd` | `${QuotaWindow}_usage_usd` | `${QuotaWindow}_window_resets_at`
-
-function quotaVal(q: PlatformQuotaItem | undefined, key: QuotaField): PlatformQuotaItem[QuotaField] {
-  return q?.[key]
-}
-
-function hasAnyLimit(q: PlatformQuotaItem | undefined): boolean {
-  if (!q) return false
-  return q.daily_limit_usd != null || q.weekly_limit_usd != null || q.monthly_limit_usd != null
-}
-
-function calcPercent(usage: number, limit: number): number {
-  if (!limit || limit <= 0) return 0
-  return Math.min(100, Math.max(0, Math.round((usage / limit) * 100)))
-}
-
-function quotaBarClass(p: number): string {
-  if (p >= 95) return 'bg-red-500'
-  if (p >= 75) return 'bg-amber-500'
-  return 'bg-green-500'
-}
-
-// 与 formatBalance 一致使用 Intl.NumberFormat 做半偶舍入，避免 toFixed 在不同 JS 引擎
-// 下偶发截断而非四舍五入（与后端展示精度不一致）。
-const usdFormatter = new Intl.NumberFormat('en-US', {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-})
-function formatUsd(n: number): string {
-  if (!Number.isFinite(n)) return '0.00'
-  return usdFormatter.format(n)
-}
-
-function formatResetTime(iso: string | null | undefined): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleString(undefined, {
-    month: 'numeric',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  })
-}
-
-const formatBalance = (b: number) =>
-  new Intl.NumberFormat('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  }).format(b)
-
-const formatNumber = (n: number) => n.toLocaleString()
-const formatCost = (c: number) => c.toFixed(4)
-const formatTokens = (t: number) => {
-  if (t >= 1_000_000) return `${(t / 1_000_000).toFixed(1)}M`
-  if (t >= 1000) return `${(t / 1000).toFixed(1)}K`
-  return t.toString()
-}
-*/
 </script>

@@ -113,7 +113,7 @@ SUB2API_IMAGES_MAIN_MODEL=env-image-model
 					case "defaults":
 						require.Equal(t, "Asia/Shanghai", cfg.Timezone)
 						require.False(t, cfg.Gateway.ForceCodexCLI)
-						require.Equal(t, "gpt-5.4", cfg.Gateway.OpenAICompactModel)
+						require.Equal(t, "gpt-5.5", cfg.Gateway.OpenAICompactModel)
 						require.Equal(t, 1024, cfg.Gateway.MaxConnsPerHost)
 						require.Equal(t, 2560, cfg.Gateway.MaxIdleConns)
 						require.Equal(t, 120, cfg.Gateway.MaxIdleConnsPerHost)

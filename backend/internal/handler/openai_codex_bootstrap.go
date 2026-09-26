@@ -243,13 +243,32 @@ func validCodexAutomationLastRun(value string) bool {
 
 func validCodexAutomationHeartbeat(value string) bool {
 	decoder := xml.NewDecoder(strings.NewReader(value))
-	var rootSeen, idSeen bool
-	var id bytes.Buffer
+	var rootSeen bool
+	fields := make(map[string]*bytes.Buffer, 3)
 	depth := 0
+	activeField := ""
 	for {
 		token, err := decoder.Token()
 		if err == io.EOF {
-			return rootSeen && idSeen && depth == 0 && strings.TrimSpace(id.String()) == id.String() && validCodexAutomationID(id.String())
+			if !rootSeen || depth != 0 {
+				return false
+			}
+			id, ok := fields["automation_id"]
+			if !ok || strings.TrimSpace(id.String()) != id.String() || !validCodexAutomationID(id.String()) {
+				return false
+			}
+			_, hasTime := fields["current_time_iso"]
+			instructions, hasInstructions := fields["instructions"]
+			if hasTime != hasInstructions {
+				return false
+			}
+			if hasTime {
+				if _, err := time.Parse(time.RFC3339Nano, fields["current_time_iso"].String()); err != nil {
+					return false
+				}
+				return strings.TrimSpace(instructions.String()) != ""
+			}
+			return len(fields) == 1
 		}
 		if err != nil {
 			return false
@@ -265,14 +284,24 @@ func validCodexAutomationHeartbeat(value string) bool {
 					return false
 				}
 				rootSeen = true
-			} else if idSeen || current.Name.Local != "automation_id" {
-				return false
 			} else {
-				idSeen = true
+				switch current.Name.Local {
+				case "automation_id", "current_time_iso", "instructions":
+					if _, exists := fields[current.Name.Local]; exists {
+						return false
+					}
+					fields[current.Name.Local] = &bytes.Buffer{}
+					activeField = current.Name.Local
+				default:
+					return false
+				}
 			}
 		case xml.EndElement:
 			if current.Name.Space != "" {
 				return false
+			}
+			if depth == 2 {
+				activeField = ""
 			}
 			depth--
 			if depth < 0 {
@@ -280,7 +309,10 @@ func validCodexAutomationHeartbeat(value string) bool {
 			}
 		case xml.CharData:
 			if depth == 2 {
-				_, _ = id.Write(current)
+				if activeField == "" {
+					return false
+				}
+				_, _ = fields[activeField].Write(current)
 			} else if len(bytes.TrimSpace(current)) != 0 {
 				return false
 			}

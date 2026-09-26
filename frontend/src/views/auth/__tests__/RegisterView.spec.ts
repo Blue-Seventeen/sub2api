@@ -2,10 +2,25 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import RegisterView from '@/views/auth/RegisterView.vue'
 
-const { getPublicSettingsMock, registerMock, showErrorMock } = vi.hoisted(() => ({
+const {
+  getPublicSettingsMock,
+  registerMock,
+  showErrorMock,
+  pushMock,
+  verifyActionMock,
+  appStoreMock
+} = vi.hoisted(() => ({
   getPublicSettingsMock: vi.fn(),
   registerMock: vi.fn(),
-  showErrorMock: vi.fn()
+  showErrorMock: vi.fn(),
+  pushMock: vi.fn(),
+  verifyActionMock: vi.fn(),
+  appStoreMock: {
+    cachedPublicSettings: null as { promo_code_enabled?: boolean } | null,
+    showError: (...args: unknown[]) => showErrorMock(...args),
+    showSuccess: vi.fn(),
+    showWarning: vi.fn()
+  }
 }))
 
 const publicSettings = {
@@ -26,7 +41,7 @@ const publicSettings = {
 }
 
 vi.mock('vue-router', () => ({
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push: pushMock }),
   useRoute: () => ({ query: {} })
 }))
 
@@ -47,11 +62,7 @@ vi.mock('vue-i18n', () => ({
 
 vi.mock('@/stores', () => ({
   useAuthStore: () => ({ register: (...args: unknown[]) => registerMock(...args) }),
-  useAppStore: () => ({
-    showError: (...args: unknown[]) => showErrorMock(...args),
-    showSuccess: vi.fn(),
-    showWarning: vi.fn()
-  })
+  useAppStore: () => appStoreMock
 }))
 
 vi.mock('@/api/auth', async () => {
@@ -68,7 +79,10 @@ function mountRegister() {
       stubs: {
         AuthLayout: { template: '<div><slot /><slot name="footer" /></div>' },
         Icon: true,
-        TurnstileWidget: { template: '<div data-testid="turnstile-widget" />' },
+        TurnstileWidget: {
+          template: '<div data-testid="turnstile-widget" />',
+          methods: { verifyAction: verifyActionMock, reset: vi.fn() }
+        },
         LoginAgreementPrompt: true,
         EmailOAuthButtons: true,
         LinuxDoOAuthSection: true,
@@ -81,11 +95,16 @@ function mountRegister() {
   })
 }
 
-describe('RegisterView invitation layout', () => {
+describe('RegisterView', () => {
   beforeEach(() => {
     getPublicSettingsMock.mockReset()
     registerMock.mockReset()
     showErrorMock.mockReset()
+    pushMock.mockReset()
+    verifyActionMock.mockReset()
+    appStoreMock.cachedPublicSettings = null
+    sessionStorage.removeItem('register_data')
+    verifyActionMock.mockResolvedValue({ token: 'ticket', randstr: 'randstr' })
     getPublicSettingsMock.mockResolvedValue(publicSettings)
     registerMock.mockResolvedValue({})
   })
@@ -122,6 +141,7 @@ describe('RegisterView invitation layout', () => {
     await flushPromises()
     await wrapper.get('#email').setValue('first@custom.example')
     await wrapper.get('#password').setValue('secret-123')
+    await wrapper.get('#confirmPassword').setValue('secret-123')
     await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
 
@@ -147,6 +167,7 @@ describe('RegisterView invitation layout', () => {
     await flushPromises()
     await wrapper.get('#email').setValue('second@custom.example')
     await wrapper.get('#password').setValue('secret-123')
+    await wrapper.get('#confirmPassword').setValue('secret-123')
     await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
 
@@ -167,6 +188,7 @@ describe('RegisterView invitation layout', () => {
     await flushPromises()
     await wrapper.get('#email').setValue('first@custom.example')
     await wrapper.get('#password').setValue('secret-123')
+    await wrapper.get('#confirmPassword').setValue('secret-123')
     await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
 
@@ -187,6 +209,7 @@ describe('RegisterView invitation layout', () => {
     await flushPromises()
     await wrapper.get('#email').setValue('user@allowed.com')
     await wrapper.get('#password').setValue('secret-123')
+    await wrapper.get('#confirmPassword').setValue('secret-123')
     await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
 

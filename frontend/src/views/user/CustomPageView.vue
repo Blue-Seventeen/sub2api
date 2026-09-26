@@ -144,6 +144,7 @@
 
         <div v-else ref="embedShellRef" class="custom-embed-shell">
           <a
+            v-if="menuItem.hide_open_button !== true"
             ref="openLinkRef"
             :href="embeddedUrl"
             target="_blank"

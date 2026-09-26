@@ -50,7 +50,8 @@ export default {
       "kimi": "Kimi",
       "zhipu": "Zhipu GLM",
       "deepseek": "DeepSeek",
-      "minimax": "MiniMax"
+      "minimax": "MiniMax",
+      "opencode_go": "OpenCode Go"
     },
     "checkMode": {
       "probe": "Probe",
@@ -262,6 +263,7 @@ export default {
         "balance": "Balance --",
         "window5h": "5h",
         "windowWeekly": "7d",
+        "windowMonthly": "30d",
         "probe": "Query",
         "probeTooltip": "Query the provider quota endpoint for 5-hour / weekly rolling window usage",
         "balanceProbeTooltip": "Query the provider balance endpoint for the account balance",

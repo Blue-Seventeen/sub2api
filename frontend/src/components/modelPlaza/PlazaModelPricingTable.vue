@@ -98,6 +98,20 @@
                 {{ sourcePeakLabel(m) }}
               </span>
             </div>
+            <div
+              v-if="reasoningEffortMultipliers(m).length"
+              class="mt-1 flex flex-wrap gap-1"
+              :title="t('admin.channels.form.reasoningEffortMultipliers')"
+              data-testid="reasoning-effort-multipliers"
+            >
+              <span
+                v-for="([effort, multiplier], idx) in reasoningEffortMultipliers(m)"
+                :key="idx"
+                class="rounded bg-cyan-50 px-1.5 py-0.5 text-[10px] text-cyan-700 dark:bg-cyan-900/20 dark:text-cyan-300"
+              >
+                {{ effort }} × {{ formatRateMultiplier(multiplier) }}
+              </span>
+            </div>
           </td>
 
           <template v-if="billingMode(m) === BILLING_MODE_TOKEN">
@@ -258,9 +272,19 @@ import { useI18n } from 'vue-i18n'
 import { formatScaled } from '@/utils/pricing'
 import { formatRateMultiplier } from '@/utils/formatters'
 import { platformAccentColor, platformBadgeLightClass, platformLabel } from '@/utils/platformColors'
-import { BILLING_MODE_TOKEN, BILLING_MODE_IMAGE, type BillingMode } from '@/constants/channel'
+import { BILLING_MODE_TOKEN, BILLING_MODE_IMAGE, REASONING_EFFORT_LEVELS, type BillingMode } from '@/constants/channel'
 import type { PlazaModel } from '@/api/modelPlaza'
 import type { UserPricingInterval } from '@/api/channels'
+
+function reasoningEffortMultipliers(model: PlazaModel): [string, number][] {
+  const multipliers = model.pricing?.reasoning_effort_multipliers
+  return REASONING_EFFORT_LEVELS.flatMap(effort => {
+    const multiplier = multipliers?.[effort]
+    return typeof multiplier === 'number' && Number.isFinite(multiplier) && multiplier > 0
+      ? [[effort, multiplier] as [string, number]]
+      : []
+  })
+}
 
 const props = defineProps<{
   models: PlazaModel[]

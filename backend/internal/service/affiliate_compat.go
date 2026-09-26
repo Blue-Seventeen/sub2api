@@ -61,6 +61,20 @@ type AffiliateTransferRecord struct {
 	ID int64
 }
 
+// AffiliateWithdrawResult remains available for source compatibility with
+// historical repository test doubles and DTO consumers. Withdraw operations
+// are intentionally inert in this fork; Promotion owns the active rebate
+// workflow and no withdrawal method is exposed by AffiliateRepository.
+type AffiliateWithdrawResult struct {
+	LedgerID            int64   `json:"ledger_id"`
+	UserID              int64   `json:"user_id"`
+	Amount              float64 `json:"amount"`
+	AvailableQuotaAfter float64 `json:"available_quota_after"`
+	FrozenQuotaAfter    float64 `json:"frozen_quota_after"`
+	HistoryQuotaAfter   float64 `json:"history_quota_after"`
+	Replayed            bool    `json:"-"`
+}
+
 type AffiliateUserOverview struct {
 	UserID int64
 }

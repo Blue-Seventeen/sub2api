@@ -5035,6 +5035,15 @@ const createPlatformSearchMeta: Record<
     iconActiveClass: "bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-300",
     textActiveClass: "text-indigo-600 dark:text-indigo-300",
   },
+  opencode_go: {
+    subtitle: "OpenCode Go / Zen",
+    searchTerms: ["opencode", "opencode go", "zen", "go"],
+    activeClass:
+      "border-amber-200 bg-white shadow-sm dark:border-amber-900/50 dark:bg-dark-600",
+    iconActiveClass:
+      "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300",
+    textActiveClass: "text-amber-700 dark:text-amber-300",
+  },
   composite: {
     subtitle: "Multi-provider route",
     searchTerms: ["composite", "route", "multi", "gateway", "model"],

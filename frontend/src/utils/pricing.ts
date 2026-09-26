@@ -8,6 +8,7 @@ import { getDisplayCurrencySymbol } from '@/utils/format'
  */
 export function formatScaled(value: number | null, scale: number, minFractionDigits = 0): string {
   if (value == null) return '-'
+  if (value === 0) return `${getDisplayCurrencySymbol()}0`
   let s = (value * scale).toPrecision(10).replace(/\.?0+$/, '')
   if (minFractionDigits > 0 && !s.includes('e')) {
     const dot = s.indexOf('.')

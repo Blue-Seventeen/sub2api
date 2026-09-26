@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
+import { adminAPI } from '@/api/admin'
+import type { AdminDataImportResult } from '@/types'
 import ImportDataModal from '@/components/admin/proxy/ImportDataModal.vue'
 
 const showError = vi.fn()
@@ -27,6 +29,103 @@ vi.mock('vue-i18n', () => ({
 }))
 
 describe('Proxy ImportDataModal', () => {
+  const partialResult: AdminDataImportResult = {
+    proxy_created: 1,
+    proxy_reused: 0,
+    proxy_failed: 1,
+    account_created: 0,
+    account_failed: 0,
+    errors: [{ kind: 'proxy', name: 'invalid proxy', message: 'invalid port' }]
+  }
+
+  const mountWithFile = async () => {
+    const wrapper = mount(ImportDataModal, {
+      props: { show: true },
+      global: {
+        stubs: {
+          BaseDialog: { template: '<div><slot /><footer><slot name="footer" /></footer></div>' }
+        }
+      }
+    })
+    const input = wrapper.find('input[type="file"]')
+    const file = new File(['{}'], 'data.json', { type: 'application/json' })
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve('{}') })
+    Object.defineProperty(input.element, 'files', { value: [file] })
+    await input.trigger('change')
+    return wrapper
+  }
+
+  it.each([
+    { name: 'created', proxy_created: 1, proxy_reused: 0 },
+    { name: 'reused', proxy_created: 0, proxy_reused: 1 }
+  ])('refreshes $name proxies when closing a partial import result', async (counts) => {
+    vi.mocked(adminAPI.proxies.importData).mockResolvedValue({ ...partialResult, ...counts })
+    const wrapper = await mountWithFile()
+
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(showError).toHaveBeenCalledWith('admin.proxies.dataImportCompletedWithErrors')
+    expect(wrapper.text()).toContain('invalid port')
+    expect(wrapper.emitted('imported')).toBeUndefined()
+    expect(wrapper.emitted('close')).toBeUndefined()
+
+    await wrapper.findAll('button').find(button => button.text() === 'common.cancel')!.trigger('click')
+    expect(wrapper.emitted('imported')).toHaveLength(1)
+    expect(wrapper.emitted('close')).toHaveLength(1)
+
+    await wrapper.setProps({ show: false })
+    await wrapper.setProps({ show: true })
+    await wrapper.findAll('button').find(button => button.text() === 'common.cancel')!.trigger('click')
+    expect(wrapper.emitted('imported')).toHaveLength(1)
+  })
+
+  it('keeps a pending refresh when a later import entirely fails', async () => {
+    vi.mocked(adminAPI.proxies.importData)
+      .mockResolvedValueOnce(partialResult)
+      .mockResolvedValueOnce({ ...partialResult, proxy_created: 0 })
+    const wrapper = await mountWithFile()
+
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'common.cancel')!.trigger('click')
+
+    expect(wrapper.emitted('imported')).toHaveLength(1)
+  })
+
+  it('does not refresh when all imported proxies fail', async () => {
+    vi.mocked(adminAPI.proxies.importData).mockResolvedValue({ ...partialResult, proxy_created: 0 })
+    const wrapper = await mountWithFile()
+
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    const cancelButton = wrapper.findAll('button').find(button => button.text() === 'common.cancel')
+    expect(cancelButton).toBeDefined()
+    await cancelButton!.trigger('click')
+
+    expect(wrapper.emitted('imported')).toBeUndefined()
+    expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
+  it('refreshes immediately after a successful retry without refreshing twice on close', async () => {
+    vi.mocked(adminAPI.proxies.importData)
+      .mockResolvedValueOnce(partialResult)
+      .mockResolvedValueOnce({ ...partialResult, proxy_failed: 0, errors: [] })
+    const wrapper = await mountWithFile()
+
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(showSuccess).toHaveBeenCalledWith('admin.proxies.dataImportSuccess')
+    expect(wrapper.emitted('imported')).toHaveLength(1)
+
+    await wrapper.findAll('button').find(button => button.text() === 'common.cancel')!.trigger('click')
+    expect(wrapper.emitted('imported')).toHaveLength(1)
+  })
+
   beforeEach(() => {
     showError.mockReset()
     showSuccess.mockReset()
@@ -73,7 +172,7 @@ describe('Proxy ImportDataModal', () => {
     expect(showError).toHaveBeenCalledWith('admin.proxies.dataImportParseFailed')
   })
 
-  it('emits imported when import partially succeeds', async () => {
+  it('waits until close to emit imported after a partial success', async () => {
     const api = await import('@/api/admin')
     vi.mocked(api.adminAPI.proxies.importData).mockResolvedValue({
       proxy_created: 1,
@@ -106,6 +205,8 @@ describe('Proxy ImportDataModal', () => {
     await Promise.resolve()
 
     expect(showError).toHaveBeenCalledWith('admin.proxies.dataImportCompletedWithErrors')
+    expect(wrapper.emitted('imported')).toBeUndefined()
+    await wrapper.findAll('button').find(button => button.text() === 'common.cancel')!.trigger('click')
     expect(wrapper.emitted('imported')).toHaveLength(1)
   })
 })

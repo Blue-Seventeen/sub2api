@@ -16,7 +16,7 @@ func TestResponsesToAnthropicRequest_SkipsBlankAndInvalidContent(t *testing.T) {
 		{"role":"assistant","content":[{"type":"bogus","text":"discard"}]},
 		{"role":"user","content":[{"type":"input_text","text":"hello"}]},
 		{"role":"assistant","content":"reply"}
-	]`))
+	]`), false)
 	require.NoError(t, err)
 	require.Len(t, messages, 2)
 

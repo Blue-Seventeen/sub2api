@@ -129,7 +129,7 @@ func resolveOpenAIMessagesDispatchMappedModel(c *gin.Context, apiKey *service.AP
 	// Group defaults target OpenAI; other providers use account-level mappings.
 	if apiKey.Group.Platform == service.PlatformComposite && c != nil && c.Request != nil {
 		if platform, ok := service.ResolvedTargetPlatformFromContext(c.Request.Context()); ok &&
-			(platform == service.PlatformGrok || service.IsCNProvider(platform)) {
+			(platform == service.PlatformGrok || service.IsMultiProtocolAPIKeyProvider(platform)) {
 			return ""
 		}
 	}
@@ -226,7 +226,7 @@ func allowOpenAICompatibleMessagesDispatch(c *gin.Context, apiKey *service.APIKe
 	}
 	if apiKey.Group.Platform == service.PlatformComposite && c != nil && c.Request != nil {
 		if platform, ok := service.ResolvedTargetPlatformFromContext(c.Request.Context()); ok &&
-			(platform == service.PlatformGrok || service.IsCNProvider(platform)) {
+			(platform == service.PlatformGrok || service.IsMultiProtocolAPIKeyProvider(platform)) {
 			return true
 		}
 	}
@@ -236,24 +236,64 @@ func allowOpenAICompatibleMessagesDispatch(c *gin.Context, apiKey *service.APIKe
 func openAICompatibleTextTargetAllowed(c *gin.Context, apiKey *service.APIKey, model string) bool {
 	return compositeTargetPlatformAllowed(c, apiKey, model,
 		service.PlatformOpenAI, service.PlatformGrok,
-		service.PlatformKimi, service.PlatformZhipu, service.PlatformDeepseek, service.PlatformMiniMax)
+		service.PlatformKimi, service.PlatformZhipu, service.PlatformDeepseek,
+		service.PlatformMiniMax, service.PlatformOpenCodeGo)
 }
 
-// NewOpenAIGatewayHandler creates a new OpenAIGatewayHandler
-func NewOpenAIGatewayHandler(
-	gatewayService *service.OpenAIGatewayService,
-	newAPIStyleService *service.NewAPIStyleGatewayService,
-	concurrencyService *service.ConcurrencyService,
-	billingCacheService *service.BillingCacheService,
-	apiKeyService *service.APIKeyService,
-	usageRecordWorkerPool *service.UsageRecordWorkerPool,
-	proxyStatsWorkerPool *service.ProxyStatsWorkerPool,
-	proxyActiveUsageTracker *service.ProxyActiveUsageTracker,
-	errorPassthroughService *service.ErrorPassthroughService,
-	contentModerationService *service.ContentModerationService,
-	opsService *service.OpsService,
-	cfg *config.Config,
-) *OpenAIGatewayHandler {
+// dependencyOrNil preserves typed nils while adapting optional constructor
+// dependencies supplied by older and newer internal call sites.
+func dependencyOrNil[T any](value any) *T {
+	if value == nil {
+		return nil
+	}
+	dependency, ok := value.(*T)
+	if !ok {
+		panic(fmt.Sprintf("unexpected dependency type %T", value))
+	}
+	return dependency
+}
+
+// NewOpenAIGatewayHandler creates a new OpenAIGatewayHandler. Both the legacy
+// and current dependency layouts are accepted for custom in-package callers.
+func NewOpenAIGatewayHandler(gatewayService *service.OpenAIGatewayService, args ...any) *OpenAIGatewayHandler {
+	var (
+		newAPIStyleService       *service.NewAPIStyleGatewayService
+		concurrencyService       *service.ConcurrencyService
+		billingCacheService      *service.BillingCacheService
+		apiKeyService            *service.APIKeyService
+		usageRecordWorkerPool    *service.UsageRecordWorkerPool
+		proxyStatsWorkerPool     *service.ProxyStatsWorkerPool
+		proxyActiveUsageTracker  *service.ProxyActiveUsageTracker
+		errorPassthroughService  *service.ErrorPassthroughService
+		contentModerationService *service.ContentModerationService
+		opsService               *service.OpsService
+		cfg                      *config.Config
+	)
+	switch len(args) {
+	case 11:
+		newAPIStyleService = dependencyOrNil[service.NewAPIStyleGatewayService](args[0])
+		concurrencyService = dependencyOrNil[service.ConcurrencyService](args[1])
+		billingCacheService = dependencyOrNil[service.BillingCacheService](args[2])
+		apiKeyService = dependencyOrNil[service.APIKeyService](args[3])
+		usageRecordWorkerPool = dependencyOrNil[service.UsageRecordWorkerPool](args[4])
+		proxyStatsWorkerPool = dependencyOrNil[service.ProxyStatsWorkerPool](args[5])
+		proxyActiveUsageTracker = dependencyOrNil[service.ProxyActiveUsageTracker](args[6])
+		errorPassthroughService = dependencyOrNil[service.ErrorPassthroughService](args[7])
+		contentModerationService = dependencyOrNil[service.ContentModerationService](args[8])
+		opsService = dependencyOrNil[service.OpsService](args[9])
+		cfg = dependencyOrNil[config.Config](args[10])
+	case 8:
+		concurrencyService = dependencyOrNil[service.ConcurrencyService](args[0])
+		billingCacheService = dependencyOrNil[service.BillingCacheService](args[1])
+		apiKeyService = dependencyOrNil[service.APIKeyService](args[2])
+		usageRecordWorkerPool = dependencyOrNil[service.UsageRecordWorkerPool](args[3])
+		errorPassthroughService = dependencyOrNil[service.ErrorPassthroughService](args[4])
+		contentModerationService = dependencyOrNil[service.ContentModerationService](args[5])
+		opsService = dependencyOrNil[service.OpsService](args[6])
+		cfg = dependencyOrNil[config.Config](args[7])
+	default:
+		panic(fmt.Sprintf("NewOpenAIGatewayHandler: unsupported dependency count %d", len(args)))
+	}
 	pingInterval := time.Duration(0)
 	maxAccountSwitches := 3
 	if cfg != nil {
@@ -2077,6 +2117,20 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		return
 	}
 
+	// A WebSocket may outlive a key's remaining spending window. Recheck
+	// after acquiring turn slots, including the first account-selection wait.
+	// Restrict this extra check to the opt-in mode so standard-mode RPM checks
+	// are not charged a second time for the same request.
+	checkSimpleModeTurnBilling := func() error {
+		if h.cfg == nil || h.cfg.RunMode != config.RunModeSimple || !h.cfg.SimpleModeKeyRateLimitEnabled {
+			return nil
+		}
+		if err := h.billingCacheService.CheckBillingEligibility(ctx, apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(ctx, apiKey)); err != nil {
+			return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "billing check failed", err)
+		}
+		return nil
+	}
+
 	sessionHash := h.gatewayService.GenerateSessionHashWithFallback(
 		c,
 		firstMessage,
@@ -2289,6 +2343,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		// AfterTurn 的计费读取所属 turn 的时刻。零值起步的语义见
 		// openAIWSTurnPricing 的注释——绝不能用建连时刻初始化。
 		var turnPricing openAIWSTurnPricing
+		// Passthrough ingress does not invoke BeforeTurn for the first frame.
+		if err := checkSimpleModeTurnBilling(); err != nil {
+			closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "billing check failed")
+			return
+		}
 		hooks := &service.OpenAIWSIngressHooks{
 			ClientLifecycleContext:  clientLifecycleCtx,
 			InitialRequestModel:     reqModel,
@@ -2385,7 +2444,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				}
 				currentUserRelease = wrapReleaseOnDone(ctx, userReleaseFunc)
 				currentAccountRelease = wrapReleaseOnDone(ctx, accountReleaseFunc)
-				return nil
+				return checkSimpleModeTurnBilling()
 			},
 			AfterTurn: func(turn int, result *service.OpenAIForwardResult, turnErr error) {
 				cyberBlockBody := takeCyberTurnBody(turn)
@@ -2824,6 +2883,7 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 		h.handleFailoverExhaustedSimple(c, http.StatusBadGateway, streamStarted)
 		return
 	}
+	copyFailoverRetryAfter(c, failoverErr.ResponseHeaders)
 	if failoverErr.IsOpenAIRequestBodyTooLarge() {
 		service.SetOpsUpstreamError(c, http.StatusRequestEntityTooLarge, service.OpenAIRequestBodyTooLargeClientMessage, "")
 		h.handleStreamingAwareError(

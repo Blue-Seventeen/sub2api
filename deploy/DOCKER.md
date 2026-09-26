@@ -9,18 +9,18 @@
 
 ```bash
 docker build \
-  --build-arg VERSION=0.2.4 \
+  --build-arg VERSION=0.2.8 \
   --build-arg COMMIT="$(git rev-parse --short HEAD)" \
-  -t sub2api-custom:v0.2.4 .
+  -t sub2api-custom:v0.2.8 .
 ```
 
 或者使用你自己的版本号：
 
 ```bash
 docker build \
-  --build-arg VERSION=0.2.4 \
+  --build-arg VERSION=0.2.8 \
   --build-arg COMMIT="$(git rev-parse --short HEAD)" \
-  -t sub2api-custom:v0.2.4 .
+  -t sub2api-custom:v0.2.8 .
 ```
 
 ## Docker Compose 示例
@@ -28,7 +28,7 @@ docker build \
 ```yaml
 services:
   sub2api:
-    image: sub2api-custom:v0.2.4
+    image: sub2api-custom:v0.2.8
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"

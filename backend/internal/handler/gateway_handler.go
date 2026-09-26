@@ -62,27 +62,68 @@ type GatewayHandler struct {
 	settingService            *service.SettingService
 }
 
-// NewGatewayHandler creates a new GatewayHandler
-func NewGatewayHandler(
-	gatewayService *service.GatewayService,
-	newAPIStyleService *service.NewAPIStyleGatewayService,
-	openAIGatewayService *service.OpenAIGatewayService,
-	geminiCompatService *service.GeminiMessagesCompatService,
-	antigravityGatewayService *service.AntigravityGatewayService,
-	userService *service.UserService,
-	concurrencyService *service.ConcurrencyService,
-	billingCacheService *service.BillingCacheService,
-	usageService *service.UsageService,
-	apiKeyService *service.APIKeyService,
-	usageRecordWorkerPool *service.UsageRecordWorkerPool,
-	proxyStatsWorkerPool *service.ProxyStatsWorkerPool,
-	proxyActiveUsageTracker *service.ProxyActiveUsageTracker,
-	errorPassthroughService *service.ErrorPassthroughService,
-	contentModerationService *service.ContentModerationService,
-	userMsgQueueService *service.UserMessageQueueService,
-	cfg *config.Config,
-	settingService *service.SettingService,
-) *GatewayHandler {
+// NewGatewayHandler creates a new GatewayHandler. It accepts both the current
+// dependency layout and the pre-v0.2.8 layout so internal custom integrations
+// do not break when optional gateway services are added.
+func NewGatewayHandler(gatewayService *service.GatewayService, args ...any) *GatewayHandler {
+	var (
+		newAPIStyleService      *service.NewAPIStyleGatewayService
+		openAIGatewayService    *service.OpenAIGatewayService
+		geminiCompatService     *service.GeminiMessagesCompatService
+		antigravityGateway      *service.AntigravityGatewayService
+		userService             *service.UserService
+		concurrencyService      *service.ConcurrencyService
+		billingCacheService     *service.BillingCacheService
+		usageService            *service.UsageService
+		apiKeyService           *service.APIKeyService
+		usageRecordWorkerPool   *service.UsageRecordWorkerPool
+		proxyStatsWorkerPool    *service.ProxyStatsWorkerPool
+		proxyActiveUsageTracker *service.ProxyActiveUsageTracker
+		errorPassthroughService *service.ErrorPassthroughService
+		contentModeration       *service.ContentModerationService
+		userMsgQueueService     *service.UserMessageQueueService
+		cfg                     *config.Config
+		settingService          *service.SettingService
+	)
+	switch len(args) {
+	case 17:
+		newAPIStyleService = dependencyOrNil[service.NewAPIStyleGatewayService](args[0])
+		openAIGatewayService = dependencyOrNil[service.OpenAIGatewayService](args[1])
+		geminiCompatService = dependencyOrNil[service.GeminiMessagesCompatService](args[2])
+		antigravityGateway = dependencyOrNil[service.AntigravityGatewayService](args[3])
+		userService = dependencyOrNil[service.UserService](args[4])
+		concurrencyService = dependencyOrNil[service.ConcurrencyService](args[5])
+		billingCacheService = dependencyOrNil[service.BillingCacheService](args[6])
+		usageService = dependencyOrNil[service.UsageService](args[7])
+		apiKeyService = dependencyOrNil[service.APIKeyService](args[8])
+		usageRecordWorkerPool = dependencyOrNil[service.UsageRecordWorkerPool](args[9])
+		proxyStatsWorkerPool = dependencyOrNil[service.ProxyStatsWorkerPool](args[10])
+		proxyActiveUsageTracker = dependencyOrNil[service.ProxyActiveUsageTracker](args[11])
+		errorPassthroughService = dependencyOrNil[service.ErrorPassthroughService](args[12])
+		contentModeration = dependencyOrNil[service.ContentModerationService](args[13])
+		userMsgQueueService = dependencyOrNil[service.UserMessageQueueService](args[14])
+		cfg = dependencyOrNil[config.Config](args[15])
+		settingService = dependencyOrNil[service.SettingService](args[16])
+	case 14:
+		openAIGatewayService = dependencyOrNil[service.OpenAIGatewayService](args[0])
+		geminiCompatService = dependencyOrNil[service.GeminiMessagesCompatService](args[1])
+		antigravityGateway = dependencyOrNil[service.AntigravityGatewayService](args[2])
+		userService = dependencyOrNil[service.UserService](args[3])
+		concurrencyService = dependencyOrNil[service.ConcurrencyService](args[4])
+		billingCacheService = dependencyOrNil[service.BillingCacheService](args[5])
+		usageService = dependencyOrNil[service.UsageService](args[6])
+		apiKeyService = dependencyOrNil[service.APIKeyService](args[7])
+		usageRecordWorkerPool = dependencyOrNil[service.UsageRecordWorkerPool](args[8])
+		errorPassthroughService = dependencyOrNil[service.ErrorPassthroughService](args[9])
+		contentModeration = dependencyOrNil[service.ContentModerationService](args[10])
+		userMsgQueueService = dependencyOrNil[service.UserMessageQueueService](args[11])
+		cfg = dependencyOrNil[config.Config](args[12])
+		settingService = dependencyOrNil[service.SettingService](args[13])
+	default:
+		panic(fmt.Sprintf("NewGatewayHandler: unsupported dependency count %d", len(args)))
+	}
+	contentModerationService := contentModeration
+	antigravityGatewayService := antigravityGateway
 	pingInterval := time.Duration(0)
 	maxAccountSwitches := 10
 	maxAccountSwitchesGemini := 3
@@ -1164,8 +1205,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	}
 }
 
-// Models handles listing available models
-// GET /v1/models
+// Models lists visible models, or retrieves the exact list entry for a model path parameter.
+// GET /v1/models and /v1/models/:model (also exposed through root aliases)
 // Returns models based on account configurations (model_mapping whitelist)
 // Falls back to default models if no whitelist is configured
 func (h *GatewayHandler) Models(c *gin.Context) {
@@ -1247,18 +1288,12 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 
 	// Fallback to default models
 	if platform == service.PlatformOpenAI {
-		c.JSON(http.StatusOK, gin.H{
-			"object": "list",
-			"data":   openai.DefaultModels,
-		})
+		writeModelsListResponse(c, openai.DefaultModels)
 		return
 	}
 
 	if platform == service.PlatformGemini {
-		c.JSON(http.StatusOK, gin.H{
-			"object": "list",
-			"data":   geminicli.DefaultModels,
-		})
+		writeModelsListResponse(c, geminicli.DefaultModels)
 		return
 	}
 	if platform == service.PlatformGrok {
@@ -1266,10 +1301,7 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"object": "list",
-		"data":   claude.DefaultModels,
-	})
+	writeModelsListResponse(c, claude.DefaultModels)
 }
 
 // CodexModels returns the effective group model list using the manifest shape
@@ -1483,10 +1515,7 @@ func writeModelsList(c *gin.Context, platform string, modelIDs []string) {
 			CreatedAt:   "2024-01-01T00:00:00Z",
 		})
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"object": "list",
-		"data":   models,
-	})
+	writeModelsListResponse(c, models)
 }
 
 func writeCustomModelsList(c *gin.Context, platform string, modelIDs []string) {
@@ -1544,15 +1573,12 @@ func writeGrokModelsList(c *gin.Context, modelIDs []string) {
 		models = append(models, item)
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"object": "list",
-		"data":   models,
-	})
+	writeModelsListResponse(c, models)
 }
 
 func grokModelSupportsConfigurableReasoning(modelID string) bool {
 	switch strings.ToLower(strings.TrimSpace(modelID)) {
-	case "grok-4.6", "grok-4.6-latest", "grok-4.5", "grok-4.5-latest", "grok", "grok-latest", "grok-build", "grok-build-latest", "grok-build-0.1":
+	case "grok-4.7", "grok-4.7-latest", "grok-4.6", "grok-4.6-latest", "grok-4.5", "grok-4.5-latest", "grok", "grok-latest", "grok-build", "grok-build-latest", "grok-build-0.1":
 		return true
 	default:
 		return false
@@ -1580,10 +1606,7 @@ func writeOpenAIModelsList(c *gin.Context, modelIDs []string) {
 			DisplayName: modelID,
 		})
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"object": "list",
-		"data":   models,
-	})
+	writeModelsListResponse(c, models)
 }
 
 func customModelsListSource(platform string, availableModels, fallbackModels []string) []string {
@@ -1714,6 +1737,8 @@ func defaultModelIDsForPlatform(platform string) []string {
 		return defaultClaudeModelIDs()
 	case service.PlatformGrok:
 		return xai.DefaultModelIDs()
+	case service.PlatformOpenCodeGo:
+		return service.DefaultOpenCodeGoModelIDs()
 	case service.PlatformComposite:
 		ids := make([]string, 0)
 		seen := make(map[string]struct{})
@@ -1768,7 +1793,7 @@ func modelListingSource(platform string, availableModels, fallbackModels []strin
 func defaultCodexModelIDsForPlatform(platform string) []string {
 	switch platform {
 	case service.PlatformDeepseek:
-		return []string{"deepseek-v4-pro", "deepseek-v4-flash"}
+		return []string{"deepseek-v4-pro", "deepseek-v4-flash", "deepseek-flash"}
 	case service.PlatformMiniMax:
 		return []string{"MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.5"}
 	default:

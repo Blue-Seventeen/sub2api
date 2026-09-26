@@ -105,6 +105,15 @@ func readOpenAIWSClientMessageWithTimeoutStart(
 			return closeAndJoin(timeoutStatus, timeoutReason, context.DeadlineExceeded)
 		case <-controlCtx.Done():
 			cause := context.Cause(controlCtx)
+			if isOpenAIWSSessionPreempted(controlCtx) {
+				_ = conn.CloseNow()
+				<-readDone
+				return 0, nil, NewOpenAIWSClientCloseError(
+					coderws.StatusTryAgainLater,
+					openAIWSSessionPreemptedCloseReason,
+					errOpenAIWSSessionPreempted,
+				)
+			}
 			if errors.Is(cause, ErrOpenAIWSIngressLeaseLost) {
 				return closeAndJoin(
 					coderws.StatusTryAgainLater,

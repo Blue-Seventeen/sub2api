@@ -20,6 +20,7 @@ export const CONCRETE_PLATFORM_OPTIONS = [
   { value: 'zhipu', label: 'Zhipu GLM' },
   { value: 'deepseek', label: 'DeepSeek' },
   { value: 'minimax', label: 'MiniMax' },
+  { value: 'opencode_go', label: 'OpenCode Go' },
   { value: 'volcengine', label: 'VolcEngine/Doubao' },
   { value: 'ali', label: 'Qwen/Ali' },
   { value: 'moonshot', label: 'Kimi/Moonshot' },

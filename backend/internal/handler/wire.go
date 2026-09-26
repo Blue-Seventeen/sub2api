@@ -49,9 +49,11 @@ func ProvideAdminHandlers(
 	auditLogHandler *admin.AuditLogHandler,
 	upstreamBillingProbe *service.UpstreamBillingProbeService,
 	ollamaCloudUsage *service.OllamaCloudUsageService,
+	opencodeGoUsage *service.OpenCodeGoUsageService,
 ) *AdminHandlers {
 	accountHandler.SetUpstreamBillingProbeService(upstreamBillingProbe)
 	accountHandler.SetOllamaCloudUsageService(ollamaCloudUsage)
+	accountHandler.SetOpenCodeGoUsageService(opencodeGoUsage)
 	return &AdminHandlers{
 		Dashboard:              dashboardHandler,
 		User:                   userHandler,
@@ -90,6 +92,16 @@ func ProvideAdminHandlers(
 		Compliance:             complianceHandler,
 		AuditLog:               auditLogHandler,
 	}
+}
+
+// ProvideDashboardHandler gives Wire a fixed dependency signature while
+// keeping NewDashboardHandler compatible with direct tests and callers.
+func ProvideDashboardHandler(
+	dashboardService *service.DashboardService,
+	aggregationService *service.DashboardAggregationService,
+	realtimeStatsService *service.OpsService,
+) *admin.DashboardHandler {
+	return admin.NewDashboardHandler(dashboardService, aggregationService, realtimeStatsService)
 }
 
 func ProvideGatewayHandler(
@@ -263,7 +275,7 @@ var ProviderSet = wire.NewSet(
 	ProvideBatchImageHandler,
 
 	// Admin handlers
-	admin.NewDashboardHandler,
+	ProvideDashboardHandler,
 	admin.NewUserHandler,
 	admin.NewGroupHandlerWithConfig,
 	admin.ProvideAccountHandler,

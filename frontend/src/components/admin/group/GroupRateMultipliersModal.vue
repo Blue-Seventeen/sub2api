@@ -63,7 +63,7 @@
           <button
             type="button"
             class="btn btn-primary shrink-0"
-            :disabled="!selectedUser || newRate === null || newRate < 0"
+            :disabled="!selectedUser || newRate === null || !Number.isFinite(newRate) || newRate <= 0"
             @click="handleAddLocal"
           >
             {{ t('common.add') }}

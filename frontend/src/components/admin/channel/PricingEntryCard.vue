@@ -79,7 +79,7 @@
             </label>
             <Select
               :modelValue="entry.billing_mode"
-              @update:modelValue="emit('update', { ...entry, billing_mode: $event as BillingMode, intervals: [], time_pricing: { timezone: entry.time_pricing?.timezone || 'Asia/Shanghai', periods: [] } })"
+              @update:modelValue="emit('update', { ...entry, billing_mode: $event as BillingMode, intervals: [], time_pricing: { timezone: entry.time_pricing?.timezone || 'Asia/Shanghai', weekdays_only: false, periods: [] } })"
               :options="billingModeOptions"
               class="mt-1"
             />
@@ -249,6 +249,60 @@
             {{ t('admin.channels.form.characterBillingHint') }}
           </p>
         </div>
+
+        <div v-else-if="entry.billing_mode === 'video'">
+          <label class="mt-3 block text-xs font-medium text-gray-500 dark:text-gray-400">
+            {{ t('admin.channels.form.defaultPerRequestPrice') }}
+            <span class="ml-1 font-normal text-gray-400">{{ getDisplayCurrencySymbol() }}</span>
+          </label>
+          <div class="mt-1 w-48">
+            <input :value="entry.per_request_price" @input="emitField('per_request_price', ($event.target as HTMLInputElement).value)"
+              type="number" step="any" min="0" class="input text-sm" :placeholder="t('admin.channels.form.pricePlaceholder')" />
+          </div>
+        </div>
+
+        <div class="mt-4 border-t border-gray-200 pt-3 dark:border-dark-600">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <p class="text-xs font-medium text-gray-700 dark:text-gray-300">
+                {{ t('admin.channels.form.reasoningEffortMultipliers') }}
+              </p>
+              <p class="mt-0.5 text-[11px] text-gray-400">
+                {{ t('admin.channels.form.reasoningEffortMultipliersHint') }}
+              </p>
+            </div>
+            <button
+              type="button"
+              data-testid="reasoning-effort-multipliers-clear"
+              class="shrink-0 text-xs text-gray-500 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400"
+              :title="t('common.clear')"
+              @click="clearReasoningEffortMultipliers"
+            >
+              <Icon name="x" size="sm" />
+            </button>
+          </div>
+          <div class="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div v-for="effort in REASONING_EFFORT_LEVELS" :key="effort">
+              <label class="text-[11px] text-gray-500 dark:text-gray-400">
+                {{ t('admin.channels.form.reasoningEffortMultiplierLabel', { effort }) }}
+              </label>
+              <input
+                :value="entry.reasoning_effort_multipliers?.[effort] ?? ''"
+                :data-reasoning-effort="effort"
+                :aria-invalid="isReasoningEffortMultiplierInvalid(effort)"
+                :placeholder="t('admin.channels.form.reasoningEffortMultiplierDefault')"
+                type="number"
+                min="0"
+                step="any"
+                class="input mt-0.5 text-sm"
+                @input="updateReasoningEffortMultiplier(effort, ($event.target as HTMLInputElement).value)"
+              />
+            </div>
+          </div>
+          <p v-if="reasoningEffortError" role="alert" class="mt-2 text-xs text-red-600 dark:text-red-400">
+            {{ reasoningEffortError }}
+          </p>
+        </div>
       </div>
     </div>
   </div>
@@ -263,7 +317,8 @@ import IntervalRow from './IntervalRow.vue'
 import ModelTagInput from './ModelTagInput.vue'
 import TimePricingSection from './TimePricingSection.vue'
 import type { PricingFormEntry, IntervalFormEntry } from './types'
-import { perTokenToMTok, getPlatformTagClass } from './types'
+import { perTokenToMTok, getPlatformTagClass, validateReasoningEffortMultipliers } from './types'
+import { REASONING_EFFORT_LEVELS, type ReasoningEffortLevel } from '@/constants/channel'
 import type { BillingMode } from '@/api/admin/channels'
 import channelsAPI from '@/api/admin/channels'
 import { getDisplayCurrencySymbol } from '@/utils/format'
@@ -289,7 +344,8 @@ const billingModeOptions = computed(() => [
   { value: 'per_request', label: t('admin.channels.billingMode.perRequest') },
   { value: 'image', label: t('admin.channels.billingMode.image') },
   { value: 'duration', label: t('admin.channels.billingMode.duration') },
-  { value: 'character', label: t('admin.channels.billingMode.character') }
+  { value: 'character', label: t('admin.channels.billingMode.character') },
+  { value: 'video', label: t('admin.channels.billingMode.video') }
 ])
 
 const billingModeLabel = computed(() => {
@@ -300,8 +356,32 @@ const billingModeLabel = computed(() => {
 const tierMultiplierFields = [
   { key: 'fast_multiplier' as const, label: 'admin.channels.form.fastMultiplier' },
   { key: 'flex_multiplier' as const, label: 'admin.channels.form.flexMultiplier' },
-  { key: 'max_reasoning_effort_multiplier' as const, label: 'admin.channels.form.maxReasoningEffortMultiplier' },
 ]
+
+const reasoningEffortError = computed(() =>
+  validateReasoningEffortMultipliers(props.entry.reasoning_effort_multipliers, t),
+)
+
+function isReasoningEffortMultiplierInvalid(effort: ReasoningEffortLevel): boolean {
+  const value = props.entry.reasoning_effort_multipliers?.[effort]
+  if (value === undefined || value === '') return false
+  const multiplier = Number(value)
+  return !Number.isFinite(multiplier) || multiplier <= 0
+}
+
+function clearReasoningEffortMultipliers() {
+  emit('update', { ...props.entry, reasoning_effort_multipliers: null })
+}
+
+function updateReasoningEffortMultiplier(effort: ReasoningEffortLevel, value: string) {
+  const multipliers = { ...props.entry.reasoning_effort_multipliers }
+  if (value === '') delete multipliers[effort]
+  else multipliers[effort] = value
+  emit('update', {
+    ...props.entry,
+    reasoning_effort_multipliers: Object.keys(multipliers).length ? multipliers : null,
+  })
+}
 
 function emitField(field: keyof PricingFormEntry, value: string) {
   emit('update', { ...props.entry, [field]: value === '' ? null : value })

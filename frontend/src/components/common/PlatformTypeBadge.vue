@@ -63,6 +63,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AccountPlatform, AccountType } from '@/types'
 import { platformBadgeLightClass, platformLabel } from '@/utils/platformColors'
+import { normalizePlanType, openAIPlanTypeLabel } from '@/utils/planType'
 import GrokFreeIcon from './GrokFreeIcon.vue'
 import PlatformIcon from './PlatformIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -107,12 +108,16 @@ const typeLabel = computed(() => {
   }
 })
 
-const normalizedPlanType = computed(() =>
-  (props.planType || '').trim().toLowerCase().replace(/[\s_-]+/g, '')
-)
+const normalizedPlanType = computed(() => normalizePlanType(props.planType))
 
 const planLabel = computed(() => {
   if (!normalizedPlanType.value) return ''
+  // ChatGPT 档位命名（Pro 5x / Pro 20x、Business Standard / Business Premium）只适用于
+  // OpenAI：Antigravity 与 Grok 各自的 pro/team 沿用下面的通用标签。
+  if (props.platform === 'openai') {
+    const label = openAIPlanTypeLabel(props.planType)
+    if (label) return label
+  }
   switch (normalizedPlanType.value) {
     case 'plus':
       return 'Plus'
@@ -168,6 +173,12 @@ const planBadgeClass = computed(() => {
     if (isGrokFreePlan.value) return 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
     if (['supergrok', 'supergroklite'].includes(normalizedPlanType.value)) return 'bg-cyan-100 text-cyan-600 dark:bg-cyan-900/30 dark:text-cyan-400'
     if (['supergrokheavy', 'heavy'].includes(normalizedPlanType.value)) return 'bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400'
+  }
+  if (props.platform === 'openai') {
+    if (normalizedPlanType.value === 'plus') return 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300'
+    if (normalizedPlanType.value === 'free' || normalizedPlanType.value === 'basic') return 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
+    if (['pro', 'chatgptpro', 'prolite'].includes(normalizedPlanType.value)) return 'bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400'
+    if (['team', 'selfservebusinessprolite'].includes(normalizedPlanType.value)) return 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400'
   }
   return typeClass.value
 })

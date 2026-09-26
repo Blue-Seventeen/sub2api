@@ -210,7 +210,11 @@ func (s *AntigravityGatewayService) prepareAntigravityCompatCall(
 		return nil, s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", "Invalid request body")
 	}
 
-	mappedModel := s.getMappedModel(account, request.originalModel)
+	mappedModel := s.getMappedModelForThinkingLevel(
+		account,
+		request.originalModel,
+		geminiThinkingLevelFromClaudeThinking(claudeRequest.Thinking),
+	)
 	if mappedModel == "" {
 		MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalFeatureGate)
 		message := fmt.Sprintf("model %s not in whitelist", request.originalModel)
@@ -272,6 +276,9 @@ func (s *AntigravityGatewayService) buildAntigravityCompatGeminiBody(
 		if cleaned, cleanErr := cleanGeminiRequest(body); cleanErr == nil {
 			body = cleaned
 		}
+		if cleaned, cleanErr := enableMixedGeminiToolInvocations(body); cleanErr == nil {
+			body = cleaned
+		}
 		body = ensureAntigravityMixedToolConfig(body)
 		return s.wrapV1InternalRequest(projectID, mappedModel, body)
 	}
@@ -282,6 +289,72 @@ func (s *AntigravityGatewayService) buildAntigravityCompatGeminiBody(
 }
 
 const antigravityCompatSafeMaxTokens = 64000
+
+// enableMixedGeminiToolInvocations removes built-in Gemini tools when client
+// function declarations are present. Antigravity rejects that combination at
+// its v1internal endpoint even when the server-side invocation flag is set.
+func enableMixedGeminiToolInvocations(body []byte) ([]byte, error) {
+	var request map[string]any
+	if err := json.Unmarshal(body, &request); err != nil {
+		return nil, err
+	}
+
+	tools, ok := request["tools"].([]any)
+	if !ok || len(tools) == 0 {
+		return body, nil
+	}
+
+	hasFunctionDeclarations := false
+	for _, rawTool := range tools {
+		tool, ok := rawTool.(map[string]any)
+		if !ok {
+			continue
+		}
+		declarations, hasFunctions := tool["functionDeclarations"].([]any)
+		if hasFunctions && len(declarations) > 0 {
+			hasFunctionDeclarations = true
+			break
+		}
+	}
+	if !hasFunctionDeclarations {
+		return body, nil
+	}
+
+	filtered := make([]any, 0, len(tools))
+	droppedBuiltin := false
+	for _, rawTool := range tools {
+		tool, ok := rawTool.(map[string]any)
+		if !ok {
+			filtered = append(filtered, rawTool)
+			continue
+		}
+		if _, hasSearch := tool["googleSearch"]; hasSearch {
+			delete(tool, "googleSearch")
+			droppedBuiltin = true
+		}
+		if _, hasCodeExecution := tool["codeExecution"]; hasCodeExecution {
+			delete(tool, "codeExecution")
+			droppedBuiltin = true
+		}
+		if len(tool) == 0 {
+			continue
+		}
+		filtered = append(filtered, tool)
+	}
+	if !droppedBuiltin {
+		return body, nil
+	}
+
+	request["tools"] = filtered
+	if toolConfig, ok := request["toolConfig"].(map[string]any); ok {
+		delete(toolConfig, "includeServerSideToolInvocations")
+		delete(toolConfig, "include_server_side_tool_invocations")
+		if len(toolConfig) == 0 {
+			delete(request, "toolConfig")
+		}
+	}
+	return json.Marshal(request)
+}
 
 func ensureAntigravityMixedToolConfig(body []byte) []byte {
 	var payload map[string]any

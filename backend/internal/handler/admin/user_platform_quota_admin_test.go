@@ -277,6 +277,45 @@ func TestUpdateUserPlatformQuotas_FlushesCachedUsageBeforeMutationGuard(t *testi
 	}
 }
 
+// TestUpdateUserPlatformQuotas_AllUnlimitedClearsRows 锁定：全部平台三档全空等价于清空，
+// UpsertForUser 收到空列表（软删该用户所有活跃行），且 0 = 显式禁用仍算已配置。
+func TestUpdateUserPlatformQuotas_AllUnlimitedClearsRows(t *testing.T) {
+	repo := &upsertCapturingQuotaRepo{}
+	cache := &billingCacheStub{}
+	h := buildTestHandler(repo, cache)
+
+	body := `{"quotas":[
+		{"platform":"anthropic","daily_limit_usd":null,"weekly_limit_usd":null,"monthly_limit_usd":null},
+		{"platform":"openai"}
+	]}`
+	c, w := putReq(t, body)
+	h.UpdateUserPlatformQuotas(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if len(repo.upsertCalls) != 1 {
+		t.Fatalf("UpsertForUser should be called once, got %d", len(repo.upsertCalls))
+	}
+	if len(repo.upsertCalls[0].records) != 0 {
+		t.Errorf("all-unlimited input must upsert zero records, got %+v", repo.upsertCalls[0].records)
+	}
+
+	repo = &upsertCapturingQuotaRepo{}
+	h = buildTestHandler(repo, &billingCacheStub{})
+	c, w = putReq(t, `{"quotas":[{"platform":"gemini","daily_limit_usd":0}]}`)
+	h.UpdateUserPlatformQuotas(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if len(repo.upsertCalls) != 1 || len(repo.upsertCalls[0].records) != 1 {
+		t.Fatalf("zero limit is a configured limit and must be upserted: %+v", repo.upsertCalls)
+	}
+	if r := repo.upsertCalls[0].records[0]; r.Platform != "gemini" || r.DailyLimitUSD == nil || *r.DailyLimitUSD != 0 {
+		t.Errorf("unexpected record: %+v", r)
+	}
+}
+
 func TestUpdateUserPlatformQuotas_RejectsDuplicatePlatform(t *testing.T) {
 	h := buildTestHandler(&upsertCapturingQuotaRepo{}, &billingCacheStub{})
 	body := `{"quotas":[

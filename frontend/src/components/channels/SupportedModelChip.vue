@@ -150,6 +150,14 @@
               :scale="1"
             />
 
+            <PricingRow
+              v-if="model.pricing.billing_mode === BILLING_MODE_VIDEO && model.pricing.per_request_price != null"
+              :label="t(prefixKey('videoPrice'))"
+              :value="model.pricing.per_request_price"
+              :unit="t(prefixKey('unitPerSecond'))"
+              :scale="1"
+            />
+
             <div
               v-if="model.pricing.intervals && model.pricing.intervals.length > 0"
               class="mt-2 border-t pt-2"
@@ -198,6 +206,7 @@ import type { UserPricingInterval, UserSupportedModel } from '@/api/channels'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import type { GroupPlatform } from '@/types'
 import { platformBadgeClass, platformBorderClass, platformBadgeLightClass } from '@/utils/platformColors'
+import { BILLING_MODE_VIDEO } from '@/utils/billingMode'
 
 const props = withDefaults(
   defineProps<{
@@ -257,6 +266,8 @@ const billingModeLabel = computed(() => {
       return t(prefixKey('billingModeDuration'))
     case BILLING_MODE_CHARACTER:
       return t(prefixKey('billingModeCharacter'))
+    case BILLING_MODE_VIDEO:
+      return t(prefixKey('billingModeVideo'))
     default:
       return '-'
   }
@@ -275,9 +286,13 @@ function formatInterval(iv: UserPricingInterval, mode: BillingMode): string {
     mode === BILLING_MODE_PER_REQUEST ||
     mode === BILLING_MODE_IMAGE ||
     mode === BILLING_MODE_DURATION ||
-    mode === BILLING_MODE_CHARACTER
+    mode === BILLING_MODE_CHARACTER ||
+    mode === BILLING_MODE_VIDEO
   ) {
-    return formatScaled(iv.per_request_price, 1)
+    const formatted = formatScaled(iv.per_request_price, 1)
+    return mode === BILLING_MODE_VIDEO
+      ? `${formatted} ${t(prefixKey('unitPerSecond'))}`
+      : formatted
   }
   const input = formatScaled(iv.input_price, perMillionScale)
   const output = formatScaled(iv.output_price, perMillionScale)

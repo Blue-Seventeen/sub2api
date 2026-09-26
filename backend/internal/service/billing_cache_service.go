@@ -963,6 +963,10 @@ func (s *BillingCacheService) InvalidateAPIKeyRateLimit(ctx context.Context, key
 // resets expired windows in-memory and triggers async DB reset,
 // and returns an error if any window limit is exceeded.
 func (s *BillingCacheService) checkAPIKeyRateLimits(ctx context.Context, apiKey *APIKey) error {
+	return s.checkAPIKeyRateLimitsWithMode(ctx, apiKey, false)
+}
+
+func (s *BillingCacheService) checkAPIKeyRateLimitsWithMode(ctx context.Context, apiKey *APIKey, failClosed bool) error {
 	if s.cache == nil {
 		// No cache: fall back to reading from DB directly
 		if s.apiKeyRateLimitLoader == nil {
@@ -970,6 +974,9 @@ func (s *BillingCacheService) checkAPIKeyRateLimits(ctx context.Context, apiKey 
 		}
 		data, err := s.apiKeyRateLimitLoader.GetRateLimitData(ctx, apiKey.ID)
 		if err != nil {
+			if failClosed {
+				return ErrBillingServiceUnavailable
+			}
 			return nil // Don't block requests on DB errors
 		}
 		return s.evaluateRateLimits(ctx, apiKey, data.Usage5h, data.Usage1d, data.Usage7d,
@@ -984,6 +991,9 @@ func (s *BillingCacheService) checkAPIKeyRateLimits(ctx context.Context, apiKey 
 		}
 		dbData, dbErr := s.apiKeyRateLimitLoader.GetRateLimitData(ctx, apiKey.ID)
 		if dbErr != nil {
+			if failClosed {
+				return ErrBillingServiceUnavailable
+			}
 			return nil // Don't block requests on DB errors
 		}
 		// Build cache entry from DB data
@@ -1148,8 +1158,12 @@ func (s *BillingCacheService) CheckBillingEligibilityFreshSubscription(ctx conte
 }
 
 func (s *BillingCacheService) checkBillingEligibility(ctx context.Context, user *User, apiKey *APIKey, group *Group, subscription *UserSubscription, platform string, freshSubscription bool) error {
-	// 简易模式：跳过所有计费检查
+	// 简易模式默认跳过余额/订阅计费，但显式启用的 API Key 窗口限额仍需
+	// 在长连接建连和每个 turn 的边界重新读取，避免 WebSocket 绕过限额。
 	if s.cfg.RunMode == config.RunModeSimple {
+		if s.cfg.SimpleModeKeyRateLimitEnabled && apiKey != nil {
+			return s.checkAPIKeyRateLimitsWithMode(ctx, apiKey, true)
+		}
 		return nil
 	}
 	if s.circuitBreaker != nil && !s.circuitBreaker.Allow() {
@@ -1692,10 +1706,9 @@ func (s *BillingCacheService) checkUserPlatformQuotaEligibility(
 		// 超时 50ms:覆盖正常路径与可接受抖动;Redis 异常时 hot path 不阻塞超过此值。
 		// 用 context.Background()+短超时,避免请求 ctx 取消导致刷新丢失。
 		// 显式 setCancel()(而非 defer):缩短 context 生命周期,避免 defer 延迟到函数返回。
-		// isSentinel 判定「该 entry 无任何 limit」,涵盖两类,跨窗口命中时都跳过 refresh:
-		//   1) A3 回填的 sentinel(DB 无行,短 TTL):refresh 会把短 TTL 误升级为 86400s,有害;
-		//   2) DB 有行但三 limit 全未配置的用户(TTL 86400s):refresh 纯属无意义(TTL 升级本身无害)。
-		// 两类的 enforcement(下方 limit!=nil 比较)都因 limit 全 nil 永远放行,跳过 refresh 均正确。
+		// isSentinel 判定「该 entry 无任何 limit」(DB 无行时回填的短 TTL sentinel),跨窗口命中时跳过 refresh:
+		// refresh 会把短 TTL 误升级为 86400s;其 enforcement(下方 limit!=nil 比较)因 limit 全 nil 永远放行,
+		// 跳过 refresh 不改变结果。
 		isSentinel := entry.DailyLimitUSD == nil && entry.WeeklyLimitUSD == nil && entry.MonthlyLimitUSD == nil
 		if windowExpired && s.cache != nil && !isSentinel {
 			refreshed := &UserPlatformQuotaCacheEntry{

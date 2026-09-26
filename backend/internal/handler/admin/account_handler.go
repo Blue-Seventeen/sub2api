@@ -68,6 +68,7 @@ type AccountHandler struct {
 	grokImportProber        grokImportProber
 	upstreamBillingProbe    *service.UpstreamBillingProbeService
 	ollamaCloudUsage        *service.OllamaCloudUsageService
+	opencodeGoUsage         *service.OpenCodeGoUsageService
 }
 
 // SetUpstreamBillingProbeService attaches the optional remote billing probe service.
@@ -77,6 +78,10 @@ func (h *AccountHandler) SetUpstreamBillingProbeService(probe *service.UpstreamB
 
 func (h *AccountHandler) SetOllamaCloudUsageService(usage *service.OllamaCloudUsageService) {
 	h.ollamaCloudUsage = usage
+}
+
+func (h *AccountHandler) SetOpenCodeGoUsageService(usage *service.OpenCodeGoUsageService) {
+	h.opencodeGoUsage = usage
 }
 
 // NewAccountHandler creates a new admin account handler
@@ -94,13 +99,20 @@ func NewAccountHandler(
 	accountAutoOpsService *service.AccountAutoOpsService,
 	concurrencyService *service.ConcurrencyService,
 	crsSyncService *service.CRSSyncService,
-	sessionLimitCache service.SessionLimitCache,
-	rpmCache service.RPMCache,
-	tokenCacheInvalidator ...service.TokenCacheInvalidator,
+	optionalDependencies ...any,
 ) *AccountHandler {
+	var sessionLimitCache service.SessionLimitCache
+	var rpmCache service.RPMCache
 	var invalidator service.TokenCacheInvalidator
-	if len(tokenCacheInvalidator) > 0 {
-		invalidator = tokenCacheInvalidator[0]
+	for _, dependency := range optionalDependencies {
+		switch value := dependency.(type) {
+		case service.SessionLimitCache:
+			sessionLimitCache = value
+		case service.RPMCache:
+			rpmCache = value
+		case service.TokenCacheInvalidator:
+			invalidator = value
+		}
 	}
 	return &AccountHandler{
 		adminService:            adminService,
@@ -685,14 +697,22 @@ func (h *AccountHandler) List(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	if h.ollamaCloudUsage != nil && len(accounts) > 0 {
+	if len(accounts) > 0 {
 		accountPointers := make([]*service.Account, len(accounts))
 		for index := range accounts {
 			accountPointers[index] = &accounts[index]
 		}
-		if err := h.ollamaCloudUsage.ResolveAccounts(c.Request.Context(), accountPointers); err != nil {
-			response.ErrorFrom(c, err)
-			return
+		if h.ollamaCloudUsage != nil {
+			if err := h.ollamaCloudUsage.ResolveAccounts(c.Request.Context(), accountPointers); err != nil {
+				response.ErrorFrom(c, err)
+				return
+			}
+		}
+		if h.opencodeGoUsage != nil {
+			if err := h.opencodeGoUsage.ResolveOpenCodeGoUsageAccounts(c.Request.Context(), accountPointers); err != nil {
+				response.ErrorFrom(c, err)
+				return
+			}
 		}
 	}
 
@@ -950,6 +970,12 @@ func (h *AccountHandler) GetByID(c *gin.Context) {
 	}
 	if h.ollamaCloudUsage != nil {
 		if err := h.ollamaCloudUsage.ResolveAccounts(c.Request.Context(), []*service.Account{account}); err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+	}
+	if h.opencodeGoUsage != nil {
+		if err := h.opencodeGoUsage.ResolveOpenCodeGoUsageAccounts(c.Request.Context(), []*service.Account{account}); err != nil {
 			response.ErrorFrom(c, err)
 			return
 		}
@@ -1430,6 +1456,7 @@ func (h *AccountHandler) Refresh(c *gin.Context) {
 
 	if warning == "missing_project_id_temporary" {
 		response.Success(c, gin.H{
+			"account": h.buildAccountResponseWithRuntime(c.Request.Context(), updatedAccount),
 			"message": "Token refreshed successfully, but project_id could not be retrieved (will retry automatically)",
 			"warning": "missing_project_id_temporary",
 		})
@@ -1444,6 +1471,54 @@ type ApplyOAuthCredentialsRequest struct {
 	Type        string         `json:"type" binding:"required,oneof=oauth setup-token"`
 	Credentials map[string]any `json:"credentials" binding:"required"`
 	Extra       map[string]any `json:"extra"`
+}
+
+func mergeOAuthReauthorizationCredentials(existing, fresh map[string]any) map[string]any {
+	merged := make(map[string]any, len(existing)+len(fresh))
+	for key, value := range existing {
+		if isOAuthCredentialAuthMaterialKey(key) {
+			continue
+		}
+		merged[key] = stripNestedOAuthCredentialAuthMaterial(value)
+	}
+	for key, value := range fresh {
+		merged[key] = value
+	}
+	return merged
+}
+
+func isOAuthCredentialAuthMaterialKey(key string) bool {
+	key = strings.ReplaceAll(strings.ToLower(strings.TrimSpace(key)), "-", "_")
+	switch key {
+	case "access_token", "refresh_token", "id_token", "token", "oauth_token",
+		"password", "passwd", "sso_token", "cookie", "cookies", "cookie_jar",
+		"client_secret", "api_key", "authorization", "private_key", "expires_at", "expires_in":
+		return true
+	}
+	return strings.Contains(key, "cookie") || strings.HasSuffix(key, "_token") ||
+		strings.HasSuffix(key, "_secret") || strings.HasSuffix(key, "_password") ||
+		strings.HasSuffix(key, "_expires_at")
+}
+
+func stripNestedOAuthCredentialAuthMaterial(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		filtered := make(map[string]any, len(typed))
+		for key, nested := range typed {
+			if !isOAuthCredentialAuthMaterialKey(key) {
+				filtered[key] = stripNestedOAuthCredentialAuthMaterial(nested)
+			}
+		}
+		return filtered
+	case []any:
+		filtered := make([]any, len(typed))
+		for index, nested := range typed {
+			filtered[index] = stripNestedOAuthCredentialAuthMaterial(nested)
+		}
+		return filtered
+	default:
+		return value
+	}
 }
 
 // ApplyOAuthCredentials 将"重新授权"得到的新凭据原子落库。
@@ -1491,7 +1566,7 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 
 	updatedAccount, err := h.adminService.UpdateAccount(ctx, accountID, &service.UpdateAccountInput{
 		Type:        req.Type,
-		Credentials: req.Credentials,
+		Credentials: mergeOAuthReauthorizationCredentials(existing.Credentials, req.Credentials),
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)

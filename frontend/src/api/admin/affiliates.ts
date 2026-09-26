@@ -45,17 +45,22 @@ export interface AffiliateInviteRecord {
   created_at: string
 }
 
+/**
+ * One rebate accrual. Non-order sources (redeem codes, admin recharges) carry no
+ * order, so order fields are null; invitee_id is null when the invitee account
+ * was deleted.
+ */
 export interface AffiliateRebateRecord {
-  order_id: number
+  order_id: number | null
   out_trade_no: string
   inviter_id: number
   inviter_email: string
   inviter_username: string
-  invitee_id: number
+  invitee_id: number | null
   invitee_email: string
   invitee_username: string
-  order_amount: number
-  pay_amount: number
+  order_amount: number | null
+  pay_amount: number | null
   rebate_amount: number
   payment_type: string
   order_status: string
@@ -212,6 +217,11 @@ export async function getUserOverview(
   return data
 }
 
+/**
+ * Records an offline withdrawal. `idempotencyKey` identifies one registration:
+ * a retry with the same key deducts nothing and returns the first result, with
+ * `replayed` set.
+ */
 export const affiliatesAPI = {
   listUsers,
   lookupUsers,

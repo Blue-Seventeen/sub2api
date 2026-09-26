@@ -44,7 +44,7 @@ func (UserPlatformQuota) Fields() []ent.Field {
 				case "anthropic", "openai", "gemini", "antigravity", "grok",
 					"kimi", "zhipu", "deepseek", "minimax", "volcengine", "ali", "moonshot",
 					"perplexity", "mistral", "siliconflow", "openrouter",
-					"suno", "kling", "midjourney":
+					"suno", "kling", "midjourney", "opencode_go":
 					return nil
 				default:
 					return fmt.Errorf("platform %q is not allowed", s)

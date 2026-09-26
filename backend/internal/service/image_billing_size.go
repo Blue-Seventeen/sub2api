@@ -124,7 +124,20 @@ func ApplyOpenAIImageBillingResolution(result *OpenAIForwardResult) {
 	if len(outputSizes) == 0 && strings.TrimSpace(result.ImageOutputSize) != "" {
 		outputSizes = []string{result.ImageOutputSize}
 	}
+	previousBreakdown := result.ImageSizeBreakdown
+	if cached := result.Usage.ImageCacheReadTokens; cached > 0 {
+		if previousBreakdown == nil {
+			previousBreakdown = make(map[string]int)
+		}
+		previousBreakdown["image_cache_read_tokens"] = cached
+	}
 	resolved := ResolveImageBillingSize(inputSize, outputSizes)
+	if cached := previousBreakdown["image_cache_read_tokens"]; cached > 0 {
+		if resolved.Breakdown == nil {
+			resolved.Breakdown = make(map[string]int)
+		}
+		resolved.Breakdown["image_cache_read_tokens"] = cached
+	}
 	applyImageBillingResolution(
 		&result.ImageSize,
 		&result.ImageInputSize,
