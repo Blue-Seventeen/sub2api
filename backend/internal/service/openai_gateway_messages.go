@@ -53,37 +53,24 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		return nil, err
 	}
 
-	// OpenCode Go：按模型原生协议分流。规则未命中兜底 Chat Completions。
-	if account.IsOpenCodeGo() {
-		mapped := resolveOpenCodeGoMappedModel(account, body, defaultMappedModel)
-		switch openCodeGoNativeProtocol(account, mapped) {
-		case APIProtocolAnthropic:
-			return s.forwardAnthropicViaNativeAnthropicEndpoint(ctx, c, account, body, defaultMappedModel)
-		case APIProtocolResponses:
-			break
-		default:
-			return s.forwardAnthropicViaRawChatCompletions(ctx, c, account, body, defaultMappedModel)
-		}
-	} else if account.IsAnthropicProtocol() || account.IsAdaptiveAPIProtocol() {
-		// 入口分流（国产供应商 Anthropic 协议）：上游为供应商原生 Anthropic 端点时，
-		// /v1/messages 请求零转换直通（仅模型名映射 + 少量 body 清洗），完整保留
-		// thinking / tool_use / cache 语义，适配 Claude Code 等原生客户端。
-		// 必须先于 ShouldUseResponsesAPI 分流：Anthropic 协议账号经 probe 落标
-		// openai_responses_supported=false，会先命中下方的 CC 直转分支。
-		return s.forwardAnthropicViaNativeAnthropicEndpoint(ctx, c, account, body, defaultMappedModel)
+	// 上游协议统一由 resolveUpstreamProtocol 判定。Anthropic 分流必须先于
+	// ShouldUseResponsesAPI：Anthropic 协议账号经 probe 落标
+	// openai_responses_supported=false，否则会命中 CC 直转。
+	routingModel := upstreamRoutingModel(account, body, defaultMappedModel)
+	if account.IsOpenCodeGo() && IsOpenCodeUnsupportedModel(routingModel) {
+		return nil, writeOpenCodeUnsupportedModelError(c, true, routingModel)
 	}
-
-	// 固定 chat_completions 的 CN 账号，以及不支持 Responses 的其他 APIKey
-	// 账号，均将 Messages 转为 CC；固定 responses 的 CN 账号不受探针旧值覆盖。
-	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
+	switch resolveUpstreamProtocol(account, APIProtocolAnthropic, routingModel) {
+	case APIProtocolAnthropic:
+		// 上游为供应商原生 Anthropic 端点：/v1/messages 零转换直通（仅模型名映射 +
+		// 少量 body 清洗），完整保留 thinking / tool_use / cache 语义。
+		return s.forwardAnthropicViaNativeAnthropicEndpoint(ctx, c, account, body, defaultMappedModel)
+	case APIProtocolChatCompletions:
+		// 固定 chat_completions 的多协议账号、规则命中 CC 的按模型分流账号，以及
+		// 不支持 Responses 的其他 APIKey 账号，均将 Messages 转为 CC。
 		return s.forwardAnthropicViaRawChatCompletions(ctx, c, account, body, defaultMappedModel)
 	}
 	SetActualOpenAIUpstreamEndpoint(c, openAIResponsesUpstreamEndpoint)
-	if c != nil {
-		SetCompatibilityRoute(c, CompatibilityRouteAnthropicResponsesBridge)
-		SetCompatibilityUpstreamTransport(c, UpstreamTransportSSE)
-		AppendCompatibilityFallbackStage(c, "bridge")
-	}
 
 	startTime := time.Now()
 
@@ -321,7 +308,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	// 4c. Apply OpenAI fast policy (may filter service_tier or block the request).
 	// Mirrors the Claude anthropic-beta "fast-mode-2026-02-01" filter, but keyed
 	// on the body-level service_tier field (priority/flex).
-	updatedBody, _, policyErr := s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, responsesBody)
+	updatedBody, policyErr := s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, responsesBody)
 	if policyErr != nil {
 		var blocked *OpenAIFastBlockedError
 		if errors.As(policyErr, &blocked) {
@@ -332,7 +319,6 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	}
 	responsesBody = updatedBody
 	responsesReq.ServiceTier = normalizedOpenAIServiceTierValue(gjson.GetBytes(responsesBody, "service_tier").String())
-	setOpsUpstreamRequestBody(c, responsesBody)
 	grokCacheIdentity := ""
 	if account.Platform == PlatformGrok {
 		grokIntentBody := responsesBody
@@ -457,6 +443,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		logger.L().Info("openai messages: retrying after stripping invalid Grok encrypted_content",
 			zap.Int64("account_id", account.ID),
 			zap.Bool("cache_identity_present", strings.TrimSpace(grokCacheIdentity) != ""),
+			zap.String("upstream_error_preview", truncateOpenAIWSLogValue(string(respBody), 240)),
 		)
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -523,6 +510,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		// Client wants JSON: buffer the streaming response and assemble a JSON reply.
 		result, handleErr = s.handleAnthropicBufferedStreamingResponse(resp, c, account, originalModel, billingModel, upstreamModel, startTime)
 	}
+
 	// cyber_policy：标记已设、error 已按 Anthropic 格式发给客户端。丢弃 result、返回哨兵，
 	// 使 handler 落入 tokens=0 免费用量行（对齐 /v1/responses），不计费、不 failover。
 	if GetOpsCyberPolicy(c) != nil {
@@ -665,6 +653,7 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 		return nil, fmt.Errorf("upstream response failed: %s", message)
 	}
 	if strings.TrimSpace(finalResponse.Status) == "completed" {
+		logOpenAISuccessMissingUsage(c.Request.Context(), c, account, resp, &usage, "response.completed", false)
 	}
 
 	// When the terminal event has an empty output array, reconstruct from
@@ -959,6 +948,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	clientOutputStarted := false
 	var streamFailoverErr error
 	var streamNonFailoverErr error
+	terminalEventType := ""
 	searchCount := 0
 	streamSearchSeen := make(map[string]struct{})
 	countSearch := account != nil && account.IsGrok()
@@ -1034,6 +1024,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		isBareErrorEvent := eventType == "error"
 		isTerminalEvent := isOpenAICompatResponsesTerminalEvent(eventType) || isBareErrorEvent
 		if isTerminalEvent {
+			terminalEventType = eventType
 			if event.Response != nil {
 				if id := strings.TrimSpace(event.Response.ID); id != "" {
 					responseID = id
@@ -1169,6 +1160,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				c.Writer.Flush()
 			}
 		}
+		logOpenAISuccessMissingUsage(c.Request.Context(), c, account, resp, &usage, terminalEventType, clientDisconnected)
 		return resultWithUsage(), nil
 	}
 
