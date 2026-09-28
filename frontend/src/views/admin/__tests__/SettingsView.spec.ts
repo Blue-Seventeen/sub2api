@@ -12,17 +12,25 @@ const {
   updateWebSearchEmulationConfig,
   getAdminApiKey,
   getOverloadCooldownSettings,
+  updateOverloadCooldownSettings,
   getRateLimit429CooldownSettings,
   updateRateLimit429CooldownSettings,
   getPanelRateLimitSettings,
   updatePanelRateLimitSettings,
   getStreamTimeoutSettings,
+  updateStreamTimeoutSettings,
   getRectifierSettings,
+  updateRectifierSettings,
   getBetaPolicySettings,
+  updateBetaPolicySettings,
+  getOpenAIFastPolicySettings,
+  updateOpenAIFastPolicySettings,
   getUpstreamBillingProbeSettings,
   updateUpstreamBillingProbeSettings,
   getOllamaCloudUsageSettings,
   updateOllamaCloudUsageSettings,
+  getOpenCodeGoUsageSettings,
+  updateOpenCodeGoUsageSettings,
   getGroups,
   listProxies,
   getProviders,
@@ -40,6 +48,7 @@ const {
   updateWebSearchEmulationConfig: vi.fn(),
   getAdminApiKey: vi.fn(),
   getOverloadCooldownSettings: vi.fn(),
+  updateOverloadCooldownSettings: vi.fn(),
   getRateLimit429CooldownSettings: vi.fn(),
   updateRateLimit429CooldownSettings: vi.fn(),
   getPanelRateLimitSettings: vi.fn().mockResolvedValue({
@@ -51,8 +60,13 @@ const {
   }),
   updatePanelRateLimitSettings: vi.fn().mockImplementation(async (payload) => payload),
   getStreamTimeoutSettings: vi.fn(),
+  updateStreamTimeoutSettings: vi.fn(),
   getRectifierSettings: vi.fn(),
+  updateRectifierSettings: vi.fn(),
   getBetaPolicySettings: vi.fn(),
+  updateBetaPolicySettings: vi.fn(),
+  getOpenAIFastPolicySettings: vi.fn(),
+  updateOpenAIFastPolicySettings: vi.fn(),
   getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({
     enabled: true,
     interval_minutes: 30,
@@ -64,6 +78,8 @@ const {
     debounce_minutes: 1,
   }),
   updateOllamaCloudUsageSettings: vi.fn().mockImplementation(async (payload) => payload),
+  getOpenCodeGoUsageSettings: vi.fn(),
+  updateOpenCodeGoUsageSettings: vi.fn(),
   getGroups: vi.fn(),
   listProxies: vi.fn(),
   getProviders: vi.fn(),
@@ -87,19 +103,27 @@ vi.mock("@/api", () => ({
       updateWebSearchEmulationConfig,
       getAdminApiKey,
       getOverloadCooldownSettings,
+      updateOverloadCooldownSettings,
       getRateLimit429CooldownSettings,
       updateRateLimit429CooldownSettings,
       getPanelRateLimitSettings,
       updatePanelRateLimitSettings,
       getStreamTimeoutSettings,
+      updateStreamTimeoutSettings,
       getRectifierSettings,
+      updateRectifierSettings,
       getBetaPolicySettings,
+      updateBetaPolicySettings,
+      getOpenAIFastPolicySettings,
+      updateOpenAIFastPolicySettings,
     },
     accounts: {
       getUpstreamBillingProbeSettings,
       updateUpstreamBillingProbeSettings,
       getOllamaCloudUsageSettings,
       updateOllamaCloudUsageSettings,
+      getOpenCodeGoUsageSettings,
+      updateOpenCodeGoUsageSettings,
     },
     groups: {
       getAll: getGroups,
@@ -363,6 +387,8 @@ const baseSettingsResponse = {
   registration_email_suffix_whitelist: [],
   promo_code_enabled: true,
   invitation_code_enabled: false,
+  invitation_code_missing_prompt_html: "",
+  markdown_pages_enabled: false,
   password_reset_enabled: false,
   totp_enabled: false,
   totp_encryption_key_configured: false,
@@ -594,7 +620,7 @@ async function openUsersTab(wrapper: ReturnType<typeof mountView>) {
   await flushPromises();
 }
 
-describe("admin SettingsView payment visible method controls", () => {
+describe("admin SettingsView main settings save contract", () => {
   beforeEach(() => {
     getSettings.mockReset();
     updateSettings.mockReset();
@@ -602,15 +628,31 @@ describe("admin SettingsView payment visible method controls", () => {
     updateWebSearchEmulationConfig.mockReset();
     getAdminApiKey.mockReset();
     getOverloadCooldownSettings.mockReset();
+    updateOverloadCooldownSettings.mockReset();
     getRateLimit429CooldownSettings.mockReset();
     updateRateLimit429CooldownSettings.mockReset();
+    getPanelRateLimitSettings.mockReset().mockResolvedValue({
+      enabled: true,
+      user_rpm: 240,
+      heavy_rpm: 60,
+      exempt_admin: true,
+      public_ip_rpm: 300,
+    });
+    updatePanelRateLimitSettings.mockReset().mockImplementation(async (payload) => payload);
     getStreamTimeoutSettings.mockReset();
+    updateStreamTimeoutSettings.mockReset();
     getRectifierSettings.mockReset();
+    updateRectifierSettings.mockReset();
     getBetaPolicySettings.mockReset();
+    updateBetaPolicySettings.mockReset();
+    getOpenAIFastPolicySettings.mockReset();
+    updateOpenAIFastPolicySettings.mockReset();
     getUpstreamBillingProbeSettings.mockReset();
     updateUpstreamBillingProbeSettings.mockReset();
     getOllamaCloudUsageSettings.mockReset();
     updateOllamaCloudUsageSettings.mockReset();
+    getOpenCodeGoUsageSettings.mockReset();
+    updateOpenCodeGoUsageSettings.mockReset();
     getGroups.mockReset();
     listProxies.mockReset();
     getProviders.mockReset();
@@ -644,6 +686,7 @@ describe("admin SettingsView payment visible method controls", () => {
       enabled: true,
       cooldown_minutes: 10,
     });
+    updateOverloadCooldownSettings.mockImplementation(async (payload) => payload);
     getRateLimit429CooldownSettings.mockResolvedValue({
       enabled: true,
       cooldown_seconds: 5,
@@ -656,6 +699,7 @@ describe("admin SettingsView payment visible method controls", () => {
       threshold_count: 3,
       threshold_window_minutes: 10,
     });
+    updateStreamTimeoutSettings.mockImplementation(async (payload) => payload);
     getRectifierSettings.mockResolvedValue({
       enabled: true,
       thinking_signature_enabled: true,
@@ -663,9 +707,13 @@ describe("admin SettingsView payment visible method controls", () => {
       apikey_signature_enabled: false,
       apikey_signature_patterns: [],
     });
+    updateRectifierSettings.mockImplementation(async (payload) => payload);
     getBetaPolicySettings.mockResolvedValue({
       rules: [],
     });
+    updateBetaPolicySettings.mockImplementation(async (payload) => payload);
+    getOpenAIFastPolicySettings.mockResolvedValue({ rules: [] });
+    updateOpenAIFastPolicySettings.mockImplementation(async (payload) => payload);
     getUpstreamBillingProbeSettings.mockResolvedValue({
       enabled: true,
       interval_minutes: 30,
@@ -677,6 +725,12 @@ describe("admin SettingsView payment visible method controls", () => {
       debounce_minutes: 1,
     });
     updateOllamaCloudUsageSettings.mockImplementation(async (payload) => payload);
+    getOpenCodeGoUsageSettings.mockResolvedValue({
+      enabled: false,
+      interval_minutes: 15,
+      debounce_minutes: 1,
+    });
+    updateOpenCodeGoUsageSettings.mockImplementation(async (payload) => payload);
     getGroups.mockResolvedValue([]);
     listProxies.mockResolvedValue({
       items: [],
@@ -686,6 +740,204 @@ describe("admin SettingsView payment visible method controls", () => {
     });
     fetchPublicSettings.mockResolvedValue(undefined);
     adminSettingsFetch.mockResolvedValue(undefined);
+  });
+
+  it("loads, displays, and resubmits the active invitation-code prompt HTML", async () => {
+    const prompt = '<p>Use <a href="https://example.test/invite">this link</a>.</p>';
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      invitation_code_enabled: true,
+      invitation_code_missing_prompt_html: prompt,
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const promptEditor = wrapper
+      .findAll("textarea")
+      .find((textarea) => (textarea.element as HTMLTextAreaElement).value === prompt);
+    expect(promptEditor).toBeDefined();
+
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ invitation_code_missing_prompt_html: prompt }),
+    );
+    const updatedEditor = wrapper
+      .findAll("textarea")
+      .find((textarea) => (textarea.element as HTMLTextAreaElement).value === prompt);
+    expect(updatedEditor).toBeDefined();
+    wrapper.unmount();
+  });
+
+  it("keeps the loaded Markdown pages switch enabled in the save payload", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      markdown_pages_enabled: true,
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ markdown_pages_enabled: true }),
+    );
+    wrapper.unmount();
+  });
+
+  it("round-trips runtime-backed registration, captcha, gateway, monitor, and scheduling settings", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      registration_email_domain_quota_enabled: true,
+      tencent_captcha_enabled: true,
+      tencent_captcha_region: "intl",
+      openai_ttft_mode: "semantic",
+      channel_monitor_enabled: true,
+      channel_monitor_mode: "v1",
+      channel_monitor_hide_throughput: false,
+      channel_monitor_show_quota: false,
+      channel_monitor_hide_user_ranking: false,
+      grok_default_text_model: "grok-4.6",
+      grok_cross_client_model_map_enabled: true,
+      grok_default_base_url_mode: "cli",
+      plugin_management_enabled: false,
+      account_scheduling_thresholds: {
+        openai: 86,
+        anthropic: 80,
+        grok: 90,
+        kimi: 84,
+        zhipu: 82,
+        minimax: 79,
+        opencode_go: 88,
+      },
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="registration-domain-quota-enabled"]').element).toMatchObject({ checked: true });
+    expect(wrapper.get('[data-testid="tencent-captcha-region"]').element).toMatchObject({ value: "intl" });
+    expect(wrapper.get('[data-testid="openai-ttft-mode"]').element).toMatchObject({ value: "semantic" });
+    expect(wrapper.get('[data-testid="channel-monitor-mode"]').element).toMatchObject({ value: "v1" });
+    expect(wrapper.get('[data-testid="grok-default-text-model"]').element).toMatchObject({ value: "grok-4.6" });
+    expect(wrapper.get('[data-testid="grok-default-base-url-mode"]').element).toMatchObject({ value: "cli" });
+    expect(wrapper.get('[data-testid="account-scheduling-threshold-openai"]').element).toMatchObject({ value: "86" });
+
+    await wrapper.get('[data-testid="registration-domain-quota-enabled"]').setValue(false);
+    await wrapper.get('[data-testid="tencent-captcha-region"]').setValue("cn");
+    await wrapper.get('[data-testid="openai-ttft-mode"]').setValue("visible");
+    await wrapper.get('[data-testid="channel-monitor-mode"]').setValue("v2");
+    await wrapper.get('[data-testid="channel-monitor-hide-throughput"]').setValue(true);
+    await wrapper.get('[data-testid="channel-monitor-show-quota"]').setValue(true);
+    await wrapper.get('[data-testid="channel-monitor-hide-user-ranking"]').setValue(true);
+    await wrapper.get('[data-testid="grok-default-text-model"]').setValue("grok-4.6-mini");
+    await wrapper.get('[data-testid="grok-cross-client-model-map-enabled"]').setValue(false);
+    await wrapper.get('[data-testid="grok-default-base-url-mode"]').setValue("api");
+    await wrapper.get('[data-testid="plugin-management-enabled"]').setValue(true);
+    await wrapper.get('[data-testid="account-scheduling-threshold-openai"]').setValue(75);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        registration_email_domain_quota_enabled: false,
+        tencent_captcha_region: "cn",
+        openai_ttft_mode: "visible",
+        channel_monitor_mode: "v2",
+        channel_monitor_hide_throughput: true,
+        channel_monitor_show_quota: true,
+        channel_monitor_hide_user_ranking: true,
+        grok_default_text_model: "grok-4.6-mini",
+        grok_cross_client_model_map_enabled: false,
+        grok_default_base_url_mode: "api",
+        plugin_management_enabled: true,
+        account_scheduling_thresholds: {
+          openai: 75,
+          anthropic: 80,
+          grok: 90,
+          kimi: 84,
+          zhipu: 82,
+          minimax: 79,
+          opencode_go: 88,
+        },
+      }),
+    );
+    expect(wrapper.get('[data-testid="account-scheduling-threshold-openai"]').element).toMatchObject({ value: "75" });
+    wrapper.unmount();
+  });
+
+  it("hydrates the sanitized Web Search settings returned after save", async () => {
+    getWebSearchEmulationConfig.mockResolvedValueOnce({
+      enabled: true,
+      providers: [{
+        type: "brave",
+        api_key: "",
+        api_key_configured: true,
+        quota_limit: 100,
+        subscribed_at: null,
+        quota_used: 4,
+        proxy_id: null,
+        expires_at: null,
+      }],
+    });
+    updateWebSearchEmulationConfig.mockResolvedValueOnce({
+      enabled: true,
+      providers: [{
+        type: "brave",
+        api_key: "",
+        api_key_configured: true,
+        quota_limit: 20,
+        subscribed_at: null,
+        quota_used: 4,
+        proxy_id: null,
+        expires_at: null,
+      }],
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const webSearchCard = wrapper
+      .findAll(".card")
+      .find((card) => card.text().includes("admin.settings.webSearchEmulation.title"));
+    expect(webSearchCard).toBeDefined();
+    await webSearchCard!.find(".flex.cursor-pointer.items-center.justify-between").trigger("click");
+    await flushPromises();
+
+    const quotaInput = webSearchCard!.find('input[type="number"]');
+    const apiKeyInput = webSearchCard!.find('input[type="password"]');
+    await quotaInput.setValue(35);
+    await apiKeyInput.setValue("new-secret-key");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateWebSearchEmulationConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providers: [expect.objectContaining({ api_key: "new-secret-key", quota_limit: 35 })],
+      }),
+    );
+    expect((quotaInput.element as HTMLInputElement).value).toBe("20");
+    expect((apiKeyInput.element as HTMLInputElement).value).toBe("");
+    expect((apiKeyInput.element as HTMLInputElement).placeholder).toBe("••••••••");
+    wrapper.unmount();
+  });
+
+  it("does not overwrite Web Search configuration when its initial load fails", async () => {
+    getWebSearchEmulationConfig.mockRejectedValueOnce(new Error("network unavailable"));
+
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).toHaveBeenCalledTimes(1);
+    expect(updateWebSearchEmulationConfig).not.toHaveBeenCalled();
+    expect(showSuccess).not.toHaveBeenCalledWith("admin.settings.settingsSaved");
+    expect(showError).toHaveBeenCalled();
+    wrapper.unmount();
   });
 
   it("loads and saves the open button visibility for each custom menu", async () => {
@@ -765,6 +1017,48 @@ describe("admin SettingsView payment visible method controls", () => {
       public_ip_rpm: 300,
     });
     expect(showSuccess).toHaveBeenCalled();
+  });
+
+  it("does not expose admin API key mutations when its status cannot be loaded", async () => {
+    getAdminApiKey.mockRejectedValueOnce(new Error("key status unavailable"));
+
+    const wrapper = mountView();
+    await flushPromises();
+    await openSecurityTab(wrapper);
+
+    expect(wrapper.findAll("button").some((button) =>
+      button.text().includes("admin.settings.adminApiKey.create") ||
+      button.text().includes("admin.settings.adminApiKey.regenerate") ||
+      button.text().includes("admin.settings.adminApiKey.delete"),
+    )).toBe(false);
+    expect(wrapper.find('[role="alert"]').exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it.each([
+    ["overload cooldown", "admin.settings.overloadCooldown.title", getOverloadCooldownSettings, updateOverloadCooldownSettings],
+    ["429 cooldown", "admin.settings.rateLimit429Cooldown.title", getRateLimit429CooldownSettings, updateRateLimit429CooldownSettings],
+    ["panel rate limit", "admin.settings.panelRateLimit.title", getPanelRateLimitSettings, updatePanelRateLimitSettings],
+    ["stream timeout", "admin.settings.streamTimeout.title", getStreamTimeoutSettings, updateStreamTimeoutSettings],
+    ["rectifier", "admin.settings.rectifier.title", getRectifierSettings, updateRectifierSettings],
+    ["beta policy", "admin.settings.betaPolicy.title", getBetaPolicySettings, updateBetaPolicySettings],
+    ["OpenAI fast policy", "admin.settings.openaiFastPolicy.title", getOpenAIFastPolicySettings, updateOpenAIFastPolicySettings],
+    ["upstream billing probe", "上游倍率自动探测", getUpstreamBillingProbeSettings, updateUpstreamBillingProbeSettings],
+    ["Ollama Cloud usage", "admin.settings.ollamaCloudUsage.title", getOllamaCloudUsageSettings, updateOllamaCloudUsageSettings],
+    ["OpenCode Go usage", "admin.settings.opencodeGoUsage.title", getOpenCodeGoUsageSettings, updateOpenCodeGoUsageSettings],
+  ])("does not overwrite %s settings when their initial read fails", async (_name, title, load, update) => {
+    load.mockRejectedValueOnce(new Error("settings read failed"));
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const card = wrapper.findAll(".card").find((item) => item.text().includes(title));
+    expect(card).toBeDefined();
+    expect(card!.find('[role="alert"]').exists()).toBe(true);
+    const saveButton = card!.findAll("button").find((button) => button.text().includes("common.save"));
+    expect(!saveButton || saveButton.attributes("disabled") !== undefined).toBe(true);
+    expect(update).not.toHaveBeenCalled();
+    wrapper.unmount();
   });
 
   it("does not render legacy visible payment method controls", async () => {

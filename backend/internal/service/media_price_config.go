@@ -1,5 +1,7 @@
 package service
 
+import "context"
+
 func imagePriceConfigFromAPIKey(apiKey *APIKey) *ImagePriceConfig {
 	if apiKey == nil || apiKey.Group == nil {
 		return nil
@@ -55,4 +57,31 @@ func groupAudioPriceConfigFromAPIKey(apiKey *APIKey) *audioPriceConfig {
 		TTSPerMChars:   g.AudioTTSPricePerMillionChars,
 		STTPerHour:     g.AudioSTTPricePerHour,
 	}
+}
+
+// resolveMediaPricing resolves a media price with the same precedence used by
+// the group editor: an explicit group card overrides the channel card, while
+// channel pricing remains available when the group has no matching card.
+func resolveMediaPricing(
+	ctx context.Context,
+	resolver *ModelPricingResolver,
+	model string,
+	apiKey *APIKey,
+) *ResolvedPricing {
+	if resolver == nil || apiKey == nil {
+		return nil
+	}
+	gid, ok := apiKeyBillingGroupID(apiKey)
+	if !ok {
+		return nil
+	}
+	resolved := resolver.Resolve(ctx, PricingInput{
+		Model:   model,
+		GroupID: &gid,
+		Group:   apiKey.Group,
+	})
+	if resolved.Source != PricingSourceChannel && resolved.Source != PricingSourceGroup {
+		return nil
+	}
+	return resolved
 }

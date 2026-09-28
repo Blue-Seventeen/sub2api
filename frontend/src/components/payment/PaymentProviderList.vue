@@ -24,8 +24,8 @@
           <button
             type="button"
             @click="emit('create')"
-            :disabled="!canCreate"
-            :class="canCreate
+            :disabled="!canCreate || loading || loadError"
+            :class="canCreate && !loading && !loadError
               ? 'btn btn-primary btn-sm'
               : 'btn btn-secondary btn-sm cursor-not-allowed opacity-50'"
           >
@@ -38,13 +38,16 @@
     <!-- List -->
     <div class="p-4">
       <!-- Loading -->
-      <div v-if="loading && !providers.length" class="flex items-center justify-center py-6">
+      <div v-if="loading" class="flex items-center justify-center py-6">
         <div class="h-5 w-5 animate-spin rounded-full border-2 border-primary-500 border-t-transparent" />
+      </div>
+      <div v-else-if="loadError" role="alert" class="py-6 text-center text-sm text-red-600 dark:text-red-400">
+        {{ t('admin.settings.payment.providersLoadFailed') }}
       </div>
 
       <!-- Provider cards (draggable) -->
       <VueDraggable
-        v-if="providers.length"
+        v-else-if="providers.length"
         v-model="localProviders"
         :animation="200"
         handle=".drag-handle"
@@ -72,7 +75,7 @@
       </VueDraggable>
 
       <!-- Empty -->
-      <div v-else-if="!loading" class="py-6 text-center">
+      <div v-else class="py-6 text-center">
         <p class="text-sm text-gray-500 dark:text-gray-400">
           {{ canCreate
             ? t('admin.settings.payment.noProviders')
@@ -82,6 +85,7 @@
           type="button"
           v-if="canCreate"
           @click="emit('create')"
+          :disabled="loading || loadError"
           class="btn btn-primary btn-sm mt-2"
         >
           {{ t('admin.settings.payment.createProvider') }}
@@ -104,6 +108,7 @@ import { getAvailableTypes } from './providerConfig'
 const props = defineProps<{
   providers: ProviderInstance[]
   loading: boolean
+  loadError: boolean
   canCreate: boolean
   enabledPaymentTypes: string[]
   allPaymentTypes: TypeOption[]

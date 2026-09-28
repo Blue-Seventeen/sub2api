@@ -299,6 +299,7 @@ func snapshotOpsStreamErrorContext(c *gin.Context, streamErr *OpsStreamError) {
 				}
 				copyOfEvent := *event
 				streamErr.UpstreamErrors = append(streamErr.UpstreamErrors, &copyOfEvent)
+				streamErr.SkipMonitoring = streamErr.SkipMonitoring || copyOfEvent.SkipMonitoring
 			}
 		}
 	}

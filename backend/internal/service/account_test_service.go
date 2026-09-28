@@ -409,6 +409,14 @@ func (s *AccountTestService) testAccountConnection(c *gin.Context, accountID int
 	}
 
 	// Route to platform-specific test method
+	// OpenCode Go is also classified as a multi-protocol CN provider, but its
+	// model-specific protocol table must take precedence over the generic CN
+	// adaptive probe. The latter probes Chat, Anthropic, and Responses in
+	// sequence, while OpenCode Go must probe exactly one native endpoint.
+	if account.IsOpenCodeGo() {
+		return s.testOpenCodeGoAccountConnection(c, account, modelID, prompt)
+	}
+
 	// Legacy custom providers keep their preset and relay fallback behavior.
 	if account.IsCNProvider() && (!account.IsCompatiblePlatform() || strings.TrimSpace(account.GetCredential("api_protocol")) != "") {
 		switch account.GetAPIProtocol() {

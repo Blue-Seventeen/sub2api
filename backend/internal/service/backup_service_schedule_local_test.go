@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -20,8 +21,9 @@ import (
 )
 
 type backupScheduleTestSettingRepo struct {
-	mu   sync.Mutex
-	data map[string]string
+	mu          sync.Mutex
+	data        map[string]string
+	getValueErr error
 }
 
 func newBackupScheduleTestSettingRepo() *backupScheduleTestSettingRepo {
@@ -41,6 +43,9 @@ func (m *backupScheduleTestSettingRepo) Get(_ context.Context, key string) (*Set
 func (m *backupScheduleTestSettingRepo) GetValue(_ context.Context, key string) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.getValueErr != nil {
+		return "", m.getValueErr
+	}
 	return m.data[key], nil
 }
 
@@ -190,6 +195,27 @@ func TestBackupServiceSchedule_DefaultsLocalEnabledToFalse(t *testing.T) {
 	require.Equal(t, "0 2 * * *", cfg.CronExpr)
 	require.Equal(t, 7, cfg.RetainDays)
 	require.Equal(t, 3, cfg.RetainCount)
+}
+
+func TestBackupServiceSchedule_GetPropagatesReadFailure(t *testing.T) {
+	wantErr := errors.New("settings database unavailable")
+	repo := newBackupScheduleTestSettingRepo()
+	repo.getValueErr = wantErr
+	svc := newBackupScheduleTestService(repo, &backupScheduleTestDumper{}, newBackupScheduleTestObjectStore(), filepath.Join(t.TempDir(), backupScheduleLocalConfigFile))
+
+	_, err := svc.GetSchedule(context.Background())
+
+	require.ErrorIs(t, err, wantErr)
+}
+
+func TestBackupServiceSchedule_GetRejectsCorruptedStoredConfig(t *testing.T) {
+	repo := newBackupScheduleTestSettingRepo()
+	require.NoError(t, repo.Set(context.Background(), settingKeyBackupSchedule, `{"enabled":`))
+	svc := newBackupScheduleTestService(repo, &backupScheduleTestDumper{}, newBackupScheduleTestObjectStore(), filepath.Join(t.TempDir(), backupScheduleLocalConfigFile))
+
+	_, err := svc.GetSchedule(context.Background())
+
+	require.Error(t, err)
 }
 
 func TestBackupServiceSchedule_UpdatePersistsEnabledLocallyOnly(t *testing.T) {

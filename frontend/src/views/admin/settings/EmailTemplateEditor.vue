@@ -145,7 +145,7 @@
                 v-model="subject"
                 type="text"
                 class="input"
-                :disabled="loadingTemplate"
+                :disabled="loadingTemplate || !templateLoaded"
                 :placeholder="t('admin.settings.emailTemplates.subjectPlaceholder')"
               />
             </div>
@@ -159,7 +159,7 @@
                 v-model="html"
                 rows="18"
                 class="input min-h-[28rem] resize-y font-mono text-sm leading-6"
-                :disabled="loadingTemplate"
+                :disabled="loadingTemplate || !templateLoaded"
                 :placeholder="t('admin.settings.emailTemplates.htmlPlaceholder')"
               ></textarea>
             </div>
@@ -328,6 +328,15 @@ const placeholders = ref<string[]>([]);
 const previewSubject = ref("");
 const previewHtml = ref("");
 const initializingSelection = ref(false);
+const loadedTemplateKey = ref("");
+const currentTemplateKey = computed(() =>
+  selectedEvent.value && selectedLocale.value
+    ? `${selectedEvent.value}\u0000${selectedLocale.value}`
+    : "",
+);
+const templateLoaded = computed(
+  () => currentTemplateKey.value !== "" && loadedTemplateKey.value === currentTemplateKey.value,
+);
 
 interface EventDisplayMeta {
   label: string;
@@ -549,13 +558,13 @@ function formatPlaceholder(placeholder: string): string {
 
 const canSave = computed(
   () =>
-    Boolean(selectedEvent.value && selectedLocale.value) &&
+    templateLoaded.value &&
     subject.value.trim().length > 0 &&
     html.value.trim().length > 0,
 );
 
 const canPreview = computed(
-  () => Boolean(selectedEvent.value && selectedLocale.value) && html.value.trim().length > 0,
+  () => templateLoaded.value && html.value.trim().length > 0,
 );
 
 function formatLocale(locale: string): string {
@@ -598,14 +607,31 @@ function applyTemplate(template: {
 }
 
 async function loadTemplate() {
-  if (!selectedEvent.value || !selectedLocale.value) return;
+  const event = selectedEvent.value;
+  const selectedLocaleValue = selectedLocale.value;
+  if (!event || !selectedLocaleValue) {
+    loadedTemplateKey.value = "";
+    subject.value = "";
+    html.value = "";
+    previewSubject.value = "";
+    previewHtml.value = "";
+    return;
+  }
+  const templateKey = `${event}\u0000${selectedLocaleValue}`;
+  loadedTemplateKey.value = "";
+  subject.value = "";
+  html.value = "";
+  isCustomTemplate.value = false;
+  previewSubject.value = "";
+  previewHtml.value = "";
   loadingTemplate.value = true;
   try {
     const template = await adminAPI.settings.getEmailTemplate(
-      selectedEvent.value,
-      selectedLocale.value,
+      event,
+      selectedLocaleValue,
     );
     applyTemplate(template);
+    loadedTemplateKey.value = templateKey;
     await refreshPreview();
   } catch (err: unknown) {
     appStore.showError(extractApiErrorMessage(err, t("common.error")));
@@ -683,16 +709,19 @@ async function refreshPreview() {
 }
 
 async function restoreOfficial() {
-  if (!selectedEvent.value || !selectedLocale.value) return;
+  const event = selectedEvent.value;
+  const selectedLocaleValue = selectedLocale.value;
+  if (!event || !selectedLocaleValue) return;
   if (!window.confirm(t("admin.settings.emailTemplates.restoreConfirm"))) return;
 
   restoring.value = true;
   try {
     const template = await adminAPI.settings.restoreOfficialEmailTemplate(
-      selectedEvent.value,
-      selectedLocale.value,
+      event,
+      selectedLocaleValue,
     );
     applyTemplate(template);
+    loadedTemplateKey.value = `${event}\u0000${selectedLocaleValue}`;
     await refreshPreview();
     appStore.showSuccess(t("admin.settings.emailTemplates.restoreSuccess"));
   } catch (err: unknown) {

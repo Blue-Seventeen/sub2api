@@ -85,6 +85,9 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		}
 		return s.forwardAsRawChatCompletions(ctx, c, account, body, defaultMappedModel)
 	}
+	if account.IsOpenCodeGo() && account.ResolveOpenCodeGoUpstreamProtocol(gjson.GetBytes(body, "model").String()) == APIProtocolChatCompletions {
+		return s.forwardAsRawChatCompletions(ctx, c, account, body, defaultMappedModel)
+	}
 
 	// 入口分流：国产账号的显式协议优先于 stale capability probe；不支持
 	// Responses 的 adaptive provider 也必须走 CC 直转。
@@ -98,6 +101,12 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 			body = convertedBody
 		}
 		return s.forwardAsRawChatCompletions(ctx, c, account, body, defaultMappedModel)
+	}
+	adaptiveResponsesShape := account.IsAdaptiveAPIProtocol() &&
+		!gjson.GetBytes(body, "messages").Exists() &&
+		gjson.GetBytes(body, "input").Exists()
+	if isCNNativeAnthropicIngress(account) && !adaptiveResponsesShape {
+		return s.forwardChatCompletionsViaNativeAnthropic(ctx, c, account, body, defaultMappedModel)
 	}
 	SetActualOpenAIUpstreamEndpoint(c, openAIResponsesUpstreamEndpoint)
 

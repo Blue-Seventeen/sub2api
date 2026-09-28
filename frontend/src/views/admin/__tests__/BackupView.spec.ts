@@ -6,6 +6,8 @@ import BackupView from '../BackupView.vue'
 const {
   getS3Config,
   getImageStorageConfig,
+  updateS3Config,
+  updateImageStorageConfig,
   getSchedule,
   updateSchedule,
   deleteBackup,
@@ -14,6 +16,8 @@ const {
 } = vi.hoisted(() => ({
   getS3Config: vi.fn(),
   getImageStorageConfig: vi.fn(),
+  updateS3Config: vi.fn(),
+  updateImageStorageConfig: vi.fn(),
   getSchedule: vi.fn(),
   updateSchedule: vi.fn(),
   deleteBackup: vi.fn(),
@@ -25,10 +29,10 @@ vi.mock('@/api', () => ({
   adminAPI: {
     backup: {
       getS3Config,
-      updateS3Config: vi.fn(),
+      updateS3Config,
       testS3Connection: vi.fn(),
       getImageStorageConfig,
-      updateImageStorageConfig: vi.fn(),
+      updateImageStorageConfig,
       testImageStorageConnection: vi.fn(),
       getSchedule,
       updateSchedule,
@@ -95,7 +99,9 @@ describe('admin BackupView', () => {
     getS3Config.mockResolvedValue({})
     getImageStorageConfig.mockResolvedValue({ config: {}, secret_configured: false })
     getSchedule.mockResolvedValue({ enabled: false, cron_expr: '', retain_days: 14, retain_count: 10 })
-    updateSchedule.mockReset().mockResolvedValue({})
+    updateS3Config.mockReset().mockResolvedValue({})
+    updateImageStorageConfig.mockReset().mockResolvedValue({})
+    updateSchedule.mockReset().mockImplementation(async (payload) => payload)
     deleteBackup.mockReset().mockResolvedValue(undefined)
     listBackups.mockResolvedValue({ items: [] })
     getDownloadURL.mockReset()
@@ -106,6 +112,30 @@ describe('admin BackupView', () => {
     wrappers.splice(0).forEach(wrapper => wrapper.unmount())
     vi.restoreAllMocks()
     document.body.innerHTML = ''
+  })
+
+  it('does not save backup configuration defaults when initial settings loads fail', async () => {
+    getS3Config.mockRejectedValueOnce(new Error('S3 settings unavailable'))
+    getImageStorageConfig.mockRejectedValueOnce(new Error('Image storage settings unavailable'))
+    getSchedule.mockRejectedValueOnce(new Error('Schedule settings unavailable'))
+
+    const wrapper = mountBackupView()
+    await flushPromises()
+
+    const cards = wrapper.findAll('.card')
+    const s3Card = cards.find((card) => card.text().includes('admin.backup.s3.title'))!
+    const imageCard = cards.find((card) => card.text().includes('admin.backup.imageStorage.title'))!
+    const saveButton = (card: typeof s3Card) => card.findAll('button').find((button) => button.text() === 'common.save')!
+
+    await saveButton(s3Card).trigger('click')
+    await saveButton(imageCard).trigger('click')
+    await wrapper.get('[data-testid="backup-schedule"] .btn-primary').trigger('click')
+    await flushPromises()
+
+    expect(updateS3Config).not.toHaveBeenCalled()
+    expect(updateImageStorageConfig).not.toHaveBeenCalled()
+    expect(updateSchedule).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-testid="backup-schedule"] .btn-primary').attributes('disabled')).toBeDefined()
   })
 
   it('显示分卷数并在下载时列出每个分卷链接', async () => {
@@ -174,6 +204,26 @@ describe('admin BackupView', () => {
     await wrapper.get('[data-testid="backup-schedule"] .btn-primary').trigger('click')
     await flushPromises()
     expect(updateSchedule).toHaveBeenCalledWith(expect.objectContaining({ retain_days: 0, retain_count: 0, monthly_archive: expect.objectContaining({ enabled: false }) }))
+  })
+
+  it('hydrates the normalized backup schedule returned by the server', async () => {
+    updateSchedule.mockImplementationOnce(async (payload) => ({
+      ...payload,
+      cron_expr: '15 3 * * *',
+      retain_days: 5,
+      retain_count: 7,
+      monthly_archive: { enabled: false, days: [1], include_month_end: false, retain_count: 0 },
+    }))
+    const wrapper = mountBackupView()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="backup-schedule"] input[placeholder="0 2 * * *"]').setValue(' 0 4 * * * ')
+    await wrapper.get('[data-testid="backup-schedule"] .btn-primary').trigger('click')
+    await flushPromises()
+
+    expect((wrapper.get('[data-testid="backup-schedule"] input[placeholder="0 2 * * *"]').element as HTMLInputElement).value).toBe('15 3 * * *')
+    expect((wrapper.get('[data-testid="backup-retain-days"]').element as HTMLInputElement).value).toBe('5')
+    expect((wrapper.get('[data-testid="backup-retain-count"]').element as HTMLInputElement).value).toBe('7')
   })
 
   it('多选日期，手填份数；永久保留隐藏数量并在取消后恢复', async () => {

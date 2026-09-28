@@ -216,6 +216,7 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Icon from '@/components/icons/Icon.vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
+import { platformTextClass } from '@/utils/platformColors'
 
 interface LocalEntry extends GroupRPMOverrideEntry {}
 
@@ -246,14 +247,7 @@ const pageSize = ref(10)
 
 let searchTimeout: ReturnType<typeof setTimeout>
 
-const platformColorClass = computed(() => {
-  switch (props.group?.platform) {
-    case 'anthropic': return 'text-orange-700 dark:text-orange-400'
-    case 'openai': return 'text-emerald-700 dark:text-emerald-400'
-    case 'antigravity': return 'text-purple-700 dark:text-purple-400'
-    default: return 'text-blue-700 dark:text-blue-400'
-  }
-})
+const platformColorClass = computed(() => platformTextClass(props.group?.platform || ''))
 
 const isDirty = computed(() => {
   if (localEntries.value.length !== serverEntries.value.length) return true

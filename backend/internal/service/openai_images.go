@@ -302,7 +302,7 @@ func (s *OpenAIGatewayService) ParseOpenAIImagesRequest(c *gin.Context, body []b
 	if resolvedModel, ok := ResolvedUpstreamModelFromContext(c.Request.Context()); ok {
 		req.Model = resolvedModel
 	}
-	if err := validateOpenAIImagesModel(req.Model); err != nil {
+	if err := validateCompatibleImagesModel(req.Model); err != nil {
 		return nil, err
 	}
 	req.SizeTier = normalizeOpenAIImageSizeTier(req.Size)

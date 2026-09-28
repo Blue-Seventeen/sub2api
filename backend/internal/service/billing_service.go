@@ -138,9 +138,9 @@ const (
 	openAIGPT54LongContextInputThreshold   = 272000
 	openAIGPT54LongContextInputMultiplier  = 2.0
 	openAIGPT54LongContextOutputMultiplier = 1.5
-	deepseekFlashOffPeakInputPrice         = 2.2e-7
-	deepseekFlashOffPeakOutputPrice        = 6.6e-7
-	deepseekFlashOffPeakCacheRead          = 7e-9
+	deepseekFlashOffPeakInputPrice         = 1.5e-7
+	deepseekFlashOffPeakOutputPrice        = 6.0e-7
+	deepseekFlashOffPeakCacheRead          = 3e-9
 	deepseekProOffPeakInputPrice           = 6.6e-7
 	deepseekProOffPeakOutputPrice          = 1.98e-6
 	deepseekProOffPeakCacheRead            = 2.2e-8
@@ -311,11 +311,7 @@ func isClaudeFable51Model(model string) bool {
 }
 
 func defaultMaxReasoningEffortMultiplier(model string) *float64 {
-	if !isClaudeFable51Model(model) {
-		return nil
-	}
-	multiplier := claudeFable51MaxReasoningEffortMultiplier
-	return &multiplier
+	return nil
 }
 
 func reasoningEffortBillingMultiplier(effort string, multipliers map[string]float64) float64 {
@@ -528,6 +524,14 @@ func (s *BillingService) initFallbackPricing() {
 	enforceOpenAIFastPricingRatio(&fastOpus, 2)
 	s.fallbackPrices["claude-opus-4.8"] = &fastOpus
 	s.fallbackPrices["claude-opus-5"] = s.fallbackPrices["claude-opus-4.8"]
+	s.fallbackPrices["claude-opus-5-5"] = &ModelPricing{
+		InputPricePerToken: 4e-6, OutputPricePerToken: 20e-6,
+		CacheCreationPricePerToken: 5e-6, CacheCreation5mPrice: 5e-6, CacheCreation1hPrice: 8e-6,
+		CacheReadPricePerToken:     0.2e-6,
+		InputPricePerTokenPriority: 8e-6, OutputPricePerTokenPriority: 40e-6,
+		CacheCreationPricePerTokenPriority: 10e-6, CacheReadPricePerTokenPriority: 0.4e-6,
+		SupportsCacheBreakdown: true,
+	}
 	s.fallbackPrices["claude-fable-5"] = &ModelPricing{
 		InputPricePerToken: 10e-6, OutputPricePerToken: 50e-6,
 		CacheCreationPricePerToken: 12.5e-6, CacheCreation5mPrice: 12.5e-6,
@@ -720,9 +724,9 @@ func (s *BillingService) initFallbackPricing() {
 		SupportsCacheBreakdown: false,
 	}
 	s.fallbackPrices["deepseek-v4-flash"] = &ModelPricing{
-		InputPricePerToken:     2.2e-7, // $0.22 per MTok (cache miss)
-		OutputPricePerToken:    6.6e-7, // $0.66 per MTok
-		CacheReadPricePerToken: 7e-9,   // $0.007 per MTok (cache hit)
+		InputPricePerToken:     deepseekFlashOffPeakInputPrice,
+		OutputPricePerToken:    deepseekFlashOffPeakOutputPrice,
+		CacheReadPricePerToken: deepseekFlashOffPeakCacheRead,
 		SupportsCacheBreakdown: false,
 	}
 
@@ -1034,6 +1038,12 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	if strings.Contains(modelLower, "gemini-3.8-flash") || strings.Contains(modelLower, "gemini-3-8-flash") {
 		return s.fallbackPrices["gemini-3.8-flash"]
 	}
+	if normalized := normalizeKnownOpenAICodexModel(modelLower); normalized == "gpt-6-sol" || normalized == "gpt-6-luna" {
+		return s.fallbackPrices[normalized]
+	}
+	if claude.IsOpus55(modelLower) {
+		return s.fallbackPrices["claude-opus-5-5"]
+	}
 	if isOpenAIGPT6AstraModel(modelLower) {
 		return s.fallbackPrices["gpt-6-astra"]
 	}
@@ -1338,21 +1348,7 @@ func (s *BillingService) applyFallbackModelSpecificPricingPolicy(model string, p
 }
 
 func (s *BillingService) applyFallbackModelSpecificPricingPolicyAt(model string, pricing *ModelPricing, pricingAt time.Time) *ModelPricing {
-	pricing = s.applyModelSpecificPricingPolicyEx(model, pricing, true, pricingAt)
-	if pricing == nil || !isDeepSeekModel(model) {
-		return pricing
-	}
-	cloned := *pricing
-	if strings.Contains(strings.ToLower(strings.TrimSpace(model)), "deepseek-v4-pro") {
-		cloned.InputPricePerToken = deepseekProCompatibilityInputPrice
-		cloned.OutputPricePerToken = deepseekProCompatibilityOutputPrice
-		cloned.CacheReadPricePerToken = deepseekProCompatibilityCacheRead
-	} else {
-		cloned.InputPricePerToken = deepseekFlashCompatibilityInputPrice
-		cloned.OutputPricePerToken = deepseekFlashCompatibilityOutputPrice
-		cloned.CacheReadPricePerToken = deepseekFlashCompatibilityCacheRead
-	}
-	return &cloned
+	return s.applyModelSpecificPricingPolicyEx(model, pricing, true, pricingAt)
 }
 
 // GetModelPricingWithChannel 获取模型定价，渠道配置的价格覆盖默认值
@@ -1459,7 +1455,18 @@ func (s *BillingService) CalculateCostUnified(input CostInput) (*CostBreakdown, 
 			breakdown.BillingMode = string(BillingModeToken)
 		}
 		if resolved.Mode != BillingModeToken {
-			applyCostBreakdownMultiplier(breakdown, maxReasoningEffortBillingMultiplier(input.Model, input.ReasoningEffort, resolved.BasePricing))
+			reasoningMultiplier := reasoningEffortBillingMultiplier(input.ReasoningEffort, nil)
+			if resolved.BasePricing != nil {
+				reasoningMultiplier = reasoningEffortBillingMultiplier(
+					input.ReasoningEffort,
+					resolved.BasePricing.ReasoningEffortMultipliers,
+				)
+			}
+			if NormalizeMaxReasoningEffort(input.ReasoningEffort) == "max" &&
+				(resolved.BasePricing == nil || resolved.BasePricing.ReasoningEffortMultipliers["max"] <= 0) {
+				reasoningMultiplier = maxReasoningEffortBillingMultiplier(input.Model, input.ReasoningEffort, resolved.BasePricing)
+			}
+			applyCostBreakdownMultiplier(breakdown, reasoningMultiplier)
 			applyCostBreakdownMultiplier(breakdown, resolvedChannelTimeMultiplier(resolved, input.PricingAt))
 		}
 	}
@@ -1509,7 +1516,20 @@ func (s *BillingService) calculateTokenCost(resolved *ResolvedPricing, input Cos
 	}
 	breakdown := s.computeTokenBreakdown(pricing, input.Tokens, input.RateMultiplier, input.ServiceTier, applyLongCtx)
 	applyCostBreakdownMultiplier(breakdown, resolvedChannelTimeMultiplier(resolved, input.PricingAt))
-	applyCostBreakdownMultiplier(breakdown, reasoningEffortBillingMultiplier(input.ReasoningEffort, pricing.ReasoningEffortMultipliers))
+	reasoningMultiplier := reasoningEffortBillingMultiplier(input.ReasoningEffort, pricing.ReasoningEffortMultipliers)
+	if NormalizeMaxReasoningEffort(input.ReasoningEffort) == "max" {
+		// Interval pricing replaces the flat card, so carry the explicit max
+		// multiplier from the resolved channel policy when the interval itself
+		// does not contain one.
+		maxPricing := pricing
+		if maxPricing.MaxReasoningEffortMultiplier == nil && resolved.BasePricing != nil {
+			maxPricing = resolved.BasePricing
+		}
+		if maxMultiplier, configured := maxPricing.ReasoningEffortMultipliers["max"]; !configured || maxMultiplier <= 0 {
+			reasoningMultiplier = maxReasoningEffortBillingMultiplier(input.Model, input.ReasoningEffort, maxPricing)
+		}
+	}
+	applyCostBreakdownMultiplier(breakdown, reasoningMultiplier)
 	return breakdown, nil
 }
 
@@ -1559,6 +1579,7 @@ func (s *BillingService) computeTokenBreakdown(
 	cacheReadPrice := pricing.CacheReadPricePerToken
 	cacheCreationPrice := pricing.CacheCreationPricePerToken
 	cacheCreationMultiplier := 1.0
+	cacheCreationTierMultiplier := 1.0
 	tierMultiplier := 1.0
 
 	if usePriorityServiceTierPricing(serviceTier, pricing) {
@@ -1573,6 +1594,11 @@ func (s *BillingService) computeTokenBreakdown(
 		}
 		if pricing.CacheCreationPricePerTokenPriority > 0 {
 			cacheCreationPrice = pricing.CacheCreationPricePerTokenPriority
+		}
+		if pricing.SupportsCacheBreakdown &&
+			(pricing.CacheCreation5mPrice > 0 || pricing.CacheCreation1hPrice > 0) &&
+			pricing.CacheCreationPricePerToken > 0 && pricing.CacheCreationPricePerTokenPriority > 0 {
+			cacheCreationTierMultiplier = pricing.CacheCreationPricePerTokenPriority / pricing.CacheCreationPricePerToken
 		}
 	} else {
 		tierMultiplier = configuredServiceTierMultiplier(serviceTier, pricing)
@@ -1632,7 +1658,7 @@ func (s *BillingService) computeTokenBreakdown(
 	}
 
 	// 缓存创建费用
-	bd.CacheCreationCost = s.computeCacheCreationCost(pricing, tokens, cacheCreationPrice, cacheCreationMultiplier)
+	bd.CacheCreationCost = s.computeCacheCreationCost(pricing, tokens, cacheCreationPrice, cacheCreationMultiplier) * cacheCreationTierMultiplier
 
 	bd.CacheReadCost = float64(tokens.CacheReadTokens) * cacheReadPrice
 	if imageCached := min(max(tokens.ImageCacheReadTokens, 0), max(tokens.CacheReadTokens, 0)); imageCached > 0 && pricing.ImageCacheReadPricePerToken > 0 {
@@ -1836,16 +1862,12 @@ func (s *BillingService) applyModelSpecificPricingPolicyEx(model string, pricing
 	normalized := normalizeKnownOpenAICodexModel(model)
 	isGPT56 := isOpenAIGPT56Model(normalized)
 	usesCacheWritePremium := isGPT56 || openai.IsGPT6SolOrLunaModelSpelling(normalized)
-	needsMaxReasoning := isClaudeFable51Model(model) && pricing.MaxReasoningEffortMultiplier == nil
 	needsCacheCreation := isGPT56 && !pricing.CacheCreationPriceExplicit && (pricing.CacheCreationPricePerToken <= 0 || (pricing.InputPricePerTokenPriority > 0 && pricing.CacheCreationPricePerTokenPriority <= 0))
 	fastRatio := openAIModelFastPricingRatio(normalized)
-	if !needsCacheCreation && fastRatio <= 0 && !needsMaxReasoning {
+	if !needsCacheCreation && fastRatio <= 0 {
 		return pricing
 	}
 	cloned := *pricing
-	if needsMaxReasoning {
-		cloned.MaxReasoningEffortMultiplier = defaultMaxReasoningEffortMultiplier(model)
-	}
 	if usesCacheWritePremium && !cloned.CacheCreationPriceExplicit {
 		if cloned.CacheCreationPricePerToken <= 0 {
 			cloned.CacheCreationPricePerToken = cloned.InputPricePerToken * 1.25

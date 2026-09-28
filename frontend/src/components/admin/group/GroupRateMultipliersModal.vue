@@ -249,6 +249,7 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Icon from '@/components/icons/Icon.vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
+import { platformTextClass } from '@/utils/platformColors'
 
 interface LocalEntry extends GroupRateMultiplierEntry {}
 
@@ -280,26 +281,7 @@ const batchFactor = ref<number | null>(null)
 
 let searchTimeout: ReturnType<typeof setTimeout>
 
-const platformColorClass = computed(() => {
-  switch (props.group?.platform) {
-    case 'anthropic': return 'text-orange-700 dark:text-orange-400'
-    case 'openai': return 'text-emerald-700 dark:text-emerald-400'
-    case 'antigravity': return 'text-purple-700 dark:text-purple-400'
-    case 'zhipu': return 'text-emerald-700 dark:text-emerald-400'
-    case 'deepseek': return 'text-cyan-700 dark:text-cyan-400'
-    case 'volcengine': return 'text-rose-700 dark:text-rose-400'
-    case 'ali': return 'text-amber-700 dark:text-amber-400'
-    case 'moonshot': return 'text-fuchsia-700 dark:text-fuchsia-400'
-    case 'perplexity': return 'text-sky-700 dark:text-sky-400'
-    case 'mistral': return 'text-violet-700 dark:text-violet-400'
-    case 'siliconflow': return 'text-teal-700 dark:text-teal-400'
-    case 'openrouter': return 'text-indigo-700 dark:text-indigo-400'
-    case 'suno': return 'text-yellow-700 dark:text-yellow-300'
-    case 'kling': return 'text-red-700 dark:text-red-400'
-    case 'midjourney': return 'text-slate-700 dark:text-slate-300'
-    default: return 'text-blue-700 dark:text-blue-400'
-  }
-})
+const platformColorClass = computed(() => platformTextClass(props.group?.platform || ''))
 
 // 是否显示"最终倍率"预览列
 const showFinalRate = computed(() => {

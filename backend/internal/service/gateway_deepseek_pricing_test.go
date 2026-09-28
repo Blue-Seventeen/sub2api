@@ -16,11 +16,11 @@ func TestGatewayRecordUsage_DeepSeekDefaultPricingAt(t *testing.T) {
 		pricingAt time.Time
 		want      float64
 	}{
-		{"flash_off_peak", "deepseek-v4-flash", time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC), 0.000557},
-		{"flash_peak", "deepseek-v4-flash", time.Date(2026, 8, 24, 2, 0, 0, 0, time.UTC), 0.001114},
-		{"flash_weekend", "deepseek-v4-flash", time.Date(2026, 8, 29, 2, 0, 0, 0, time.UTC), 0.000557},
+		{"flash_off_peak", "deepseek-v4-flash", time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC), 0.000453},
+		{"flash_peak", "deepseek-v4-flash", time.Date(2026, 8, 24, 2, 0, 0, 0, time.UTC), 0.000906},
+		{"flash_weekend", "deepseek-v4-flash", time.Date(2026, 8, 29, 2, 0, 0, 0, time.UTC), 0.000453},
 		{"pro_peak", "deepseek-v4-pro", time.Date(2026, 8, 24, 6, 30, 0, 0, time.UTC), 0.003344},
-		{"alias_peak", "deepseek-chat", time.Date(2026, 8, 24, 2, 0, 0, 0, time.UTC), 0.001114},
+		{"alias_peak", "deepseek-chat", time.Date(2026, 8, 24, 2, 0, 0, 0, time.UTC), 0.000906},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc, logs, billing, input := newGatewayDeepSeekPricingCase(t)
@@ -51,12 +51,12 @@ func TestGatewayRecordUsage_DeepSeekPeakAppliesUserMultipliersOnce(t *testing.T)
 
 	require.NoError(t, svc.RecordUsage(context.Background(), input))
 	require.NotNil(t, logs.lastLog)
-	require.InDelta(t, 0.001114, logs.lastLog.TotalCost, 1e-12)
-	require.InDelta(t, 0.010026, logs.lastLog.ActualCost, 1e-12)
-	require.InDelta(t, 0.005013, logs.lastLog.RealActualCost, 1e-12)
+	require.InDelta(t, 0.000906, logs.lastLog.TotalCost, 1e-12)
+	require.InDelta(t, 0.008154, logs.lastLog.ActualCost, 1e-12)
+	require.InDelta(t, 0.004077, logs.lastLog.RealActualCost, 1e-12)
 	require.NotNil(t, billing.lastCmd)
-	require.InDelta(t, 0.010026, billing.lastCmd.SubscriptionCost, 1e-12)
-	require.InDelta(t, 0.010026, billing.lastCmd.APIKeyQuotaCost, 1e-12)
+	require.InDelta(t, 0.008154, billing.lastCmd.SubscriptionCost, 1e-12)
+	require.InDelta(t, 0.008154, billing.lastCmd.APIKeyQuotaCost, 1e-12)
 }
 
 func TestGatewayRecordUsage_DeepSeekPreservesCustomAndFreePricing(t *testing.T) {
@@ -76,9 +76,9 @@ func TestGatewayRecordUsage_DeepSeekPreservesCustomAndFreePricing(t *testing.T) 
 		{name: "free_channel", channelCard: true, groupRate: 1, unifiedRate: 1, peakRate: 1},
 		{name: "custom_group", groupCard: true, inputPrice: 1e-6, outputPrice: 2e-6, cacheReadPrice: 0.5e-6, groupRate: 1, unifiedRate: 1, peakRate: 1, wantTotal: 0.0025, wantActual: 0.0025},
 		{name: "free_group_card", groupCard: true, groupRate: 1, unifiedRate: 1, peakRate: 1},
-		{name: "free_group_rate", groupRate: 0, unifiedRate: 1, peakRate: 1, wantTotal: 0.001114},
-		{name: "free_unified_rate", groupRate: 1, unifiedRate: 0, peakRate: 1, wantTotal: 0.001114},
-		{name: "free_peak_rate", groupRate: 1, unifiedRate: 1, peakRate: 0, wantTotal: 0.001114},
+		{name: "free_group_rate", groupRate: 0, unifiedRate: 1, peakRate: 1, wantTotal: 0.000906},
+		{name: "free_unified_rate", groupRate: 1, unifiedRate: 0, peakRate: 1, wantTotal: 0.000906},
+		{name: "free_peak_rate", groupRate: 1, unifiedRate: 1, peakRate: 0, wantTotal: 0.000906},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc, logs, billing, input := newGatewayDeepSeekPricingCase(t)
@@ -125,9 +125,9 @@ func TestGatewayRecordUsageWithLongContext_DeepSeekPreservesExplicitThreshold(t 
 		wantTotal  float64
 		wantActual float64
 	}{
-		{name: "default_input_overflow", threshold: 1500, wantTotal: 0.001114, wantActual: 0.001334},
-		{name: "default_cache_overflow", threshold: 500, wantTotal: 0.001114, wantActual: 0.001561},
-		{name: "default_at_threshold", threshold: 2000, wantTotal: 0.001114, wantActual: 0.001114},
+		{name: "default_input_overflow", threshold: 1500, wantTotal: 0.000906, wantActual: 0.001056},
+		{name: "default_cache_overflow", threshold: 500, wantTotal: 0.000906, wantActual: 0.001209},
+		{name: "default_at_threshold", threshold: 2000, wantTotal: 0.000906, wantActual: 0.000906},
 		{name: "custom_channel_no_extra_context", threshold: 1500, customCard: true, wantTotal: 0.0025, wantActual: 0.0025},
 		{name: "custom_group_no_extra_context", threshold: 1500, customCard: true, groupCard: true, wantTotal: 0.0025, wantActual: 0.0025},
 		{name: "free_channel", threshold: 1500, customCard: true, freeCard: true},

@@ -30,12 +30,12 @@ export type Platform = (typeof PLATFORMS)[number]
 
 const BADGE: Record<Platform, string> = {
   anthropic: 'bg-orange-500/10 text-orange-600 border-orange-500/30 dark:text-orange-400',
-  openai: 'bg-green-500/10 text-green-600 border-green-500/30 dark:text-green-400',
+  openai: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30 dark:text-emerald-400',
   antigravity: 'bg-purple-500/10 text-purple-600 border-purple-500/30 dark:text-purple-400',
-  gemini: 'bg-blue-500/10 text-blue-600 border-blue-500/30 dark:text-blue-400',
+  gemini: 'bg-sky-500/10 text-sky-600 border-sky-500/30 dark:text-sky-400',
   grok: 'bg-zinc-800/10 text-zinc-800 border-zinc-800/30 dark:bg-zinc-500/10 dark:text-zinc-200 dark:border-zinc-500/30',
-  zhipu: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30 dark:text-emerald-400',
-  deepseek: 'bg-cyan-500/10 text-cyan-600 border-cyan-500/30 dark:text-cyan-400',
+  zhipu: 'bg-indigo-500/10 text-indigo-600 border-indigo-500/30 dark:text-indigo-400',
+  deepseek: 'bg-teal-500/10 text-teal-600 border-teal-500/30 dark:text-teal-400',
   volcengine: 'bg-rose-500/10 text-rose-600 border-rose-500/30 dark:text-rose-400',
   ali: 'bg-amber-500/10 text-amber-600 border-amber-500/30 dark:text-amber-400',
   moonshot: 'bg-fuchsia-500/10 text-fuchsia-600 border-fuchsia-500/30 dark:text-fuchsia-400',
@@ -49,17 +49,22 @@ const BADGE: Record<Platform, string> = {
   composite: 'bg-cyan-500/10 text-cyan-700 border-cyan-500/30 dark:text-cyan-300'
 }
 const BADGE_DEFAULT = 'bg-slate-500/10 text-slate-600 border-slate-500/30 dark:text-slate-400'
+const BADGE_EXTRA: Record<string, string> = {
+  kimi: 'bg-pink-500/10 text-pink-600 border-pink-500/30 dark:text-pink-400',
+  minimax: 'bg-rose-500/10 text-rose-600 border-rose-500/30 dark:text-rose-400',
+  opencode_go: 'bg-amber-500/10 text-amber-600 border-amber-500/30 dark:text-amber-400',
+}
 
 const BADGE_LIGHT: Record<Platform | 'kimi' | 'minimax', string> = {
   kimi: 'bg-pink-100 text-pink-600 dark:bg-pink-900/30 dark:text-pink-300',
   minimax: 'bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-300',
   anthropic: 'bg-orange-500/10 text-orange-600 dark:bg-orange-500/10 dark:text-orange-300',
-  openai: 'bg-green-500/10 text-green-600 dark:bg-green-500/10 dark:text-green-300',
+  openai: 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-300',
   antigravity: 'bg-purple-500/10 text-purple-600 dark:bg-purple-500/10 dark:text-purple-300',
-  gemini: 'bg-blue-500/10 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300',
+  gemini: 'bg-sky-500/10 text-sky-600 dark:bg-sky-500/10 dark:text-sky-300',
   grok: 'bg-zinc-800/10 text-zinc-800 dark:bg-zinc-500/10 dark:text-zinc-200',
-  zhipu: 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-300',
-  deepseek: 'bg-cyan-500/10 text-cyan-600 dark:bg-cyan-500/10 dark:text-cyan-300',
+  zhipu: 'bg-indigo-500/10 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-300',
+  deepseek: 'bg-teal-500/10 text-teal-600 dark:bg-teal-500/10 dark:text-teal-300',
   volcengine: 'bg-rose-500/10 text-rose-600 dark:bg-rose-500/10 dark:text-rose-300',
   ali: 'bg-amber-500/10 text-amber-600 dark:bg-amber-500/10 dark:text-amber-300',
   moonshot: 'bg-fuchsia-500/10 text-fuchsia-600 dark:bg-fuchsia-500/10 dark:text-fuchsia-300',
@@ -72,15 +77,20 @@ const BADGE_LIGHT: Record<Platform | 'kimi' | 'minimax', string> = {
   midjourney: 'bg-slate-500/10 text-slate-600 dark:bg-slate-500/10 dark:text-slate-300',
   composite: 'bg-cyan-500/10 text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-300'
 }
+const BADGE_LIGHT_EXTRA: Record<string, string> = {
+  kimi: 'bg-pink-100 text-pink-600 dark:bg-pink-900/30 dark:text-pink-300',
+  minimax: 'bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-300',
+  opencode_go: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
+}
 
 const BORDER: Record<Platform, string> = {
   anthropic: 'border-orange-500/20 dark:border-orange-500/20',
-  openai: 'border-green-500/20 dark:border-green-500/20',
+  openai: 'border-emerald-500/20 dark:border-emerald-500/20',
   antigravity: 'border-purple-500/20 dark:border-purple-500/20',
-  gemini: 'border-blue-500/20 dark:border-blue-500/20',
+  gemini: 'border-sky-500/20 dark:border-sky-500/20',
   grok: 'border-zinc-800/20 dark:border-zinc-500/20',
-  zhipu: 'border-emerald-500/20 dark:border-emerald-500/20',
-  deepseek: 'border-cyan-500/20 dark:border-cyan-500/20',
+  zhipu: 'border-indigo-500/20 dark:border-indigo-500/20',
+  deepseek: 'border-teal-500/20 dark:border-teal-500/20',
   volcengine: 'border-rose-500/20 dark:border-rose-500/20',
   ali: 'border-amber-500/20 dark:border-amber-500/20',
   moonshot: 'border-fuchsia-500/20 dark:border-fuchsia-500/20',
@@ -98,12 +108,12 @@ const BORDER_DEFAULT = 'border-gray-200 dark:border-dark-700'
 // ── Border strong (higher-contrast platform tint, e.g. plaza group cards) ──
 const BORDER_STRONG: Record<Platform, string> = {
   anthropic: 'border-orange-500/35 dark:border-orange-500/30',
-  openai: 'border-green-500/35 dark:border-green-500/30',
+  openai: 'border-emerald-500/35 dark:border-emerald-500/30',
   antigravity: 'border-purple-500/35 dark:border-purple-500/30',
-  gemini: 'border-blue-500/35 dark:border-blue-500/30',
+  gemini: 'border-sky-500/35 dark:border-sky-500/30',
   grok: 'border-zinc-800/35 dark:border-zinc-500/35',
-  zhipu: 'border-emerald-500/35 dark:border-emerald-500/30',
-  deepseek: 'border-cyan-500/35 dark:border-cyan-500/30',
+  zhipu: 'border-indigo-500/35 dark:border-indigo-500/30',
+  deepseek: 'border-teal-500/35 dark:border-teal-500/30',
   volcengine: 'border-rose-500/35 dark:border-rose-500/30',
   ali: 'border-amber-500/35 dark:border-amber-500/30',
   moonshot: 'border-fuchsia-500/35 dark:border-fuchsia-500/30',
@@ -122,12 +132,12 @@ const BORDER_STRONG_DEFAULT = 'border-gray-300 dark:border-dark-600'
 //    from it via CSS color-mix, e.g. plaza paid-price zone) ──
 const ACCENT: Record<Platform, string> = {
   anthropic: '#f97316', // orange-500
-  openai: '#22c55e', // green-500
+  openai: '#10b981', // emerald-500
   antigravity: '#a855f7', // purple-500
-  gemini: '#3b82f6', // blue-500
+  gemini: '#0ea5e9', // sky-500
   grok: '#71717a', // zinc-500
-  zhipu: '#10b981', // emerald-500
-  deepseek: '#06b6d4', // cyan-500
+  zhipu: '#6366f1', // indigo-500
+  deepseek: '#14b8a6', // teal-500
   volcengine: '#f43f5e', // rose-500
   ali: '#f59e0b', // amber-500
   moonshot: '#d946ef', // fuchsia-500
@@ -147,10 +157,10 @@ const ACCENT_BAR: Record<Platform, string> = {
   anthropic: 'bg-gradient-to-r from-orange-400 to-orange-500',
   openai: 'bg-gradient-to-r from-emerald-400 to-emerald-500',
   antigravity: 'bg-gradient-to-r from-purple-400 to-purple-500',
-  gemini: 'bg-gradient-to-r from-blue-400 to-blue-500',
+  gemini: 'bg-gradient-to-r from-sky-400 to-sky-500',
   grok: 'bg-gradient-to-r from-zinc-700 to-zinc-900',
-  zhipu: 'bg-gradient-to-r from-emerald-400 to-emerald-500',
-  deepseek: 'bg-gradient-to-r from-cyan-400 to-cyan-500',
+  zhipu: 'bg-gradient-to-r from-indigo-400 to-indigo-500',
+  deepseek: 'bg-gradient-to-r from-teal-400 to-teal-500',
   volcengine: 'bg-gradient-to-r from-rose-400 to-rose-500',
   ali: 'bg-gradient-to-r from-amber-400 to-amber-500',
   moonshot: 'bg-gradient-to-r from-fuchsia-400 to-fuchsia-500',
@@ -169,10 +179,10 @@ const TEXT: Record<Platform, string> = {
   anthropic: 'text-orange-600 dark:text-orange-400',
   openai: 'text-emerald-600 dark:text-emerald-400',
   antigravity: 'text-purple-600 dark:text-purple-400',
-  gemini: 'text-blue-600 dark:text-blue-400',
+  gemini: 'text-sky-600 dark:text-sky-400',
   grok: 'text-zinc-800 dark:text-zinc-200',
-  zhipu: 'text-emerald-600 dark:text-emerald-400',
-  deepseek: 'text-cyan-600 dark:text-cyan-400',
+  zhipu: 'text-indigo-600 dark:text-indigo-400',
+  deepseek: 'text-teal-600 dark:text-teal-400',
   volcengine: 'text-rose-600 dark:text-rose-400',
   ali: 'text-amber-600 dark:text-amber-400',
   moonshot: 'text-fuchsia-600 dark:text-fuchsia-400',
@@ -186,15 +196,20 @@ const TEXT: Record<Platform, string> = {
   composite: 'text-cyan-700 dark:text-cyan-300'
 }
 const TEXT_DEFAULT = 'text-primary-600 dark:text-primary-400'
+const TEXT_EXTRA: Record<string, string> = {
+  kimi: 'text-pink-600 dark:text-pink-400',
+  minimax: 'text-rose-600 dark:text-rose-400',
+  opencode_go: 'text-amber-600 dark:text-amber-400',
+}
 
 const ICON: Record<Platform, string> = {
   anthropic: 'text-orange-500 dark:text-orange-400',
   openai: 'text-emerald-500 dark:text-emerald-400',
   antigravity: 'text-purple-500 dark:text-purple-400',
-  gemini: 'text-blue-500 dark:text-blue-400',
+  gemini: 'text-sky-500 dark:text-sky-400',
   grok: 'text-zinc-800 dark:text-zinc-200',
-  zhipu: 'text-emerald-500 dark:text-emerald-400',
-  deepseek: 'text-cyan-500 dark:text-cyan-400',
+  zhipu: 'text-indigo-500 dark:text-indigo-400',
+  deepseek: 'text-teal-500 dark:text-teal-400',
   volcengine: 'text-rose-500 dark:text-rose-400',
   ali: 'text-amber-500 dark:text-amber-400',
   moonshot: 'text-fuchsia-500 dark:text-fuchsia-400',
@@ -208,15 +223,20 @@ const ICON: Record<Platform, string> = {
   composite: 'text-cyan-600 dark:text-cyan-300'
 }
 const ICON_DEFAULT = 'text-primary-500 dark:text-primary-400'
+const ICON_EXTRA: Record<string, string> = {
+  kimi: 'text-pink-500 dark:text-pink-400',
+  minimax: 'text-rose-500 dark:text-rose-400',
+  opencode_go: 'text-amber-500 dark:text-amber-400',
+}
 
 const DOT: Record<Platform, string> = {
   anthropic: 'bg-orange-500',
   openai: 'bg-emerald-500',
   antigravity: 'bg-purple-500',
-  gemini: 'bg-blue-500',
+  gemini: 'bg-sky-500',
   grok: 'bg-zinc-800',
-  zhipu: 'bg-emerald-500',
-  deepseek: 'bg-cyan-500',
+  zhipu: 'bg-indigo-500',
+  deepseek: 'bg-teal-500',
   volcengine: 'bg-rose-500',
   ali: 'bg-amber-500',
   moonshot: 'bg-fuchsia-500',
@@ -233,12 +253,12 @@ const DOT_DEFAULT = 'bg-gray-400'
 
 const BUTTON: Record<Platform, string> = {
   anthropic: 'bg-orange-500 text-white hover:bg-orange-600 active:bg-orange-700 dark:bg-orange-500/80 dark:hover:bg-orange-500',
-  openai: 'bg-green-600 text-white hover:bg-green-700 active:bg-green-800 dark:bg-green-600/80 dark:hover:bg-green-600',
+  openai: 'bg-emerald-600 text-white hover:bg-emerald-700 active:bg-emerald-800 dark:bg-emerald-600/80 dark:hover:bg-emerald-600',
   antigravity: 'bg-purple-500 text-white hover:bg-purple-600 active:bg-purple-700 dark:bg-purple-500/80 dark:hover:bg-purple-500',
-  gemini: 'bg-blue-500 text-white hover:bg-blue-600 active:bg-blue-700 dark:bg-blue-500/80 dark:hover:bg-blue-500',
+  gemini: 'bg-sky-500 text-white hover:bg-sky-600 active:bg-sky-700 dark:bg-sky-500/80 dark:hover:bg-sky-500',
   grok: 'bg-zinc-800 text-white hover:bg-zinc-900 active:bg-black dark:bg-zinc-700 dark:hover:bg-zinc-600',
-  zhipu: 'bg-emerald-500 text-white hover:bg-emerald-600 active:bg-emerald-700 dark:bg-emerald-500/80 dark:hover:bg-emerald-500',
-  deepseek: 'bg-cyan-500 text-white hover:bg-cyan-600 active:bg-cyan-700 dark:bg-cyan-500/80 dark:hover:bg-cyan-500',
+  zhipu: 'bg-indigo-500 text-white hover:bg-indigo-600 active:bg-indigo-700 dark:bg-indigo-500/80 dark:hover:bg-indigo-500',
+  deepseek: 'bg-teal-500 text-white hover:bg-teal-600 active:bg-teal-700 dark:bg-teal-500/80 dark:hover:bg-teal-500',
   volcengine: 'bg-rose-500 text-white hover:bg-rose-600 active:bg-rose-700 dark:bg-rose-500/80 dark:hover:bg-rose-500',
   ali: 'bg-amber-500 text-white hover:bg-amber-600 active:bg-amber-700 dark:bg-amber-500/80 dark:hover:bg-amber-500',
   moonshot: 'bg-fuchsia-500 text-white hover:bg-fuchsia-600 active:bg-fuchsia-700 dark:bg-fuchsia-500/80 dark:hover:bg-fuchsia-500',
@@ -257,10 +277,10 @@ const DISCOUNT: Record<Platform, string> = {
   anthropic: 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300',
   openai: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
   antigravity: 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300',
-  gemini: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
+  gemini: 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300',
   grok: 'bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-200',
-  zhipu: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
-  deepseek: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/40 dark:text-cyan-300',
+  zhipu: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300',
+  deepseek: 'bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300',
   volcengine: 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300',
   ali: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
   moonshot: 'bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-900/40 dark:text-fuchsia-300',
@@ -279,10 +299,10 @@ const GRADIENT: Record<Platform, string> = {
   anthropic: 'from-orange-500 to-orange-600',
   openai: 'from-emerald-500 to-emerald-600',
   antigravity: 'from-purple-500 to-purple-600',
-  gemini: 'from-blue-500 to-blue-600',
+  gemini: 'from-sky-500 to-sky-600',
   grok: 'from-zinc-700 to-zinc-900',
-  zhipu: 'from-emerald-500 to-emerald-600',
-  deepseek: 'from-cyan-500 to-cyan-600',
+  zhipu: 'from-indigo-500 to-indigo-600',
+  deepseek: 'from-teal-500 to-teal-600',
   volcengine: 'from-rose-500 to-rose-600',
   ali: 'from-amber-500 to-amber-600',
   moonshot: 'from-fuchsia-500 to-fuchsia-600',
@@ -301,10 +321,10 @@ const GRADIENT_TEXT: Record<Platform, string> = {
   anthropic: 'text-orange-100',
   openai: 'text-emerald-100',
   antigravity: 'text-purple-100',
-  gemini: 'text-blue-100',
+  gemini: 'text-sky-100',
   grok: 'text-zinc-100',
-  zhipu: 'text-emerald-100',
-  deepseek: 'text-cyan-100',
+  zhipu: 'text-indigo-100',
+  deepseek: 'text-teal-100',
   volcengine: 'text-rose-100',
   ali: 'text-amber-100',
   moonshot: 'text-fuchsia-100',
@@ -323,10 +343,10 @@ const GRADIENT_SUBTEXT: Record<Platform, string> = {
   anthropic: 'text-orange-200',
   openai: 'text-emerald-200',
   antigravity: 'text-purple-200',
-  gemini: 'text-blue-200',
+  gemini: 'text-sky-200',
   grok: 'text-zinc-300',
-  zhipu: 'text-emerald-200',
-  deepseek: 'text-cyan-200',
+  zhipu: 'text-indigo-200',
+  deepseek: 'text-teal-200',
   volcengine: 'text-rose-200',
   ali: 'text-amber-200',
   moonshot: 'text-fuchsia-200',
@@ -346,11 +366,13 @@ function isPlatform(p: string): p is Platform {
 }
 
 export function platformBadgeClass(p: string): string {
-  return isPlatform(p) ? BADGE[p] : BADGE_DEFAULT
+  return isPlatform(p) ? BADGE[p] : BADGE_EXTRA[p] ?? BADGE_DEFAULT
 }
 
 export function platformBadgeLightClass(p: string): string {
-  return isPlatform(p) || p === 'kimi' || p === 'minimax' ? BADGE_LIGHT[p] : BADGE_DEFAULT
+  return isPlatform(p) || p === 'kimi' || p === 'minimax'
+    ? BADGE_LIGHT[p]
+    : BADGE_LIGHT_EXTRA[p] ?? BADGE_DEFAULT
 }
 
 export function platformBorderClass(p: string): string {
@@ -370,10 +392,11 @@ export function platformAccentBarClass(p: string): string {
 }
 
 export function platformTextClass(p: string): string {
-  return isPlatform(p) ? TEXT[p] : TEXT_DEFAULT
+  return isPlatform(p) ? TEXT[p] : TEXT_EXTRA[p] ?? TEXT_DEFAULT
 }
 
 export function platformIconClass(p: string): string {
+  if (p in ICON_EXTRA) return ICON_EXTRA[p]
   return isPlatform(p) ? ICON[p] : ICON_DEFAULT
 }
 

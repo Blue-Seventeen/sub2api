@@ -421,7 +421,7 @@ func TestTryCustomRules_FirstMatchWins(t *testing.T) {
 		},
 	}
 	tokens := UsageTokens{InputTokens: 100, OutputTokens: 50}
-	result := tryCustomRules(channel, 999, 1, "", "claude-opus-4", tokens, 1)
+	result := tryCustomRules(channel, 999, 1, "", "claude-opus-4", tokens, 1, "")
 	require.NotNil(t, result)
 	// 应使用第一条规则的价格：100*0.01 + 50*0.02 = 2.0
 	require.InDelta(t, 2.0, *result, 1e-12)
@@ -445,7 +445,7 @@ func TestTryCustomRules_SkipsNonMatchingRules(t *testing.T) {
 		},
 	}
 	tokens := UsageTokens{InputTokens: 100}
-	result := tryCustomRules(channel, 999, 1, "", "claude-opus-4", tokens, 1)
+	result := tryCustomRules(channel, 999, 1, "", "claude-opus-4", tokens, 1, "")
 	require.NotNil(t, result)
 	// 跳过规则1（账号不匹配），使用规则2：100*0.05 = 5.0
 	require.InDelta(t, 5.0, *result, 1e-12)
@@ -463,7 +463,7 @@ func TestTryCustomRules_NoMatch_ReturnsNil(t *testing.T) {
 		},
 	}
 	tokens := UsageTokens{InputTokens: 100}
-	result := tryCustomRules(channel, 999, 2, "", "claude-opus-4", tokens, 1)
+	result := tryCustomRules(channel, 999, 2, "", "claude-opus-4", tokens, 1, "")
 	require.Nil(t, result) // 账号和分组都不匹配
 }
 
@@ -485,7 +485,7 @@ func TestTryCustomRules_RuleMatchesButModelNot_ContinuesToNext(t *testing.T) {
 		},
 	}
 	tokens := UsageTokens{InputTokens: 100}
-	result := tryCustomRules(channel, 999, 1, "", "claude-opus-4", tokens, 1)
+	result := tryCustomRules(channel, 999, 1, "", "claude-opus-4", tokens, 1, "")
 	require.NotNil(t, result)
 	require.InDelta(t, 5.0, *result, 1e-12) // 使用规则2
 }
@@ -699,7 +699,7 @@ func TestTryModelFilePricing_DeepSeekPeakPricing(t *testing.T) {
 		name                          string
 		input, output, cacheReadPrice float64
 	}{
-		{"deepseek-v4-flash", 1.5e-7, 6e-7, 3e-9},
+		{"deepseek-v4-flash", 1.5e-7, 6.0e-7, 3e-9},
 		{"deepseek-v4-pro", 6.6e-7, 1.98e-6, 2.2e-8},
 	} {
 		for _, usage := range []struct {

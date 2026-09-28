@@ -165,9 +165,10 @@ func (d *blockingDumper) Restore(_ context.Context, data io.Reader) error {
 }
 
 type mockObjectStore struct {
-	objects   map[string][]byte
-	mu        sync.Mutex
-	deleteErr error
+	objects     map[string][]byte
+	deletedKeys []string
+	mu          sync.Mutex
+	deleteErr   error
 }
 
 func newMockObjectStore() *mockObjectStore {
@@ -196,10 +197,13 @@ func (m *mockObjectStore) Download(_ context.Context, key string) (io.ReadCloser
 }
 
 func (m *mockObjectStore) Delete(_ context.Context, key string) error {
-	if m.deleteErr != nil {
-		return m.deleteErr
-	}
 	m.mu.Lock()
+	m.deletedKeys = append(m.deletedKeys, key)
+	if m.deleteErr != nil {
+		err := m.deleteErr
+		m.mu.Unlock()
+		return err
+	}
 	delete(m.objects, key)
 	m.mu.Unlock()
 	return nil

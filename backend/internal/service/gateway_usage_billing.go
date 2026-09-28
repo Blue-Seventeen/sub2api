@@ -1060,6 +1060,37 @@ func (s *GatewayService) calculateRecordUsageCost(
 		}
 		return s.addSearchSurcharge(result, apiKey, multiplier, cost), nil
 	}
+	if result != nil && result.AudioUsage != nil {
+		if resolved := resolveMediaPricing(ctx, s.resolver, billingModel, apiKey); resolved != nil &&
+			resolved.Mode == BillingModePerRequest {
+			gid, ok := apiKeyBillingGroupID(apiKey)
+			if !ok {
+				return nil, errors.New("channel audio pricing requires a billing group")
+			}
+			cost, err := s.billingService.CalculateCostUnified(CostInput{
+				Ctx:             ctx,
+				Model:           billingModel,
+				GroupID:         &gid,
+				Group:           apiKey.Group,
+				UsageUnits:      result.AudioUsage.DurationOrUnits,
+				SizeTier:        result.AudioUsage.Mode,
+				RateMultiplier:  multiplier,
+				ReasoningEffort: optionalStringValue(result.ReasoningEffort),
+				Resolver:        s.resolver,
+				Resolved:        resolved,
+			})
+			if err == nil {
+				return s.addSearchSurcharge(result, apiKey, multiplier, cost), nil
+			}
+		}
+		cfg := groupAudioPriceConfigFromAPIKey(apiKey)
+		return s.billingService.CalculateAudioCost(
+			result.AudioUsage.Mode,
+			result.AudioUsage.DurationOrUnits,
+			cfg,
+			multiplier,
+		), nil
+	}
 	var cost *CostBreakdown
 	var err error
 	if unitCount := resultBillableRequestCount(result); unitCount > 0 {
@@ -1073,7 +1104,7 @@ func (s *GatewayService) calculateRecordUsageCost(
 			cost, err = s.calculateRequestUnitCost(ctx, result, apiKey, billingModel, multiplier, unitCount)
 		}
 	} else if result.ImageCount > 0 {
-		if resolved := s.resolveChannelPricing(ctx, billingModel, apiKey); resolved != nil && resolved.Mode == BillingModeToken && forwardResultHasTokenUsage(result) {
+		if resolved := resolveMediaPricing(ctx, s.resolver, billingModel, apiKey); resolved != nil && resolved.Mode == BillingModeToken && forwardResultHasTokenUsage(result) {
 			cost, err = s.calculateTokenCost(ctx, result, apiKey, billingModel, multiplier, opts)
 		} else {
 			cost, err = s.calculateImageCost(ctx, result, apiKey, billingModel, imageMultiplier)
@@ -1164,8 +1195,8 @@ func (s *GatewayService) resolveChannelPricing(ctx context.Context, billingModel
 	if !ok {
 		return nil
 	}
-	resolved := s.resolver.Resolve(ctx, PricingInput{Model: billingModel, GroupID: &gid})
-	if resolved.Source == PricingSourceChannel {
+	resolved := s.resolver.Resolve(ctx, PricingInput{Model: billingModel, GroupID: &gid, Group: apiKey.Group})
+	if resolved.Source == PricingSourceChannel || resolved.Source == PricingSourceGroup {
 		return resolved
 	}
 	return nil
@@ -1184,7 +1215,7 @@ func (s *GatewayService) calculateImageCost(
 	if apiKeyHasConfiguredImagePrice(apiKey, sizeTier) {
 		return s.billingService.CalculateImageCost(billingModel, sizeTier, result.ImageCount, groupConfig, multiplier), nil
 	}
-	if resolved := s.resolveChannelPricing(ctx, billingModel, apiKey); resolved != nil {
+	if resolved := resolveMediaPricing(ctx, s.resolver, billingModel, apiKey); resolved != nil {
 		tokens := UsageTokens{
 			InputTokens:       result.Usage.InputTokens,
 			OutputTokens:      result.Usage.OutputTokens,
@@ -1195,15 +1226,16 @@ func (s *GatewayService) calculateImageCost(
 			return nil, errors.New("channel image pricing requires a billing group")
 		}
 		cost, err := s.billingService.CalculateCostUnified(CostInput{
-			Ctx:            ctx,
-			Model:          billingModel,
-			GroupID:        &gid,
-			Tokens:         tokens,
-			RequestCount:   result.ImageCount,
-			SizeTier:       sizeTier,
-			RateMultiplier: multiplier,
-			Resolver:       s.resolver,
-			Resolved:       resolved,
+			Ctx:             ctx,
+			Model:           billingModel,
+			GroupID:         &gid,
+			Tokens:          tokens,
+			RequestCount:    result.ImageCount,
+			SizeTier:        sizeTier,
+			ReasoningEffort: optionalStringValue(result.ReasoningEffort),
+			RateMultiplier:  multiplier,
+			Resolver:        s.resolver,
+			Resolved:        resolved,
 		})
 		return cost, err
 	}
@@ -1280,15 +1312,17 @@ func (s *GatewayService) calculateTokenCost(
 			pricingAt = opts.PricingAt
 		}
 		cost, err = s.billingService.CalculateCostUnified(CostInput{
-			Ctx:            ctx,
-			Model:          billingModel,
-			GroupID:        &gid,
-			Tokens:         tokens,
-			RequestCount:   1,
-			RateMultiplier: multiplier,
-			PricingAt:      pricingAt,
-			Resolver:       s.resolver,
-			Resolved:       resolved,
+			Ctx:             ctx,
+			Model:           billingModel,
+			GroupID:         &gid,
+			Group:           apiKey.Group,
+			Tokens:          tokens,
+			RequestCount:    1,
+			RateMultiplier:  multiplier,
+			PricingAt:       pricingAt,
+			ReasoningEffort: optionalStringValue(result.ReasoningEffort),
+			Resolver:        s.resolver,
+			Resolved:        resolved,
 		})
 	} else if opts != nil && opts.LongContextThreshold > 0 {
 		// 长上下文双倍计费（如 Gemini 200K 阈值）
@@ -1331,58 +1365,59 @@ func (s *GatewayService) buildRecordUsageLog(
 		)
 	}
 	usageLog := &UsageLog{
-		UserID:                  user.ID,
-		APIKeyID:                apiKey.ID,
-		AccountID:               account.ID,
-		RequestID:               requestID,
-		Model:                   result.Model,
-		RequestedModel:          requestedModel,
-		UpstreamModel:           optionalUpstreamModelPtr(result.UpstreamModel, result.Model, requestedModel),
-		UpstreamResponseModel:   optionalTrimmedStringPtr(result.UpstreamResponseModel),
-		UpstreamModelMismatch:   upstreamModelMismatch(sentModel, result.UpstreamResponseModel),
-		ReasoningEffort:         result.ReasoningEffort,
-		InboundEndpoint:         optionalTrimmedStringPtr(input.InboundEndpoint),
-		UpstreamEndpoint:        optionalTrimmedStringPtr(input.UpstreamEndpoint),
-		ClientProfile:           optionalTrimmedStringPtr(input.ClientProfile),
-		CompatibilityRoute:      optionalTrimmedStringPtr(input.CompatibilityRoute),
-		FallbackChain:           optionalTrimmedStringPtr(input.FallbackChain),
-		UpstreamTransport:       optionalTrimmedStringPtr(input.UpstreamTransport),
-		InputTokens:             result.Usage.InputTokens,
-		OutputTokens:            result.Usage.OutputTokens,
-		CacheCreationTokens:     result.Usage.CacheCreationInputTokens,
-		CacheReadTokens:         result.Usage.CacheReadInputTokens,
-		CacheCreation5mTokens:   result.Usage.CacheCreation5mTokens,
-		CacheCreation1hTokens:   result.Usage.CacheCreation1hTokens,
-		ImageOutputTokens:       result.Usage.ImageOutputTokens,
-		RateMultiplier:          multiplier,
-		UnifiedRateMultiplier:   unifiedRateMultiplier,
-		AccountRateMultiplier:   &accountRateMultiplier,
-		BillingType:             billingType,
-		BillingMode:             resolveBillingMode(result, cost),
-		Stream:                  result.Stream,
-		DurationMs:              &durationMs,
-		FirstTokenMs:            result.FirstTokenMs,
-		ImageCount:              result.ImageCount,
-		ImageSize:               optionalTrimmedStringPtr(result.ImageSize),
-		ImageInputSize:          optionalTrimmedStringPtr(result.ImageInputSize),
-		ImageOutputSize:         optionalTrimmedStringPtr(result.ImageOutputSize),
-		ImageSizeSource:         optionalTrimmedStringPtr(result.ImageSizeSource),
-		ImageSizeBreakdown:      result.ImageSizeBreakdown,
-		RequestCount:            result.RequestCount,
-		TaskCount:               result.TaskCount,
-		BillableDurationSeconds: result.BillableDurationSeconds,
-		BillableCharacterCount:  result.BillableCharacterCount,
-		UsageEstimated:          result.UsageEstimated,
-		BillableUnitType:        optionalTrimmedStringPtr(result.BillableUnitType),
-		CacheTTLOverridden:      cacheTTLOverridden,
-		ChannelID:               optionalInt64Ptr(input.ChannelID),
-		ModelMappingChain:       optionalTrimmedStringPtr(input.ModelMappingChain),
-		UserAgent:               optionalTrimmedStringPtr(input.UserAgent),
-		IPAddress:               optionalTrimmedStringPtr(input.IPAddress),
-		SessionID:               optionalTrimmedStringPtr(input.SessionID),
-		GroupID:                 apiKey.GroupID,
-		SubscriptionID:          optionalSubscriptionID(subscription),
-		CreatedAt:               time.Now(),
+		UserID:                   user.ID,
+		APIKeyID:                 apiKey.ID,
+		AccountID:                account.ID,
+		RequestID:                requestID,
+		Model:                    result.Model,
+		RequestedModel:           requestedModel,
+		UpstreamModel:            optionalUpstreamModelPtr(result.UpstreamModel, result.Model, requestedModel),
+		UpstreamResponseModel:    optionalTrimmedStringPtr(result.UpstreamResponseModel),
+		UpstreamModelMismatch:    upstreamModelMismatch(sentModel, result.UpstreamResponseModel),
+		ReasoningEffort:          result.ReasoningEffort,
+		RequestedReasoningEffort: result.RequestedReasoningEffort,
+		InboundEndpoint:          optionalTrimmedStringPtr(input.InboundEndpoint),
+		UpstreamEndpoint:         optionalTrimmedStringPtr(input.UpstreamEndpoint),
+		ClientProfile:            optionalTrimmedStringPtr(input.ClientProfile),
+		CompatibilityRoute:       optionalTrimmedStringPtr(input.CompatibilityRoute),
+		FallbackChain:            optionalTrimmedStringPtr(input.FallbackChain),
+		UpstreamTransport:        optionalTrimmedStringPtr(input.UpstreamTransport),
+		InputTokens:              result.Usage.InputTokens,
+		OutputTokens:             result.Usage.OutputTokens,
+		CacheCreationTokens:      result.Usage.CacheCreationInputTokens,
+		CacheReadTokens:          result.Usage.CacheReadInputTokens,
+		CacheCreation5mTokens:    result.Usage.CacheCreation5mTokens,
+		CacheCreation1hTokens:    result.Usage.CacheCreation1hTokens,
+		ImageOutputTokens:        result.Usage.ImageOutputTokens,
+		RateMultiplier:           multiplier,
+		UnifiedRateMultiplier:    unifiedRateMultiplier,
+		AccountRateMultiplier:    &accountRateMultiplier,
+		BillingType:              billingType,
+		BillingMode:              resolveBillingMode(result, cost),
+		Stream:                   result.Stream,
+		DurationMs:               &durationMs,
+		FirstTokenMs:             result.FirstTokenMs,
+		ImageCount:               result.ImageCount,
+		ImageSize:                optionalTrimmedStringPtr(result.ImageSize),
+		ImageInputSize:           optionalTrimmedStringPtr(result.ImageInputSize),
+		ImageOutputSize:          optionalTrimmedStringPtr(result.ImageOutputSize),
+		ImageSizeSource:          optionalTrimmedStringPtr(result.ImageSizeSource),
+		ImageSizeBreakdown:       result.ImageSizeBreakdown,
+		RequestCount:             result.RequestCount,
+		TaskCount:                result.TaskCount,
+		BillableDurationSeconds:  result.BillableDurationSeconds,
+		BillableCharacterCount:   result.BillableCharacterCount,
+		UsageEstimated:           result.UsageEstimated,
+		BillableUnitType:         optionalTrimmedStringPtr(result.BillableUnitType),
+		CacheTTLOverridden:       cacheTTLOverridden,
+		ChannelID:                optionalInt64Ptr(input.ChannelID),
+		ModelMappingChain:        optionalTrimmedStringPtr(input.ModelMappingChain),
+		UserAgent:                optionalTrimmedStringPtr(input.UserAgent),
+		IPAddress:                optionalTrimmedStringPtr(input.IPAddress),
+		SessionID:                optionalTrimmedStringPtr(input.SessionID),
+		GroupID:                  apiKey.GroupID,
+		SubscriptionID:           optionalSubscriptionID(subscription),
+		CreatedAt:                time.Now(),
 	}
 	if usageUsesImageMultiplier(result.ImageCount, costBillingMode(cost), result.RequestCount, result.TaskCount, result.BillableDurationSeconds, result.BillableCharacterCount) {
 		usageLog.RateMultiplier = imageMultiplier

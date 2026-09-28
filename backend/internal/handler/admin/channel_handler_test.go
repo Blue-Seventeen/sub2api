@@ -575,6 +575,7 @@ func TestSyncPricingModels_ValidPlatformsUseExpectedProviders(t *testing.T) {
 		service.PlatformZhipu:       "zhipuai",
 		service.PlatformDeepseek:    "deepseek",
 		service.PlatformMiniMax:     "minimax",
+		service.PlatformOpenCodeGo:  "opencode-go",
 	}
 	require.Equal(t, expectedProviders, platformToLiteLLMProvider)
 
@@ -612,10 +613,11 @@ func TestGetModelDefaultPricing_ReturnsFable51CacheTTLs(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	var body struct {
 		Data struct {
-			Found                      bool               `json:"found"`
-			CacheWritePrice            float64            `json:"cache_write_price"`
-			CacheWrite1hPrice          *float64           `json:"cache_write_1h_price"`
-			ReasoningEffortMultipliers map[string]float64 `json:"reasoning_effort_multipliers"`
+			Found                        bool               `json:"found"`
+			CacheWritePrice              float64            `json:"cache_write_price"`
+			CacheWrite1hPrice            *float64           `json:"cache_write_1h_price"`
+			ReasoningEffortMultipliers   map[string]float64 `json:"reasoning_effort_multipliers"`
+			MaxReasoningEffortMultiplier *float64           `json:"max_reasoning_effort_multiplier"`
 		} `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))

@@ -48,7 +48,7 @@
           <button type="button" class="btn btn-secondary btn-sm" :disabled="testingS3" @click="testS3">
             {{ testingS3 ? t('common.loading') : t('admin.backup.s3.testConnection') }}
           </button>
-          <button type="button" class="btn btn-primary btn-sm" :disabled="savingS3" @click="saveS3Config">
+          <button type="button" class="btn btn-primary btn-sm" :disabled="savingS3 || !s3ConfigLoaded" @click="saveS3Config">
             {{ savingS3 ? t('common.loading') : t('common.save') }}
           </button>
         </div>
@@ -123,7 +123,7 @@
           <button type="button" class="btn btn-secondary btn-sm" :disabled="testingImageStorage" @click="testImageStorage">
             {{ testingImageStorage ? t('common.loading') : t('admin.backup.s3.testConnection') }}
           </button>
-          <button type="button" class="btn btn-primary btn-sm" :disabled="savingImageStorage" @click="saveImageStorageConfig">
+          <button type="button" class="btn btn-primary btn-sm" :disabled="savingImageStorage || !imageStorageConfigLoaded" @click="saveImageStorageConfig">
             {{ savingImageStorage ? t('common.loading') : t('common.save') }}
           </button>
         </div>
@@ -169,7 +169,7 @@
           <p>{{ retentionPreview }}</p>
         </div>
         <div class="mt-4">
-          <button type="button" class="btn btn-primary btn-sm" :disabled="savingSchedule || !!scheduleValidationError" @click="saveSchedule">
+          <button type="button" class="btn btn-primary btn-sm" :disabled="savingSchedule || !scheduleLoaded || !!scheduleValidationError" @click="saveSchedule">
             {{ savingSchedule ? t('common.loading') : t('common.save') }}
           </button>
         </div>
@@ -458,6 +458,7 @@ const s3Form = ref<BackupS3Config>({
 const s3SecretConfigured = ref(false)
 const savingS3 = ref(false)
 const testingS3 = ref(false)
+const s3ConfigLoaded = ref(false)
 
 // Async image object storage. Shares the S3 client with backups, so the default is
 // to reuse the credentials configured above and only differ by prefix.
@@ -478,6 +479,7 @@ const imageStorageForm = ref<ImageStorageConfig>({
 const imageStorageSecretConfigured = ref(false)
 const savingImageStorage = ref(false)
 const testingImageStorage = ref(false)
+const imageStorageConfigLoaded = ref(false)
 
 // Schedule config
 const scheduleForm = ref<BackupScheduleConfig>({
@@ -487,6 +489,7 @@ const scheduleForm = ref<BackupScheduleConfig>({
   retain_count: 10,
 })
 const savingSchedule = ref(false)
+const scheduleLoaded = ref(false)
 const archiveForm = ref<BackupMonthlyArchiveConfig>({ enabled: false, days: [1], include_month_end: false, retain_count: 0 })
 // Disabling hides the archive parameters, so a save while disabled keeps the
 // persisted parameters and only turns the rule off.
@@ -651,6 +654,7 @@ const r2ConfigRows = computed(() => [
 ])
 
 async function loadS3Config() {
+  s3ConfigLoaded.value = false
   try {
     const cfg = await adminAPI.backup.getS3Config()
     s3Form.value = {
@@ -663,12 +667,14 @@ async function loadS3Config() {
       force_path_style: cfg.force_path_style,
     }
     s3SecretConfigured.value = Boolean(cfg.access_key_id)
+    s3ConfigLoaded.value = true
   } catch (error) {
     appStore.showError((error as { message?: string })?.message || t('errors.networkError'))
   }
 }
 
 async function saveS3Config() {
+  if (!s3ConfigLoaded.value) return
   savingS3.value = true
   try {
     await backupStepUp.run(() => adminAPI.backup.updateS3Config(s3Form.value))
@@ -686,6 +692,7 @@ async function saveS3Config() {
 }
 
 async function loadImageStorageConfig() {
+  imageStorageConfigLoaded.value = false
   try {
     const { config, secret_configured } = await adminAPI.backup.getImageStorageConfig()
     imageStorageForm.value = {
@@ -695,12 +702,14 @@ async function loadImageStorageConfig() {
       secret_access_key: '',
     }
     imageStorageSecretConfigured.value = secret_configured
+    imageStorageConfigLoaded.value = true
   } catch (error) {
     appStore.showError((error as { message?: string })?.message || t('errors.networkError'))
   }
 }
 
 async function saveImageStorageConfig() {
+  if (!imageStorageConfigLoaded.value) return
   savingImageStorage.value = true
   try {
     await backupStepUp.run(() => adminAPI.backup.updateImageStorageConfig(imageStorageForm.value))
@@ -750,6 +759,7 @@ async function testS3() {
 }
 
 async function loadSchedule() {
+  scheduleLoaded.value = false
   try {
     const cfg = await adminAPI.backup.getSchedule()
     scheduleForm.value = {
@@ -765,18 +775,35 @@ async function loadSchedule() {
       retain_count: cfg.monthly_archive?.retain_count ?? 0,
     }
     savedArchive.value = cloneArchive(archiveForm.value)
+    scheduleLoaded.value = true
   } catch (error) {
     appStore.showError((error as { message?: string })?.message || t('errors.networkError'))
   }
 }
 
 async function saveSchedule() {
-  if (scheduleValidationError.value) return
+  if (!scheduleLoaded.value || scheduleValidationError.value) return
   savingSchedule.value = true
   try {
     const archive = archivePayload.value
-    await adminAPI.backup.updateSchedule({ ...scheduleForm.value, monthly_archive: archive })
-    savedArchive.value = cloneArchive(archive)
+    const archiveDraft = cloneArchive(archiveForm.value)
+    const updated = await adminAPI.backup.updateSchedule({ ...scheduleForm.value, monthly_archive: archive })
+    scheduleForm.value = {
+      enabled: updated.enabled,
+      cron_expr: updated.cron_expr || '0 2 * * *',
+      retain_days: updated.retain_days ?? 14,
+      retain_count: updated.retain_count ?? 10,
+    }
+    const savedArchiveConfig = {
+      enabled: updated.monthly_archive?.enabled ?? false,
+      days: updated.monthly_archive?.days ?? [1],
+      include_month_end: updated.monthly_archive?.include_month_end ?? false,
+      retain_count: updated.monthly_archive?.retain_count ?? 0,
+    }
+    savedArchive.value = cloneArchive(savedArchiveConfig)
+    archiveForm.value = archiveDraft.enabled
+      ? cloneArchive(savedArchiveConfig)
+      : { ...archiveDraft, enabled: false }
     appStore.showSuccess(t('admin.backup.schedule.saved'))
   } catch (error) {
     appStore.showError((error as { message?: string })?.message || t('errors.networkError'))

@@ -178,7 +178,9 @@ func TestUpdateUserPlatformQuotas_Success(t *testing.T) {
 	if len(repo.upsertCalls) != 1 {
 		t.Fatalf("UpsertForUser should be called once, got %d", len(repo.upsertCalls))
 	}
-	if repo.upsertCalls[0].userID != 42 || len(repo.upsertCalls[0].records) != len(service.AllowedQuotaPlatforms) {
+	// Platforms without any configured limit are intentionally omitted from the
+	// stored records; their absence means unlimited rather than a persisted row.
+	if repo.upsertCalls[0].userID != 42 || len(repo.upsertCalls[0].records) != 2 {
 		t.Errorf("unexpected upsert call: %+v", repo.upsertCalls[0])
 	}
 	// 缓存失效：写库前后各清一次全部 platform，防止 flusher 读到旧 Redis 快照后覆盖 admin 写入。

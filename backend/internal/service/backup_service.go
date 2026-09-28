@@ -614,11 +614,14 @@ func (s *BackupService) GetSchedule(ctx context.Context) (*BackupScheduleConfig,
 	cfg := BackupScheduleConfig{Enabled: localEnabled}
 
 	raw, err := s.settingRepo.GetValue(ctx, settingKeyBackupSchedule)
-	if err != nil || raw == "" {
+	if errors.Is(err, ErrSettingNotFound) || (err == nil && raw == "") {
 		return &cfg, nil
 	}
+	if err != nil {
+		return nil, fmt.Errorf("load backup schedule: %w", err)
+	}
 	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
-		cfg = BackupScheduleConfig{}
+		return nil, fmt.Errorf("parse backup schedule: %w", err)
 	}
 	cfg.Enabled = localEnabled
 	return &cfg, nil
@@ -632,6 +635,9 @@ func (s *BackupService) isCronSchedulerInitialized() bool {
 
 func (s *BackupService) UpdateSchedule(ctx context.Context, cfg BackupScheduleConfig) (*BackupScheduleConfig, error) {
 	cfg.CronExpr = strings.TrimSpace(cfg.CronExpr)
+	if err := validateBackupRetention(&cfg); err != nil {
+		return nil, err
+	}
 	if cfg.Enabled && cfg.CronExpr == "" {
 		return nil, infraerrors.BadRequest("INVALID_CRON", "cron expression is required when schedule is enabled")
 	}
@@ -1289,6 +1295,12 @@ func (s *BackupService) deleteBackup(ctx context.Context, backupID string, delet
 	}
 	if found == nil {
 		return ErrBackupNotFound
+	}
+	if found.RestoreStatus == "running" {
+		return ErrRestoreInProgress
+	}
+	if found.MonthlyArchive != nil && !deleteArchived {
+		return ErrBackupArchiveProtected
 	}
 
 	// 从 S3 删除

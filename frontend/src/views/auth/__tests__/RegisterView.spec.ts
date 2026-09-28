@@ -28,6 +28,7 @@ const publicSettings = {
   email_verify_enabled: false,
   promo_code_enabled: false,
   invitation_code_enabled: false,
+  invitation_code_missing_prompt_html: "",
   affiliate_enabled: true,
   turnstile_enabled: true,
   turnstile_site_key: 'site-key',
@@ -78,6 +79,10 @@ function mountRegister() {
     global: {
       stubs: {
         AuthLayout: { template: '<div><slot /><slot name="footer" /></div>' },
+        BaseDialog: {
+          props: ["show"],
+          template: '<div v-if="show" role="dialog"><slot /><slot name="footer" /></div>'
+        },
         Icon: true,
         TurnstileWidget: {
           template: '<div data-testid="turnstile-widget" />',
@@ -127,6 +132,46 @@ describe('RegisterView', () => {
 
     expect(wrapper.find('[data-testid="affiliate-invitation-field"]').exists()).toBe(false)
     expect(wrapper.get('#invitation_code').exists()).toBe(true)
+  })
+
+  it('shows the configured prompt when invitation code is missing', async () => {
+    getPublicSettingsMock.mockResolvedValueOnce({
+      ...publicSettings,
+      turnstile_enabled: false,
+      invitation_code_enabled: true,
+      invitation_code_missing_prompt_html: '<p>Request an invitation code.</p>'
+    })
+
+    const wrapper = mountRegister()
+    await flushPromises()
+    await wrapper.get('#email').setValue('invite@example.com')
+    await wrapper.get('#password').setValue('secret-123')
+    await wrapper.get('#confirmPassword').setValue('secret-123')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(wrapper.get('[role="dialog"]').text()).toContain('Request an invitation code.')
+    expect(registerMock).not.toHaveBeenCalled()
+  })
+
+  it('does not show the invitation prompt when configured HTML is blank', async () => {
+    getPublicSettingsMock.mockResolvedValueOnce({
+      ...publicSettings,
+      turnstile_enabled: false,
+      invitation_code_enabled: true,
+      invitation_code_missing_prompt_html: ' \n\t '
+    })
+
+    const wrapper = mountRegister()
+    await flushPromises()
+    await wrapper.get('#email').setValue('invite@example.com')
+    await wrapper.get('#password').setValue('secret-123')
+    await wrapper.get('#confirmPassword').setValue('secret-123')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(registerMock).not.toHaveBeenCalled()
   })
 
   it('submits a non-whitelist email domain so the backend can enforce its registration quota', async () => {

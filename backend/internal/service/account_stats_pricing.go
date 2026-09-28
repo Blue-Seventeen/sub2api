@@ -75,8 +75,7 @@ func resolveAccountStatsCostWithQuantities(
 	platform := channelService.GetGroupPlatform(ctx, groupID)
 
 	// 优先级 1：自定义规则（始终尝试）
-	if cost := tryCustomRules(channel, accountID, groupID, platform, upstreamModel, tokens, requestCount, quantities...); cost != nil {
-		*cost *= maxReasoningEffortBillingMultiplier(upstreamModel, reasoningEffort, nil)
+	if cost := tryCustomRules(channel, accountID, groupID, platform, upstreamModel, tokens, requestCount, reasoningEffort, quantities...); cost != nil {
 		return cost
 	}
 
@@ -125,7 +124,7 @@ func tryModelFilePricing(billingService *BillingService, model string, tokens Us
 // tryCustomRules 遍历自定义规则，按数组顺序先命中为准。
 func tryCustomRules(
 	channel *Channel, accountID, groupID int64,
-	platform, model string, tokens UsageTokens, requestCount int,
+	platform, model string, tokens UsageTokens, requestCount int, reasoningEffort string,
 	quantities ...accountStatsBillableQuantity,
 ) *float64 {
 	modelLower := strings.ToLower(model)
@@ -137,7 +136,15 @@ func tryCustomRules(
 		if pricing == nil {
 			continue // 规则匹配但模型不在规则定价中，继续下一条
 		}
-		return calculateStatsCost(pricing, tokens, requestCount, quantities...)
+		cost := calculateStatsCost(pricing, tokens, requestCount, quantities...)
+		if cost != nil {
+			multiplier := maxReasoningEffortBillingMultiplier(model, reasoningEffort, nil)
+			if len(pricing.ReasoningEffortMultipliers) > 0 {
+				multiplier = reasoningEffortBillingMultiplier(reasoningEffort, pricing.ReasoningEffortMultipliers)
+			}
+			*cost *= multiplier
+		}
+		return cost
 	}
 	return nil
 }

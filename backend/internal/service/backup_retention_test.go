@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -266,6 +268,11 @@ func TestBackupRetention_ScheduledExecutionAndZeroDays(t *testing.T) {
 	repo := newMockSettingRepo()
 	seedS3Config(t, repo)
 	svc := newTestBackupService(repo, &mockDumper{dumpData: []byte("backup")}, newMockObjectStore())
+	localSchedulePath := filepath.Join(t.TempDir(), backupScheduleLocalConfigFile)
+	svc.scheduleLocalConfigPath = localSchedulePath
+	localEnabled, err := json.Marshal(backupScheduleLocalConfig{Enabled: true})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(localSchedulePath, localEnabled, 0o600))
 	cfg := archiveSchedule(time.Now().UTC().Day())
 	cfg.RetainDays = 0
 	raw, err := json.Marshal(cfg)

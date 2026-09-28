@@ -85,6 +85,9 @@
                 ></div>
                 {{ t("common.loading") }}
               </div>
+              <div v-else-if="!adminApiKeyLoaded" role="alert" class="text-sm text-red-600 dark:text-red-400">
+                {{ t("admin.settings.failedToLoad") }}
+              </div>
 
               <!-- No Key Configured -->
               <div
@@ -225,6 +228,9 @@
                 ></div>
                 {{ t("common.loading") }}
               </div>
+              <div v-else-if="!overloadCooldownLoaded" role="alert" class="text-sm text-red-600 dark:text-red-400">
+                {{ t("admin.settings.failedToLoad") }}
+              </div>
 
               <template v-else>
                 <div class="flex items-center justify-between">
@@ -325,6 +331,9 @@
                   class="h-4 w-4 animate-spin rounded-full border-b-2 border-primary-600"
                 ></div>
                 {{ t("common.loading") }}
+              </div>
+              <div v-else-if="!rateLimit429CooldownLoaded" role="alert" class="text-sm text-red-600 dark:text-red-400">
+                {{ t("admin.settings.failedToLoad") }}
               </div>
 
               <template v-else>
@@ -433,6 +442,9 @@
                   class="h-4 w-4 animate-spin rounded-full border-b-2 border-primary-600"
                 ></div>
                 {{ t("common.loading") }}
+              </div>
+              <div v-else-if="!streamTimeoutLoaded" role="alert" class="text-sm text-red-600 dark:text-red-400">
+                {{ t("admin.settings.failedToLoad") }}
               </div>
 
               <template v-else>
@@ -613,6 +625,9 @@
                   class="h-4 w-4 animate-spin rounded-full border-b-2 border-primary-600"
                 ></div>
                 {{ t("common.loading") }}
+              </div>
+              <div v-else-if="!rectifierLoaded" role="alert" class="text-sm text-red-600 dark:text-red-400">
+                {{ t("admin.settings.failedToLoad") }}
               </div>
 
               <template v-else>
@@ -812,6 +827,9 @@
                   class="h-4 w-4 animate-spin rounded-full border-b-2 border-primary-600"
                 ></div>
                 {{ t("common.loading") }}
+              </div>
+              <div v-else-if="!betaPolicyLoaded" role="alert" class="text-sm text-red-600 dark:text-red-400">
+                {{ t("admin.settings.failedToLoad") }}
               </div>
 
               <template v-else>
@@ -1096,6 +1114,9 @@
                   class="h-4 w-4 animate-spin rounded-full border-b-2 border-primary-600"
                 ></div>
                 {{ t("common.loading") }}
+              </div>
+              <div v-else-if="!openaiFastPolicyLoaded" role="alert" class="text-sm text-red-600 dark:text-red-400">
+                {{ t("admin.settings.failedToLoad") }}
               </div>
 
               <template v-else>
@@ -1428,6 +1449,24 @@
                     )
                   }}
                 </p>
+              </div>
+
+              <!-- Non-allowlist registration quota -->
+              <div
+                class="flex items-center justify-between border-t border-gray-100 pt-4 dark:border-dark-700"
+              >
+                <div>
+                  <label class="font-medium text-gray-900 dark:text-white">
+                    {{ t("admin.settings.registration.emailDomainQuota") }}
+                  </label>
+                  <p class="text-sm text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.registration.emailDomainQuotaHint") }}
+                  </p>
+                </div>
+                <Toggle
+                  v-model="form.registration_email_domain_quota_enabled"
+                  data-testid="registration-domain-quota-enabled"
+                />
               </div>
 
               <!-- Promo Code -->
@@ -1781,6 +1820,9 @@
                 ></div>
                 {{ t("common.loading") }}
               </div>
+              <div v-else-if="!panelRateLimitLoaded" role="alert" class="text-sm text-red-600 dark:text-red-400">
+                {{ t("admin.settings.failedToLoad") }}
+              </div>
 
               <template v-else>
                 <!-- 计数维度说明：按账号计数，反代部署无误伤 -->
@@ -2091,6 +2133,22 @@
                       </h3>
                       <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                         {{ t("admin.settings.tencentCaptcha.appCredentialsHint") }}
+                      </p>
+                    </div>
+                    <div class="md:col-span-2">
+                      <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        {{ t("admin.settings.tencentCaptcha.region") }}
+                      </label>
+                      <select
+                        v-model="form.tencent_captcha_region"
+                        class="input"
+                        data-testid="tencent-captcha-region"
+                      >
+                        <option value="cn">{{ t("admin.settings.tencentCaptcha.regionCn") }}</option>
+                        <option value="intl">{{ t("admin.settings.tencentCaptcha.regionIntl") }}</option>
+                      </select>
+                      <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                        {{ t("admin.settings.tencentCaptcha.regionHint") }}
                       </p>
                     </div>
                     <div>
@@ -4855,6 +4913,9 @@
                 ></div>
                 {{ t("common.loading") }}
               </div>
+              <div v-else-if="!upstreamBillingProbeLoaded" role="alert" class="text-sm text-red-600 dark:text-red-400">
+                {{ t("admin.settings.failedToLoad") }}
+              </div>
 
               <template v-else>
                 <div class="flex items-center justify-between gap-4">
@@ -4933,6 +4994,9 @@
               <div v-if="ollamaCloudUsageLoading" class="flex items-center gap-2 text-gray-500">
                 <div class="h-4 w-4 animate-spin rounded-full border-b-2 border-primary-600"></div>
                 {{ t("common.loading") }}
+              </div>
+              <div v-else-if="!ollamaCloudUsageLoaded" role="alert" class="text-sm text-red-600 dark:text-red-400">
+                {{ t("admin.settings.failedToLoad") }}
               </div>
               <template v-else>
                 <div class="flex items-center justify-between gap-4">
@@ -5017,6 +5081,9 @@
               <div v-if="opencodeGoUsageLoading" class="flex items-center gap-2 text-gray-500">
                 <div class="h-4 w-4 animate-spin rounded-full border-b-2 border-primary-600"></div>
                 {{ t("common.loading") }}
+              </div>
+              <div v-else-if="!opencodeGoUsageLoaded" role="alert" class="text-sm text-red-600 dark:text-red-400">
+                {{ t("admin.settings.failedToLoad") }}
               </div>
               <template v-else>
                 <div class="flex items-center justify-between gap-4">
@@ -5112,6 +5179,18 @@
                   </p>
                 </div>
                 <Toggle v-model="form.allow_ungrouped_key_scheduling" />
+              </div>
+
+              <div class="border-t border-gray-100 pt-5 dark:border-dark-700">
+                <h3 class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.settings.scheduling.accountSchedulingThresholdsTitle') }}</h3>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.scheduling.accountSchedulingThresholdsDescription') }}</p>
+                <div class="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
+                  <label v-for="platform in ['openai', 'anthropic', 'grok', 'kimi', 'zhipu', 'minimax', 'opencode_go']" :key="platform" class="block">
+                    <span class="text-xs font-medium text-gray-600 dark:text-gray-400">{{ t(`admin.settings.scheduling.accountSchedulingThresholdPlatforms.${platform}`) }}</span>
+                    <input v-model.number="form.account_scheduling_thresholds[platform]" type="number" min="1" max="100" class="input mt-1" :data-testid="`account-scheduling-threshold-${platform}`" />
+                  </label>
+                </div>
+                <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.scheduling.accountSchedulingThresholdsDisabledHint') }}</p>
               </div>
 
               <div
@@ -5307,6 +5386,38 @@
               </p>
             </div>
             <div class="space-y-5 p-6">
+              <div class="grid grid-cols-1 gap-4 border-b border-gray-100 pb-5 md:grid-cols-2 dark:border-dark-700">
+                <div>
+                  <label class="input-label">{{ t('admin.settings.gatewayForwarding.grokDefaultTextModel') }}</label>
+                  <input v-model="form.grok_default_text_model" class="input" data-testid="grok-default-text-model" type="text" />
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.gatewayForwarding.grokDefaultTextModelHint') }}</p>
+                </div>
+                <div class="flex items-center justify-between gap-4">
+                  <div>
+                    <label class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.settings.gatewayForwarding.grokCrossClientMap') }}</label>
+                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.gatewayForwarding.grokCrossClientMapHint') }}</p>
+                  </div>
+                  <Toggle v-model="form.grok_cross_client_model_map_enabled" data-testid="grok-cross-client-model-map-enabled" />
+                </div>
+                <div>
+                  <label class="input-label">{{ t('admin.settings.gatewayForwarding.grokDefaultBaseURLMode') }}</label>
+                  <select v-model="form.grok_default_base_url_mode" class="input" data-testid="grok-default-base-url-mode">
+                    <option value="cli">{{ t('admin.settings.gatewayForwarding.grokBaseURLModeCLI') }}</option>
+                    <option value="api">{{ t('admin.settings.gatewayForwarding.grokBaseURLModeAPI') }}</option>
+                    <option value="us-east-1">{{ t('admin.settings.gatewayForwarding.grokBaseURLModeUSEast1') }}</option>
+                    <option value="us-west-2">{{ t('admin.settings.gatewayForwarding.grokBaseURLModeUSWest2') }}</option>
+                    <option value="eu-west-1">{{ t('admin.settings.gatewayForwarding.grokBaseURLModeEUWest1') }}</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="input-label">{{ t('admin.settings.gatewayForwarding.openaiTTFTMode') }}</label>
+                  <select v-model="form.openai_ttft_mode" class="input" data-testid="openai-ttft-mode">
+                    <option value="semantic">{{ t('admin.settings.gatewayForwarding.openaiTTFTModeSemantic') }}</option>
+                    <option value="visible">{{ t('admin.settings.gatewayForwarding.openaiTTFTModeVisible') }}</option>
+                  </select>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.gatewayForwarding.openaiTTFTModeHint') }}</p>
+                </div>
+              </div>
               <!-- Fingerprint Unification -->
               <div class="flex items-center justify-between">
                 <div>
@@ -7209,6 +7320,14 @@
             </div>
 
             <div v-if="form.channel_monitor_enabled">
+              <div class="border-t border-gray-100 pt-5 dark:border-dark-700">
+                <label class="input-label">{{ t('admin.settings.features.channelMonitor.mode') }}</label>
+                <select v-model="form.channel_monitor_mode" class="input" data-testid="channel-monitor-mode">
+                  <option value="v1">{{ t('admin.settings.features.channelMonitor.modeV1') }}</option>
+                  <option value="v2">{{ t('admin.settings.features.channelMonitor.modeV2') }}</option>
+                </select>
+                <p class="mt-1 text-xs text-gray-400">{{ t('admin.settings.features.channelMonitor.modeHint') }}</p>
+              </div>
               <label class="input-label">
                 {{ t('admin.settings.features.channelMonitor.defaultInterval') }}
                 <span class="text-red-500">*</span>
@@ -7223,6 +7342,20 @@
               <p class="mt-1 text-xs text-gray-400">
                 {{ t('admin.settings.features.channelMonitor.defaultIntervalHint') }}
               </p>
+              <div class="space-y-4 border-t border-gray-100 pt-5 dark:border-dark-700">
+                <div class="flex items-center justify-between">
+                  <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('admin.settings.features.channelMonitor.hideThroughput') }}</span>
+                  <Toggle v-model="form.channel_monitor_hide_throughput" data-testid="channel-monitor-hide-throughput" />
+                </div>
+                <div class="flex items-center justify-between">
+                  <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('admin.settings.features.channelMonitor.showQuota') }}</span>
+                  <Toggle v-model="form.channel_monitor_show_quota" data-testid="channel-monitor-show-quota" />
+                </div>
+                <div class="flex items-center justify-between">
+                  <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('admin.settings.features.channelMonitor.hideUserRanking') }}</span>
+                  <Toggle v-model="form.channel_monitor_hide_user_ranking" data-testid="channel-monitor-hide-user-ranking" />
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -7307,6 +7440,22 @@
                 class="input font-mono text-sm"
               ></textarea>
             </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              {{ t('admin.settings.features.pluginManagement.title') }}
+            </h2>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.pluginManagement.description') }}</p>
+          </div>
+          <div class="flex items-center justify-between p-6">
+            <div>
+              <label class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.settings.features.pluginManagement.enabled') }}</label>
+              <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.pluginManagement.enabledHint') }}</p>
+            </div>
+            <Toggle v-model="form.plugin_management_enabled" data-testid="plugin-management-enabled" />
           </div>
         </div>
 
@@ -8271,9 +8420,11 @@
                       v-for="pt in allPaymentTypes"
                       :key="pt.value"
                       type="button"
+                      :disabled="!providersLoaded"
                       @click="togglePaymentType(pt.value)"
                       :class="[
                         'rounded-lg border px-3 py-1.5 text-sm font-medium transition-all',
+                        !providersLoaded && 'cursor-not-allowed opacity-50',
                         isPaymentTypeEnabled(pt.value)
                           ? 'border-primary-500 bg-primary-500 text-white shadow-sm'
                           : 'border-gray-300 bg-white text-gray-600 hover:border-gray-400 hover:bg-gray-50 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-300 dark:hover:border-dark-500',
@@ -8305,6 +8456,9 @@
                         />
                       </svg>
                     </a>
+                  </p>
+                  <p v-if="!providersLoaded && !providersLoading" role="alert" class="mt-2 text-xs text-red-600 dark:text-red-400">
+                    {{ t("admin.settings.payment.providersLoadFailed") }}
                   </p>
                 </div>
                 <!-- Row 5: Help image + text -->
@@ -8346,7 +8500,8 @@
             v-if="form.payment_enabled"
             :providers="providers"
             :loading="providersLoading"
-            :can-create="hasAnyPaymentTypeEnabled"
+            :load-error="!providersLoaded"
+            :can-create="hasAnyPaymentTypeEnabled && providersLoaded"
             :enabled-payment-types="form.payment_enabled_types"
             :all-payment-types="allPaymentTypes"
             :redirect-label="t('admin.settings.payment.easypayRedirect')"
@@ -9059,6 +9214,7 @@ const tablePageSizeOptionsInput = ref("10, 20, 50, 100");
 
 // Admin API Key 状态
 const adminApiKeyLoading = ref(true);
+const adminApiKeyLoaded = ref(false);
 const adminApiKeyExists = ref(false);
 const adminApiKeyMasked = ref("");
 const adminApiKeyOperating = ref(false);
@@ -9067,6 +9223,7 @@ const subscriptionGroups = ref<AdminGroup[]>([]);
 
 // Upstream billing probe state
 const upstreamBillingProbeLoading = ref(true);
+const upstreamBillingProbeLoaded = ref(false);
 const upstreamBillingProbeSaving = ref(false);
 const upstreamBillingProbeForm = reactive({
   enabled: true,
@@ -9074,6 +9231,7 @@ const upstreamBillingProbeForm = reactive({
 });
 
 const ollamaCloudUsageLoading = ref(true);
+const ollamaCloudUsageLoaded = ref(false);
 const ollamaCloudUsageSaving = ref(false);
 const ollamaCloudUsageForm = reactive({
   enabled: false,
@@ -9082,6 +9240,7 @@ const ollamaCloudUsageForm = reactive({
 });
 
 const opencodeGoUsageLoading = ref(true);
+const opencodeGoUsageLoaded = ref(false);
 const opencodeGoUsageSaving = ref(false);
 const opencodeGoUsageForm = reactive({
   enabled: false,
@@ -9091,6 +9250,7 @@ const opencodeGoUsageForm = reactive({
 
 // Overload Cooldown (529) 状态
 const overloadCooldownLoading = ref(true);
+const overloadCooldownLoaded = ref(false);
 const overloadCooldownSaving = ref(false);
 const overloadCooldownForm = reactive({
   enabled: true,
@@ -9099,6 +9259,7 @@ const overloadCooldownForm = reactive({
 
 // Rate Limit Cooldown (429) 状态
 const rateLimit429CooldownLoading = ref(true);
+const rateLimit429CooldownLoaded = ref(false);
 const rateLimit429CooldownSaving = ref(false);
 const rateLimit429CooldownForm = reactive({
   enabled: true,
@@ -9107,6 +9268,7 @@ const rateLimit429CooldownForm = reactive({
 
 // Panel API Rate Limit 状态
 const panelRateLimitLoading = ref(true);
+const panelRateLimitLoaded = ref(false);
 const panelRateLimitSaving = ref(false);
 const panelRateLimitForm = reactive({
   enabled: true,
@@ -9119,6 +9281,7 @@ const affiliateFeatureAvailable = false;
 
 // Stream Timeout 状态
 const streamTimeoutLoading = ref(true);
+const streamTimeoutLoaded = ref(false);
 const streamTimeoutSaving = ref(false);
 const streamTimeoutForm = reactive({
   enabled: true,
@@ -9130,6 +9293,7 @@ const streamTimeoutForm = reactive({
 
 // Rectifier 状态
 const rectifierLoading = ref(true);
+const rectifierLoaded = ref(false);
 const rectifierSaving = ref(false);
 const rectifierForm = reactive({
   enabled: true,
@@ -9141,6 +9305,7 @@ const rectifierForm = reactive({
 
 // Beta Policy 状态
 const betaPolicyLoading = ref(true);
+const betaPolicyLoaded = ref(false);
 const betaPolicySaving = ref(false);
 const betaPolicyForm = reactive({
   rules: [] as Array<{
@@ -9601,6 +9766,8 @@ type SettingsForm = Omit<
   | "wechat_connect_mp_enabled"
   | "wechat_connect_mobile_enabled"
   | "openai_oauth_scheduling_rate_multiplier"
+  | "purchase_subscription_enabled"
+  | "purchase_subscription_url"
 > & {
   smtp_password: string;
   turnstile_secret_key: string;
@@ -9645,6 +9812,7 @@ const form = reactive<SettingsForm>({
   registration_enabled: true,
   email_verify_enabled: false,
   registration_email_suffix_whitelist: [],
+  registration_email_domain_quota_enabled: false,
   promo_code_enabled: true,
   invitation_code_enabled: false,
   invitation_code_missing_prompt_html: "",
@@ -9745,6 +9913,7 @@ const form = reactive<SettingsForm>({
   turnstile_secret_key: "",
   turnstile_secret_key_configured: false,
   tencent_captcha_enabled: false,
+  tencent_captcha_region: "cn",
   tencent_captcha_app_id: "",
   tencent_captcha_app_secret_key: "",
   tencent_captcha_app_secret_key_configured: false,
@@ -9878,6 +10047,10 @@ const form = reactive<SettingsForm>({
   openai_advanced_scheduler_weight_session_sticky: "",
   // Gateway forwarding behavior
   enable_fingerprint_unification: true,
+  openai_ttft_mode: "semantic",
+  grok_default_text_model: "grok-4.6",
+  grok_cross_client_model_map_enabled: true,
+  grok_default_base_url_mode: "cli",
   enable_metadata_passthrough: false,
   enable_cch_signing: false,
   enable_claude_oauth_system_prompt_injection: true,
@@ -9912,7 +10085,11 @@ const form = reactive<SettingsForm>({
   account_quota_notify_emails: [] as NotifyEmailEntry[],
   // Channel Monitor feature switch
   channel_monitor_enabled: true,
+  channel_monitor_mode: "v1",
   channel_monitor_default_interval_seconds: 60,
+  channel_monitor_hide_throughput: false,
+  channel_monitor_show_quota: false,
+  channel_monitor_hide_user_ranking: false,
   // Available Channels feature switch
   available_channels_enabled: false,
   markdown_pages_enabled: false,
@@ -9920,6 +10097,16 @@ const form = reactive<SettingsForm>({
   model_plaza_enabled: false,
   model_plaza_require_auth: false,
   model_plaza_description: '',
+  plugin_management_enabled: false,
+  account_scheduling_thresholds: {
+    openai: 100,
+    anthropic: 100,
+    grok: 100,
+    kimi: 100,
+    zhipu: 100,
+    minimax: 100,
+    opencode_go: 100,
+  },
   // Affiliate (邀请返利) feature switch
   affiliate_enabled: false,
   // Allow user view error requests
@@ -10138,6 +10325,7 @@ const webSearchConfig = reactive<WebSearchEmulationConfig>({
   enabled: false,
   providers: [],
 });
+const webSearchConfigLoaded = ref(false);
 
 const expandedProviders = reactive<Record<number, boolean>>({});
 const apiKeyVisible = reactive<Record<number, boolean>>({});
@@ -10258,6 +10446,7 @@ async function testWebSearchProvider() {
 }
 
 async function loadWebSearchConfig() {
+  webSearchConfigLoaded.value = false;
   try {
     const [resp, proxiesResp] = await Promise.all([
       adminAPI.settings.getWebSearchEmulationConfig(),
@@ -10268,16 +10457,19 @@ async function loadWebSearchConfig() {
       webSearchConfig.providers = resp.providers || [];
     }
     webSearchProxies.value = proxiesResp.items || [];
+    webSearchConfigLoaded.value = true;
   } catch (err: unknown) {
-    // 404 is expected when config hasn't been created yet; show error for other failures
-    const status = (err as { status?: number })?.status;
-    if (status !== 404 && status !== undefined) {
-      appStore.showError(extractApiErrorMessage(err, t("common.error")));
-    }
+    appStore.showError(
+      extractApiErrorMessage(
+        err,
+        t("admin.settings.webSearchEmulation.loadFailed"),
+      ),
+    );
   }
 }
 
 async function saveWebSearchConfig(): Promise<boolean> {
+  if (!webSearchConfigLoaded.value) return false;
   try {
     for (const p of webSearchConfig.providers) {
       const raw = p.quota_limit;
@@ -10294,10 +10486,16 @@ async function saveWebSearchConfig(): Promise<boolean> {
         quota_limit: Number(p.quota_limit) > 0 ? Number(p.quota_limit) : null,
       }),
     );
-    await adminAPI.settings.updateWebSearchEmulationConfig({
+    const updated = await adminAPI.settings.updateWebSearchEmulationConfig({
       enabled: webSearchConfig.enabled,
       providers,
     });
+    webSearchConfig.enabled = updated.enabled;
+    webSearchConfig.providers = (updated.providers || []).map((provider) => ({
+      ...provider,
+      api_key: provider.api_key || "",
+      api_key_configured: provider.api_key_configured === true,
+    }));
     return true;
   } catch (err: unknown) {
     appStore.showError(extractApiErrorMessage(err, t("common.error")));
@@ -11354,6 +11552,8 @@ async function saveSettings() {
         registrationEmailSuffixWhitelistTags.value.map((suffix) =>
           suffix.startsWith("*.") ? suffix : `@${suffix}`,
         ),
+      registration_email_domain_quota_enabled:
+        form.registration_email_domain_quota_enabled,
       promo_code_enabled: form.promo_code_enabled,
       invitation_code_enabled: form.invitation_code_enabled,
       invitation_code_missing_prompt_html:
@@ -11421,6 +11621,7 @@ async function saveSettings() {
       turnstile_site_key: form.turnstile_site_key,
       turnstile_secret_key: form.turnstile_secret_key || undefined,
       tencent_captcha_enabled: form.tencent_captcha_enabled,
+      tencent_captcha_region: form.tencent_captcha_region,
       tencent_captcha_app_id: form.tencent_captcha_app_id,
       tencent_captcha_app_secret_key:
         form.tencent_captcha_app_secret_key || undefined,
@@ -11532,6 +11733,16 @@ async function saveSettings() {
       min_claude_code_version: form.min_claude_code_version,
       max_claude_code_version: form.max_claude_code_version,
       allow_ungrouped_key_scheduling: form.allow_ungrouped_key_scheduling,
+      account_scheduling_thresholds: Object.fromEntries(
+        Object.entries(form.account_scheduling_thresholds).map(([key, value]) => [
+          key,
+          Math.max(1, Math.min(100, Math.round(Number(value) || 100))),
+        ]),
+      ),
+      openai_ttft_mode: form.openai_ttft_mode,
+      grok_default_text_model: form.grok_default_text_model?.trim() || "grok-4.6",
+      grok_cross_client_model_map_enabled: form.grok_cross_client_model_map_enabled,
+      grok_default_base_url_mode: form.grok_default_base_url_mode,
       enable_fingerprint_unification: form.enable_fingerprint_unification,
       enable_metadata_passthrough: form.enable_metadata_passthrough,
       enable_cch_signing: form.enable_cch_signing,
@@ -11651,8 +11862,12 @@ async function saveSettings() {
       ).filter((e) => e.email.trim() !== ""),
       // Channel Monitor feature switch
       channel_monitor_enabled: form.channel_monitor_enabled,
+      channel_monitor_mode: form.channel_monitor_mode,
       channel_monitor_default_interval_seconds:
         Number(form.channel_monitor_default_interval_seconds) || 60,
+      channel_monitor_hide_throughput: form.channel_monitor_hide_throughput,
+      channel_monitor_show_quota: form.channel_monitor_show_quota,
+      channel_monitor_hide_user_ranking: form.channel_monitor_hide_user_ranking,
       // Available Channels feature switch
       available_channels_enabled: form.available_channels_enabled,
       markdown_pages_enabled: form.markdown_pages_enabled,
@@ -11660,6 +11875,7 @@ async function saveSettings() {
       model_plaza_enabled: form.model_plaza_enabled,
       model_plaza_require_auth: form.model_plaza_require_auth,
       model_plaza_description: form.model_plaza_description,
+      plugin_management_enabled: form.plugin_management_enabled,
       // Affiliate (邀请返利) feature switch
       affiliate_enabled: false,
       allow_user_view_error_requests: form.allow_user_view_error_requests,
@@ -11876,6 +12092,7 @@ async function loadAdminApiKey() {
     const status = await adminAPI.settings.getAdminApiKey();
     adminApiKeyExists.value = status.exists;
     adminApiKeyMasked.value = status.masked_key;
+    adminApiKeyLoaded.value = true;
   } catch (_error: unknown) {
     // Silent fail - admin API key status is non-critical
   } finally {
@@ -11884,6 +12101,7 @@ async function loadAdminApiKey() {
 }
 
 async function createAdminApiKey() {
+  if (!adminApiKeyLoaded.value) return;
   adminApiKeyOperating.value = true;
   try {
     const result = await adminAPI.settings.regenerateAdminApiKey();
@@ -11900,11 +12118,13 @@ async function createAdminApiKey() {
 }
 
 async function regenerateAdminApiKey() {
+  if (!adminApiKeyLoaded.value) return;
   if (!confirm(t("admin.settings.adminApiKey.regenerateConfirm"))) return;
   await createAdminApiKey();
 }
 
 async function deleteAdminApiKey() {
+  if (!adminApiKeyLoaded.value) return;
   if (!confirm(t("admin.settings.adminApiKey.deleteConfirm"))) return;
   adminApiKeyOperating.value = true;
   try {
@@ -11938,6 +12158,7 @@ async function loadUpstreamBillingProbeSettings() {
       upstreamBillingProbeForm,
       await adminAPI.accounts.getUpstreamBillingProbeSettings(),
     );
+    upstreamBillingProbeLoaded.value = true;
   } catch (_error: unknown) {
     // Keep defaults when this optional setting cannot be loaded.
   } finally {
@@ -11946,6 +12167,7 @@ async function loadUpstreamBillingProbeSettings() {
 }
 
 async function saveUpstreamBillingProbeSettings() {
+  if (!upstreamBillingProbeLoaded.value) return;
   upstreamBillingProbeSaving.value = true;
   try {
     const updated = await adminAPI.accounts.updateUpstreamBillingProbeSettings({
@@ -11972,6 +12194,7 @@ async function loadOllamaCloudUsageSettings() {
       ollamaCloudUsageForm,
       await adminAPI.accounts.getOllamaCloudUsageSettings(),
     );
+    ollamaCloudUsageLoaded.value = true;
   } catch (_error: unknown) {
     // Keep the fail-safe disabled defaults when this optional setting cannot be loaded.
   } finally {
@@ -11980,6 +12203,7 @@ async function loadOllamaCloudUsageSettings() {
 }
 
 async function saveOllamaCloudUsageSettings() {
+  if (!ollamaCloudUsageLoaded.value) return;
   ollamaCloudUsageSaving.value = true;
   try {
     const updated = await adminAPI.accounts.updateOllamaCloudUsageSettings({
@@ -12003,6 +12227,7 @@ async function loadOpenCodeGoUsageSettings() {
       opencodeGoUsageForm,
       await adminAPI.accounts.getOpenCodeGoUsageSettings(),
     );
+    opencodeGoUsageLoaded.value = true;
   } catch (_error: unknown) {
     // Keep the fail-safe disabled defaults when this optional setting cannot be loaded.
   } finally {
@@ -12011,6 +12236,7 @@ async function loadOpenCodeGoUsageSettings() {
 }
 
 async function saveOpenCodeGoUsageSettings() {
+  if (!opencodeGoUsageLoaded.value) return;
   opencodeGoUsageSaving.value = true;
   try {
     const updated = await adminAPI.accounts.updateOpenCodeGoUsageSettings({
@@ -12033,6 +12259,7 @@ async function loadOverloadCooldownSettings() {
   try {
     const settings = await adminAPI.settings.getOverloadCooldownSettings();
     Object.assign(overloadCooldownForm, settings);
+    overloadCooldownLoaded.value = true;
   } catch (_error: unknown) {
     // Silent fail - settings will use defaults
   } finally {
@@ -12041,6 +12268,7 @@ async function loadOverloadCooldownSettings() {
 }
 
 async function saveOverloadCooldownSettings() {
+  if (!overloadCooldownLoaded.value) return;
   overloadCooldownSaving.value = true;
   try {
     const updated = await adminAPI.settings.updateOverloadCooldownSettings({
@@ -12067,6 +12295,7 @@ async function loadPanelRateLimitSettings() {
   try {
     const settings = await adminAPI.settings.getPanelRateLimitSettings();
     Object.assign(panelRateLimitForm, settings);
+    panelRateLimitLoaded.value = true;
   } catch (_error: unknown) {
     // Silent fail - settings will use defaults
   } finally {
@@ -12075,6 +12304,7 @@ async function loadPanelRateLimitSettings() {
 }
 
 async function savePanelRateLimitSettings() {
+  if (!panelRateLimitLoaded.value) return;
   panelRateLimitSaving.value = true;
   try {
     const updated = await adminAPI.settings.updatePanelRateLimitSettings({
@@ -12104,6 +12334,7 @@ async function loadRateLimit429CooldownSettings() {
   try {
     const settings = await adminAPI.settings.getRateLimit429CooldownSettings();
     Object.assign(rateLimit429CooldownForm, settings);
+    rateLimit429CooldownLoaded.value = true;
   } catch (_error: unknown) {
     // Silent fail - settings will use defaults
   } finally {
@@ -12112,6 +12343,7 @@ async function loadRateLimit429CooldownSettings() {
 }
 
 async function saveRateLimit429CooldownSettings() {
+  if (!rateLimit429CooldownLoaded.value) return;
   rateLimit429CooldownSaving.value = true;
   try {
     const updated = await adminAPI.settings.updateRateLimit429CooldownSettings({
@@ -12138,6 +12370,7 @@ async function loadStreamTimeoutSettings() {
   try {
     const settings = await adminAPI.settings.getStreamTimeoutSettings();
     Object.assign(streamTimeoutForm, settings);
+    streamTimeoutLoaded.value = true;
   } catch (_error: unknown) {
     // Silent fail - settings will use defaults
   } finally {
@@ -12146,6 +12379,7 @@ async function loadStreamTimeoutSettings() {
 }
 
 async function saveStreamTimeoutSettings() {
+  if (!streamTimeoutLoaded.value) return;
   streamTimeoutSaving.value = true;
   try {
     const updated = await adminAPI.settings.updateStreamTimeoutSettings({
@@ -12179,6 +12413,7 @@ async function loadRectifierSettings() {
     if (!Array.isArray(rectifierForm.apikey_signature_patterns)) {
       rectifierForm.apikey_signature_patterns = [];
     }
+    rectifierLoaded.value = true;
   } catch (_error: unknown) {
     // Silent fail - settings will use defaults
   } finally {
@@ -12187,6 +12422,7 @@ async function loadRectifierSettings() {
 }
 
 async function saveRectifierSettings() {
+  if (!rectifierLoaded.value) return;
   rectifierSaving.value = true;
   try {
     const updated = await adminAPI.settings.updateRectifierSettings({
@@ -12293,6 +12529,7 @@ async function loadBetaPolicySettings() {
   try {
     const settings = await adminAPI.settings.getBetaPolicySettings();
     betaPolicyForm.rules = settings.rules;
+    betaPolicyLoaded.value = true;
   } catch (_error: unknown) {
     // Silent fail - settings will use defaults
   } finally {
@@ -12376,6 +12613,7 @@ function removeOpenAIFastPolicyModelPattern(
 }
 
 async function saveBetaPolicySettings() {
+  if (!betaPolicyLoaded.value) return;
   betaPolicySaving.value = true;
   try {
     // Clean up empty patterns before saving
@@ -12476,14 +12714,16 @@ async function loadOpenAIFastPolicySettings() {
               : [],
           }))
       : [];
+    openaiFastPolicyLoaded.value = true;
   } catch (_error: unknown) {
-    openaiFastPolicyForm.rules = [];
+    // The bulk settings response may already have hydrated this shared policy.
   } finally {
     openaiFastPolicyLoading.value = false;
   }
 }
 
 async function saveOpenAIFastPolicySettings() {
+  if (!openaiFastPolicyLoaded.value) return;
   openaiFastPolicySaving.value = true;
   try {
     const cleanedRules = openaiFastPolicyForm.rules
@@ -12553,6 +12793,7 @@ const hasAnyPaymentTypeEnabled = computed(
 );
 
 function togglePaymentType(type: string) {
+  if (!providersLoaded.value) return;
   if (form.payment_enabled_types.includes(type)) {
     form.payment_enabled_types = form.payment_enabled_types.filter(
       (t) => t !== type,
@@ -12583,6 +12824,7 @@ function slog(...args: unknown[]) {
 }
 
 const providersLoading = ref(false);
+const providersLoaded = ref(false);
 const providerSaving = ref(false);
 const providers = ref<ProviderInstance[]>([]);
 const showProviderDialog = ref(false);
@@ -12728,6 +12970,7 @@ function showProviderEnablementConflict(
 
 async function loadProviders() {
   providersLoading.value = true;
+  providersLoaded.value = false;
   try {
     const res = await adminAPI.payment.getProviders();
     // Normalize supported_types: backend returns null when the list is empty
@@ -12739,6 +12982,7 @@ async function loadProviders() {
         ? p.supported_types
         : [],
     }));
+    providersLoaded.value = true;
   } catch (err: unknown) {
     appStore.showError(extractI18nErrorMessage(err, t, "payment.errors", t("common.error")));
   } finally {
@@ -12747,6 +12991,7 @@ async function loadProviders() {
 }
 
 function openCreateProvider() {
+  if (!providersLoaded.value) return;
   editingProvider.value = null;
   providerDialogRef.value?.reset(
     enabledProviderKeyOptions.value[0]?.value || "easypay",
@@ -12755,12 +13000,14 @@ function openCreateProvider() {
 }
 
 function openEditProvider(provider: ProviderInstance) {
+  if (!providersLoaded.value) return;
   editingProvider.value = provider;
   providerDialogRef.value?.loadProvider(provider);
   showProviderDialog.value = true;
 }
 
 async function handleSaveProvider(payload: Partial<ProviderInstance>) {
+  if (!providersLoaded.value) return;
   providerSaving.value = true;
   try {
     const candidate: ProviderEnablementCandidate = {
@@ -12799,6 +13046,7 @@ async function handleToggleField(
   provider: ProviderInstance,
   field: "enabled" | "refund_enabled" | "allow_user_refund",
 ) {
+  if (!providersLoaded.value) return;
   let newValue: boolean;
   if (field === "enabled") newValue = !provider.enabled;
   else if (field === "refund_enabled") newValue = !provider.refund_enabled;
@@ -12832,6 +13080,7 @@ async function handleToggleField(
 }
 
 async function handleToggleType(provider: ProviderInstance, type: string) {
+  if (!providersLoaded.value) return;
   const currentTypes = Array.isArray(provider.supported_types)
     ? provider.supported_types
     : [];
@@ -12860,6 +13109,7 @@ async function handleToggleType(provider: ProviderInstance, type: string) {
 }
 
 function confirmDeleteProvider(provider: ProviderInstance) {
+  if (!providersLoaded.value) return;
   deletingProviderId.value = provider.id;
   showDeleteProviderDialog.value = true;
 }
@@ -12867,6 +13117,7 @@ function confirmDeleteProvider(provider: ProviderInstance) {
 async function handleReorderProviders(
   updates: { id: number; sort_order: number }[],
 ) {
+  if (!providersLoaded.value) return;
   try {
     await Promise.all(
       updates.map((u) =>
@@ -12883,6 +13134,7 @@ async function handleReorderProviders(
 }
 
 async function handleDeleteProvider() {
+  if (!providersLoaded.value) return;
   if (!deletingProviderId.value) return;
   try {
     await adminAPI.payment.deleteProvider(deletingProviderId.value);

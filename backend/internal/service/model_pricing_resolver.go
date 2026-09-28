@@ -253,6 +253,7 @@ func (r *ModelPricingResolver) applyTokenOverrides(chPricing *ChannelModelPricin
 	resolved.BasePricing.FastMultiplier = chPricing.FastMultiplier
 	resolved.BasePricing.FlexMultiplier = chPricing.FlexMultiplier
 	resolved.BasePricing.ReasoningEffortMultipliers = maps.Clone(chPricing.ReasoningEffortMultipliers)
+	resolved.BasePricing.MaxReasoningEffortMultiplier = chPricing.MaxReasoningEffortMultiplier
 	// 渠道定价覆盖一切：显式配置则用配置值，未配置则归零（不回退到 LiteLLM）
 	if chPricing.ImageOutputPrice != nil {
 		resolved.BasePricing.ImageOutputPricePerToken = *chPricing.ImageOutputPrice
@@ -284,6 +285,12 @@ func (r *ModelPricingResolver) applyRequestTierOverrides(chPricing *ChannelModel
 	resolved.RequestTiers = filterValidIntervals(chPricing.Intervals)
 	if chPricing.PerRequestPrice != nil {
 		resolved.DefaultPerRequestPrice = *chPricing.PerRequestPrice
+	}
+	if len(chPricing.ReasoningEffortMultipliers) > 0 || chPricing.MaxReasoningEffortMultiplier != nil {
+		resolved.BasePricing = &ModelPricing{
+			ReasoningEffortMultipliers:   maps.Clone(chPricing.ReasoningEffortMultipliers),
+			MaxReasoningEffortMultiplier: chPricing.MaxReasoningEffortMultiplier,
+		}
 	}
 }
 

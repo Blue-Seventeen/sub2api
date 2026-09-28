@@ -362,11 +362,15 @@ export interface SystemSettings {
   registration_enabled: boolean;
   email_verify_enabled: boolean;
   registration_email_suffix_whitelist: string[];
+  registration_email_domain_quota_enabled: boolean;
+  purchase_subscription_enabled: boolean;
+  purchase_subscription_url: string;
   promo_code_enabled: boolean;
   password_reset_enabled: boolean;
   frontend_url: string;
   invitation_code_enabled: boolean;
   invitation_code_missing_prompt_html: string;
+  tencent_captcha_region: "cn" | "intl";
   totp_enabled: boolean; // TOTP 双因素认证
   totp_encryption_key_configured: boolean; // TOTP 加密密钥是否已配置
   passkey_enabled: boolean;
@@ -700,6 +704,16 @@ export interface SystemSettings {
 
   // OpenAI fast/flex policy
   openai_fast_policy_settings?: OpenAIFastPolicySettings;
+  openai_ttft_mode: "semantic" | "visible";
+  channel_monitor_mode: "v1" | "v2";
+  channel_monitor_hide_throughput: boolean;
+  channel_monitor_show_quota: boolean;
+  channel_monitor_hide_user_ranking: boolean;
+  grok_default_text_model: string;
+  grok_cross_client_model_map_enabled: boolean;
+  grok_default_base_url_mode: string;
+  plugin_management_enabled: boolean;
+  account_scheduling_thresholds: Record<string, number>;
 
   // Allow user view error requests
   allow_user_view_error_requests: boolean;
@@ -709,11 +723,16 @@ export interface UpdateSettingsRequest {
   registration_enabled?: boolean;
   email_verify_enabled?: boolean;
   registration_email_suffix_whitelist?: string[];
+  registration_email_domain_quota_enabled?: boolean;
+  // Legacy external purchase-page contract; the current UI uses native PaymentView.
+  purchase_subscription_enabled?: boolean;
+  purchase_subscription_url?: string;
   promo_code_enabled?: boolean;
   password_reset_enabled?: boolean;
   frontend_url?: string;
   invitation_code_enabled?: boolean;
   invitation_code_missing_prompt_html?: string;
+  tencent_captcha_region?: "cn" | "intl";
   totp_enabled?: boolean; // TOTP 双因素认证
   passkey_enabled?: boolean;
   session_binding_enabled?: boolean; // 会话 IP/UA 绑定
@@ -1000,6 +1019,16 @@ export interface UpdateSettingsRequest {
 
   // OpenAI fast/flex policy
   openai_fast_policy_settings?: OpenAIFastPolicySettings;
+  openai_ttft_mode?: "semantic" | "visible";
+  channel_monitor_mode?: "v1" | "v2";
+  channel_monitor_hide_throughput?: boolean;
+  channel_monitor_show_quota?: boolean;
+  channel_monitor_hide_user_ranking?: boolean;
+  grok_default_text_model?: string;
+  grok_cross_client_model_map_enabled?: boolean;
+  grok_default_base_url_mode?: string;
+  plugin_management_enabled?: boolean;
+  account_scheduling_thresholds?: Record<string, number>;
 
   allow_user_view_error_requests?: boolean;
 }

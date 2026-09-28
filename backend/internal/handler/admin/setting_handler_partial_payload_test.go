@@ -3,10 +3,14 @@
 package admin
 
 import (
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/gin-gonic/gin"
 
 	"github.com/stretchr/testify/require"
 )
@@ -64,6 +68,77 @@ func TestUpdateSettingsSMTPFromAliasIsWritable(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 
 	require.Equal(t, "new@example.com", repo.values[service.SettingKeySMTPFrom])
+}
+
+func TestUpdateSettingsInvitationCodeMissingPromptRoundTrip(t *testing.T) {
+	h, repo := newStepUpSwitchTestHandler(t, map[string]string{})
+	prompt := `<p>Please get an invitation code from <a href="https://example.test/invite">here</a>.</p>`
+
+	rec := doUpdateSettings(t, h, map[string]any{
+		"invitation_code_missing_prompt_html": prompt,
+	}, nil)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, prompt, repo.values[service.SettingKeyInvitationCodeMissingPromptHTML])
+
+	var envelope response.Response
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &envelope))
+	data, ok := envelope.Data.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, prompt, data["invitation_code_missing_prompt_html"])
+
+	getSettings := func() map[string]any {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/admin/settings", nil)
+		h.GetSettings(c)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		var getEnvelope response.Response
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &getEnvelope))
+		data, ok := getEnvelope.Data.(map[string]any)
+		require.True(t, ok)
+		return data
+	}
+	require.Equal(t, prompt, getSettings()["invitation_code_missing_prompt_html"])
+
+	// A partial update of another setting must not erase the configured prompt.
+	rec = doUpdateSettings(t, h, map[string]any{"site_name": "Updated Site"}, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, prompt, repo.values[service.SettingKeyInvitationCodeMissingPromptHTML])
+	require.Equal(t, prompt, getSettings()["invitation_code_missing_prompt_html"])
+}
+
+func TestUpdateSettingsMarkdownPagesRoundTrip(t *testing.T) {
+	h, repo := newStepUpSwitchTestHandler(t, map[string]string{})
+
+	rec := doUpdateSettings(t, h, map[string]any{
+		"markdown_pages_enabled": true,
+	}, nil)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "true", repo.values[service.SettingKeyMarkdownPagesEnabled])
+
+	var envelope response.Response
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &envelope))
+	data, ok := envelope.Data.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, true, data["markdown_pages_enabled"])
+}
+
+func TestUpdateSettingsAcceptsSupportedPlatformQuotaPlatforms(t *testing.T) {
+	h, repo := newStepUpSwitchTestHandler(t, map[string]string{})
+	quotas := map[string]any{}
+	for _, platform := range []string{"kimi", "minimax", "opencode_go"} {
+		quotas[platform] = map[string]any{"daily": 1.0, "weekly": nil, "monthly": nil}
+	}
+
+	rec := doUpdateSettings(t, h, map[string]any{"default_platform_quotas": quotas}, nil)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Contains(t, repo.values[service.SettingKeyDefaultPlatformQuotas], `"minimax"`)
+	require.Contains(t, repo.values[service.SettingKeyDefaultPlatformQuotas], `"kimi"`)
+	require.Contains(t, repo.values[service.SettingKeyDefaultPlatformQuotas], `"opencode_go"`)
 }
 
 func TestUpdateSettingsGrokDefaultBaseURLModeIsWritable(t *testing.T) {
