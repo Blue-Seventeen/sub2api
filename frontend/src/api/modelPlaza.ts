@@ -29,6 +29,8 @@ export interface PlazaModel {
   user_rate_multiplier?: number | null
   image_rate_independent?: boolean
   image_rate_multiplier?: number | null
+  long_context_basis?: 'full' | 'marginal' | string
+  time_pricing?: PlazaTimePricing
   source_group_id?: number
   source_group_name?: string
   source_group_subscription_type?: string
@@ -39,8 +41,19 @@ export interface PlazaModel {
   source_group_peak_rate_multiplier?: number
 }
 
+export interface PlazaTimePricingPeriod {
+  start_time: string
+  end_time: string
+  multiplier: number
+}
+
+export interface PlazaTimePricing {
+  timezone: string
+  weekdays_only?: boolean
+  periods: PlazaTimePricingPeriod[]
+}
+
 export interface ModelPlazaGroup {
-  long_context_pricing_enabled?: boolean
   id: number
   name: string
   description: string
@@ -59,6 +72,11 @@ export interface ModelPlazaGroup {
   /** 生图独立倍率：true 时图片计费模型的实付倍率取 image_rate_multiplier，不取分组/专属倍率。 */
   image_rate_independent: boolean
   image_rate_multiplier: number
+  /** 视频独立倍率开启时，覆盖视频模型的分组/用户专属倍率。 */
+  video_rate_independent: boolean
+  video_rate_multiplier: number
+  /** 分组是否启用长上下文阶梯计费；false 时实付列只展示最低档，官方阶梯仅供参考。 */
+  long_context_pricing_enabled: boolean
   models: PlazaModel[]
 }
 

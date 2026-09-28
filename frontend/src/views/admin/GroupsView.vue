@@ -1014,6 +1014,12 @@
                 />
                 <span v-else class="min-w-0 flex-1 break-all text-sm text-gray-700 dark:text-gray-300">
                   {{ item.id }}
+                  <span
+                    v-if="item.id.includes('*')"
+                    class="ml-1 rounded bg-primary-50 px-1.5 py-0.5 text-[10px] font-medium text-primary-600 dark:bg-primary-900/30 dark:text-primary-400"
+                  >
+                    {{ t("admin.groups.modelAllowlist.wildcardTag") }}
+                  </span>
                 </span>
                 <button
                   type="button"
@@ -2733,6 +2739,12 @@
                 />
                 <span v-else class="min-w-0 flex-1 break-all text-sm text-gray-700 dark:text-gray-300">
                   {{ item.id }}
+                  <span
+                    v-if="item.id.includes('*')"
+                    class="ml-1 rounded bg-primary-50 px-1.5 py-0.5 text-[10px] font-medium text-primary-600 dark:bg-primary-900/30 dark:text-primary-400"
+                  >
+                    {{ t("admin.groups.modelAllowlist.wildcardTag") }}
+                  </span>
                 </span>
                 <button
                   type="button"

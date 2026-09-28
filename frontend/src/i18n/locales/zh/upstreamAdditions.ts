@@ -96,6 +96,8 @@ export default {
       "tierHintMarginal": "仅超过阈值的部分按该档计价，输出不加价",
       "maxReasoningMultiplierBadge": "Max ×{multiplier}",
       "maxReasoningMultiplierHint": "最终转发的推理强度为 max 时，整次请求的计费与额度消耗乘以 {multiplier}",
+      "reasoningMultiplierBadge": "{effort} ×{multiplier}",
+      "reasoningMultiplierHint": "推理强度 {effort} 的计费倍率为 {multiplier}",
       "marginalBadge": "超出部分计价",
       "timePricingRowHint": "按 {timezone} 时间，在该时段内发起的请求按本行价格计费",
       "timePricingRowHintWeekdays": "按 {timezone} 时间，仅工作日（周一至周五）在该时段内发起的请求按本行价格计费，周末全天按标准价",

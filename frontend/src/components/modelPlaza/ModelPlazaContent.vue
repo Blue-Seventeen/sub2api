@@ -175,25 +175,23 @@ function aggregateModelKey(model: PlazaModel): string {
 }
 
 function aggregateByPlatform(groups: ModelPlazaGroup[]): ModelPlazaGroup[] {
-  const platformMap = new Map<
-    string,
-    {
-      group: ModelPlazaGroup
-      models: Map<
-        string,
-        {
-          model: PlazaModel
-          sourceGroup: ModelPlazaGroup
-          rate: number
-        }
-      >
-    }
-  >()
+  type PlatformEntry = {
+    group: ModelPlazaGroup
+    models: Map<
+      string,
+      {
+        model: PlazaModel
+        sourceGroup: ModelPlazaGroup
+        rate: number
+      }
+    >
+  }
+  const platformMap = new Map<string, PlatformEntry>()
 
   for (const group of groups) {
     let entry = platformMap.get(group.platform)
     if (!entry) {
-      entry = {
+      const newEntry: PlatformEntry = {
         group: {
           id: -1,
           name: group.platform,
@@ -208,12 +206,19 @@ function aggregateByPlatform(groups: ModelPlazaGroup[]): ModelPlazaGroup[] {
           is_exclusive: false,
           image_rate_independent: false,
           image_rate_multiplier: 1,
+          video_rate_independent: false,
+          video_rate_multiplier: 1,
+          long_context_pricing_enabled: false,
           models: []
         },
         models: new Map()
       }
-      platformMap.set(group.platform, entry)
+      entry = newEntry
+      platformMap.set(group.platform, newEntry)
     }
+	if (!entry) {
+		continue
+	}
 
     for (const model of group.models) {
       const rate = modelEffectiveRate(group, model)
