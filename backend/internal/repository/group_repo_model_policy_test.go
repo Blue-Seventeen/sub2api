@@ -19,7 +19,7 @@ func TestGlobalModelOperationLocksPlatformBeforeAnyWrites(t *testing.T) {
 		t.Run(method, func(t *testing.T) {
 			db, mock, err := sqlmock.New()
 			require.NoError(t, err)
-			defer db.Close()
+			t.Cleanup(func() { _ = db.Close() })
 			client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
 			repo := newGroupRepositoryWithSQL(client, db)
 			lockFailure := errors.New("platform lock unavailable")

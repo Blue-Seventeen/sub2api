@@ -177,15 +177,20 @@ func TestAccountBatchUsageRouteEmptyMapsAndMissingAccounts(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	var result map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result))
-	data := result["data"].(map[string]any)
+	data, ok := result["data"].(map[string]any)
+	require.True(t, ok)
 	require.Equal(t, map[string]any{}, data["usage"])
-	require.Contains(t, data["errors"].(map[string]any)["404"], "account not found")
+	errorsByAccount, ok := data["errors"].(map[string]any)
+	require.True(t, ok)
+	require.Contains(t, errorsByAccount["404"], "account not found")
 
 	repo.accounts = []*service.Account{{ID: 7, Platform: service.PlatformAnthropic, Type: service.AccountTypeSetupToken}}
 	rec = requestBatchUsage(router, token, `{"account_ids":[7]}`)
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result))
-	require.Equal(t, map[string]any{}, result["data"].(map[string]any)["errors"])
+	data, ok = result["data"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, map[string]any{}, data["errors"])
 }
 
 func TestAccountBatchUsageRouteFailsClosedOnUnavailableServiceOrRepository(t *testing.T) {

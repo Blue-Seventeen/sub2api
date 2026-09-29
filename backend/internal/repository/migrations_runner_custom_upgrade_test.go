@@ -24,7 +24,7 @@ func TestNewUsageIndexMigrationsRecoverInvalidIndexes(t *testing.T) {
 			t.Run(name+"/"+state, func(t *testing.T) {
 				db, mock, err := sqlmock.New()
 				require.NoError(t, err)
-				defer db.Close()
+				t.Cleanup(func() { _ = db.Close() })
 				content, err := migrations.FS.ReadFile(name)
 				require.NoError(t, err)
 				prepareMigrationsBootstrapExpectations(mock)

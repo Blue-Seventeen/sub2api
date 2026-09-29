@@ -61,10 +61,10 @@ const latestAPIKeyIPIndex = "idx_usage_logs_api_key_latest_ip"
 const emailAliasDedupIndexMigration = "190_add_users_email_alias_dedup_index_notx.sql"
 const emailAliasDedupIndex = "idx_users_email_dot_stripped"
 const upstreamModelMismatchIndexMigration = "195_add_usage_log_upstream_model_mismatch_index_notx.sql"
-const usageLogsUpstreamModelMismatchIndex = "idx_usage_logs_upstream_model_mismatch_created_at"
+const usageLogsUpstreamModelMismatchIndex = "idx_usage_logs_upstream_model_mismatch_created_at" //nolint:unused // used by migration integration assertions
 const effectiveModelIndexesMigration = "226_add_usage_log_effective_model_indexes_notx.sql"
-const usageLogsEffectiveRequestedModelIndex = "idx_usage_logs_effective_requested_model_created"
-const usageLogsEffectiveUpstreamModelIndex = "idx_usage_logs_effective_upstream_model_created"
+const usageLogsEffectiveRequestedModelIndex = "idx_usage_logs_effective_requested_model_created" //nolint:unused // used by migration integration assertions
+const usageLogsEffectiveUpstreamModelIndex = "idx_usage_logs_effective_upstream_model_created"   //nolint:unused // used by migration integration assertions
 const upstreamRequestIDIndexMigration = "233_add_usage_log_upstream_request_id_index_notx.sql"
 
 var accountGroupSchedulerIndexes = []string{

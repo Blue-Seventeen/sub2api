@@ -27,7 +27,7 @@ func hasBillableGrokChatUsage(usage OpenAIUsage) bool {
 // platform and model identity. Grok models may be served through generic
 // OpenAI-compatible accounts, so account.Platform alone is not a safe billing
 // boundary.
-func requiresBillableGrokChatUsage(account *Account, models ...string) bool {
+func requiresBillableGrokChatUsage(account *Account, models ...string) bool { //nolint:unused // retained for Grok usage-integrity callers
 	if account != nil && account.Platform == PlatformGrok {
 		return true
 	}

@@ -80,8 +80,8 @@ func TestGatewayCacheLegacyReasoningAccessIsDisabled(t *testing.T) {
 	cache := NewGatewayCache(client)
 	ctx := context.Background()
 	require.NoError(t, mr.Set("reasoning_content:legacy-id", "legacy private"))
-	_, err := cache.GetReasoningContent(ctx, "legacy-id")
+	_, err := cache.GetReasoningContent(ctx, "legacy-id") //nolint:staticcheck // this test verifies the deprecated unscoped API stays disabled
 	require.ErrorIs(t, err, service.ErrReasoningContentNotFound)
-	require.NoError(t, cache.SetReasoningContent(ctx, "new-id", "private", time.Minute))
+	require.NoError(t, cache.SetReasoningContent(ctx, "new-id", "private", time.Minute)) //nolint:staticcheck // this test verifies the deprecated unscoped API stays disabled
 	require.Equal(t, []string{"reasoning_content:legacy-id"}, mr.Keys())
 }

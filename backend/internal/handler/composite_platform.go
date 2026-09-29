@@ -116,7 +116,7 @@ func bindRequestedReasoningEffort(c *gin.Context, body []byte, model string) {
 	c.Request = c.Request.WithContext(service.WithRequestedReasoningEffort(c.Request.Context(), *effort))
 }
 
-func stampOpenAIRequestedReasoningEffort(result *service.OpenAIForwardResult, c *gin.Context) {
+func stampOpenAIRequestedReasoningEffort(result *service.OpenAIForwardResult, c *gin.Context) { //nolint:unused // retained for composite forwarding integrations
 	if result == nil || result.RequestedReasoningEffort != nil {
 		return
 	}
@@ -126,7 +126,7 @@ func stampOpenAIRequestedReasoningEffort(result *service.OpenAIForwardResult, c 
 	result.RequestedReasoningEffort = service.RequestedReasoningEffortFromContext(c.Request.Context())
 }
 
-func stampForwardRequestedReasoningEffort(result *service.ForwardResult, requested *string) {
+func stampForwardRequestedReasoningEffort(result *service.ForwardResult, requested *string) { //nolint:unused // retained for composite forwarding integrations
 	if result == nil || result.RequestedReasoningEffort != nil {
 		return
 	}

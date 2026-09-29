@@ -16,10 +16,10 @@ func TestOpenAIHTTPResponseOwnerProductionBinding(t *testing.T) {
 	SetOpenAIHTTPResponseOwner(c, 201, 301)
 	svc.bindHTTPResponseAccount(ctx, c, &Account{ID: 91}, " resp_owned ")
 	for _, tt := range []struct {
-		name string
+		name                      string
 		groupID, userID, apiKeyID int64
-		responseID string
-		want bool
+		responseID                string
+		want                      bool
 	}{
 		{"original key", 41, 201, 301, "resp_owned", true},
 		{"same user different key", 41, 201, 302, "resp_owned", true},

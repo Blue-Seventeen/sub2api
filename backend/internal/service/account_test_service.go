@@ -81,7 +81,7 @@ func isOpenAIImageModel(model string) bool {
 	return strings.HasPrefix(strings.ToLower(model), "gpt-image-")
 }
 
-func firstAccountTestOptions(opts []AccountTestOptions) AccountTestOptions {
+func firstAccountTestOptions(opts []AccountTestOptions) AccountTestOptions { //nolint:unused // retained for legacy account-test callers
 	if len(opts) == 0 {
 		return AccountTestOptions{}
 	}

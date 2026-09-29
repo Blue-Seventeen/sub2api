@@ -54,7 +54,7 @@ func snapshot(ctx context.Context, db *sql.DB, spec invariant) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	hash := sha256.New()
 	count := 0
 	for rows.Next() {
@@ -73,7 +73,7 @@ func migrationLedgerSnapshot(ctx context.Context, db *sql.DB) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	hash := sha256.New()
 	count := 0
 	for rows.Next() {
@@ -97,7 +97,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("open rehearsal database failed")
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	var name string
 	if err := db.QueryRowContext(ctx, "SELECT current_database()").Scan(&name); err != nil {
 		return fmt.Errorf("connect rehearsal database failed")
@@ -112,7 +112,7 @@ func run() error {
 	for rows.Next() {
 		var table string
 		if err := rows.Scan(&table); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return err
 		}
 		invariants = append(invariants, invariant{table, nil})

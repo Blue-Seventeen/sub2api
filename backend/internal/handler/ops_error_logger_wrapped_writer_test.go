@@ -49,7 +49,11 @@ func TestOpsErrorLoggerMiddleware_PreservesWrappedWriterForOuterWrites(t *testin
 		c.Writer.Flush()
 	})
 	r.GET("/responses", OpsErrorLoggerMiddleware(nil), func(c *gin.Context) {
-		capture = c.Writer.(*opsCaptureWriter)
+		var ok bool
+		capture, ok = c.Writer.(*opsCaptureWriter)
+		if !ok {
+			panic("middleware did not install capture writer")
+		}
 		c.Writer = &testOuterResponseWriterWrapper{ResponseWriter: c.Writer}
 		_, _ = c.Writer.WriteString("inner:")
 	})

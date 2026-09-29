@@ -27,7 +27,7 @@ func recordGatewayStreamHeartbeat(c *gin.Context, written int) {
 	c.Set(gatewayStreamHeartbeatBytesKey, bytes+written)
 }
 
-func gatewayStreamHasOnlyHeartbeats(c *gin.Context) bool {
+func gatewayStreamHasOnlyHeartbeats(c *gin.Context) bool { //nolint:unused // retained for stream diagnostics
 	if c == nil || c.Writer == nil {
 		return false
 	}

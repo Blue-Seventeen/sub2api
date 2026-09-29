@@ -8,6 +8,8 @@ import (
 
 // openAILadderCatalogJSON 镜像真实同步目录的形态：长上下文用 above_272k 绝对价字段表达，
 // 由解析层折算成阈值+倍率。静态 Go 兜底价不再携带阶梯，阶梯计费一律走目录数据。
+//
+//nolint:unused // shared by pricing regression fixtures
 const openAILadderCatalogJSON = `{
 	"gpt-5.4": {"litellm_provider": "openai", "mode": "chat",
 		"input_cost_per_token": 2.5e-06, "output_cost_per_token": 1.5e-05,

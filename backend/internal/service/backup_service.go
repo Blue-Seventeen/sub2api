@@ -29,7 +29,7 @@ const (
 	settingKeyBackupSchedule = "backup_schedule"
 	settingKeyBackupRecords  = "backup_records"
 
-	maxBackupRecords = 100
+	maxBackupRecords = 100 //nolint:unused // retained for legacy backup-record limits
 
 	backupScheduleLocalConfigFile      = "backup_schedule.local.json"
 	backupScheduleReconcileInterval    = time.Minute

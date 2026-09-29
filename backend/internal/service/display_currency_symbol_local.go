@@ -216,7 +216,7 @@ func (s *SettingService) snapshotDisplayCurrencySymbolLocalConfig() func() {
 	return func() {
 		displayCurrencySymbolLocalConfigMu.Lock()
 		defer displayCurrencySymbolLocalConfigMu.Unlock()
-		if err := os.WriteFile(path, snapshot, 0o600); err != nil {
+		if err := os.WriteFile(path, snapshot, 0o600); err != nil { //nolint:gosec // path is the trusted local settings file selected by the service
 			slog.Warn("failed to restore display currency symbol local config", "path", path, "error", err)
 		}
 	}

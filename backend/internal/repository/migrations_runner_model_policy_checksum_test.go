@@ -48,7 +48,7 @@ func TestModelPolicyMigrationChecksumCompatibilityIsExact(t *testing.T) {
 func TestModelPolicyMigrationRunnerOrdersRestoreBeforeSynchronization(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	t.Cleanup(func() { _ = db.Close() })
 	prepareMigrationsBootstrapExpectations(mock)
 	files := fstest.MapFS{}
 	for _, name := range []string{"235_group_model_allowlist.sql", "236_group_model_allowlist_repair.sql", "237_add_minimax_platform.sql", "237a_restore_group_models_list_config.sql", "238_group_model_allowlist_sync.sql", "239_group_model_policy_auth_cache_invalidation.sql"} {
@@ -95,7 +95,7 @@ func TestModelPolicyMigrationRunnerAcceptsOnlyAuditedHistory(t *testing.T) {
 				}
 				db, mock, err := sqlmock.New()
 				require.NoError(t, err)
-				defer db.Close()
+				t.Cleanup(func() { _ = db.Close() })
 				prepareMigrationsBootstrapExpectations(mock)
 				mock.ExpectQuery(regexp.QuoteMeta("SELECT checksum FROM schema_migrations WHERE filename = $1")).
 					WithArgs(tc.name).WillReturnRows(sqlmock.NewRows([]string{"checksum"}).AddRow(dbChecksum))

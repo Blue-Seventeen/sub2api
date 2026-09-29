@@ -199,7 +199,7 @@ func openCodeSessionIDFromMetadataUserID(userID string) string {
 	return userID
 }
 
-func openCodeSessionHintBody(promptCacheKey string) []byte {
+func openCodeSessionHintBody(promptCacheKey string) []byte { //nolint:unused // retained for OpenCode session compatibility callers
 	key := strings.TrimSpace(promptCacheKey)
 	if key == "" {
 		return nil

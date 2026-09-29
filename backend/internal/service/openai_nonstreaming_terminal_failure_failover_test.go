@@ -335,7 +335,8 @@ func TestNonStreamingSSEToJSON_EntryPointsPreserveAccountAndTerminalVerdict(t *t
 					}
 					raw, exists := c.Get(OpsUpstreamErrorsKey)
 					require.True(t, exists)
-					events := raw.([]*OpsUpstreamErrorEvent)
+					events, ok := raw.([]*OpsUpstreamErrorEvent)
+					require.True(t, ok)
 					require.Equal(t, account.ID, events[len(events)-1].AccountID)
 					require.Equal(t, entry == "passthrough", events[len(events)-1].Passthrough)
 				} else if tt.status != 0 {

@@ -9,7 +9,7 @@ import (
 	"os"
 )
 
-const defaultBackupPartSizeBytes int64 = 4 * 1024 * 1024 * 1024
+const defaultBackupPartSizeBytes int64 = 4 * 1024 * 1024 * 1024 //nolint:unused // retained for multipart backup integration
 
 // BackupPart 描述一个 gzip 字节分卷。
 type BackupPart struct {
@@ -19,14 +19,14 @@ type BackupPart struct {
 	SHA256    string `json:"sha256,omitempty"`
 }
 
-type localBackupPart struct {
+type localBackupPart struct { //nolint:unused // retained for multipart backup integration
 	Index     int
 	Path      string
 	SizeBytes int64
 	SHA256    string
 }
 
-func splitBackupFile(srcPath string, partSize int64) (parts []localBackupPart, err error) {
+func splitBackupFile(srcPath string, partSize int64) (parts []localBackupPart, err error) { //nolint:unused // retained for multipart backup integration
 	if partSize <= 0 {
 		return nil, fmt.Errorf("backup part size must be positive")
 	}
@@ -92,7 +92,7 @@ func splitBackupFile(srcPath string, partSize int64) (parts []localBackupPart, e
 	return parts, nil
 }
 
-func cleanupBackupFiles(paths ...string) error {
+func cleanupBackupFiles(paths ...string) error { //nolint:unused // retained for multipart backup integration
 	var errs []error
 	for _, path := range paths {
 		if path == "" {

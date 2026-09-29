@@ -706,7 +706,7 @@ func normalizeGrokResponsesReasoningEffort(body []byte, upstreamModel string) ([
 	return out, nil
 }
 
-func normalizeGrokChatReasoningEffort(body []byte, upstreamModel string) ([]byte, error) {
+func normalizeGrokChatReasoningEffort(body []byte, upstreamModel string) ([]byte, error) { //nolint:unused // retained for legacy Chat compatibility callers
 	raw := strings.TrimSpace(gjson.GetBytes(body, "reasoning_effort").String())
 	if raw == "" {
 		raw = strings.TrimSpace(gjson.GetBytes(body, "reasoningEffort").String())

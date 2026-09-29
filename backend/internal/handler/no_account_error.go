@@ -34,11 +34,11 @@ type noAccountErrorClassification struct {
 	ModelNotFound bool // true when this is a 404 model_not_found classification
 }
 
-var selectionModelRateLimitedPattern = regexp.MustCompile(`(?:model_rate_limited|rate_limited)=(\d+)`)
+var selectionModelRateLimitedPattern = regexp.MustCompile(`(?:model_rate_limited|rate_limited)=(\d+)`) //nolint:unused // retained for enriched scheduler diagnostics
 
 // classifySelectionFailureError preserves the scheduler's compact reason when
 // every model-capable account is temporarily rate limited.
-func classifySelectionFailureError(err error, fallback noAccountErrorClassification) noAccountErrorClassification {
+func classifySelectionFailureError(err error, fallback noAccountErrorClassification) noAccountErrorClassification { //nolint:unused // retained for enriched scheduler diagnostics
 	if err == nil {
 		return fallback
 	}

@@ -8,16 +8,16 @@ import (
 
 // Default Grok stream idle when gateway.stream_data_interval_timeout is 0.
 // Long enough for slow thinking models, short enough to release hung sockets.
-const defaultGrokStreamIdleTimeout = 180 * time.Second
+const defaultGrokStreamIdleTimeout = 180 * time.Second //nolint:unused // retained for Grok stream failover integration
 
 // Shorter cool after a Grok stream-idle failure so the account can re-enter soon
 // but is not immediately re-picked in a tight failover loop.
-const grokStreamIdleCooldown = 2 * time.Minute
+const grokStreamIdleCooldown = 2 * time.Minute //nolint:unused // retained for Grok stream failover integration
 
 // resolveGrokStreamIdleTimeout returns the effective upstream-read idle timeout
 // for Grok streams. Prefers the global gateway setting when positive; otherwise
 // applies a Grok-only default so hung SSE bodies still fail over.
-func resolveGrokStreamIdleTimeout(cfgStreamIntervalSec int) time.Duration {
+func resolveGrokStreamIdleTimeout(cfgStreamIntervalSec int) time.Duration { //nolint:unused // retained for Grok stream failover integration
 	if cfgStreamIntervalSec > 0 {
 		return time.Duration(cfgStreamIntervalSec) * time.Second
 	}
@@ -26,7 +26,7 @@ func resolveGrokStreamIdleTimeout(cfgStreamIntervalSec int) time.Duration {
 
 // grokStreamIdleFailoverError builds a pre-commit/handler-visible failover so
 // the gateway can switch OAuth accounts after a hung Grok upstream stream.
-func grokStreamIdleFailoverError(account *Account, idle time.Duration) *UpstreamFailoverError {
+func grokStreamIdleFailoverError(account *Account, idle time.Duration) *UpstreamFailoverError { //nolint:unused // retained for Grok stream failover integration
 	msg := fmt.Sprintf("Grok stream idle timeout after %s with no upstream data", idle.Round(time.Second))
 	return &UpstreamFailoverError{
 		StatusCode:               502,

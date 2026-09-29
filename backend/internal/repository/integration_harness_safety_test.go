@@ -111,7 +111,7 @@ func resetIntegrationDatabase(ctx context.Context, db integrationSQLBeginner, cf
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var i integrationDatabaseIdentity
 	err = tx.QueryRowContext(ctx, integrationDatabaseGuardQuery).Scan(
 		&i.database, &i.user, &i.sessionUser, &i.owner, &i.marker,
@@ -133,17 +133,19 @@ FROM pg_catalog.pg_namespace WHERE nspname !~ '^pg_' AND nspname <> 'information
 	for rows.Next() {
 		var name, owner string
 		if err := rows.Scan(&name, &owner); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return err
 		}
-		if owner != cfg.database && !(name == "public" && owner == "pg_database_owner") {
-			rows.Close()
+		if owner != cfg.database && (name != "public" || owner != "pg_database_owner") {
+			_ = rows.Close()
 			return errors.New("database guard refused reset: a non-system schema is not owned by the dedicated role")
 		}
 		schemas = append(schemas, name)
 	}
 	err = rows.Err()
-	rows.Close()
+	if closeErr := rows.Close(); closeErr != nil {
+		return fmt.Errorf("close schema rows: %w", closeErr)
+	}
 	if err != nil {
 		return err
 	}

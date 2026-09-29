@@ -50,7 +50,7 @@ func (execManagedProxyProcessRunner) Start(ctx context.Context, binary string, a
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	cmd := exec.Command(binary, args...)
+	cmd := exec.Command(binary, args...) //nolint:gosec // binary and args come from the trusted managed-proxy runtime configuration
 	cmd.Dir = dir
 	if err := cmd.Start(); err != nil {
 		return nil, err

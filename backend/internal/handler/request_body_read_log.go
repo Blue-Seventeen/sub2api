@@ -16,7 +16,7 @@ import (
 // read failure. Clients continue to receive the stable generic error message;
 // operators get enough information to distinguish compression failures from a
 // disconnected/truncated upload without logging request content.
-func logRequestBodyReadFailure(reqLog *zap.Logger, req *http.Request, err error) {
+func logRequestBodyReadFailure(reqLog *zap.Logger, req *http.Request, err error) { //nolint:unused // retained for request-read observability integration
 	if reqLog == nil || err == nil {
 		return
 	}
@@ -35,7 +35,7 @@ func logRequestBodyReadFailure(reqLog *zap.Logger, req *http.Request, err error)
 	)
 }
 
-func requestContentEncodingCategory(value string) string {
+func requestContentEncodingCategory(value string) string { //nolint:unused // retained for request-read observability integration
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "", "identity":
 		return "identity"
@@ -50,7 +50,7 @@ func requestContentEncodingCategory(value string) string {
 	}
 }
 
-func requestBodyReadErrorKind(err error) string {
+func requestBodyReadErrorKind(err error) string { //nolint:unused // retained for request-read observability integration
 	if err == nil {
 		return "none"
 	}

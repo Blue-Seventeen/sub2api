@@ -779,7 +779,7 @@ func isOpenAICompatResponsesTerminalEvent(eventType string) bool {
 	}
 }
 
-func openAICompatTerminalResponse(event *apicompat.ResponsesStreamEvent, payload []byte) *apicompat.ResponsesResponse {
+func openAICompatTerminalResponse(event *apicompat.ResponsesStreamEvent, payload []byte) *apicompat.ResponsesResponse { //nolint:unused // retained for compatibility terminal-event callers
 	if event == nil {
 		return nil
 	}

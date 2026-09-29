@@ -96,11 +96,7 @@ func (r *groupRepository) CreateWithGlobalModelOperations(ctx context.Context, g
 		return nil, err
 	}
 	txClient := r.client
-	if tx == nil {
-		// The caller already owns the transaction (used by transactional
-		// repository composition and integration tests).
-		txClient = r.client
-	} else {
+	if tx != nil {
 		defer func() { _ = tx.Rollback() }()
 		txClient = tx.Client()
 	}
@@ -549,10 +545,7 @@ func (r *groupRepository) UpdateWithGlobalModelOperations(ctx context.Context, g
 		return nil, err
 	}
 	txClient := r.client
-	if tx == nil {
-		// Reuse the caller-owned transaction.
-		txClient = r.client
-	} else {
+	if tx != nil {
 		defer func() { _ = tx.Rollback() }()
 		txClient = tx.Client()
 	}

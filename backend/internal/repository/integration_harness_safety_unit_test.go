@@ -108,7 +108,7 @@ func TestIntegrationHarnessResetRejectsBeforeDDL(t *testing.T) {
 	require.NoError(t, err)
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	t.Cleanup(func() { _ = db.Close() })
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT current_database").WillReturnError(errors.New("guard unavailable"))
 	mock.ExpectRollback()
@@ -132,7 +132,7 @@ func TestIntegrationHarnessResetTransaction(t *testing.T) {
 			require.NoError(t, err)
 			db, mock, err := sqlmock.New()
 			require.NoError(t, err)
-			defer db.Close()
+			t.Cleanup(func() { _ = db.Close() })
 			mock.ExpectBegin()
 			i := harnessSafeIdentity()
 			if scenario == "business database" {
@@ -283,7 +283,7 @@ func (h *harnessScriptTransport) ProcessHook(redis.ProcessHook) redis.ProcessHoo
 			cmd.SetErr(redis.ErrNoScript)
 			return redis.ErrNoScript
 		}
-		cmd.(*redis.Cmd).SetVal(int64(1))
+		cmd.(*redis.Cmd).SetVal(int64(1)) //nolint:errcheck // SetVal mutates the test command and has no return value.
 		return nil
 	}
 }

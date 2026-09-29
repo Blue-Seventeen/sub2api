@@ -37,7 +37,9 @@ func TestOpenAIModelsRefreshRechecksCacheAfterPriorMiss(t *testing.T) {
 				require.Equal(t, 1, calls, "stale or expired results still refresh")
 			} else {
 				require.Zero(t, calls)
-				require.Equal(t, cached.Body, result.Val.(*OpenAIModelsResponse).Body)
+				cachedResult, ok := result.Val.(*OpenAIModelsResponse)
+				require.True(t, ok)
+				require.Equal(t, cached.Body, cachedResult.Body)
 			}
 		})
 	}

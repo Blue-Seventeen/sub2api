@@ -2359,6 +2359,6 @@ func writeOpenAIPassthroughResponseHeaders(dst http.Header, src http.Header, fil
 		}
 	}
 	if len(getCaseInsensitiveValues(src, openAICodexTurnStateHeader)) == 0 {
-		dst.Del(http.CanonicalHeaderKey(openAICodexTurnStateHeader))
+		dst.Del(openAICodexTurnStateHeader)
 	}
 }

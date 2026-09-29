@@ -295,8 +295,6 @@ func maxReasoningEffortBillingMultiplier(model, effort string, pricing *ModelPri
 	return 1
 }
 
-const claudeFable51MaxReasoningEffortMultiplier = 3.0
-
 func isClaudeFable51Model(model string) bool {
 	model = strings.ToLower(strings.TrimSpace(model))
 	for _, marker := range []string{"fable-5-1", "fable-5.1", "fable5.1", "fable51"} {
@@ -1355,7 +1353,7 @@ func (s *BillingService) getModelPricingAt(model string, pricingAt time.Time) (*
 	return nil, fmt.Errorf("%w for model: %s", ErrModelPricingUnavailable, model)
 }
 
-func (s *BillingService) applyFallbackModelSpecificPricingPolicy(model string, pricing *ModelPricing) *ModelPricing {
+func (s *BillingService) applyFallbackModelSpecificPricingPolicy(model string, pricing *ModelPricing) *ModelPricing { //nolint:unused // retained for legacy pricing callers
 	return s.applyFallbackModelSpecificPricingPolicyAt(model, pricing, time.Time{})
 }
 

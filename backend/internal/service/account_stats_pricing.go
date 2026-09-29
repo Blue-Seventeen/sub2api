@@ -27,7 +27,7 @@ type accountStatsBillableQuantity struct {
 // longContextPricingEnabled 表示上游是否对本次请求收取长上下文费率，用于优先级 3；
 // 由 accountStatsLongContextPricingEnabled 按账号开关得出，不受分组售价开关影响。
 // reasoningEffort 是最终转发等级；按账号统计定价中配置的等级倍率计费。
-func resolveAccountStatsCost(
+func resolveAccountStatsCost( //nolint:unused // retained as the legacy pricing helper for compatibility tests
 	ctx context.Context,
 	channelService *ChannelService,
 	billingService *BillingService,

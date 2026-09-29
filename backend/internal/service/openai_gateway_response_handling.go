@@ -88,15 +88,15 @@ func openAIUsageHasTokens(usage *OpenAIUsage) bool {
 		usage.CacheReadInputTokens > 0 || usage.ImageOutputTokens > 0)
 }
 
-const openAIMissingUsageLogInterval = time.Minute
+const openAIMissingUsageLogInterval = time.Minute //nolint:unused // retained for missing-usage observability integration
 
-type openAIMissingUsageLogSampler struct {
+type openAIMissingUsageLogSampler struct { //nolint:unused // retained for missing-usage observability integration
 	total      atomic.Uint64
 	suppressed atomic.Uint64
 	lastLog    atomic.Int64
 }
 
-func (s *openAIMissingUsageLogSampler) sample(now time.Time) (logNow bool, total uint64, suppressed uint64) {
+func (s *openAIMissingUsageLogSampler) sample(now time.Time) (logNow bool, total uint64, suppressed uint64) { //nolint:unused // retained for missing-usage observability integration
 	total = s.total.Add(1)
 	nowNanos := now.UnixNano()
 	for {
@@ -650,7 +650,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 					})
 				}
 				outputStarted := openAIStreamClientOutputStarted(c, clientOutputStarted)
-				if !outputStarted && !cyberHit && !(codexFailureTerminal && eventType == "error") {
+				if !outputStarted && !cyberHit && (!codexFailureTerminal || eventType != "error") {
 					if compactErr := newOpenAICompactFallbackSignal(c, dataBytes, failedMessage); compactErr != nil {
 						sawFailedEvent = true
 						streamEarlyErr = compactErr
@@ -676,7 +676,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 					if eventType == "error" {
 						shouldFailover = openAIStreamErrorEventShouldFailover(dataBytes, failedMessage)
 					}
-					if !cyberHit && shouldFailover && !(codexFailureTerminal && eventType == "error" && !isOpenAIUpstreamCapacityShedEvent(dataBytes)) {
+					if !cyberHit && shouldFailover && (!codexFailureTerminal || eventType != "error" || isOpenAIUpstreamCapacityShedEvent(dataBytes)) {
 						sawFailedEvent = true
 						streamEarlyErr = s.newOpenAIStreamFailoverErrorWithModel(c, account, false, upstreamRequestID, dataBytes, failedMessage, mappedModel, resp.Header)
 						return

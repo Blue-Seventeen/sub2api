@@ -116,7 +116,7 @@ func TestOpenAINativeTTFTModeDoesNotChangeFirstOutputTimeout(t *testing.T) {
 				})
 				go func() {
 					defer close(done)
-					defer writer.Close()
+					defer func() { _ = writer.Close() }()
 					item := `{"type":"reasoning","summary":[]}`
 					if progress {
 						item = `{"type":"reasoning","encrypted_content":"encrypted"}`

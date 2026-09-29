@@ -405,7 +405,7 @@ func getAPIKeyFromContext(c interface{ Get(string) (any, bool) }) *APIKey {
 		return nil
 	}
 	rv := reflect.ValueOf(c)
-	if rv.Kind() == reflect.Ptr && rv.IsNil() {
+	if rv.Kind() == reflect.Pointer && rv.IsNil() {
 		return nil
 	}
 	v, exists := c.Get("api_key")

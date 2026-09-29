@@ -122,7 +122,7 @@ func (s *AffiliateService) AccrueInviteRebateForOrder(ctx context.Context, invit
 	return 0, nil
 }
 
-func (s *AffiliateService) resolveRebateRatePercent(ctx context.Context, inviter *AffiliateSummary) float64 {
+func (s *AffiliateService) resolveRebateRatePercent(ctx context.Context, inviter *AffiliateSummary) float64 { //nolint:unused // retained for legacy affiliate compatibility
 	if inviter != nil && inviter.AffRebateRatePercent != nil {
 		v := *inviter.AffRebateRatePercent
 		if !math.IsNaN(v) && !math.IsInf(v, 0) {
@@ -135,7 +135,7 @@ func (s *AffiliateService) resolveRebateRatePercent(ctx context.Context, inviter
 	return clampAffiliateRebateRate(s.settingService.GetAffiliateRebateRatePercent(ctx))
 }
 
-func affiliateRoundTo(v float64, scale int) float64 {
+func affiliateRoundTo(v float64, scale int) float64 { //nolint:unused // retained for legacy affiliate compatibility
 	factor := math.Pow10(scale)
 	return math.Round(v*factor) / factor
 }

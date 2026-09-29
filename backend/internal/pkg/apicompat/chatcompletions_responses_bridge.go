@@ -379,7 +379,7 @@ func normalizeResponsesDerivedChatMessageRoles(messages []ChatMessage) []ChatMes
 
 // buildChatMessagesFromItems walks the Responses input items and appends the
 // corresponding Chat messages.
-func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessage) ([]ChatMessage, toolOutputMediaByCallID, error) {
+func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessage) ([]ChatMessage, toolOutputMediaByCallID, error) { //nolint:unused // retained as the compatibility wrapper for legacy callers
 	return buildChatMessagesFromItemsWithOptions(messages, rawItems, nil)
 }
 

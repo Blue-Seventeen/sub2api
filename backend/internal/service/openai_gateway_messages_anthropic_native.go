@@ -140,7 +140,7 @@ func (s *OpenAIGatewayService) nativeAnthropicTargetURL(account *Account) (strin
 	return strings.TrimRight(validatedURL, "/") + "/v1/messages", nil
 }
 
-func resolveOpenCodeGoMappedModel(account *Account, body []byte, defaultMappedModel string) string {
+func resolveOpenCodeGoMappedModel(account *Account, body []byte, defaultMappedModel string) string { //nolint:unused // retained for OpenCode Go compatibility routing
 	original := strings.TrimSpace(gjson.GetBytes(body, "model").String())
 	billing := resolveOpenAIForwardModel(account, original, defaultMappedModel)
 	return normalizeOpenAIModelForUpstream(account, billing)

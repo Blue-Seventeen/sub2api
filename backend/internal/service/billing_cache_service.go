@@ -739,7 +739,7 @@ func subscriptionCacheSchemaStale(data *subscriptionCacheData) bool {
 	return false
 }
 
-func normalizeSubscriptionsForCache(subs []UserSubscription) []UserSubscription {
+func normalizeSubscriptionsForCache(subs []UserSubscription) []UserSubscription { //nolint:unused // retained for legacy cache callers
 	return normalizeSubscriptionsForCacheAt(subs, time.Now())
 }
 
@@ -836,10 +836,18 @@ func (s *BillingCacheService) InvalidateSubscription(ctx context.Context, userID
 func (s *BillingCacheService) subscriptionCacheState(userID, groupID int64) *billingSubscriptionCacheState {
 	key := subCacheKey(userID, groupID)
 	if state, ok := s.subscriptionCacheStates.Load(key); ok {
-		return state.(*billingSubscriptionCacheState)
+		cacheState, ok := state.(*billingSubscriptionCacheState)
+		if !ok {
+			panic("invalid subscription cache state")
+		}
+		return cacheState
 	}
 	state, _ := s.subscriptionCacheStates.LoadOrStore(key, &billingSubscriptionCacheState{})
-	return state.(*billingSubscriptionCacheState)
+	cacheState, ok := state.(*billingSubscriptionCacheState)
+	if !ok {
+		panic("invalid subscription cache state")
+	}
+	return cacheState
 }
 
 func (s *BillingCacheService) queueSubscriptionRepair(userID, groupID int64, state *billingSubscriptionCacheState) {
