@@ -112,7 +112,7 @@ const normalizedPlanType = computed(() => normalizePlanType(props.planType))
 
 const planLabel = computed(() => {
   if (!normalizedPlanType.value) return ''
-  // ChatGPT 档位命名（Pro 5x / Pro 20x、Business Standard / Business Premium）只适用于
+  // ChatGPT 档位命名（Pro 100 / Pro 200 / Pro 500、Business / Business Premium）只适用于
   // OpenAI：Antigravity 与 Grok 各自的 pro/team 沿用下面的通用标签。
   if (props.platform === 'openai') {
     const label = openAIPlanTypeLabel(props.planType)
@@ -177,8 +177,12 @@ const planBadgeClass = computed(() => {
   if (props.platform === 'openai') {
     if (normalizedPlanType.value === 'plus') return 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300'
     if (normalizedPlanType.value === 'free' || normalizedPlanType.value === 'basic') return 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
-    if (['pro', 'chatgptpro', 'prolite'].includes(normalizedPlanType.value)) return 'bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400'
-    if (['team', 'selfservebusinessprolite'].includes(normalizedPlanType.value)) return 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400'
+    if (['pro', 'chatgptpro', 'prolite', 'promax'].includes(normalizedPlanType.value)) return 'bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400'
+    if (['team', 'selfservebusinessprolite', 'selfservebusinessusagebased', 'business', 'enterprise', 'ent26', 'enterprisecbpautomation', 'enterprisecbpusagebased', 'edu', 'eduplus', 'edupro'].includes(normalizedPlanType.value)) return 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400'
+  }
+  if (props.platform === 'grok' && normalizedPlanType.value) {
+    // Future paid Grok tiers remain visually distinct from free tiers.
+    return 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
   }
   return typeClass.value
 })
