@@ -972,6 +972,7 @@ var ProviderSet = wire.NewSet(
 	NewNewAPIStyleGatewayService,
 	ProvideCompatibleGatewayService,
 	NewOAuthService,
+	NewClaudeResetCreditService,
 	ProvideOpenAIOAuthService,
 	ProvideGrokOAuthService,
 	wire.Bind(new(GrokOAuthTokenService), new(*GrokOAuthService)),

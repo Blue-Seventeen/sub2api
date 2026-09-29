@@ -532,6 +532,15 @@ func (s *BillingService) initFallbackPricing() {
 		CacheCreationPricePerTokenPriority: 10e-6, CacheReadPricePerTokenPriority: 0.4e-6,
 		SupportsCacheBreakdown: true,
 	}
+	s.fallbackPrices["claude-sonnet-5-5"] = &ModelPricing{
+		InputPricePerToken:         2e-6,
+		OutputPricePerToken:        10e-6,
+		CacheCreationPricePerToken: 2.5e-6,
+		CacheReadPricePerToken:     0.2e-6,
+		CacheCreation5mPrice:       2.5e-6,
+		CacheCreation1hPrice:       4e-6,
+		SupportsCacheBreakdown:     true,
+	}
 	s.fallbackPrices["claude-fable-5"] = &ModelPricing{
 		InputPricePerToken: 10e-6, OutputPricePerToken: 50e-6,
 		CacheCreationPricePerToken: 12.5e-6, CacheCreation5mPrice: 12.5e-6,
@@ -990,6 +999,9 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	}
 	if claude.IsOpus55(modelLower) {
 		return s.fallbackPrices["claude-opus-5-5"]
+	}
+	if claude.IsSonnet55(modelLower) {
+		return s.fallbackPrices["claude-sonnet-5-5"]
 	}
 	if strings.Contains(modelLower, "opus") {
 		// "opus-5" 必须先判：不能用裸 "5" 匹配，否则 claude-opus-4-5 会被误判。
