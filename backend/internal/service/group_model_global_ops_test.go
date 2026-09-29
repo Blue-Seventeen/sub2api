@@ -85,10 +85,8 @@ func TestApplyGlobalModelOperationsValidatesFinalPolicy(t *testing.T) {
 		config     GroupModelsListConfig
 		operations []GroupModelOperation
 	}{
-		{"invalid addition", GroupModelsListConfig{}, []GroupModelOperation{{Operation: "add", Model: "foo*bar"}}},
 		{"remove last enabled model", GroupModelsListConfig{Enabled: true, Models: []string{"only"}}, []GroupModelOperation{{Operation: "remove", Model: "ONLY"}}},
 		{"enabled empty no-op", GroupModelsListConfig{Enabled: true}, nil},
-		{"existing invalid pattern", GroupModelsListConfig{Models: []string{"foo*bar"}}, []GroupModelOperation{{Operation: "add", Model: "valid"}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, changed, _, _, err := ApplyGlobalModelOperations(tc.config, tc.operations)
@@ -97,6 +95,18 @@ func TestApplyGlobalModelOperationsValidatesFinalPolicy(t *testing.T) {
 			require.False(t, changed)
 		})
 	}
+}
+
+func TestApplyGlobalModelOperationsPreservesInteriorWildcard(t *testing.T) {
+	updated, changed, added, removed, err := ApplyGlobalModelOperations(
+		GroupModelsListConfig{Models: []string{"foo*bar"}},
+		[]GroupModelOperation{{Operation: "add", Model: "*codex"}},
+	)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, []string{"foo*bar", "*codex"}, updated.Models)
+	require.Equal(t, []string{"*codex"}, added)
+	require.Empty(t, removed)
 }
 
 func TestApplyGlobalModelOperationsValidatesAfterOrderedOperations(t *testing.T) {

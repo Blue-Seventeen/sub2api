@@ -58,14 +58,23 @@ func TestGroupModelPolicyAliasNormalization(t *testing.T) {
 	require.Equal(t, GroupModelAllowlist{Enabled: true, Models: []string{"gpt-5.4", "gpt-*"}}, got.ModelAllowlist)
 }
 
-func TestNormalizeGroupModelPolicyRejectsWildcardInTheMiddleOfCanonicalModel(t *testing.T) {
-	_, err := NormalizeGroupModelPolicy(GroupModelsListConfig{
+func TestNormalizeGroupModelPolicyAcceptsInteriorAndLeadingWildcards(t *testing.T) {
+	policy, err := NormalizeGroupModelPolicy(GroupModelsListConfig{
 		Enabled: true,
-		Models:  []string{"foo*bar"},
+		Models:  []string{"foo*bar", "*codex"},
 	})
 
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "INVALID_MODEL_ALLOWLIST")
+	require.NoError(t, err)
+	require.Equal(t, []string{"foo*bar", "*codex"}, policy.ModelsListConfig.Models)
+	require.Equal(t, policy.ModelsListConfig.Models, policy.ModelAllowlist.Models)
+	for _, model := range []string{"foo-middle-bar", "gpt-5-codex"} {
+		require.True(t, ModelsListAllowsModel(policy.ModelsListConfig.Models, model))
+		require.True(t, policy.ModelAllowlist.Allows(model))
+	}
+	for _, model := range []string{"prefix-foo-middle-bar", "gpt-5-codex-extra"} {
+		require.False(t, ModelsListAllowsModel(policy.ModelsListConfig.Models, model))
+		require.False(t, policy.ModelAllowlist.Allows(model))
+	}
 }
 
 func TestNormalizeGroupModelPolicyRejectsExplicitEnabledEmptyCanonicalConfig(t *testing.T) {

@@ -8,11 +8,6 @@ import (
 
 // ValidateModelsListConfig validates canonical policy without changing enabled.
 func ValidateModelsListConfig(cfg GroupModelsListConfig) error {
-	for _, model := range cfg.Models {
-		if !validateModelsListPattern(model) {
-			return infraerrors.BadRequest("INVALID_MODEL_ALLOWLIST", `wildcard "*" is only allowed at the end of an allowlist entry`)
-		}
-	}
 	if cfg.Enabled && len(normalizeGroupModelsListConfig(cfg).Models) == 0 {
 		return infraerrors.BadRequest("INVALID_MODEL_ALLOWLIST", "model allowlist cannot be enabled with an empty model list")
 	}
@@ -66,14 +61,7 @@ func ModelsListAllowsModel(patterns []string, model string) bool {
 		if pattern == "" {
 			continue
 		}
-		if strings.HasSuffix(pattern, "*") {
-			prefix := strings.TrimSuffix(pattern, "*")
-			if strings.HasPrefix(model, prefix) {
-				return true
-			}
-			continue
-		}
-		if pattern == model {
+		if groupAllowlistPatternMatches(pattern, model) {
 			return true
 		}
 	}
@@ -82,9 +70,4 @@ func ModelsListAllowsModel(patterns []string, model string) bool {
 
 func normalizeModelsListMatchKey(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
-}
-
-func validateModelsListPattern(value string) bool {
-	value = strings.TrimSpace(value)
-	return !strings.Contains(strings.TrimSuffix(value, "*"), "*")
 }

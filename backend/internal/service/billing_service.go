@@ -295,6 +295,8 @@ func maxReasoningEffortBillingMultiplier(model, effort string, pricing *ModelPri
 	return 1
 }
 
+const claudeFable51MaxReasoningEffortMultiplier = 3.0
+
 func isClaudeFable51Model(model string) bool {
 	model = strings.ToLower(strings.TrimSpace(model))
 	for _, marker := range []string{"fable-5-1", "fable-5.1", "fable5.1", "fable51"} {
@@ -309,6 +311,9 @@ func isClaudeFable51Model(model string) bool {
 }
 
 func defaultMaxReasoningEffortMultiplier(model string) *float64 {
+	// Fable's default multiplier is materialized on its fallback pricing card.
+	// Keep this hook empty so synthetic/custom pricing cards do not inherit an
+	// implicit multiplier that was not explicitly configured on the card.
 	return nil
 }
 
@@ -544,10 +549,13 @@ func (s *BillingService) initFallbackPricing() {
 		CacheCreationPricePerToken: 12.5e-6, CacheCreation5mPrice: 12.5e-6,
 		CacheCreation1hPrice: 20e-6, CacheReadPricePerToken: 1e-6, SupportsCacheBreakdown: true,
 	}
+	fableMaxReasoningMultiplier := claudeFable51MaxReasoningEffortMultiplier
 	s.fallbackPrices["claude-fable-5-1"] = &ModelPricing{
 		InputPricePerToken: 10e-6, OutputPricePerToken: 50e-6,
 		CacheCreationPricePerToken: 12.5e-6, CacheCreation5mPrice: 12.5e-6,
-		CacheCreation1hPrice: 20e-6, CacheReadPricePerToken: 0.25e-6, SupportsCacheBreakdown: true,
+		CacheCreation1hPrice: 20e-6, CacheReadPricePerToken: 0.25e-6,
+		MaxReasoningEffortMultiplier: &fableMaxReasoningMultiplier,
+		SupportsCacheBreakdown:       true,
 	}
 
 	// Gemini 3.1 Pro

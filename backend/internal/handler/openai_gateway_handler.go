@@ -2970,6 +2970,27 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 		h.handleStreamingAwareError(c, status, "server_error", message, streamStarted)
 		return
 	}
+	if failoverErr.Reason == service.OpenAIImagesInsufficientBalanceReason {
+		status := failoverErr.ClientStatusCode
+		if status <= 0 {
+			status = http.StatusPaymentRequired
+		}
+		message := strings.TrimSpace(failoverErr.ClientMessage)
+		if message == "" {
+			message = service.OpenAIImagesInsufficientBalanceMessage
+		}
+		service.SetOpsUpstreamError(c, statusCode, message, "")
+		if streamStarted {
+			h.handleStreamingAwareErrorWithCode(c, status, "server_error", service.OpenAIImagesInsufficientBalanceCode, message, true, true)
+			return
+		}
+		c.JSON(status, gin.H{"error": gin.H{
+			"message": message,
+			"type":    "server_error",
+			"code":    service.OpenAIImagesInsufficientBalanceCode,
+		}})
+		return
+	}
 	if h.tryWriteModelNotFoundFailover(c, failoverErr, streamStarted) {
 		return
 	}

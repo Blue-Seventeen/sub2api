@@ -1193,3 +1193,31 @@ func newTestChannelServiceForStats(t *testing.T, channel *Channel, groupID int64
 	cs.cache.Store(cache)
 	return cs
 }
+
+func swapInOpenAILadderCatalog(t *testing.T, svc *OpenAIGatewayService) {
+	t.Helper()
+	require.NotNil(t, svc)
+	require.NotNil(t, svc.billingService)
+	previous := svc.billingService.pricingService
+	previousResolver := svc.resolver
+	svc.billingService.pricingService = openAILadderCatalog()
+	svc.resolver = NewModelPricingResolver(nil, svc.billingService)
+	t.Cleanup(func() {
+		svc.billingService.pricingService = previous
+		svc.resolver = previousResolver
+	})
+}
+
+func openAIRecordUsageAPIKeyWithGroup(_ *OpenAIGatewayService, id int64, longContextEnabled bool) *APIKey {
+	groupID := id
+	return &APIKey{
+		ID:      id,
+		GroupID: &groupID,
+		Group: &Group{
+			ID:                        groupID,
+			Platform:                  PlatformOpenAI,
+			RateMultiplier:            1,
+			LongContextPricingEnabled: longContextEnabled,
+		},
+	}
+}
