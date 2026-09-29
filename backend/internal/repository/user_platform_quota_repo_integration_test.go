@@ -372,10 +372,13 @@ func TestBatchSnapshotUsage_OverwriteMultiKey(t *testing.T) {
 	mustSeedQuotaRow(t, ctx, repo, userID1, "anthropic")
 	mustSeedQuotaRow(t, ctx, repo, userID2, "openai")
 
-	now := time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)
-	dailyStart := time.Date(2026, 5, 29, 0, 0, 0, 0, time.UTC)
-	weeklyStart := time.Date(2026, 5, 25, 0, 0, 0, 0, time.UTC) // 当周一
-	monthlyStart := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	// Seeded rows use the database clock for updated_at. Keep the snapshot just
+	// ahead of that timestamp while deriving windows from the current UTC date.
+	now := time.Now().UTC().Add(time.Second).Truncate(time.Microsecond)
+	dailyStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	daysSinceMonday := (int(now.Weekday()) + 6) % 7
+	weeklyStart := dailyStart.AddDate(0, 0, -daysSinceMonday)
+	monthlyStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
 
 	// ── 第一批：覆盖 2 行 ──────────────────────────────────────────────────────
 	firstBatch := []UserPlatformQuotaSnapshot{

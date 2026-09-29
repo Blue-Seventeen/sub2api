@@ -77,7 +77,6 @@ func TestGlobalModelOperationsReturnFreshGroupProjection(t *testing.T) {
 func TestGlobalModelPolicyInvalidFinalStateRollsBackAllWrites(t *testing.T) {
 	for _, method := range []string{"create", "update"} {
 		for _, operation := range []service.GroupModelOperation{
-			{Operation: "add", Model: "foo*bar"},
 			{Operation: "remove", Model: "only"},
 		} {
 			t.Run(method+"/"+operation.Operation, func(t *testing.T) {

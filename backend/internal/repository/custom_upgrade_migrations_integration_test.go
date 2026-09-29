@@ -28,6 +28,12 @@ func TestCustomUpgradeIntermediateConstraintsKeepExistingRows(t *testing.T) {
 INSERT INTO users (email, password_hash) VALUES ('custom-migration-platforms@example.test', 'test-only') RETURNING id`).Scan(&userID))
 	require.NoError(t, tx.QueryRowContext(ctx, `
 INSERT INTO groups (name, platform) VALUES ('custom-migration-platforms', 'composite') RETURNING id`).Scan(&groupID))
+	// The harness starts from the latest schema. Drop the latest constraints to
+	// recreate the pre-224/pre-227 state before applying those migrations.
+	_, err := tx.ExecContext(ctx, `
+ALTER TABLE user_platform_quotas DROP CONSTRAINT IF EXISTS user_platform_quotas_platform_check;
+ALTER TABLE composite_model_routes DROP CONSTRAINT IF EXISTS composite_model_routes_target_platform_check`)
+	require.NoError(t, err)
 	platforms := []string{"moonshot", "volcengine", "ali", "openrouter", "perplexity", "mistral", "siliconflow", "suno", "kling", "midjourney"}
 	for i, platform := range platforms {
 		_, err := tx.ExecContext(ctx, `INSERT INTO user_platform_quotas (user_id, platform) VALUES ($1, $2)`, userID, platform)

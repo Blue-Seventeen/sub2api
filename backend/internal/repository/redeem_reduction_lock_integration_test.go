@@ -29,6 +29,20 @@ func (r *lockedReductionReadRepo) GetByIDForUpdate(ctx context.Context, id int64
 	r.lockReads.Add(1)
 	return r.UserSubscriptionRepository.GetByIDForUpdate(ctx, id)
 }
+func (r *lockedReductionReadRepo) ListActiveByUserIDAndGroupID(ctx context.Context, u, g int64) ([]service.UserSubscription, error) {
+	// Observe the row before the production query acquires its FOR UPDATE lock.
+	// This models a concurrent renewal and verifies that the locked reread uses
+	// the latest committed values while keeping the production lock path intact.
+	stale, err := r.UserSubscriptionRepository.GetByUserIDAndGroupID(ctx, u, g)
+	if err != nil {
+		return nil, err
+	}
+	if r.afterRead != nil {
+		r.afterRead(stale)
+	}
+	r.lockReads.Add(1)
+	return r.UserSubscriptionRepository.ListActiveByUserIDAndGroupID(ctx, u, g)
+}
 func newReductionLockFixture(t *testing.T, name string) (*service.RedeemService, *lockedReductionReadRepo, *service.UserSubscription, int64, []string) {
 	t.Helper()
 	ctx := context.Background()
