@@ -200,13 +200,56 @@ export default {
         description: 'Configure Grok Build, Claude Code, Codex, or OpenCode to send requests through your Sub2API Grok group.',
         claudeDescription: 'Configure Claude Code to send Messages API traffic through your Sub2API Grok group.',
         codexDescription: 'Configure Codex to send Responses API traffic through your Sub2API Grok group.',
-        configTomlHint: 'Back up an existing config.toml before merging this model entry. Run grok inspect after saving to verify the effective configuration.',
-        codexConfigTomlHint: 'Back up an existing config.toml before merging this provider configuration.',
-        note: 'Save the file as ~/.grok/config.toml, then run grok inspect and select grok from /model.',
-        noteWindows: 'Save the file as %USERPROFILE%\\.grok\\config.toml, then run grok inspect and select grok from /model.',
-        claudeNote: 'Choose one method: run the terminal commands for the current session, or save settings.json for user-level persistent configuration.',
-        codexNote: 'Save config.toml under ~/.codex and set SUB2API_API_KEY before starting Codex.',
-        codexNoteWindows: 'Save config.toml under %USERPROFILE%\\.codex and set SUB2API_API_KEY in PowerShell before starting Codex.',
+        configTomlHint:
+          'Official path: ~/.grok/config.toml (or $GROK_HOME). Fill [endpoints] (models_base_url / models_list_url / xai_api_base_url / cli_chat_proxy_base_url), [auth] preferred_method=api_key, [models], [session], and [features] image/video overrides. Prefer env_key over api_key; every text model needs api_backend=responses. Back up before merge, then run grok inspect.',
+        codexConfigTomlHint:
+          'Official Codex: wire_api = "responses" only; prefer env_key over experimental_bearer_token; supports_websockets = false for non-OpenAI gateways (Sub2API can still accept client WS and bridge to HTTP/SSE). Back up ~/.codex/config.toml before merge.',
+        note:
+          'Export GROK_MODELS_BASE_URL and XAI_API_KEY, save the full config.toml (endpoints/auth/models/session/features) as ~/.grok/config.toml, run grok inspect, then /model grok-4.5 (or grok-build-0.1 for coding).',
+        noteWindows:
+          'Set GROK_MODELS_BASE_URL and XAI_API_KEY, save the full config.toml as %USERPROFILE%\\.grok\\config.toml, run grok inspect, then /model grok-4.5 (or grok-build-0.1 for coding).',
+        claudeNote:
+          'Choose one method: terminal env for this session, or ~/.claude/settings.json for persistence. Do not commit files that contain your API key.',
+        codexNote:
+          'Export SUB2API_API_KEY, save config.toml under ~/.codex (mkdir -p ~/.codex). Prefer env_key auth; do not commit secrets.',
+        codexNoteWindows:
+          'Set $env:SUB2API_API_KEY, save config.toml under %USERPROFILE%\\.codex. Prefer env_key auth; do not commit secrets.',
+      },
+      deepseek: {
+        description: 'Configure Claude Code, Codex, or OpenCode through the current DeepSeek group.',
+        codexDescription: 'Configure Codex with API key authentication through the current DeepSeek group.',
+        codexConfigTomlHint: 'Save config.toml and restart Codex to load the remote catalog. In local file mode, also download the catalog to the configured path.',
+        codexNote: 'Export SUB2API_API_KEY before starting Codex. The downloaded catalog contains model metadata only, not your API key.',
+      },
+      minimax: {
+        description: 'Configure Claude Code, Codex, or OpenCode through the current MiniMax group.',
+        codexDescription: 'Configure Codex with API key authentication through the current MiniMax group.',
+        codexConfigTomlHint: 'Save config.toml and restart Codex to load the remote catalog. In local file mode, also download the catalog to the configured path.',
+        codexNote: 'Export SUB2API_API_KEY before starting Codex. The downloaded catalog contains model metadata only, not your API key.',
+      },
+      composite: {
+        description: 'Configure supported clients through the current Composite routing group.',
+        codexDescription: 'Configure Codex with API key authentication and the complete model catalog for this Composite group.',
+        codexConfigTomlHint: 'Save config.toml and restart Codex to load the remote catalog. In local file mode, also download the catalog to the configured path.',
+        codexNote: 'Export SUB2API_API_KEY before starting Codex. Model requests are routed by the selected catalog slug.',
+      },
+      routedCodex: {
+        description: 'Configure Codex with the complete model catalog for the current routed group.',
+        configTomlHint: 'Save config.toml and restart Codex to load the remote catalog. In local file mode, also download the catalog to the configured path.',
+        note: 'Export SUB2API_API_KEY before starting Codex. The downloaded catalog contains model metadata only, not your API key.',
+      },
+      codexModelCatalog: {
+        mode: 'Catalog source',
+        remote: 'Remote catalog (Codex 0.156.0+)',
+        local: 'Local file (older clients)',
+        oversized: 'The complete catalog exceeds the 1 MiB remote limit. Local file mode is selected; download it to the configured path.',
+        title: 'Codex model catalog',
+        description: 'Codex loads and refreshes the remote catalog using your configured authentication. For local file mode, fetch the catalog below and save it at the configured path.',
+        fetch: 'Fetch catalog',
+        retry: 'Retry',
+        download: 'Download catalog',
+        modelsCount: '{count} models ready to download',
+        errorDescription: 'The catalog could not be fetched with this API key.',
       },
       opencode: {
         title: 'OpenCode Example',
