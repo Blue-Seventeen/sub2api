@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"math"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -329,6 +330,59 @@ type inflightEstimateDeps struct {
 	resolver       *ModelPricingResolver
 	resolveMapping func(ctx context.Context, groupID int64, model string) ChannelMappingResult
 	userGroupRate  func(ctx context.Context, userID, groupID int64, groupDefault float64) float64
+	// accountMappedModels 返回调度器可选账号对 model 的账号级映射结果（去重，不含 model 本身）。
+	// 准入时账号尚未选定，计费侧 billableModelWithFallback 会回退到实际转发模型（UpstreamModel，
+	// 即账号映射后的模型），因此这里取所有候选映射模型的最高估算。
+	// 仅在首选/渠道候选均无法定价（或 composite 分组）时才调用；实现只读调度器快照，
+	// 不在请求路径上直接查库，也不按模型名缓存（内存不随请求模型名增长）。
+	accountMappedModels func(ctx context.Context, apiKey *APIKey, model string) []string
+}
+
+// inflightSnapshotLister 调度器快照读取（与账号选择同源：Redis 快照，未命中时由快照服务自身回源并回填）。
+type inflightSnapshotLister func(ctx context.Context, groupID *int64, platform string, hasForcePlatform bool) ([]Account, error)
+
+// inflightAccountMappedModelsFromSnapshot 基于调度器快照在内存中匹配账号级映射（支持通配规则）。
+// resolvePlatform 返回与调度器一致的平台；无分组 API Key 使用调度器的未分组账号池（groupID=nil）。
+func inflightAccountMappedModelsFromSnapshot(list inflightSnapshotLister, resolvePlatform func(ctx context.Context, apiKey *APIKey, model string) (string, bool, bool)) func(ctx context.Context, apiKey *APIKey, model string) []string {
+	if list == nil || resolvePlatform == nil {
+		return nil
+	}
+	return func(ctx context.Context, apiKey *APIKey, model string) []string {
+		model = strings.TrimSpace(model)
+		if apiKey == nil || model == "" {
+			return nil
+		}
+		platform, forced, ok := resolvePlatform(ctx, apiKey, model)
+		if !ok || platform == "" {
+			return nil
+		}
+		accounts, err := list(ctx, apiKey.GroupID, platform, forced)
+		if err != nil {
+			return nil
+		}
+		return accountMappedModelsFrom(accounts, model)
+	}
+}
+
+func accountMappedModelsFrom(accounts []Account, model string) []string {
+	var seen map[string]struct{}
+	var out []string
+	for i := range accounts {
+		mapped, matched := accounts[i].ResolveMappedModel(model)
+		mapped = strings.TrimSpace(mapped)
+		if !matched || mapped == "" || mapped == model {
+			continue
+		}
+		if seen == nil {
+			seen = map[string]struct{}{}
+		}
+		if _, dup := seen[mapped]; dup {
+			continue
+		}
+		seen[mapped] = struct{}{}
+		out = append(out, mapped)
+	}
+	return out
 }
 
 var inflightUnpricedLastLog atomic.Int64
@@ -347,26 +401,29 @@ func logInflightUnpriced(model string, groupID *int64) {
 }
 
 // inflightBillingModelCandidates 与计费路径一致地挑选计费模型：
-// channel_mapped（默认）→ 映射后模型；requested → 请求模型；
-// upstream / response_model 在准入时未知 → 取请求模型与映射模型两者较高估算。
-func inflightBillingModelCandidates(ctx context.Context, deps inflightEstimateDeps, apiKey *APIKey, model string) []string {
-	if apiKey == nil || apiKey.GroupID == nil || deps.resolveMapping == nil {
-		return []string{model}
+// 返回 primary（计费侧首选的计费模型）与 fallbacks（计费侧 billableModelWithFallback
+// 在首选模型查无价时回退到的实际转发模型：渠道映射模型 → 账号级映射模型）。
+//   - channel_mapped（默认）→ 映射后模型（同时估算请求模型，取较高者）；
+//   - requested → 请求模型；
+//   - upstream / response_model 在准入时未知 → 取请求模型与映射模型两者较高估算。
+func inflightBillingModelCandidates(ctx context.Context, deps inflightEstimateDeps, apiKey *APIKey, model string) (primary, fallbacks []string, upstreamInput string) {
+	upstreamInput = model
+	primary = []string{model}
+	if apiKey == nil || apiKey.GroupID == nil {
+		return primary, nil, upstreamInput
 	}
-	m := deps.resolveMapping(ctx, *apiKey.GroupID, model)
-	mapped := m.MappedModel
-	if mapped == "" || mapped == model {
-		return []string{model}
+	if deps.resolveMapping != nil {
+		m := deps.resolveMapping(ctx, *apiKey.GroupID, model)
+		if mapped := m.MappedModel; mapped != "" && mapped != model {
+			upstreamInput = mapped
+			if m.BillingModelSource == BillingModelSourceRequested {
+				fallbacks = append(fallbacks, mapped)
+			} else {
+				primary = []string{mapped, model}
+			}
+		}
 	}
-	switch m.BillingModelSource {
-	case BillingModelSourceRequested:
-		return []string{model}
-	case BillingModelSourceChannelMapped, "":
-		// 计费侧对无价映射模型会回落到具体转发模型；此处同时估算请求模型，取较高者。
-		return []string{mapped, model}
-	default:
-		return []string{mapped, model}
-	}
+	return primary, fallbacks, upstreamInput
 }
 
 func (d inflightEstimateDeps) rates(ctx context.Context, apiKey *APIKey) (text, image float64) {
@@ -529,10 +586,30 @@ func (d inflightEstimateDeps) estimate(ctx context.Context, apiKey *APIKey, req 
 		// 免费分组：不计费，也无需预留。
 		return 0, true
 	}
-	best := 0.0
-	for _, m := range inflightBillingModelCandidates(ctx, d, apiKey, req.Model) {
-		if c := d.estimateOne(ctx, apiKey, m, req, textRate, imageRate); c > best {
+	primary, fallbacks, upstreamInput := inflightBillingModelCandidates(ctx, d, apiKey, req.Model)
+	bestOf := func(models []string) float64 {
+		best := 0.0
+		for _, m := range models {
+			if c := d.estimateOne(ctx, apiKey, m, req, textRate, imageRate); c > best {
+				best = c
+			}
+		}
+		return best
+	}
+	best := bestOf(primary)
+	// composite 分组：计费侧除非别名有显式渠道价，否则按实际转发的具体模型计费；
+	// 别名本身可能命中家族模糊价（低估），因此与候选具体模型一起取最高。
+	composite := apiKey.Group != nil && apiKey.Group.Platform == PlatformComposite
+	if best <= 0 || composite {
+		// 与 billableModelWithFallback 同口径：首选模型无价时回退到实际转发模型。
+		if c := bestOf(fallbacks); c > best {
 			best = c
+		}
+		// 账号级映射候选（读调度器快照）仅在仍无法定价或 composite 时才查，已定价模型不触发。
+		if (best <= 0 || composite) && d.accountMappedModels != nil {
+			if c := bestOf(d.accountMappedModels(ctx, apiKey, upstreamInput)); c > best {
+				best = c
+			}
 		}
 	}
 	if best <= 0 {
@@ -578,6 +655,19 @@ func (s *GatewayService) inflightEstimateDeps() inflightEstimateDeps {
 		d.resolveMapping = s.channelService.ResolveChannelMapping
 	}
 	d.userGroupRate = s.getUserGroupRateMultiplier
+	if s.schedulerSnapshot != nil {
+		snap := s.schedulerSnapshot
+		d.accountMappedModels = inflightAccountMappedModelsFromSnapshot(
+			func(ctx context.Context, groupID *int64, platform string, forced bool) ([]Account, error) {
+				accounts, _, err := snap.ListSchedulableAccounts(ctx, groupID, platform, forced)
+				return accounts, err
+			},
+			func(ctx context.Context, apiKey *APIKey, model string) (string, bool, bool) {
+				platform, forced, err := s.resolvePlatform(ctx, apiKey.GroupID, apiKey.Group, model)
+				return platform, forced, err == nil
+			},
+		)
+	}
 	return d
 }
 
@@ -596,6 +686,22 @@ func (s *OpenAIGatewayService) inflightEstimateDeps() inflightEstimateDeps {
 		d.resolveMapping = s.channelService.ResolveChannelMapping
 	}
 	d.userGroupRate = s.ResolveUserGroupRateMultiplier
+	if s.schedulerSnapshot != nil {
+		snap := s.schedulerSnapshot
+		d.accountMappedModels = inflightAccountMappedModelsFromSnapshot(
+			func(ctx context.Context, groupID *int64, platform string, forced bool) ([]Account, error) {
+				accounts, _, err := snap.ListSchedulableAccounts(ctx, groupID, platform, forced)
+				return accounts, err
+			},
+			func(ctx context.Context, apiKey *APIKey, model string) (string, bool, bool) {
+				platform := PlatformOpenAI
+				if apiKey.Group != nil && apiKey.Group.Platform != "" && apiKey.Group.Platform != PlatformComposite {
+					platform = apiKey.Group.Platform
+				}
+				return NormalizeOpenAICompatiblePlatform(platform), false, true
+			},
+		)
+	}
 	return d
 }
 
