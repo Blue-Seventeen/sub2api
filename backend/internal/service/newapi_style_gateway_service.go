@@ -353,14 +353,21 @@ func (s *NewAPIStyleGatewayService) Forward(
 		var copyErr error
 		if c != nil {
 			c.Status(resp.StatusCode)
+			var downstreamWriter io.Writer = c.Writer
+			if flusher, ok := c.Writer.(http.Flusher); ok {
+				// io.Copy only writes to the downstream writer; without a flush
+				// after each chunk, small SSE responses stay in net/http's buffer
+				// until the upstream closes and appear as a pseudo-stream.
+				downstreamWriter = &flushOnWriteWriter{Writer: c.Writer, flusher: flusher}
+			}
 			if isEventStream(resp.Header.Get("Content-Type")) {
-				safeWriter := newClientVisibleSSESanitizingWriter(c.Writer)
+				safeWriter := newClientVisibleSSESanitizingWriter(downstreamWriter)
 				copiedBytes, copyErr = io.Copy(safeWriter, streamReader)
 				if flushErr := safeWriter.FlushRemaining(); copyErr == nil && flushErr != nil {
 					copyErr = flushErr
 				}
 			} else {
-				copiedBytes, copyErr = io.Copy(c.Writer, streamReader)
+				copiedBytes, copyErr = io.Copy(downstreamWriter, streamReader)
 			}
 			if copiedBytes > 0 || copyErr == nil {
 				if f, ok := c.Writer.(http.Flusher); ok {
@@ -1217,6 +1224,19 @@ func newAPIStyleAudioErrorPayloadResult(
 type tailBufferWriter struct {
 	buffer *bytes.Buffer
 	limit  int
+}
+
+type flushOnWriteWriter struct {
+	io.Writer
+	flusher http.Flusher
+}
+
+func (w *flushOnWriteWriter) Write(p []byte) (int, error) {
+	n, err := w.Writer.Write(p)
+	if n > 0 && w.flusher != nil {
+		w.flusher.Flush()
+	}
+	return n, err
 }
 
 type newAPIStyleSSETerminalCaptureWriter struct {
