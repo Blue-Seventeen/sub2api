@@ -191,10 +191,20 @@ const creditTitle = computed(() => {
   if (!credit) return ''
   const lines = [credit.label]
   if (credit.expires_at) lines.push(t('admin.accounts.claudeResetCredits.expiresAtFull', { time: formatTime(credit.expires_at, 'full') }))
-  if (credit.clears.length) lines.push(t('admin.accounts.claudeResetCredits.clears', { windows: credit.clears.join(', ') }))
+  if (credit.clears.length) lines.push(t('admin.accounts.claudeResetCredits.clears', { windows: windowLabels(credit.clears) }))
   if (credit.use_requires_limit) lines.push(t('admin.accounts.claudeResetCredits.requiresLimit'))
   return lines.join('\n')
 })
+
+// 已知窗口显示为可读名称，未知窗口原样显示
+const windowKeys: Record<string, string> = {
+  five_hour: 'fiveHour',
+  seven_day: 'sevenDay',
+  seven_day_overage_included: 'sevenDayOverage'
+}
+function windowLabels(windows?: string[]): string {
+  return (windows ?? []).map(w => windowKeys[w] ? t(`admin.accounts.claudeResetCredits.windows.${windowKeys[w]}`) : w).join(', ')
+}
 
 const countButtonTitle = computed(() => {
   if (!status.value) return t('admin.accounts.claudeResetCredits.countTooltipLoad')
@@ -215,8 +225,8 @@ const redeemButtonTitle = computed(() => {
 const confirmMessage = computed(() => {
   const next = status.value?.credits.find(c => c.redeemable)
   return t('admin.accounts.claudeResetCredits.confirmMessage', {
-    windows: next?.clears.join(', ') || '—',
-    count: totalResets.value
+    windows: windowLabels(next?.clears) || '—',
+    count: Math.max(totalResets.value - 1, 0)
   })
 })
 
@@ -242,7 +252,7 @@ function outcomeFeedback(result: ClaudeResetOutcome): { kind: 'success' | 'warni
   const key = 'admin.accounts.claudeResetCredits.outcome'
   switch (result.outcome) {
     case 'reset':
-      return { kind: 'success', text: t(`${key}.reset`, { windows: result.cleared?.join(', ') || '—' }) }
+      return { kind: 'success', text: t(`${key}.reset`, { windows: windowLabels(result.cleared) || '—' }) }
     case 'already_used':
       return { kind: 'warning', text: t(`${key}.alreadyUsed`) }
     case 'cooldown':
@@ -257,9 +267,13 @@ function outcomeFeedback(result: ClaudeResetOutcome): { kind: 'success' | 'warni
     case 'ineligible':
       return { kind: 'error', text: t(`${key}.ineligible`) }
     default:
+      if (result.reason === 'upstream_unavailable') return { kind: 'warning', text: t(`${key}.unavailable`) }
       return { kind: 'warning', text: t(`${key}.unknown`) }
   }
 }
+
+// Refusals issued before any claim was sent: the next attempt is a new confirmation.
+const preClaimRefusals = new Set(['CLAUDE_RESET_BUSY', 'CLAUDE_RESET_NOT_AVAILABLE', 'CLAUDE_RESET_UNRESOLVED', 'CLAUDE_RESET_UPSTREAM_UNAVAILABLE'])
 
 function errorText(e: unknown): string {
   const err = e as { reason?: string; message?: string }
@@ -267,6 +281,9 @@ function errorText(e: unknown): string {
     case 'CLAUDE_RESET_UNRESOLVED': return t('admin.accounts.claudeResetCredits.outcome.unknown')
     case 'CLAUDE_RESET_BUSY': return t('admin.accounts.claudeResetCredits.outcome.busy')
     case 'CLAUDE_RESET_NOT_AVAILABLE': return t('admin.accounts.claudeResetCredits.outcome.notAvailable')
+    case 'CLAUDE_RESET_UPSTREAM_UNAVAILABLE': return t('admin.accounts.claudeResetCredits.outcome.unavailable')
+    case 'IDEMPOTENCY_IN_PROGRESS': return t('admin.accounts.claudeResetCredits.outcome.inProgress')
+    case 'IDEMPOTENCY_RETRY_BACKOFF': return t('admin.accounts.claudeResetCredits.outcome.retryBackoff')
     default: return err?.message || t('admin.accounts.claudeResetCredits.outcome.failed')
   }
 }
@@ -290,6 +307,8 @@ async function confirmRedeem() {
     await refresh()
   } catch (e) {
     if (current !== generation) return
+    // Transport or unknown errors keep the key so a retry replays server-side.
+    if (preClaimRefusals.has((e as { reason?: string })?.reason ?? '')) pendingKey = null
     redeemFeedback.value = { kind: 'error', text: errorText(e) }
   } finally {
     if (current === generation) redeeming.value = false

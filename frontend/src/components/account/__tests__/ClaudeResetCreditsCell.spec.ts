@@ -5,7 +5,8 @@ import type { Account } from '@/types'
 const getCredits = vi.hoisted(() => vi.fn())
 const redeem = vi.hoisted(() => vi.fn())
 vi.mock('@/api/admin/claudeResetCredits', () => ({ getClaudeResetCredits: getCredits, redeemClaudeResetCredit: redeem }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+const t = vi.hoisted(() => vi.fn((key: string, _params?: Record<string, unknown>) => key))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t }) }))
 // Minimal stand-in exposing the dialog's show state and confirm/cancel events.
 vi.mock('@/components/common/ConfirmDialog.vue', () => ({
   default: {
@@ -104,6 +105,11 @@ describe('Claude reset credit status', () => {
     const dialog = wrapper.get('[data-testid="confirm-dialog"]')
     expect(dialog.attributes('data-danger')).toBe('true')
     expect(dialog.text()).toContain('admin.accounts.claudeResetCredits.confirmMessage')
+    // Known windows render as readable labels; count is what remains after this use.
+    expect(t).toHaveBeenCalledWith('admin.accounts.claudeResetCredits.confirmMessage', {
+      windows: 'admin.accounts.claudeResetCredits.windows.fiveHour, admin.accounts.claudeResetCredits.windows.sevenDay',
+      count: 0
+    })
     await wrapper.get('[data-testid="confirm-cancel"]').trigger('click')
     await flushPromises()
     expect(wrapper.find('[data-testid="confirm-dialog"]').exists()).toBe(false)
@@ -159,6 +165,54 @@ describe('Claude reset credit status', () => {
     redeem.mockRejectedValueOnce({ status: 409, reason: 'CLAUDE_RESET_BUSY', message: 'x' })
     await confirmReset(wrapper)
     expect(wrapper.get('[data-testid="claude-reset-feedback"]').text()).toBe('admin.accounts.claudeResetCredits.outcome.busy')
+  })
+
+  it.each(['CLAUDE_RESET_BUSY', 'CLAUDE_RESET_NOT_AVAILABLE', 'CLAUDE_RESET_UNRESOLVED', 'CLAUDE_RESET_UPSTREAM_UNAVAILABLE'])(
+    'rotates the key after pre-claim refusal %s',
+    async reason => {
+      const wrapper = await queried()
+      redeem.mockRejectedValueOnce({ status: 409, reason, message: 'x' })
+      await confirmReset(wrapper)
+      redeem.mockResolvedValueOnce({ outcome: 'not_limited', replayed: false })
+      await confirmReset(wrapper)
+      expect(redeem.mock.calls[1][1]).not.toBe(redeem.mock.calls[0][1])
+    }
+  )
+
+  it.each([
+    ['IDEMPOTENCY_IN_PROGRESS', 'inProgress'],
+    ['IDEMPOTENCY_RETRY_BACKOFF', 'retryBackoff'],
+    ['CLAUDE_RESET_UPSTREAM_UNAVAILABLE', 'unavailable']
+  ])('maps %s to a clear message', async (reason, key) => {
+    const wrapper = await queried()
+    redeem.mockRejectedValueOnce({ status: 409, reason, message: 'x' })
+    await confirmReset(wrapper)
+    expect(wrapper.get('[data-testid="claude-reset-feedback"]').text()).toBe(`admin.accounts.claudeResetCredits.outcome.${key}`)
+  })
+
+  it('reuses the key after an idempotency conflict', async () => {
+    const wrapper = await queried()
+    redeem.mockRejectedValueOnce({ status: 409, reason: 'IDEMPOTENCY_IN_PROGRESS', message: 'x' })
+    await confirmReset(wrapper)
+    redeem.mockResolvedValueOnce({ outcome: 'not_limited', replayed: false })
+    await confirmReset(wrapper)
+    expect(redeem.mock.calls[1][1]).toBe(redeem.mock.calls[0][1])
+  })
+
+  it('labels cleared windows and falls back to the raw key for unknown ones', async () => {
+    const wrapper = await queried()
+    redeem.mockResolvedValue({ outcome: 'reset', cleared: ['seven_day_overage_included', 'future_window'], replayed: false })
+    await confirmReset(wrapper)
+    expect(t).toHaveBeenCalledWith('admin.accounts.claudeResetCredits.outcome.reset', {
+      windows: 'admin.accounts.claudeResetCredits.windows.sevenDayOverage, future_window'
+    })
+  })
+
+  it('tells the operator to retry later after an explicit unavailable answer', async () => {
+    const wrapper = await queried()
+    redeem.mockResolvedValue({ outcome: 'unknown', reason: 'upstream_unavailable', replayed: false })
+    await confirmReset(wrapper)
+    expect(wrapper.get('[data-testid="claude-reset-feedback"]').text()).toBe('admin.accounts.claudeResetCredits.outcome.unavailable')
   })
 
   it('keeps slot content for setup tokens and discards responses after account changes', async () => {
