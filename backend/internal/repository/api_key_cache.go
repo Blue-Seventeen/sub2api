@@ -60,6 +60,12 @@ func (c *apiKeyCache) IncrementCreateAttemptCount(ctx context.Context, userID in
 	return err
 }
 
+// DeleteCreateAttemptCount clears the failed-create limiter while leaving the
+// successful-create fixed-window counter untouched.
+func (c *apiKeyCache) DeleteCreateAttemptCount(ctx context.Context, userID int64) error {
+	return c.rdb.Del(ctx, apiKeyRateLimitKey(userID)).Err()
+}
+
 // IncrementCreateCount 在固定窗口内累加创建次数并返回累加后的值。
 // ExpireNX 只在首次创建计数键时设置过期，后续创建不会延长窗口；
 // MULTI 保证 INCR 与 EXPIRE 同时生效，避免计数键丢失 TTL 后永久封禁。

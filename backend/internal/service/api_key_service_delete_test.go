@@ -252,6 +252,10 @@ func (s *apiKeyCacheStub) IncrementCreateAttemptCount(ctx context.Context, userI
 	return nil
 }
 
+func (s *apiKeyCacheStub) DeleteCreateAttemptCount(ctx context.Context, userID int64) error {
+	return nil
+}
+
 // IncrementCreateCount 空实现，本测试不验证此行为
 func (s *apiKeyCacheStub) IncrementCreateCount(ctx context.Context, userID int64, window time.Duration) (int64, error) {
 	return 0, nil

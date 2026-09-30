@@ -177,6 +177,7 @@ type APIKeyQuotaUsageState struct {
 type APIKeyCache interface {
 	GetCreateAttemptCount(ctx context.Context, userID int64) (int, error)
 	IncrementCreateAttemptCount(ctx context.Context, userID int64) error
+	DeleteCreateAttemptCount(ctx context.Context, userID int64) error
 	IncrementCreateCount(ctx context.Context, userID int64, window time.Duration) (int64, error)
 
 	IncrementDailyUsage(ctx context.Context, apiKey string) error
@@ -858,6 +859,10 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 	if req.Status != nil {
 		apiKey.Status = *req.Status
 		fields.Status = true
+		// 保留自定义失败创建尝试限流的恢复语义；成功创建次数使用独立 key，不会被清理。
+		if s.cache != nil {
+			_ = s.cache.DeleteCreateAttemptCount(ctx, apiKey.UserID)
+		}
 	}
 
 	// Update quota fields
@@ -965,7 +970,10 @@ func (s *APIKeyService) Delete(ctx context.Context, id int64, userID int64) erro
 	}
 
 	// 删除成功后再清理缓存,避免"缓存已清但删除失败"的竞态。
-	// 注意:不清零创建相关计数,否则"删除后反复新建"即可绕过创建限流。
+	// 只清理失败尝试计数；成功创建次数位于独立 key 中，不能因删除而返还。
+	if s.cache != nil {
+		_ = s.cache.DeleteCreateAttemptCount(ctx, userID)
+	}
 	s.InvalidateAuthCacheByKey(ctx, key)
 	s.lastUsedTouchL1.Delete(id)
 
