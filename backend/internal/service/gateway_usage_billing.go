@@ -496,7 +496,26 @@ func syncBalanceCacheAfterDeduction(ctx context.Context, p *postUsageBillingPara
 		}
 		return
 	}
-	deps.billingCacheService.QueueDeductBalance(p.User.ID, p.Cost.RealActualCost)
+	amount := p.Cost.RealActualCost
+	if amount <= 0 {
+		// Older callers and compatibility tests only populated ActualCost. Keep
+		// those records aligned with the balance deduction path while preferring
+		// the custom fork's real-cost field whenever it is available.
+		amount = p.Cost.ActualCost
+	}
+	if deps.billingCacheService.InflightReservationEnabled() {
+		// 在途预留开启时同步扣减余额缓存：计费任务结束后才会释放预留，
+		// 必须保证此时准入读取的缓存余额已反映本次扣费，否则释放与扣减之间
+		// 仍存在「在途=0 且余额未扣」的窗口。本函数运行在计费 worker 中，不在请求热路径。
+		// RealActualCost is the amount deducted from the user's balance in this
+		// fork; ActualCost is the user-facing compatibility field.
+		err := deps.billingCacheService.DeductBalanceCache(ctx, p.User.ID, amount)
+		if err == nil {
+			return
+		}
+		logger.LegacyPrintf("service.gateway", "Warning: sync deduct balance cache failed for user %d, falling back to queue: %v", p.User.ID, err)
+	}
+	deps.billingCacheService.QueueDeductBalance(p.User.ID, amount)
 }
 
 // notifyBalanceLow sends balance low notification after deduction.
