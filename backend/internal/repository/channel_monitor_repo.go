@@ -44,6 +44,7 @@ func (r *channelMonitorRepository) Create(ctx context.Context, m *service.Channe
 		SetProvider(channelmonitor.Provider(m.Provider)).
 		SetAPIMode(defaultAPIModeRepo(m.APIMode)).
 		SetEndpoint(m.Endpoint).
+		SetEndpointIsFullURL(m.EndpointIsFullURL).
 		SetAPIKeyEncrypted(m.APIKey). // 调用方传入的已是密文
 		SetPrimaryModel(m.PrimaryModel).
 		SetExtraModels(emptySliceIfNil(m.ExtraModels)).
@@ -116,6 +117,7 @@ func (r *channelMonitorRepository) Update(ctx context.Context, m *service.Channe
 		SetProvider(channelmonitor.Provider(m.Provider)).
 		SetAPIMode(defaultAPIModeRepo(m.APIMode)).
 		SetEndpoint(m.Endpoint).
+		SetEndpointIsFullURL(m.EndpointIsFullURL).
 		SetAPIKeyEncrypted(m.APIKey).
 		SetPrimaryModel(m.PrimaryModel).
 		SetExtraModels(emptySliceIfNil(m.ExtraModels)).
@@ -775,6 +777,7 @@ func entToServiceMonitor(row *dbent.ChannelMonitor) *service.ChannelMonitor {
 		Provider:             string(row.Provider),
 		APIMode:              defaultAPIModeRepo(row.APIMode),
 		Endpoint:             row.Endpoint,
+		EndpointIsFullURL:    row.EndpointIsFullURL,
 		APIKey:               row.APIKeyEncrypted, // 仍为密文，service 层负责解密
 		PrimaryModel:         row.PrimaryModel,
 		ExtraModels:          extras,

@@ -96,7 +96,7 @@
                 :key="option.value"
                 type="button"
                 :data-testid="`account-platform-${option.value}`"
-                @click="form.platform = option.value"
+                @click="selectPlatformOption(option.value)"
                 :ref="(el) => setPlatformOptionRef(option.value, el as HTMLElement | null)"
                 :class="[
                   'group min-w-[156px] shrink-0 rounded-xl border px-3 py-3 text-left transition-all',
@@ -142,74 +142,6 @@
               {{ platformSearchEmptyText }}
             </p>
           </div>
-        </div>
-        <!-- Multi-protocol API-key providers: Kimi / Zhipu GLM / DeepSeek / OpenCode -->
-        <div class="mt-2 flex flex-wrap rounded-lg bg-gray-100 p-1 dark:bg-dark-700">
-          <button
-            type="button"
-            @click="selectCNPlatform('kimi')"
-            :class="[
-              'flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium transition-all',
-              form.platform === 'kimi'
-                ? 'bg-white text-pink-600 shadow-sm dark:bg-dark-600 dark:text-pink-400'
-                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
-            ]"
-          >
-            <PlatformIcon platform="kimi" size="sm" />
-            Kimi
-          </button>
-          <button
-            type="button"
-            @click="selectCNPlatform('zhipu')"
-            :class="[
-              'flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium transition-all',
-              form.platform === 'zhipu'
-                ? 'bg-white text-indigo-600 shadow-sm dark:bg-dark-600 dark:text-indigo-400'
-                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
-            ]"
-          >
-            <PlatformIcon platform="zhipu" size="sm" />
-            Zhipu GLM
-          </button>
-          <button
-            type="button"
-            @click="selectCNPlatform('deepseek')"
-            :class="[
-              'flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium transition-all',
-              form.platform === 'deepseek'
-                ? 'bg-white text-teal-600 shadow-sm dark:bg-dark-600 dark:text-teal-400'
-                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
-            ]"
-          >
-            <PlatformIcon platform="deepseek" size="sm" />
-            DeepSeek
-          </button>
-          <button
-            type="button"
-            @click="selectCNPlatform('minimax')"
-            :class="[
-              'flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium transition-all',
-              form.platform === 'minimax'
-                ? 'bg-white text-rose-600 shadow-sm dark:bg-dark-600 dark:text-rose-400'
-                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
-            ]"
-          >
-            <PlatformIcon platform="minimax" size="sm" />
-            MiniMax
-          </button>
-          <button
-            type="button"
-            @click="selectOpenCodeGoPlatform()"
-            :class="[
-              'flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium transition-all',
-              form.platform === 'opencode_go'
-                ? 'bg-white text-amber-700 shadow-sm dark:bg-dark-600 dark:text-amber-300'
-                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
-            ]"
-          >
-            <PlatformIcon platform="opencode_go" size="sm" />
-            OpenCode
-          </button>
         </div>
       </div>
       <!-- Account Type Selection (Anthropic) -->
@@ -4225,6 +4157,15 @@ const platformOptions = computed<PlatformSearchOption[]>(() => [
     textActiveClass: 'text-zinc-900 dark:text-zinc-100'
   },
   {
+    value: 'kimi',
+    label: 'Kimi Coding',
+    subtitle: 'Kimi Coding API',
+    searchTerms: ['kimi', 'coding', 'moonshot coding', '月之暗面 coding'],
+    activeClass: 'border-pink-200 bg-white shadow-sm dark:border-pink-900/50 dark:bg-dark-600',
+    iconActiveClass: 'bg-pink-50 text-pink-600 dark:bg-pink-900/30 dark:text-pink-300',
+    textActiveClass: 'text-pink-600 dark:text-pink-300'
+  },
+  {
     value: 'zhipu',
     label: platformDisplayName('zhipu'),
     subtitle: 'Zhipu / GLM 系列',
@@ -4262,12 +4203,30 @@ const platformOptions = computed<PlatformSearchOption[]>(() => [
   },
   {
     value: 'moonshot',
-    label: platformDisplayName('moonshot'),
-    subtitle: 'Moonshot / Kimi',
+    label: 'Kimi / Moonshot',
+    subtitle: 'Moonshot API',
     searchTerms: ['moonshot', 'kimi', '月之暗面'],
     activeClass: 'border-fuchsia-200 bg-white shadow-sm dark:border-fuchsia-900/50 dark:bg-dark-600',
     iconActiveClass: 'bg-fuchsia-50 text-fuchsia-600 dark:bg-fuchsia-900/30 dark:text-fuchsia-300',
     textActiveClass: 'text-fuchsia-600 dark:text-fuchsia-300'
+  },
+  {
+    value: 'minimax',
+    label: platformDisplayName('minimax'),
+    subtitle: 'MiniMax API',
+    searchTerms: ['minimax', 'abab'],
+    activeClass: 'border-rose-200 bg-white shadow-sm dark:border-rose-900/50 dark:bg-dark-600',
+    iconActiveClass: 'bg-rose-50 text-rose-600 dark:bg-rose-900/30 dark:text-rose-300',
+    textActiveClass: 'text-rose-600 dark:text-rose-300'
+  },
+  {
+    value: 'opencode_go',
+    label: 'OpenCode Go',
+    subtitle: 'OpenCode Go API',
+    searchTerms: ['opencode', 'opencode go', 'zen', 'coding'],
+    activeClass: 'border-amber-200 bg-white shadow-sm dark:border-amber-900/50 dark:bg-dark-600',
+    iconActiveClass: 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
+    textActiveClass: 'text-amber-700 dark:text-amber-300'
   },
   {
     value: 'perplexity',
@@ -4537,6 +4496,19 @@ function selectCNPlatform(platform: CnProviderPlatform) {
   apiKeyBaseUrl.value = defaultCNBaseUrl(platform, accountMode.value, apiProtocol.value)
   resetAdaptiveBaseUrls(platform, accountMode.value)
 }
+
+function selectPlatformOption(platform: AccountPlatform) {
+  if (platform === 'opencode_go') {
+    selectOpenCodeGoPlatform()
+    return
+  }
+  if (isCNProviderPlatform(platform)) {
+    selectCNPlatform(platform)
+    return
+  }
+  form.platform = platform
+}
+
 function selectOpenCodeGoPlatform() {
   form.platform = 'opencode_go'
   form.type = 'apikey'

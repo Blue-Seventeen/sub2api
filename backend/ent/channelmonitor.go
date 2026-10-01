@@ -35,6 +35,8 @@ type ChannelMonitor struct {
 	APIMode string `json:"api_mode,omitempty"`
 	// Provider base origin, e.g. https://api.openai.com; empty for quota-only monitors
 	Endpoint string `json:"endpoint,omitempty"`
+	// When true, endpoint is the exact probe URL and provider path is not appended
+	EndpointIsFullURL bool `json:"endpoint_is_full_url,omitempty"`
 	// AES-256-GCM encrypted API key
 	APIKeyEncrypted string `json:"-"`
 	// PrimaryModel holds the value of the "primary_model" field.
@@ -116,7 +118,7 @@ func (*ChannelMonitor) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case channelmonitor.FieldExtraModels, channelmonitor.FieldExtraHeaders, channelmonitor.FieldBodyOverride:
 			values[i] = new([]byte)
-		case channelmonitor.FieldEnabled:
+		case channelmonitor.FieldEndpointIsFullURL, channelmonitor.FieldEnabled:
 			values[i] = new(sql.NullBool)
 		case channelmonitor.FieldID, channelmonitor.FieldAccountID, channelmonitor.FieldIntervalSeconds, channelmonitor.FieldJitterSeconds, channelmonitor.FieldCreatedBy, channelmonitor.FieldTemplateID:
 			values[i] = new(sql.NullInt64)
@@ -193,6 +195,12 @@ func (_m *ChannelMonitor) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field endpoint", values[i])
 			} else if value.Valid {
 				_m.Endpoint = value.String
+			}
+		case channelmonitor.FieldEndpointIsFullURL:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field endpoint_is_full_url", values[i])
+			} else if value.Valid {
+				_m.EndpointIsFullURL = value.Bool
 			}
 		case channelmonitor.FieldAPIKeyEncrypted:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -356,6 +364,9 @@ func (_m *ChannelMonitor) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("endpoint=")
 	builder.WriteString(_m.Endpoint)
+	builder.WriteString(", ")
+	builder.WriteString("endpoint_is_full_url=")
+	builder.WriteString(fmt.Sprintf("%v", _m.EndpointIsFullURL))
 	builder.WriteString(", ")
 	builder.WriteString("api_key_encrypted=<sensitive>")
 	builder.WriteString(", ")

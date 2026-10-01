@@ -158,6 +158,96 @@ func TestOpenAIResponseFlush_SlowEventsFlushOnceAtBoundaries(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponseFlush_HTTPClientReceivesOutputBeforeUpstreamCompletes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstreamReader, upstreamWriter := io.Pipe()
+	t.Cleanup(func() { _ = upstreamWriter.Close() })
+	started := make(chan struct{}, 1)
+	handlerDone := make(chan error, 1)
+
+	router := gin.New()
+	router.POST("/relay", func(c *gin.Context) {
+		started <- struct{}{}
+		svc := &OpenAIGatewayService{cfg: &config.Config{}}
+		resp := &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       upstreamReader,
+		}
+		_, err := svc.handleStreamingResponse(c.Request.Context(), resp, c,
+			&Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey},
+			time.Now(), "gpt-5", "gpt-5")
+		handlerDone <- err
+	})
+	server := httptest.NewServer(router)
+	t.Cleanup(server.Close)
+
+	requestCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(requestCtx, http.MethodPost, server.URL+"/relay", nil)
+	require.NoError(t, err)
+	responseCh := make(chan struct {
+		response *http.Response
+		err      error
+	}, 1)
+	go func() {
+		response, doErr := http.DefaultClient.Do(request)
+		responseCh <- struct {
+			response *http.Response
+			err      error
+		}{response: response, err: doErr}
+	}()
+
+	waitOpenAIResponseFlushSignal(t, started)
+	firstEvent := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"first\"}\n\n"
+	writeFirst := make(chan error, 1)
+	go func() {
+		_, writeErr := io.WriteString(upstreamWriter, firstEvent)
+		writeFirst <- writeErr
+	}()
+
+	var responseResult struct {
+		response *http.Response
+		err      error
+	}
+	select {
+	case responseResult = <-responseCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("HTTP client did not receive streaming response headers before upstream completion")
+	}
+	require.NoError(t, responseResult.err)
+	require.NotNil(t, responseResult.response)
+	defer func() { _ = responseResult.response.Body.Close() }()
+
+	firstChunk := make([]byte, len(firstEvent))
+	readFirst := make(chan error, 1)
+	go func() {
+		_, readErr := io.ReadFull(responseResult.response.Body, firstChunk)
+		readFirst <- readErr
+	}()
+	select {
+	case readErr := <-readFirst:
+		require.NoError(t, readErr)
+	case <-time.After(2 * time.Second):
+		t.Fatal("HTTP client did not receive the first SSE event while upstream was still open")
+	}
+	require.Contains(t, string(firstChunk), `"delta":"first"`)
+	select {
+	case err := <-handlerDone:
+		t.Fatalf("relay completed before the upstream terminal event was sent: %v", err)
+	default:
+	}
+	require.NoError(t, <-writeFirst)
+
+	terminalEvent := "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_http_stream\",\"usage\":{\"input_tokens\":2,\"output_tokens\":1,\"total_tokens\":3}}}\n\n"
+	_, err = io.WriteString(upstreamWriter, terminalEvent+"data: [DONE]\n\n")
+	require.NoError(t, err)
+	require.NoError(t, upstreamWriter.Close())
+	_, err = io.ReadAll(responseResult.response.Body)
+	require.NoError(t, err)
+	require.NoError(t, <-handlerDone)
+}
+
 func TestOpenAIResponseFlush_DataQueuedButBlankDrainsFlushesOnce(t *testing.T) {
 	first := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"first\"}\n\n"
 	second := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"second\"}\n\n"

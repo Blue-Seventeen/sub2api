@@ -1,0 +1,2 @@
+ALTER TABLE channel_monitors
+    ADD COLUMN IF NOT EXISTS endpoint_is_full_url BOOLEAN NOT NULL DEFAULT FALSE;

@@ -584,6 +584,8 @@ export default {
         apiModeResponsesHint: '使用 /v1/responses，默认带 instructions + input；适合本站自检/Codex。',
         endpoint: '上游地址',
         endpointPlaceholder: 'https://api.example.com',
+        endpointFullURL: '完整 URL',
+        endpointFullURLHint: '开启后直接请求上方填写的完整接口 URL，不再追加平台默认路径。',
         useCurrentDomain: '使用当前服务',
         apiKey: 'API Key',
         apiKeyPlaceholder: '请输入 API Key',

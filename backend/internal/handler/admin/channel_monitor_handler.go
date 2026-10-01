@@ -39,21 +39,22 @@ func NewChannelMonitorHandler(monitorService *service.ChannelMonitorService) *Ch
 // --- Request / Response ---
 
 type channelMonitorCreateRequest struct {
-	Name             string            `json:"name" binding:"required,max=100"`
-	Provider         string            `json:"provider" binding:"required,oneof=openai anthropic gemini grok antigravity kimi zhipu deepseek minimax opencode_go"`
-	APIMode          string            `json:"api_mode" binding:"omitempty,oneof=chat_completions responses"`
-	Endpoint         string            `json:"endpoint" binding:"omitempty,max=500"`
-	APIKey           string            `json:"api_key" binding:"omitempty,max=2000"`
-	PrimaryModel     string            `json:"primary_model" binding:"max=200"`
-	ExtraModels      []string          `json:"extra_models"`
-	GroupName        string            `json:"group_name" binding:"max=100"`
-	Enabled          *bool             `json:"enabled"`
-	IntervalSeconds  int               `json:"interval_seconds" binding:"required,min=15,max=3600"`
-	JitterSeconds    int               `json:"jitter_seconds" binding:"omitempty,min=0,max=3585"`
-	TemplateID       *int64            `json:"template_id"`
-	ExtraHeaders     map[string]string `json:"extra_headers"`
-	BodyOverrideMode string            `json:"body_override_mode" binding:"omitempty,oneof=off merge replace"`
-	BodyOverride     map[string]any    `json:"body_override"`
+	Name              string            `json:"name" binding:"required,max=100"`
+	Provider          string            `json:"provider" binding:"required,oneof=openai anthropic gemini grok antigravity kimi zhipu deepseek minimax opencode_go"`
+	APIMode           string            `json:"api_mode" binding:"omitempty,oneof=chat_completions responses"`
+	Endpoint          string            `json:"endpoint" binding:"omitempty,max=500"`
+	EndpointIsFullURL bool              `json:"endpoint_is_full_url"`
+	APIKey            string            `json:"api_key" binding:"omitempty,max=2000"`
+	PrimaryModel      string            `json:"primary_model" binding:"max=200"`
+	ExtraModels       []string          `json:"extra_models"`
+	GroupName         string            `json:"group_name" binding:"max=100"`
+	Enabled           *bool             `json:"enabled"`
+	IntervalSeconds   int               `json:"interval_seconds" binding:"required,min=15,max=3600"`
+	JitterSeconds     int               `json:"jitter_seconds" binding:"omitempty,min=0,max=3585"`
+	TemplateID        *int64            `json:"template_id"`
+	ExtraHeaders      map[string]string `json:"extra_headers"`
+	BodyOverrideMode  string            `json:"body_override_mode" binding:"omitempty,oneof=off merge replace"`
+	BodyOverride      map[string]any    `json:"body_override"`
 
 	// CheckMode: probe（默认）/ quota / quota_probe。quota 模式 endpoint/api_key
 	// 可空（条件必填校验在 service 层按模式分支）。
@@ -63,22 +64,23 @@ type channelMonitorCreateRequest struct {
 }
 
 type channelMonitorUpdateRequest struct {
-	Name             *string            `json:"name" binding:"omitempty,max=100"`
-	Provider         *string            `json:"provider" binding:"omitempty,oneof=openai anthropic gemini grok antigravity kimi zhipu deepseek minimax opencode_go"`
-	APIMode          *string            `json:"api_mode" binding:"omitempty,oneof=chat_completions responses"`
-	Endpoint         *string            `json:"endpoint" binding:"omitempty,max=500"`
-	APIKey           *string            `json:"api_key" binding:"omitempty,max=2000"`
-	PrimaryModel     *string            `json:"primary_model" binding:"omitempty,max=200"`
-	ExtraModels      *[]string          `json:"extra_models"`
-	GroupName        *string            `json:"group_name" binding:"omitempty,max=100"`
-	Enabled          *bool              `json:"enabled"`
-	IntervalSeconds  *int               `json:"interval_seconds" binding:"omitempty,min=15,max=3600"`
-	JitterSeconds    *int               `json:"jitter_seconds" binding:"omitempty,min=0,max=3585"`
-	TemplateID       *int64             `json:"template_id"`
-	ClearTemplate    bool               `json:"clear_template"` // true 时把 template_id 置空，忽略 TemplateID
-	ExtraHeaders     *map[string]string `json:"extra_headers"`
-	BodyOverrideMode *string            `json:"body_override_mode" binding:"omitempty,oneof=off merge replace"`
-	BodyOverride     *map[string]any    `json:"body_override"`
+	Name              *string            `json:"name" binding:"omitempty,max=100"`
+	Provider          *string            `json:"provider" binding:"omitempty,oneof=openai anthropic gemini grok antigravity kimi zhipu deepseek minimax opencode_go"`
+	APIMode           *string            `json:"api_mode" binding:"omitempty,oneof=chat_completions responses"`
+	Endpoint          *string            `json:"endpoint" binding:"omitempty,max=500"`
+	EndpointIsFullURL *bool              `json:"endpoint_is_full_url"`
+	APIKey            *string            `json:"api_key" binding:"omitempty,max=2000"`
+	PrimaryModel      *string            `json:"primary_model" binding:"omitempty,max=200"`
+	ExtraModels       *[]string          `json:"extra_models"`
+	GroupName         *string            `json:"group_name" binding:"omitempty,max=100"`
+	Enabled           *bool              `json:"enabled"`
+	IntervalSeconds   *int               `json:"interval_seconds" binding:"omitempty,min=15,max=3600"`
+	JitterSeconds     *int               `json:"jitter_seconds" binding:"omitempty,min=0,max=3585"`
+	TemplateID        *int64             `json:"template_id"`
+	ClearTemplate     bool               `json:"clear_template"` // true 时把 template_id 置空，忽略 TemplateID
+	ExtraHeaders      *map[string]string `json:"extra_headers"`
+	BodyOverrideMode  *string            `json:"body_override_mode" binding:"omitempty,oneof=off merge replace"`
+	BodyOverride      *map[string]any    `json:"body_override"`
 
 	// CheckMode/AccountID：nil = 不更新；AccountID 指向 0 = 清空关联。
 	CheckMode *string `json:"check_mode" binding:"omitempty,oneof=probe quota quota_probe"`
@@ -91,6 +93,7 @@ type channelMonitorResponse struct {
 	Provider            string                               `json:"provider"`
 	APIMode             string                               `json:"api_mode"`
 	Endpoint            string                               `json:"endpoint"`
+	EndpointIsFullURL   bool                                 `json:"endpoint_is_full_url"`
 	APIKeyMasked        string                               `json:"api_key_masked"`
 	APIKeyDecryptFailed bool                                 `json:"api_key_decrypt_failed"`
 	PrimaryModel        string                               `json:"primary_model"`
@@ -167,6 +170,7 @@ func channelMonitorToResponse(m *service.ChannelMonitor) *channelMonitorResponse
 		Provider:            m.Provider,
 		APIMode:             m.APIMode,
 		Endpoint:            m.Endpoint,
+		EndpointIsFullURL:   m.EndpointIsFullURL,
 		APIKeyMasked:        maskAPIKey(m.APIKey),
 		APIKeyDecryptFailed: m.APIKeyDecryptFailed,
 		PrimaryModel:        m.PrimaryModel,
@@ -336,24 +340,25 @@ func (h *ChannelMonitorHandler) Create(c *gin.Context) {
 	}
 
 	m, err := h.monitorService.Create(c.Request.Context(), service.ChannelMonitorCreateParams{
-		Name:             req.Name,
-		Provider:         req.Provider,
-		APIMode:          req.APIMode,
-		Endpoint:         req.Endpoint,
-		APIKey:           req.APIKey,
-		PrimaryModel:     req.PrimaryModel,
-		ExtraModels:      req.ExtraModels,
-		GroupName:        req.GroupName,
-		Enabled:          enabled,
-		IntervalSeconds:  req.IntervalSeconds,
-		JitterSeconds:    req.JitterSeconds,
-		CreatedBy:        subject.UserID,
-		TemplateID:       req.TemplateID,
-		ExtraHeaders:     req.ExtraHeaders,
-		BodyOverrideMode: req.BodyOverrideMode,
-		BodyOverride:     req.BodyOverride,
-		CheckMode:        req.CheckMode,
-		AccountID:        req.AccountID,
+		Name:              req.Name,
+		Provider:          req.Provider,
+		APIMode:           req.APIMode,
+		Endpoint:          req.Endpoint,
+		EndpointIsFullURL: req.EndpointIsFullURL,
+		APIKey:            req.APIKey,
+		PrimaryModel:      req.PrimaryModel,
+		ExtraModels:       req.ExtraModels,
+		GroupName:         req.GroupName,
+		Enabled:           enabled,
+		IntervalSeconds:   req.IntervalSeconds,
+		JitterSeconds:     req.JitterSeconds,
+		CreatedBy:         subject.UserID,
+		TemplateID:        req.TemplateID,
+		ExtraHeaders:      req.ExtraHeaders,
+		BodyOverrideMode:  req.BodyOverrideMode,
+		BodyOverride:      req.BodyOverride,
+		CheckMode:         req.CheckMode,
+		AccountID:         req.AccountID,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -432,24 +437,25 @@ func (h *ChannelMonitorHandler) Update(c *gin.Context) {
 	}
 
 	m, err := h.monitorService.Update(c.Request.Context(), id, service.ChannelMonitorUpdateParams{
-		Name:             req.Name,
-		Provider:         req.Provider,
-		APIMode:          req.APIMode,
-		Endpoint:         req.Endpoint,
-		APIKey:           req.APIKey,
-		PrimaryModel:     req.PrimaryModel,
-		ExtraModels:      req.ExtraModels,
-		GroupName:        req.GroupName,
-		Enabled:          req.Enabled,
-		IntervalSeconds:  req.IntervalSeconds,
-		JitterSeconds:    req.JitterSeconds,
-		TemplateID:       req.TemplateID,
-		ClearTemplate:    req.ClearTemplate,
-		ExtraHeaders:     req.ExtraHeaders,
-		BodyOverrideMode: req.BodyOverrideMode,
-		BodyOverride:     req.BodyOverride,
-		CheckMode:        req.CheckMode,
-		AccountID:        req.AccountID,
+		Name:              req.Name,
+		Provider:          req.Provider,
+		APIMode:           req.APIMode,
+		Endpoint:          req.Endpoint,
+		EndpointIsFullURL: req.EndpointIsFullURL,
+		APIKey:            req.APIKey,
+		PrimaryModel:      req.PrimaryModel,
+		ExtraModels:       req.ExtraModels,
+		GroupName:         req.GroupName,
+		Enabled:           req.Enabled,
+		IntervalSeconds:   req.IntervalSeconds,
+		JitterSeconds:     req.JitterSeconds,
+		TemplateID:        req.TemplateID,
+		ClearTemplate:     req.ClearTemplate,
+		ExtraHeaders:      req.ExtraHeaders,
+		BodyOverrideMode:  req.BodyOverrideMode,
+		BodyOverride:      req.BodyOverride,
+		CheckMode:         req.CheckMode,
+		AccountID:         req.AccountID,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)

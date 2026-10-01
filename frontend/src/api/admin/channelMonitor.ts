@@ -64,7 +64,8 @@ export interface ChannelMonitor {
   name: string
   provider: Provider
   api_mode: APIMode
-  endpoint: string
+	endpoint: string
+	endpoint_is_full_url?: boolean
   api_key_masked: string
   /**
    * True when the stored encrypted API key cannot be decrypted (e.g. the
@@ -131,7 +132,9 @@ export interface CreateParams {
   provider: Provider
   api_mode?: APIMode
   /** 探活模式必填（可含路径前缀的 HTTPS base URL）；quota 模式可留空 */
-  endpoint: string
+	endpoint: string
+	/** When true, endpoint is the complete probe URL and no provider path is appended. */
+	endpoint_is_full_url?: boolean
   /** 探活模式必填；quota 模式可留空 */
   api_key: string
   /** 缺省 probe；antigravity 仅支持 quota */

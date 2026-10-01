@@ -72,13 +72,19 @@ const BaseDialogStub = defineComponent({
   template: '<div v-if="show"><slot /><slot name="footer" /></div>',
 })
 
+const ToggleStub = defineComponent({
+  props: { modelValue: { type: Boolean, default: false } },
+  emits: ['update:modelValue'],
+  template: '<button type="button" data-testid="toggle" :aria-checked="modelValue" @click="$emit(\'update:modelValue\', !modelValue)" />',
+})
+
 function mountDialog() {
   return mount(MonitorFormDialog, {
     props: { show: true, monitor: null },
     global: {
       stubs: {
         BaseDialog: BaseDialogStub,
-        Toggle: true,
+        Toggle: ToggleStub,
         Select: true,
         ModelTagInput: true,
         MonitorKeyPickerDialog: true,
@@ -156,5 +162,60 @@ describe('channel monitor Grok provider', () => {
     await grokButton.trigger('click')
     expect((endpoint.element as HTMLInputElement).value).toBe(DEFAULT_GROK_ENDPOINT)
     expect((model.element as HTMLInputElement).value).toBe('grok-custom')
+  })
+
+  it('shows the full URL switch and preserves it when editing a monitor', async () => {
+    const wrapper = mount(MonitorFormDialog, {
+      props: {
+        show: true,
+        monitor: {
+          id: 9,
+          name: 'GLM',
+          provider: 'zhipu',
+          api_mode: 'chat_completions',
+          endpoint: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+          endpoint_is_full_url: true,
+          api_key_masked: '****',
+          primary_model: 'glm-4.5',
+          extra_models: [],
+          group_name: '',
+          enabled: true,
+          interval_seconds: 60,
+          jitter_seconds: 0,
+          last_checked_at: null,
+          created_by: 1,
+          created_at: '',
+          updated_at: '',
+          primary_status: '',
+          primary_latency_ms: null,
+          availability_7d: 0,
+          extra_models_status: [],
+          template_id: null,
+          extra_headers: {},
+          body_override_mode: 'off',
+          body_override: null,
+          check_mode: 'probe',
+          account_id: null,
+        },
+      },
+      global: {
+        stubs: {
+          BaseDialog: BaseDialogStub,
+          Toggle: ToggleStub,
+          Select: true,
+          ModelTagInput: true,
+          MonitorKeyPickerDialog: true,
+          MonitorAdvancedRequestConfig: true,
+        },
+      },
+    })
+    await flushPromises()
+
+    const toggle = wrapper.get('[data-testid="monitor-endpoint-full-url"]')
+    expect(toggle.attributes('aria-checked')).toBe('true')
+    const settings = wrapper.get('[data-testid="monitor-full-url-settings"]')
+    expect(settings.classes()).toContain('mt-3')
+    expect(settings.classes()).toContain('border')
+    expect(settings.classes()).toContain('bg-gray-50/70')
   })
 })

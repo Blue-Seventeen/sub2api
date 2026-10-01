@@ -734,3 +734,22 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(createOpenAICodexPATMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBe(false)
   })
 })
+
+describe('CreateAccountModal platform selector', () => {
+  beforeEach(() => {
+    authIsSimpleMode.value = true
+  })
+
+  it('renders all account platforms in one selector and distinguishes the two Kimi routes', () => {
+    const wrapper = mountModal()
+
+    expect(wrapper.get('[data-testid="account-platform-kimi"]').text()).toContain('Kimi Coding')
+    expect(wrapper.get('[data-testid="account-platform-moonshot"]').text()).toContain('Kimi / Moonshot')
+    expect(wrapper.get('[data-testid="account-platform-zhipu"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="account-platform-deepseek"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="account-platform-minimax"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="account-platform-opencode_go"]').exists()).toBe(true)
+    expect((wrapper.get('[data-testid="account-platform-zhipu"]').element.parentElement as HTMLElement).className).toContain('platform-scroll-strip')
+    expect((wrapper.get('[data-testid="account-platform-minimax"]').element.parentElement as HTMLElement).className).toContain('platform-scroll-strip')
+  })
+})

@@ -113,6 +113,20 @@ func (_c *ChannelMonitorCreate) SetEndpoint(v string) *ChannelMonitorCreate {
 	return _c
 }
 
+// SetEndpointIsFullURL sets the "endpoint_is_full_url" field.
+func (_c *ChannelMonitorCreate) SetEndpointIsFullURL(v bool) *ChannelMonitorCreate {
+	_c.mutation.SetEndpointIsFullURL(v)
+	return _c
+}
+
+// SetNillableEndpointIsFullURL sets the "endpoint_is_full_url" field if the given value is not nil.
+func (_c *ChannelMonitorCreate) SetNillableEndpointIsFullURL(v *bool) *ChannelMonitorCreate {
+	if v != nil {
+		_c.SetEndpointIsFullURL(*v)
+	}
+	return _c
+}
+
 // SetAPIKeyEncrypted sets the "api_key_encrypted" field.
 func (_c *ChannelMonitorCreate) SetAPIKeyEncrypted(v string) *ChannelMonitorCreate {
 	_c.mutation.SetAPIKeyEncrypted(v)
@@ -339,6 +353,10 @@ func (_c *ChannelMonitorCreate) defaults() {
 		v := channelmonitor.DefaultAPIMode
 		_c.mutation.SetAPIMode(v)
 	}
+	if _, ok := _c.mutation.EndpointIsFullURL(); !ok {
+		v := channelmonitor.DefaultEndpointIsFullURL
+		_c.mutation.SetEndpointIsFullURL(v)
+	}
 	if _, ok := _c.mutation.ExtraModels(); !ok {
 		v := channelmonitor.DefaultExtraModels
 		_c.mutation.SetExtraModels(v)
@@ -412,6 +430,9 @@ func (_c *ChannelMonitorCreate) check() error {
 		if err := channelmonitor.EndpointValidator(v); err != nil {
 			return &ValidationError{Name: "endpoint", err: fmt.Errorf(`ent: validator failed for field "ChannelMonitor.endpoint": %w`, err)}
 		}
+	}
+	if _, ok := _c.mutation.EndpointIsFullURL(); !ok {
+		return &ValidationError{Name: "endpoint_is_full_url", err: errors.New(`ent: missing required field "ChannelMonitor.endpoint_is_full_url"`)}
 	}
 	if _, ok := _c.mutation.APIKeyEncrypted(); !ok {
 		return &ValidationError{Name: "api_key_encrypted", err: errors.New(`ent: missing required field "ChannelMonitor.api_key_encrypted"`)}
@@ -528,6 +549,10 @@ func (_c *ChannelMonitorCreate) createSpec() (*ChannelMonitor, *sqlgraph.CreateS
 	if value, ok := _c.mutation.Endpoint(); ok {
 		_spec.SetField(channelmonitor.FieldEndpoint, field.TypeString, value)
 		_node.Endpoint = value
+	}
+	if value, ok := _c.mutation.EndpointIsFullURL(); ok {
+		_spec.SetField(channelmonitor.FieldEndpointIsFullURL, field.TypeBool, value)
+		_node.EndpointIsFullURL = value
 	}
 	if value, ok := _c.mutation.APIKeyEncrypted(); ok {
 		_spec.SetField(channelmonitor.FieldAPIKeyEncrypted, field.TypeString, value)
@@ -771,6 +796,18 @@ func (u *ChannelMonitorUpsert) SetEndpoint(v string) *ChannelMonitorUpsert {
 // UpdateEndpoint sets the "endpoint" field to the value that was provided on create.
 func (u *ChannelMonitorUpsert) UpdateEndpoint() *ChannelMonitorUpsert {
 	u.SetExcluded(channelmonitor.FieldEndpoint)
+	return u
+}
+
+// SetEndpointIsFullURL sets the "endpoint_is_full_url" field.
+func (u *ChannelMonitorUpsert) SetEndpointIsFullURL(v bool) *ChannelMonitorUpsert {
+	u.Set(channelmonitor.FieldEndpointIsFullURL, v)
+	return u
+}
+
+// UpdateEndpointIsFullURL sets the "endpoint_is_full_url" field to the value that was provided on create.
+func (u *ChannelMonitorUpsert) UpdateEndpointIsFullURL() *ChannelMonitorUpsert {
+	u.SetExcluded(channelmonitor.FieldEndpointIsFullURL)
 	return u
 }
 
@@ -1126,6 +1163,20 @@ func (u *ChannelMonitorUpsertOne) SetEndpoint(v string) *ChannelMonitorUpsertOne
 func (u *ChannelMonitorUpsertOne) UpdateEndpoint() *ChannelMonitorUpsertOne {
 	return u.Update(func(s *ChannelMonitorUpsert) {
 		s.UpdateEndpoint()
+	})
+}
+
+// SetEndpointIsFullURL sets the "endpoint_is_full_url" field.
+func (u *ChannelMonitorUpsertOne) SetEndpointIsFullURL(v bool) *ChannelMonitorUpsertOne {
+	return u.Update(func(s *ChannelMonitorUpsert) {
+		s.SetEndpointIsFullURL(v)
+	})
+}
+
+// UpdateEndpointIsFullURL sets the "endpoint_is_full_url" field to the value that was provided on create.
+func (u *ChannelMonitorUpsertOne) UpdateEndpointIsFullURL() *ChannelMonitorUpsertOne {
+	return u.Update(func(s *ChannelMonitorUpsert) {
+		s.UpdateEndpointIsFullURL()
 	})
 }
 
@@ -1680,6 +1731,20 @@ func (u *ChannelMonitorUpsertBulk) SetEndpoint(v string) *ChannelMonitorUpsertBu
 func (u *ChannelMonitorUpsertBulk) UpdateEndpoint() *ChannelMonitorUpsertBulk {
 	return u.Update(func(s *ChannelMonitorUpsert) {
 		s.UpdateEndpoint()
+	})
+}
+
+// SetEndpointIsFullURL sets the "endpoint_is_full_url" field.
+func (u *ChannelMonitorUpsertBulk) SetEndpointIsFullURL(v bool) *ChannelMonitorUpsertBulk {
+	return u.Update(func(s *ChannelMonitorUpsert) {
+		s.SetEndpointIsFullURL(v)
+	})
+}
+
+// UpdateEndpointIsFullURL sets the "endpoint_is_full_url" field to the value that was provided on create.
+func (u *ChannelMonitorUpsertBulk) UpdateEndpointIsFullURL() *ChannelMonitorUpsertBulk {
+	return u.Update(func(s *ChannelMonitorUpsert) {
+		s.UpdateEndpointIsFullURL()
 	})
 }
 

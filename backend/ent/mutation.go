@@ -14627,6 +14627,7 @@ type ChannelMonitorMutation struct {
 	addaccount_id           *int64
 	api_mode                *string
 	endpoint                *string
+	endpoint_is_full_url    *bool
 	api_key_encrypted       *string
 	primary_model           *string
 	extra_models            *[]string
@@ -15075,6 +15076,42 @@ func (m *ChannelMonitorMutation) OldEndpoint(ctx context.Context) (v string, err
 // ResetEndpoint resets all changes to the "endpoint" field.
 func (m *ChannelMonitorMutation) ResetEndpoint() {
 	m.endpoint = nil
+}
+
+// SetEndpointIsFullURL sets the "endpoint_is_full_url" field.
+func (m *ChannelMonitorMutation) SetEndpointIsFullURL(b bool) {
+	m.endpoint_is_full_url = &b
+}
+
+// EndpointIsFullURL returns the value of the "endpoint_is_full_url" field in the mutation.
+func (m *ChannelMonitorMutation) EndpointIsFullURL() (r bool, exists bool) {
+	v := m.endpoint_is_full_url
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldEndpointIsFullURL returns the old "endpoint_is_full_url" field's value of the ChannelMonitor entity.
+// If the ChannelMonitor object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelMonitorMutation) OldEndpointIsFullURL(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldEndpointIsFullURL is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldEndpointIsFullURL requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldEndpointIsFullURL: %w", err)
+	}
+	return oldValue.EndpointIsFullURL, nil
+}
+
+// ResetEndpointIsFullURL resets all changes to the "endpoint_is_full_url" field.
+func (m *ChannelMonitorMutation) ResetEndpointIsFullURL() {
+	m.endpoint_is_full_url = nil
 }
 
 // SetAPIKeyEncrypted sets the "api_key_encrypted" field.
@@ -15854,7 +15891,7 @@ func (m *ChannelMonitorMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *ChannelMonitorMutation) Fields() []string {
-	fields := make([]string, 0, 21)
+	fields := make([]string, 0, 22)
 	if m.created_at != nil {
 		fields = append(fields, channelmonitor.FieldCreatedAt)
 	}
@@ -15878,6 +15915,9 @@ func (m *ChannelMonitorMutation) Fields() []string {
 	}
 	if m.endpoint != nil {
 		fields = append(fields, channelmonitor.FieldEndpoint)
+	}
+	if m.endpoint_is_full_url != nil {
+		fields = append(fields, channelmonitor.FieldEndpointIsFullURL)
 	}
 	if m.api_key_encrypted != nil {
 		fields = append(fields, channelmonitor.FieldAPIKeyEncrypted)
@@ -15942,6 +15982,8 @@ func (m *ChannelMonitorMutation) Field(name string) (ent.Value, bool) {
 		return m.APIMode()
 	case channelmonitor.FieldEndpoint:
 		return m.Endpoint()
+	case channelmonitor.FieldEndpointIsFullURL:
+		return m.EndpointIsFullURL()
 	case channelmonitor.FieldAPIKeyEncrypted:
 		return m.APIKeyEncrypted()
 	case channelmonitor.FieldPrimaryModel:
@@ -15993,6 +16035,8 @@ func (m *ChannelMonitorMutation) OldField(ctx context.Context, name string) (ent
 		return m.OldAPIMode(ctx)
 	case channelmonitor.FieldEndpoint:
 		return m.OldEndpoint(ctx)
+	case channelmonitor.FieldEndpointIsFullURL:
+		return m.OldEndpointIsFullURL(ctx)
 	case channelmonitor.FieldAPIKeyEncrypted:
 		return m.OldAPIKeyEncrypted(ctx)
 	case channelmonitor.FieldPrimaryModel:
@@ -16083,6 +16127,13 @@ func (m *ChannelMonitorMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetEndpoint(v)
+		return nil
+	case channelmonitor.FieldEndpointIsFullURL:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetEndpointIsFullURL(v)
 		return nil
 	case channelmonitor.FieldAPIKeyEncrypted:
 		v, ok := value.(string)
@@ -16331,6 +16382,9 @@ func (m *ChannelMonitorMutation) ResetField(name string) error {
 		return nil
 	case channelmonitor.FieldEndpoint:
 		m.ResetEndpoint()
+		return nil
+	case channelmonitor.FieldEndpointIsFullURL:
+		m.ResetEndpointIsFullURL()
 		return nil
 	case channelmonitor.FieldAPIKeyEncrypted:
 		m.ResetAPIKeyEncrypted()

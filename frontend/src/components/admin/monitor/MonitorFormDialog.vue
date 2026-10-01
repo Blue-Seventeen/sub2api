@@ -104,6 +104,20 @@
             {{ t('admin.channelMonitor.form.useCurrentDomain') }}
           </button>
         </div>
+        <div
+          data-testid="monitor-full-url-settings"
+          class="mt-3 rounded-lg border border-gray-200 bg-gray-50/70 px-3 py-3 dark:border-dark-700 dark:bg-dark-800/40"
+        >
+          <div class="flex items-center justify-between gap-4">
+            <label for="monitor-endpoint-full-url" class="text-sm font-medium text-gray-800 dark:text-gray-200">
+              {{ t('admin.channelMonitor.form.endpointFullURL') }}
+            </label>
+            <Toggle id="monitor-endpoint-full-url" v-model="form.endpoint_is_full_url" data-testid="monitor-endpoint-full-url" />
+          </div>
+          <p class="mt-1.5 pr-12 text-xs leading-5 text-gray-500 dark:text-gray-400">
+            {{ t('admin.channelMonitor.form.endpointFullURLHint') }}
+          </p>
+        </div>
       </div>
 
       <div v-if="usesProbePart">
@@ -325,6 +339,7 @@ interface MonitorForm {
   check_mode: CheckMode
   account_id: number | null
   endpoint: string
+  endpoint_is_full_url: boolean
   api_key: string
   primary_model: string
   extra_models: string[]
@@ -346,6 +361,7 @@ const form = reactive<MonitorForm>({
   check_mode: CHECK_MODE_PROBE,
   account_id: null,
   endpoint: '',
+  endpoint_is_full_url: false,
   api_key: '',
   primary_model: '',
   extra_models: [],
@@ -733,6 +749,7 @@ function resetForm() {
   pinnedAccount.value = null
   accountHydrationFailed.value = false
   form.endpoint = ''
+  form.endpoint_is_full_url = false
   form.api_key = ''
   form.primary_model = ''
   form.extra_models = []
@@ -755,6 +772,7 @@ function loadFromMonitor(m: ChannelMonitor) {
   form.check_mode = m.check_mode || CHECK_MODE_PROBE
   form.account_id = m.account_id ?? null
   form.endpoint = m.endpoint
+  form.endpoint_is_full_url = m.endpoint_is_full_url ?? false
   form.api_key = ''
   form.primary_model = m.primary_model
   form.extra_models = [...(m.extra_models || [])]
@@ -823,6 +841,7 @@ function buildPayload(): CreateParams {
     check_mode: form.check_mode,
     account_id: usesQuotaMode.value ? form.account_id : null,
     endpoint: usesProbePart.value ? form.endpoint.trim() : '',
+    endpoint_is_full_url: usesProbePart.value && form.endpoint_is_full_url,
     api_key: usesProbePart.value ? form.api_key.trim() : '',
     primary_model: usesProbePart.value ? form.primary_model.trim() : 'quota',
     extra_models: usesProbePart.value ? form.extra_models : [],

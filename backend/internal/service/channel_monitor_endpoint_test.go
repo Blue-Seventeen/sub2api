@@ -94,3 +94,22 @@ func TestCallProvider_BasePath(t *testing.T) {
 		})
 	}
 }
+
+func TestCallProvider_FullURLUsesEndpointWithoutAppendingProviderPath(t *testing.T) {
+	swapMonitorHTTPClient(t)
+	requests := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r.RequestURI
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}]}`))
+	}))
+	t.Cleanup(server.Close)
+
+	fullURL := server.URL + "/api/paas/v4/chat/completions"
+	_, _, status, err := callProvider(context.Background(), MonitorProviderZhipu,
+		fullURL, "test-key", "glm-4.5", "hello", &CheckOptions{EndpointIsFullURL: true})
+
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, "/api/paas/v4/chat/completions", <-requests)
+}

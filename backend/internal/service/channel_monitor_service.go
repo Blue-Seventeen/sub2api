@@ -164,24 +164,25 @@ func (s *ChannelMonitorService) Create(ctx context.Context, p ChannelMonitorCrea
 		return nil, fmt.Errorf("encrypt api key: %w", err)
 	}
 	m := &ChannelMonitor{
-		Name:             strings.TrimSpace(p.Name),
-		Provider:         p.Provider,
-		APIMode:          defaultAPIMode(p.APIMode),
-		Endpoint:         normalizeEndpoint(p.Endpoint),
-		APIKey:           encrypted, // 注意：传入 repository 时该字段为密文
-		PrimaryModel:     normalizeMonitorPrimaryModel(p.Provider, checkMode, p.PrimaryModel),
-		ExtraModels:      normalizeModels(p.ExtraModels),
-		GroupName:        strings.TrimSpace(p.GroupName),
-		Enabled:          p.Enabled,
-		IntervalSeconds:  p.IntervalSeconds,
-		JitterSeconds:    p.JitterSeconds,
-		CreatedBy:        p.CreatedBy,
-		TemplateID:       p.TemplateID,
-		ExtraHeaders:     emptyHeadersIfNil(p.ExtraHeaders),
-		BodyOverrideMode: defaultBodyMode(p.BodyOverrideMode),
-		BodyOverride:     p.BodyOverride,
-		CheckMode:        checkMode,
-		AccountID:        cloneInt64Pointer(p.AccountID),
+		Name:              strings.TrimSpace(p.Name),
+		Provider:          p.Provider,
+		APIMode:           defaultAPIMode(p.APIMode),
+		Endpoint:          normalizeEndpoint(p.Endpoint),
+		EndpointIsFullURL: p.EndpointIsFullURL,
+		APIKey:            encrypted, // 注意：传入 repository 时该字段为密文
+		PrimaryModel:      normalizeMonitorPrimaryModel(p.Provider, checkMode, p.PrimaryModel),
+		ExtraModels:       normalizeModels(p.ExtraModels),
+		GroupName:         strings.TrimSpace(p.GroupName),
+		Enabled:           p.Enabled,
+		IntervalSeconds:   p.IntervalSeconds,
+		JitterSeconds:     p.JitterSeconds,
+		CreatedBy:         p.CreatedBy,
+		TemplateID:        p.TemplateID,
+		ExtraHeaders:      emptyHeadersIfNil(p.ExtraHeaders),
+		BodyOverrideMode:  defaultBodyMode(p.BodyOverrideMode),
+		BodyOverride:      p.BodyOverride,
+		CheckMode:         checkMode,
+		AccountID:         cloneInt64Pointer(p.AccountID),
 	}
 	if err := s.repo.Create(ctx, m); err != nil {
 		return nil, fmt.Errorf("create channel monitor: %w", err)
@@ -235,6 +236,7 @@ func (s *ChannelMonitorService) Duplicate(
 		Provider:             source.Provider,
 		APIMode:              source.APIMode,
 		Endpoint:             source.Endpoint,
+		EndpointIsFullURL:    source.EndpointIsFullURL,
 		APIKey:               encryptedAPIKey,
 		PrimaryModel:         source.PrimaryModel,
 		ExtraModels:          append([]string{}, source.ExtraModels...),
@@ -704,10 +706,11 @@ func (s *ChannelMonitorService) runChecksConcurrent(ctx context.Context, m *Chan
 
 	// 所有模型共用同一份 CheckOptions（来自监控的快照字段）。
 	opts := &CheckOptions{
-		APIMode:          m.APIMode,
-		ExtraHeaders:     m.ExtraHeaders,
-		BodyOverrideMode: m.BodyOverrideMode,
-		BodyOverride:     m.BodyOverride,
+		APIMode:           m.APIMode,
+		EndpointIsFullURL: m.EndpointIsFullURL,
+		ExtraHeaders:      m.ExtraHeaders,
+		BodyOverrideMode:  m.BodyOverrideMode,
+		BodyOverride:      m.BodyOverride,
 	}
 
 	var eg errgroup.Group
@@ -923,6 +926,9 @@ func applyMonitorUpdate(existing *ChannelMonitor, p ChannelMonitorUpdateParams) 
 			}
 		}
 		existing.Endpoint = normalizeEndpoint(*p.Endpoint)
+	}
+	if p.EndpointIsFullURL != nil {
+		existing.EndpointIsFullURL = *p.EndpointIsFullURL
 	}
 	// 模式与字段的组合校验（provider/check_mode/account_id/endpoint 全部应用后）。
 	if err := validateMonitorModeFields(existing); err != nil {

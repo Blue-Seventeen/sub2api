@@ -212,7 +212,7 @@ const ICON: Record<Platform, string> = {
   deepseek: 'text-teal-500 dark:text-teal-400',
   volcengine: 'text-rose-500 dark:text-rose-400',
   ali: 'text-amber-500 dark:text-amber-400',
-  moonshot: 'text-fuchsia-500 dark:text-fuchsia-400',
+  moonshot: 'text-pink-500 dark:text-pink-400',
   perplexity: 'text-sky-500 dark:text-sky-400',
   mistral: 'text-violet-500 dark:text-violet-400',
   siliconflow: 'text-teal-500 dark:text-teal-400',

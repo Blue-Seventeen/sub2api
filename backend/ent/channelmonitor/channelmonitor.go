@@ -31,6 +31,8 @@ const (
 	FieldAPIMode = "api_mode"
 	// FieldEndpoint holds the string denoting the endpoint field in the database.
 	FieldEndpoint = "endpoint"
+	// FieldEndpointIsFullURL holds the string denoting the endpoint_is_full_url field in the database.
+	FieldEndpointIsFullURL = "endpoint_is_full_url"
 	// FieldAPIKeyEncrypted holds the string denoting the api_key_encrypted field in the database.
 	FieldAPIKeyEncrypted = "api_key_encrypted"
 	// FieldPrimaryModel holds the string denoting the primary_model field in the database.
@@ -99,6 +101,7 @@ var Columns = []string{
 	FieldAccountID,
 	FieldAPIMode,
 	FieldEndpoint,
+	FieldEndpointIsFullURL,
 	FieldAPIKeyEncrypted,
 	FieldPrimaryModel,
 	FieldExtraModels,
@@ -143,6 +146,8 @@ var (
 	APIModeValidator func(string) error
 	// EndpointValidator is a validator for the "endpoint" field. It is called by the builders before save.
 	EndpointValidator func(string) error
+	// DefaultEndpointIsFullURL holds the default value on creation for the "endpoint_is_full_url" field.
+	DefaultEndpointIsFullURL bool
 	// APIKeyEncryptedValidator is a validator for the "api_key_encrypted" field. It is called by the builders before save.
 	APIKeyEncryptedValidator func(string) error
 	// PrimaryModelValidator is a validator for the "primary_model" field. It is called by the builders before save.
@@ -246,6 +251,11 @@ func ByAPIMode(opts ...sql.OrderTermOption) OrderOption {
 // ByEndpoint orders the results by the endpoint field.
 func ByEndpoint(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldEndpoint, opts...).ToFunc()
+}
+
+// ByEndpointIsFullURL orders the results by the endpoint_is_full_url field.
+func ByEndpointIsFullURL(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldEndpointIsFullURL, opts...).ToFunc()
 }
 
 // ByAPIKeyEncrypted orders the results by the api_key_encrypted field.

@@ -43,6 +43,8 @@ func newSSRFSafeHTTPClient(timeout time.Duration) *http.Client {
 type CheckOptions struct {
 	// APIMode 仅对 OpenAI provider 生效；空串等同 chat_completions。
 	APIMode string
+	// EndpointIsFullURL disables provider path joining and uses endpoint verbatim.
+	EndpointIsFullURL bool
 	// ExtraHeaders 用户自定义 HTTP 头（merge 到 adapter 默认 headers，用户优先）。
 	ExtraHeaders map[string]string
 	// BodyOverrideMode: off | merge | replace
@@ -297,7 +299,10 @@ func callProvider(ctx context.Context, provider, endpoint, apiKey, model, prompt
 		return "", "", 0, err
 	}
 	headers := mergeHeaders(adapter.buildHeaders(apiKey), opts)
-	full := joinURL(endpoint, adapter.buildPath(model))
+	full := endpoint
+	if opts == nil || !opts.EndpointIsFullURL {
+		full = joinURL(endpoint, adapter.buildPath(model))
+	}
 	respBytes, status, err := postRawJSON(ctx, full, body, headers)
 	if err != nil {
 		return "", "", status, err

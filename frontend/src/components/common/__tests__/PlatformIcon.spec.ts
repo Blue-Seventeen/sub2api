@@ -7,6 +7,7 @@ describe('PlatformIcon', () => {
   it('renders the official marks for upstream-added platforms', () => {
     const officialMarks = [
       ['kimi', 'M21.765'],
+      ['moonshot', 'M21.765'],
       ['zhipu', 'M11.991'],
       ['deepseek', 'M23.748'],
       ['minimax', 'M16.278'],
@@ -30,6 +31,7 @@ describe('PlatformIcon', () => {
     ['grok', 'text-zinc-800'],
     ['antigravity', 'text-purple-500'],
     ['kimi', 'text-pink-500'],
+    ['moonshot', 'text-pink-500'],
     ['zhipu', 'text-indigo-500'],
     ['deepseek', 'text-teal-500'],
     ['minimax', 'text-rose-500'],

@@ -61,6 +61,9 @@ func (ChannelMonitor) Fields() []ent.Field {
 		field.String("endpoint").
 			MaxLen(500).
 			Comment("Provider base origin, e.g. https://api.openai.com; empty for quota-only monitors"),
+		field.Bool("endpoint_is_full_url").
+			Default(false).
+			Comment("When true, endpoint is the exact probe URL and provider path is not appended"),
 		field.String("api_key_encrypted").
 			NotEmpty().
 			Sensitive().

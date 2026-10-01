@@ -90,6 +90,11 @@ func Endpoint(v string) predicate.ChannelMonitor {
 	return predicate.ChannelMonitor(sql.FieldEQ(FieldEndpoint, v))
 }
 
+// EndpointIsFullURL applies equality check predicate on the "endpoint_is_full_url" field. It's identical to EndpointIsFullURLEQ.
+func EndpointIsFullURL(v bool) predicate.ChannelMonitor {
+	return predicate.ChannelMonitor(sql.FieldEQ(FieldEndpointIsFullURL, v))
+}
+
 // APIKeyEncrypted applies equality check predicate on the "api_key_encrypted" field. It's identical to APIKeyEncryptedEQ.
 func APIKeyEncrypted(v string) predicate.ChannelMonitor {
 	return predicate.ChannelMonitor(sql.FieldEQ(FieldAPIKeyEncrypted, v))
@@ -548,6 +553,16 @@ func EndpointEqualFold(v string) predicate.ChannelMonitor {
 // EndpointContainsFold applies the ContainsFold predicate on the "endpoint" field.
 func EndpointContainsFold(v string) predicate.ChannelMonitor {
 	return predicate.ChannelMonitor(sql.FieldContainsFold(FieldEndpoint, v))
+}
+
+// EndpointIsFullURLEQ applies the EQ predicate on the "endpoint_is_full_url" field.
+func EndpointIsFullURLEQ(v bool) predicate.ChannelMonitor {
+	return predicate.ChannelMonitor(sql.FieldEQ(FieldEndpointIsFullURL, v))
+}
+
+// EndpointIsFullURLNEQ applies the NEQ predicate on the "endpoint_is_full_url" field.
+func EndpointIsFullURLNEQ(v bool) predicate.ChannelMonitor {
+	return predicate.ChannelMonitor(sql.FieldNEQ(FieldEndpointIsFullURL, v))
 }
 
 // APIKeyEncryptedEQ applies the EQ predicate on the "api_key_encrypted" field.

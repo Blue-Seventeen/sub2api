@@ -135,6 +135,20 @@ func (_u *ChannelMonitorUpdate) SetNillableEndpoint(v *string) *ChannelMonitorUp
 	return _u
 }
 
+// SetEndpointIsFullURL sets the "endpoint_is_full_url" field.
+func (_u *ChannelMonitorUpdate) SetEndpointIsFullURL(v bool) *ChannelMonitorUpdate {
+	_u.mutation.SetEndpointIsFullURL(v)
+	return _u
+}
+
+// SetNillableEndpointIsFullURL sets the "endpoint_is_full_url" field if the given value is not nil.
+func (_u *ChannelMonitorUpdate) SetNillableEndpointIsFullURL(v *bool) *ChannelMonitorUpdate {
+	if v != nil {
+		_u.SetEndpointIsFullURL(*v)
+	}
+	return _u
+}
+
 // SetAPIKeyEncrypted sets the "api_key_encrypted" field.
 func (_u *ChannelMonitorUpdate) SetAPIKeyEncrypted(v string) *ChannelMonitorUpdate {
 	_u.mutation.SetAPIKeyEncrypted(v)
@@ -581,6 +595,9 @@ func (_u *ChannelMonitorUpdate) sqlSave(ctx context.Context) (_node int, err err
 	if value, ok := _u.mutation.Endpoint(); ok {
 		_spec.SetField(channelmonitor.FieldEndpoint, field.TypeString, value)
 	}
+	if value, ok := _u.mutation.EndpointIsFullURL(); ok {
+		_spec.SetField(channelmonitor.FieldEndpointIsFullURL, field.TypeBool, value)
+	}
 	if value, ok := _u.mutation.APIKeyEncrypted(); ok {
 		_spec.SetField(channelmonitor.FieldAPIKeyEncrypted, field.TypeString, value)
 	}
@@ -878,6 +895,20 @@ func (_u *ChannelMonitorUpdateOne) SetEndpoint(v string) *ChannelMonitorUpdateOn
 func (_u *ChannelMonitorUpdateOne) SetNillableEndpoint(v *string) *ChannelMonitorUpdateOne {
 	if v != nil {
 		_u.SetEndpoint(*v)
+	}
+	return _u
+}
+
+// SetEndpointIsFullURL sets the "endpoint_is_full_url" field.
+func (_u *ChannelMonitorUpdateOne) SetEndpointIsFullURL(v bool) *ChannelMonitorUpdateOne {
+	_u.mutation.SetEndpointIsFullURL(v)
+	return _u
+}
+
+// SetNillableEndpointIsFullURL sets the "endpoint_is_full_url" field if the given value is not nil.
+func (_u *ChannelMonitorUpdateOne) SetNillableEndpointIsFullURL(v *bool) *ChannelMonitorUpdateOne {
+	if v != nil {
+		_u.SetEndpointIsFullURL(*v)
 	}
 	return _u
 }
@@ -1357,6 +1388,9 @@ func (_u *ChannelMonitorUpdateOne) sqlSave(ctx context.Context) (_node *ChannelM
 	}
 	if value, ok := _u.mutation.Endpoint(); ok {
 		_spec.SetField(channelmonitor.FieldEndpoint, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.EndpointIsFullURL(); ok {
+		_spec.SetField(channelmonitor.FieldEndpointIsFullURL, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.APIKeyEncrypted(); ok {
 		_spec.SetField(channelmonitor.FieldAPIKeyEncrypted, field.TypeString, value)
