@@ -136,3 +136,39 @@ func TestForwardResponses_FailedChatFallbackIncludesTerminalUsage(t *testing.T) 
 	require.False(t, errors.As(err, &failoverErr))
 	require.NotContains(t, rec.Body.String(), "response.completed")
 }
+
+func TestChatFallback_BillableTerminalErrorWithoutNativeUsageDoesNotReplay(t *testing.T) {
+	for _, mode := range []string{"auto", "force_chat", "messages_force_chat"} {
+		t.Run(mode, func(t *testing.T) {
+			body := []byte(`{"model":"gpt-5.4","input":"hello","stream":true}`)
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+			upstream := &httpUpstreamRecorder{}
+			account := forceChatResponsesFallbackAccount()
+			if mode == "auto" {
+				account = rawChatCompletionsTestAccount()
+				account.Extra = map[string]any{openai_compat.ExtraKeyResponsesSupported: true}
+				upstream.responses = append(upstream.responses, &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"server_error\",\"message\":\"temporary failure\"}}}\n\n"))})
+			}
+			upstream.responses = append(upstream.responses, &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.failed\",\"response\":{\"usage\":{\"input_tokens\":7,\"output_tokens\":2},\"error\":{\"code\":\"server_error\",\"message\":\"temporary failure\"}}}\n\n"))})
+			svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+			var result *OpenAIForwardResult
+			var err error
+			if mode == "messages_force_chat" {
+				body = []byte(`{"model":"gpt-5.4","stream":true,"max_tokens":64,"messages":[{"role":"user","content":"hello"}]}`)
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+				result, err = svc.ForwardAsAnthropic(context.Background(), c, forceChatMessagesFallbackAccount(), body, "", "")
+			} else {
+				result, err = svc.Forward(context.Background(), c, account, body)
+			}
+			require.Error(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, 7, result.Usage.InputTokens)
+			require.Equal(t, 2, result.Usage.OutputTokens)
+			var failoverErr *UpstreamFailoverError
+			require.False(t, errors.As(err, &failoverErr), "confirmed usage must not be discarded by account replay")
+			require.NotContains(t, rec.Body.String(), "response.completed")
+		})
+	}
+}

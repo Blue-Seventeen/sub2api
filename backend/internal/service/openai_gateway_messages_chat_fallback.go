@@ -253,7 +253,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 	if len(scan.ErrorPayload) > 0 {
 		message := extractOpenAISSEErrorMessage(scan.ErrorPayload)
 		status, passthroughType, passthroughMessage, matched := applyOpenAIStreamFailedErrorPassthroughRule(c, account.Platform, scan.ErrorPayload, message)
-		if !matched && !clientOutputStarted && openAIStreamErrorEventShouldFailover(scan.ErrorPayload, message) {
+		if !matched && !clientOutputStarted && !openAIUsageHasTokens(&usage) && openAIStreamErrorEventShouldFailover(scan.ErrorPayload, message) {
 			return &OpenAIForwardResult{
 				RequestID:                   requestID,
 				UpstreamHeaders:             resp.Header,

@@ -27,6 +27,7 @@ type responsesPartialUsageUpstream struct {
 	chatBody   string
 	wantInput  int
 	wantOutput int
+	forceChat  bool
 	paths      []string
 }
 
@@ -64,6 +65,21 @@ func TestOpenAIResponses_ChatFallbackPartialUsageRecordedOnce(t *testing.T) {
 		t.Run(body, func(t *testing.T) {
 			assertResponsesPartialUsageRecordedOnce(t, &responsesPartialUsageUpstream{chatBody: body, wantInput: 12, wantOutput: 3},
 				`{"model":"gpt-5.4","input":"hello","stream":true}`, false, []string{"/v1/responses", "/v1/chat/completions"})
+		})
+	}
+	for _, forceChat := range []bool{false, true} {
+		name := "auto_zero_native_usage"
+		paths := []string{"/v1/responses", "/v1/chat/completions"}
+		if forceChat {
+			name = "force_chat"
+			paths = paths[1:]
+		}
+		t.Run(name, func(t *testing.T) {
+			assertResponsesPartialUsageRecordedOnce(t, &responsesPartialUsageUpstream{
+				forceChat: forceChat, wantInput: 7, wantOutput: 2,
+				nativeBody: "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"server_error\",\"message\":\"temporary failure\"}}}\n\n",
+				chatBody:   "data: {\"type\":\"response.failed\",\"response\":{\"usage\":{\"input_tokens\":7,\"output_tokens\":2},\"error\":{\"code\":\"server_error\",\"message\":\"temporary failure\"}}}\n\n",
+			}, `{"model":"gpt-5.4","input":"hello","stream":true}`, false, paths)
 		})
 	}
 }
@@ -122,6 +138,11 @@ func assertResponsesPartialUsageRecordedOnce(t *testing.T, upstream *responsesPa
 	if forceResponses {
 		for i := range accounts {
 			accounts[i].Extra[openai_compat.ExtraKeyResponsesMode] = string(openai_compat.ResponsesSupportModeForceResponses)
+		}
+	}
+	if upstream.forceChat {
+		for i := range accounts {
+			accounts[i].Extra[openai_compat.ExtraKeyResponsesMode] = string(openai_compat.ResponsesSupportModeForceChatCompletions)
 		}
 	}
 	users := &grokMediaBillingUserRepo{user: key.User}

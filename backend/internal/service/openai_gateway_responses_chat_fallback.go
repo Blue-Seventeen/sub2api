@@ -237,7 +237,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 
 	if len(scan.ErrorPayload) > 0 {
 		// Resolve custom rules before failover, and never finalize/cache errors.
-		terminalErr := s.handleCCUpstreamErrorPayload(c, resp, account, scan.ErrorPayload, !c.Writer.Written() && !clientDisconnected,
+		terminalErr := s.handleCCUpstreamErrorPayload(c, resp, account, scan.ErrorPayload, !c.Writer.Written() && !clientDisconnected && !openAIUsageHasTokens(&scan.Usage),
 			func(c *gin.Context, status int, errType, message string) {
 				if clientDisconnected {
 					return
