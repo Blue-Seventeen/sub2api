@@ -145,6 +145,23 @@ func (s *GatewayService) forwardBedrock(
 	if reqStream {
 		streamResult, err := s.handleBedrockStreamingResponse(ctx, resp, c, account, startTime, reqModel)
 		if err != nil {
+			if streamResult != nil && streamResult.usage != nil && streamResult.usage.hasObservedTokens() {
+				partialUsage := ClaudeUsage{}
+				if streamResult.usage != nil {
+					partialUsage = *streamResult.usage
+				}
+				return &ForwardResult{
+					RequestID:        resp.Header.Get("x-amzn-requestid"),
+					UpstreamHeaders:  resp.Header,
+					Usage:            partialUsage,
+					Model:            reqModel,
+					UpstreamModel:    mappedModel,
+					Stream:           reqStream,
+					Duration:         time.Since(startTime),
+					FirstTokenMs:     streamResult.firstTokenMs,
+					ClientDisconnect: streamResult.clientDisconnect,
+				}, err
+			}
 			return nil, err
 		}
 		usage = streamResult.usage

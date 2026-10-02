@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -551,6 +552,86 @@ func TestAntigravityCompatEmptyStreamTriggersFailover(t *testing.T) {
 	}
 }
 
+func TestAntigravityCompatStreamIncompletePreservesUsage(t *testing.T) {
+	for _, protocol := range []string{"chat", "responses"} {
+		for _, readErr := range []error{nil, io.ErrUnexpectedEOF} {
+			t.Run(fmt.Sprintf("%s/error=%v", protocol, readErr), func(t *testing.T) {
+				svc := newAntigravityCompatService(config.GatewayConfig{MaxLineSize: defaultMaxLineSize}, nil)
+				c, recorder := newAntigravityCompatContext(http.MethodPost, "/", nil)
+				body := `data: {"response":{"candidates":[{"content":{"parts":[{"text":"partial"}]}}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":3}}}` + "\n\n"
+				var reader io.ReadCloser = io.NopCloser(strings.NewReader(body))
+				if readErr != nil {
+					reader = &antigravityCompatErrorReader{data: []byte(body), err: readErr}
+				}
+				resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: reader}
+				var adapter antigravityCompatStreamAdapter = newAntigravityResponsesStreamAdapter("gemini-3.1-pro-high")
+				if protocol == "chat" {
+					adapter = newAntigravityChatStreamAdapter("gemini-3.1-pro-high", true)
+				}
+				result, err := svc.handleAntigravityCompatStream(c, resp, time.Now(), "gemini-3.1-pro-high", adapter, "test")
+
+				require.Error(t, err)
+				if readErr == nil {
+					require.EqualError(t, err, "stream usage incomplete: missing terminal event")
+				} else {
+					require.ErrorIs(t, err, readErr)
+				}
+				require.NotNil(t, result)
+				require.Equal(t, 8, result.usage.InputTokens)
+				require.Equal(t, 3, result.usage.OutputTokens)
+				require.Contains(t, recorder.Body.String(), "partial")
+				require.Contains(t, recorder.Body.String(), `"upstream_error"`)
+				require.NotContains(t, recorder.Body.String(), "response.completed")
+				require.NotContains(t, recorder.Body.String(), "data: [DONE]")
+			})
+		}
+	}
+}
+
+func TestAntigravityCompatStreamTerminalCompletes(t *testing.T) {
+	for _, protocol := range []string{"chat", "responses"} {
+		for _, terminal := range []string{"STOP", "[DONE]", "prompt block", "empty STOP"} {
+			for _, readErr := range []error{nil, io.ErrUnexpectedEOF} {
+				t.Run(fmt.Sprintf("%s/%s/error=%v", protocol, terminal, readErr), func(t *testing.T) {
+					svc := newAntigravityCompatService(config.GatewayConfig{MaxLineSize: defaultMaxLineSize}, nil)
+					c, recorder := newAntigravityCompatContext(http.MethodPost, "/", nil)
+					body := `data: {"response":{"candidates":[{"content":{"parts":[{"text":"answer"}]}}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":3}}}` + "\n\n"
+					switch terminal {
+					case "[DONE]":
+						body += "data: [DONE]\n\n"
+					case "prompt block":
+						body = `data: {"response":{"promptFeedback":{"blockReason":"SAFETY"},"usageMetadata":{"promptTokenCount":8}}}` + "\n\n"
+					case "empty STOP":
+						body = `data: {"response":{"candidates":[{"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":8}}}` + "\n\n"
+					default:
+						body += `data: {"response":{"candidates":[{"finishReason":"STOP"}]}}` + "\n\n"
+					}
+					var reader io.ReadCloser = io.NopCloser(strings.NewReader(body))
+					if readErr != nil {
+						reader = &antigravityCompatErrorReader{data: []byte(body), err: readErr}
+					}
+					resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: reader}
+					var adapter antigravityCompatStreamAdapter = newAntigravityResponsesStreamAdapter("gemini-3.1-pro-high")
+					if protocol == "chat" {
+						adapter = newAntigravityChatStreamAdapter("gemini-3.1-pro-high", true)
+					}
+					result, err := svc.handleAntigravityCompatStream(c, resp, time.Now(), "gemini-3.1-pro-high", adapter, "test")
+
+					require.NoError(t, err)
+					require.NotNil(t, result)
+					require.Equal(t, 8, result.usage.InputTokens)
+					require.NotContains(t, recorder.Body.String(), `"upstream_error"`)
+					if protocol == "chat" {
+						require.Equal(t, 1, strings.Count(recorder.Body.String(), "data: [DONE]"))
+					} else {
+						require.Contains(t, recorder.Body.String(), "response.completed")
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestAntigravityCompatUsageOnlyStreamTriggersFailover(t *testing.T) {
 
 	tests := []struct {
@@ -755,7 +836,9 @@ func TestAntigravityCompatStreamErrorCommitsSingleTerminalFrame(t *testing.T) {
 	result, err := svc.handleResponsesStreamingFromAntigravity(c, resp, time.Now(), "gemini-3.1-pro-high")
 
 	require.Error(t, err)
-	require.Nil(t, result)
+	require.NotNil(t, result)
+	require.Equal(t, 8, result.usage.InputTokens)
+	require.Equal(t, 1, result.usage.OutputTokens)
 	require.True(t, IsResponseCommitted(c))
 	require.Equal(t, 1, strings.Count(recorder.Body.String(), "event: error"))
 }
@@ -780,6 +863,8 @@ func TestAntigravityCompatKeepaliveAfterFirstEvent(t *testing.T) {
 	)
 	require.NoError(t, err)
 	time.Sleep(1200 * time.Millisecond)
+	_, err = io.WriteString(writer, `data: {"response":{"candidates":[{"finishReason":"STOP"}]}}`+"\n\n")
+	require.NoError(t, err)
 	require.NoError(t, writer.Close())
 	require.NoError(t, <-done)
 	require.Contains(t, recorder.Body.String(), ": ping\n\n")

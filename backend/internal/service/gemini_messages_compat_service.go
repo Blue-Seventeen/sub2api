@@ -1100,7 +1100,15 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 	if req.Stream {
 		streamRes, err := s.handleStreamingResponse(c, resp, startTime, originalModel)
 		if err != nil {
-			return nil, err
+			var partialResult *ForwardResult
+			if streamRes != nil {
+				partialResult = partialStreamUsageResult(c, resp, &streamingResult{usage: streamRes.usage, firstTokenMs: streamRes.firstTokenMs}, originalModel, mappedModel, startTime, err)
+				if partialResult != nil {
+					partialResult.RequestID = requestID
+					partialResult.UpstreamHeaders = resp.Header
+				}
+			}
+			return partialResult, err
 		}
 		usage = streamRes.usage
 		firstTokenMs = streamRes.firstTokenMs
@@ -2144,6 +2152,8 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 	var firstTokenMs *int
 	var usage ClaudeUsage
 	finishReason := ""
+	sawDone := false
+	promptBlocked := false
 	sawToolUse := false
 
 	nextBlockIndex := 0
@@ -2159,7 +2169,7 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil && !errors.Is(err, io.EOF) {
-			return nil, fmt.Errorf("stream read error: %w", err)
+			return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, fmt.Errorf("stream read error: %w", err)
 		}
 
 		if !strings.HasPrefix(line, "data:") {
@@ -2169,6 +2179,9 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 			continue
 		}
 		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "[DONE]" {
+			sawDone = true
+		}
 		if payload == "" || payload == "[DONE]" {
 			if errors.Is(err, io.EOF) {
 				break
@@ -2179,6 +2192,9 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 		unwrappedBytes, err := unwrapGeminiResponse([]byte(payload))
 		if err != nil {
 			continue
+		}
+		if geminiResponsePromptBlocked(unwrappedBytes) {
+			promptBlocked = true
 		}
 		observer := upstreamResponseModelObserverFromContext(c)
 		if observer == nil {
@@ -2342,6 +2358,10 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 		if errors.Is(err, io.EOF) {
 			break
 		}
+	}
+
+	if strings.TrimSpace(finishReason) == "" && !sawDone && !promptBlocked {
+		return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, fmt.Errorf("stream usage incomplete: missing terminal event")
 	}
 
 	if openBlockIndex >= 0 {

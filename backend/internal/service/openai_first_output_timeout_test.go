@@ -79,6 +79,8 @@ func TestOpenAIForwardFirstOutputTimeoutIncludesResponseHeaderWait(t *testing.T)
 	require.Equal(t, http.StatusGatewayTimeout, failoverErr.StatusCode)
 	require.Contains(t, string(failoverErr.ResponseBody), "first_output_timeout")
 	require.True(t, failoverErr.SafeToFailoverAfterWrite)
+	require.False(t, failoverErr.PreSemanticOutput, "a response-header timeout must not replay the request through Chat")
+	require.False(t, failoverErr.ResponsesChatFallbackEligible, "a response-header timeout must not replay the request through Chat")
 	require.Less(t, time.Since(started), 1300*time.Millisecond)
 	require.Empty(t, rec.Body.String())
 	select {
@@ -138,6 +140,8 @@ func TestOpenAINativeFirstOutputTimeoutIgnoresPreambleAndCleansReader(t *testing
 	require.Equal(t, http.StatusGatewayTimeout, failoverErr.StatusCode)
 	require.Contains(t, string(failoverErr.ResponseBody), "first_output_timeout")
 	require.True(t, failoverErr.SafeToFailoverAfterWrite)
+	require.True(t, failoverErr.PreSemanticOutput, "a semantic-output timeout may use the pre-semantic Responses fallback")
+	require.True(t, failoverErr.ResponsesChatFallbackEligible, "a semantic-output timeout may use the pre-semantic Responses fallback")
 	require.Empty(t, rec.Body.String())
 	select {
 	case <-body.closed:

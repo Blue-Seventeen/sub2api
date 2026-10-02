@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -115,6 +117,112 @@ func TestGeminiForwardAsChatCompletions_OAuthRoutesToGeminiAndReturnsChatFormat(
 	require.Equal(t, float64(7), usage["prompt_tokens"])
 	require.Equal(t, float64(3), usage["completion_tokens"])
 	require.Equal(t, float64(10), usage["total_tokens"])
+}
+
+func TestGeminiMessagesCompatStream_IncompletePreservesUsage(t *testing.T) {
+	const partial = `data: {"candidates":[{"content":{"parts":[{"text":"partial"}]}}],"usageMetadata":{"promptTokenCount":10,"cachedContentTokenCount":2,"candidatesTokenCount":4,"thoughtsTokenCount":2}}`
+	for _, readErr := range []error{nil, errors.New("upstream read failed")} {
+		name := "eof"
+		if readErr != nil {
+			name = "read error"
+		}
+		t.Run(name, func(t *testing.T) {
+			reader := io.Reader(strings.NewReader(partial + "\n\n"))
+			if readErr != nil {
+				reader = io.MultiReader(reader, iotest.ErrReader(readErr))
+			}
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(reader)}
+			result, err := (&GeminiMessagesCompatService{}).handleStreamingResponse(c, resp, time.Now(), "gemini-test")
+
+			require.Error(t, err)
+			if readErr == nil {
+				require.EqualError(t, err, "stream usage incomplete: missing terminal event")
+			} else {
+				require.ErrorIs(t, err, readErr)
+			}
+			require.NotNil(t, result)
+			require.Equal(t, 8, result.usage.InputTokens)
+			require.Equal(t, 6, result.usage.OutputTokens)
+			require.Equal(t, 2, result.usage.CacheReadInputTokens)
+			require.Contains(t, rec.Body.String(), "partial")
+			require.NotContains(t, rec.Body.String(), "event: message_stop")
+			require.NotContains(t, rec.Body.String(), `"stop_reason":"end_turn"`)
+		})
+	}
+}
+
+func TestGeminiMessagesCompatForward_IncompletePreservesUsage(t *testing.T) {
+	httpStub := &geminiCompatHTTPUpstreamStub{response: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"X-Goog-Request-Id": []string{"gemini-partial"}},
+		Body:       io.NopCloser(strings.NewReader(`data: {"modelVersion":"gemini-upstream","candidates":[{"content":{"parts":[{"text":"partial"}]}}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":4}}` + "\n\n")),
+	}}
+	svc := &GeminiMessagesCompatService{httpUpstream: httpStub, cfg: &config.Config{}}
+	account := &Account{ID: 1, Platform: PlatformGemini, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test-key"}}
+	body := []byte(`{"model":"gemini-2.5-flash","stream":true,"max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+
+	result, err := svc.Forward(context.Background(), c, account, body)
+
+	require.EqualError(t, err, "stream usage incomplete: missing terminal event")
+	require.NotNil(t, result)
+	require.Equal(t, 10, result.Usage.InputTokens)
+	require.Equal(t, 4, result.Usage.OutputTokens)
+	require.Equal(t, "gemini-partial", result.RequestID)
+	require.Equal(t, "gemini-2.5-flash", result.Model)
+	require.Equal(t, "gemini-2.5-flash", result.UpstreamModel)
+	require.Equal(t, "gemini-upstream", result.UpstreamResponseModel)
+	require.False(t, result.SkipUsageBilling)
+	require.NotContains(t, rec.Body.String(), "event: message_stop")
+}
+
+func TestGeminiMessagesCompatStream_TerminalCompletes(t *testing.T) {
+	for _, terminal := range []string{"STOP", "MAX_TOKENS", "SAFETY", "[DONE]"} {
+		t.Run(terminal, func(t *testing.T) {
+			body := `data: {"candidates":[{"content":{"parts":[{"text":"answer"}]}}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":4}}` + "\n\n"
+			if terminal == "[DONE]" {
+				body += "data: [DONE]"
+			} else {
+				body += `data: {"candidates":[{"finishReason":"` + terminal + `"}]}`
+			}
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body))}
+			result, err := (&GeminiMessagesCompatService{}).handleStreamingResponse(c, resp, time.Now(), "gemini-test")
+
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, 4, result.usage.OutputTokens)
+			require.Contains(t, rec.Body.String(), "event: message_stop")
+		})
+	}
+}
+
+func TestGeminiMessagesCompatStream_PromptBlockedCompletes(t *testing.T) {
+	for _, wrapped := range []bool{false, true} {
+		t.Run(fmt.Sprintf("wrapped=%t", wrapped), func(t *testing.T) {
+			payload := `{"promptFeedback":{"blockReason":"SAFETY"},"usageMetadata":{"promptTokenCount":10}}`
+			if wrapped {
+				payload = `{"response":` + payload + `}`
+			}
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("data: " + payload + "\n\n"))}
+			result, err := (&GeminiMessagesCompatService{}).handleStreamingResponse(c, resp, time.Now(), "gemini-test")
+
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, 10, result.usage.InputTokens)
+			require.Contains(t, rec.Body.String(), "event: message_stop")
+		})
+	}
 }
 
 func TestGeminiForwardAsChatCompletions_StreamsOpenAIChunksFromGeminiSSE(t *testing.T) {

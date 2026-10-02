@@ -682,6 +682,49 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				}
 			}
 			// 转发层已写出错误响应；客户端断开时转发层不写，响应未提交则标记 499。
+			// 流已产生上游 usage 但在终态前中断时，Forward 会同时返回 partial
+			// result 和 error；错误响应不能阻止这部分已产生的 usage 入账。
+			if result != nil {
+				userAgent := c.GetHeader("User-Agent")
+				clientIP := ip.GetClientIP(c)
+				requestPayloadHash := service.HashUsageRequestPayload(body)
+				inboundEndpoint := GetInboundEndpoint(c)
+				upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
+				forceCacheBilling := fs.ForceCacheBilling
+				quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
+				sessionID := service.ExtractClientSessionID(c)
+				h.submitMandatoryUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
+					if err := h.gatewayService.RecordUsageWithLongContext(ctx, &service.RecordUsageLongContextInput{
+						Result:                result,
+						QuotaPlatform:         quotaPlatform,
+						APIKey:                apiKey,
+						User:                  apiKey.User,
+						Account:               account,
+						Subscription:          subscription,
+						PricingAt:             pricingAt,
+						InboundEndpoint:       inboundEndpoint,
+						UpstreamEndpoint:      upstreamEndpoint,
+						UserAgent:             userAgent,
+						IPAddress:             clientIP,
+						RequestPayloadHash:    requestPayloadHash,
+						LongContextThreshold:  200000,
+						LongContextMultiplier: 2.0,
+						ForceCacheBilling:     forceCacheBilling,
+						APIKeyService:         h.apiKeyService,
+						SessionID:             sessionID,
+						ChannelUsageFields:    clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel),
+					}); err != nil {
+						logger.L().With(
+							zap.String("component", "handler.gemini_v1beta.models"),
+							zap.Int64("user_id", authSubject.UserID),
+							zap.Int64("api_key_id", apiKey.ID),
+							zap.Any("group_id", apiKey.GroupID),
+							zap.String("model", modelName),
+							zap.Int64("account_id", account.ID),
+						).Error("gemini.record_usage_failed", zap.Error(err))
+					}
+				})
+			}
 			failoverClientGone(c)
 			reqLog.Error("gemini.forward_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 			return

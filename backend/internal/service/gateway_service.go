@@ -682,12 +682,19 @@ type UpstreamFailoverError struct {
 	RetryableOnSameAccount   bool        // 临时性错误（如 Google 间歇性 400、空响应），应在同一账号上重试 N 次再切换
 	RequestScopedTransient   bool        // 故障因素与账号无关（如上游按客户端身份/模型容量降载）：可同账号重试，但不得据此对账号做临时封禁
 	SafeToFailoverAfterWrite bool        // 仅写出 SSE 注释等非语义字节时，仍可在同一客户端流中切换账号
-	Stage                    GatewayFailureStage
-	Scope                    GatewayFailureScope
-	Reason                   GatewayFailureReason
-	NextAccountAction        NextAccountAction
-	ClientStatusCode         int
-	ClientMessage            string
+	// PreSemanticOutput reports that a native OpenAI Responses stream failed
+	// before any semantic event was committed to the client.
+	PreSemanticOutput bool
+	// ResponsesChatFallbackEligible marks a replay-safe Responses failure. It is
+	// deliberately narrower than PreSemanticOutput: transport failures and
+	// account-side terminal errors must never replay the request.
+	ResponsesChatFallbackEligible bool
+	Stage                         GatewayFailureStage
+	Scope                         GatewayFailureScope
+	Reason                        GatewayFailureReason
+	NextAccountAction             NextAccountAction
+	ClientStatusCode              int
+	ClientMessage                 string
 }
 
 func (e *UpstreamFailoverError) Error() string {

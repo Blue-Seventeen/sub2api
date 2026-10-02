@@ -486,7 +486,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			s.clearOpenAIProxyStreamDisconnect(account)
 		}
 		if !sawTerminalEvent && !firstOutputProgressObserved && !openAIStreamClientOutputStarted(c, clientOutputStarted) && !eventShouldFlush {
-			return resultWithUsage(), s.newOpenAIStreamFailoverError(
+			failoverErr := s.newOpenAIStreamFailoverError(
 				c,
 				account,
 				false,
@@ -494,6 +494,10 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				nil,
 				"OpenAI stream ended before a terminal event",
 			)
+			// This branch is a clean EOF, not an ambiguous body transport error
+			// or a local staging/scanner failure.
+			failoverErr.ResponsesChatFallbackEligible = failoverErr.PreSemanticOutput
+			return resultWithUsage(), failoverErr
 		}
 		flushPending("Client disconnected during final flush, returning collected usage")
 		if !sawTerminalEvent {

@@ -122,6 +122,17 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 		usage = streamRes.usage
 		firstTokenMs = streamRes.firstTokenMs
 		clientDisconnect = streamRes.clientDisconnect
+		if !streamRes.terminalEvent && !clientDisconnect {
+			return &ForwardResult{
+				Model:                         originalModel,
+				UpstreamResponseModel:         observedUpstreamResponseModel(c),
+				UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
+				Stream:                        true,
+				Duration:                      time.Since(startTime),
+				FirstTokenMs:                  firstTokenMs,
+				Usage:                         *usage,
+			}, fmt.Errorf("stream usage incomplete: missing terminal event")
+		}
 	} else {
 		// 非流式响应：直接透传
 		respBody, err := io.ReadAll(resp.Body)
@@ -169,6 +180,7 @@ func (s *AntigravityGatewayService) streamUpstreamResponse(c *gin.Context, resp 
 	}
 	usage := &ClaudeUsage{}
 	var firstTokenMs *int
+	sawTerminalEvent := false
 
 	scanner := bufio.NewScanner(resp.Body)
 	maxLineSize := defaultMaxLineSize
@@ -244,14 +256,14 @@ func (s *AntigravityGatewayService) streamUpstreamResponse(c *gin.Context, resp 
 		select {
 		case ev, ok := <-events:
 			if !ok {
-				return &antigravityStreamResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: cw.Disconnected()}
+				return &antigravityStreamResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: cw.Disconnected(), terminalEvent: sawTerminalEvent}
 			}
 			if ev.err != nil {
 				if disconnect, handled := handleStreamReadError(ev.err, cw.Disconnected(), "antigravity upstream"); handled {
-					return &antigravityStreamResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: disconnect}
+					return &antigravityStreamResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: disconnect, terminalEvent: sawTerminalEvent}
 				}
 				logger.LegacyPrintf("service.antigravity_gateway", "Stream read error (antigravity upstream): %v", ev.err)
-				return &antigravityStreamResult{usage: usage, firstTokenMs: firstTokenMs}
+				return &antigravityStreamResult{usage: usage, firstTokenMs: firstTokenMs, terminalEvent: sawTerminalEvent}
 			}
 
 			lastDataAt = time.Now()
@@ -259,6 +271,9 @@ func (s *AntigravityGatewayService) streamUpstreamResponse(c *gin.Context, resp 
 			line := ev.line
 			if data, ok := extractAnthropicSSEDataLine(line); ok {
 				observer.ObserveAnthropic([]byte(strings.TrimSpace(data)))
+				if anthropicStreamEventIsTerminal("", strings.TrimSpace(data)) {
+					sawTerminalEvent = true
+				}
 			}
 
 			// 记录首 token 时间
@@ -280,10 +295,10 @@ func (s *AntigravityGatewayService) streamUpstreamResponse(c *gin.Context, resp 
 			}
 			if cw.Disconnected() {
 				logger.LegacyPrintf("service.antigravity_gateway", "Upstream timeout after client disconnect (antigravity upstream), returning collected usage")
-				return &antigravityStreamResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}
+				return &antigravityStreamResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true, terminalEvent: sawTerminalEvent}
 			}
 			logger.LegacyPrintf("service.antigravity_gateway", "Stream data interval timeout (antigravity upstream)")
-			return &antigravityStreamResult{usage: usage, firstTokenMs: firstTokenMs}
+			return &antigravityStreamResult{usage: usage, firstTokenMs: firstTokenMs, terminalEvent: sawTerminalEvent}
 
 		case <-keepaliveCh:
 			if cw.Disconnected() {

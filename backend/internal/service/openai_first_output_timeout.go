@@ -279,9 +279,16 @@ func (s *OpenAIGatewayService) newOpenAIFirstOutputTimeoutError(
 		s.rateLimitService.HandleStreamTimeout(ctx, account, originalModel)
 	}
 	return &UpstreamFailoverError{
-		StatusCode:      http.StatusGatewayTimeout,
-		ResponseBody:    []byte(`{"error":{"type":"first_output_timeout","message":"Upstream produced no output before the deadline"}}`),
-		ResponseHeaders: responseHeaders.Clone(), SafeToFailoverAfterWrite: true,
+		StatusCode:               http.StatusGatewayTimeout,
+		ResponseBody:             []byte(`{"error":{"type":"first_output_timeout","message":"Upstream produced no output before the deadline"}}`),
+		ResponseHeaders:          responseHeaders.Clone(),
+		SafeToFailoverAfterWrite: true,
+		// A response-header timeout is ambiguous: the upstream may have
+		// accepted and started the request without returning headers. Only a
+		// semantic-output timeout has a response boundary that makes the
+		// Responses-to-Chat replay reasonably safe.
+		PreSemanticOutput:             phase == "semantic_output",
+		ResponsesChatFallbackEligible: phase == "semantic_output",
 	}
 }
 

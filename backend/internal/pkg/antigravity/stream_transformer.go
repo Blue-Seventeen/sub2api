@@ -176,6 +176,12 @@ func (p *StreamingProcessor) MessageStartSent() bool {
 	return p.messageStartSent
 }
 
+// MessageStopSent reports whether an upstream finishReason has already
+// produced the terminal Claude message_stop event.
+func (p *StreamingProcessor) MessageStopSent() bool {
+	return p.messageStopSent
+}
+
 // HasContent reports whether any substantive text, thinking, or tool calls were emitted.
 func (p *StreamingProcessor) HasContent() bool {
 	return p.hasContent

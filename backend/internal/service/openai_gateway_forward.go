@@ -12,6 +12,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -1098,7 +1099,55 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					}
 					return s.handleErrorResponse(ctx, compactResp, c, account, body, billingModel)
 				}
-				return nil, err
+				nativePartialUsageResult := func() *OpenAIForwardResult {
+					if streamResult == nil || !openAIUsageHasTokens(streamResult.usage) {
+						return nil
+					}
+					return &OpenAIForwardResult{
+						RequestID:                     resp.Header.Get("x-request-id"),
+						UpstreamHeaders:               resp.Header,
+						ResponseID:                    streamResult.responseID,
+						Usage:                         *streamResult.usage,
+						Model:                         originalModel,
+						BillingModel:                  billingModel,
+						UpstreamModel:                 upstreamModel,
+						UpstreamResponseModel:         streamResult.upstreamResponseModel,
+						UpstreamResponseModelConflict: streamResult.upstreamResponseModelConflict,
+						UpstreamResponseServiceTier:   observedUpstreamResponseServiceTier(c),
+						UpstreamEndpoint:              openAIResponsesUpstreamEndpoint,
+						ServiceTier:                   resolvedOpenAIUpstreamServiceTier(c, serviceTier),
+						ReasoningEffort:               reasoningEffort,
+						RequestedReasoningEffort:      CanonicalRequestedReasoningEffort(originalBody, originalModel, billingModel, upstreamModel),
+						Stream:                        reqStream,
+						Duration:                      time.Since(startTime),
+						FirstTokenMs:                  streamResult.firstTokenMs,
+					}
+				}
+				if shouldFallbackOpenAIResponsesStreamToChat(account, c, originalBody, upstreamModel, err) {
+					_ = resp.Body.Close()
+					SetActualOpenAIUpstreamEndpoint(c, "/v1/chat/completions")
+					logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Native Responses stream ended before semantic output; retrying once through Chat Completions bridge (account: %s, model: %s)", account.Name, upstreamModel)
+					fallbackResult, fallbackErr := s.forwardResponsesViaRawChatCompletions(ctx, c, account, originalBody)
+					if streamResult != nil && openAIUsageHasTokens(streamResult.usage) {
+						if fallbackResult != nil {
+							addOpenAIUsage(&fallbackResult.Usage, *streamResult.usage)
+						} else if fallbackErr != nil {
+							fallbackResult = nativePartialUsageResult()
+						}
+						var fallbackFailoverErr *UpstreamFailoverError
+						if errors.As(fallbackErr, &fallbackFailoverErr) {
+							// Deliberately do not wrap the replayable failover error: native
+							// usage must be recorded once, without another account attempt.
+							fallbackErr = fmt.Errorf("Chat Completions fallback failed after billable native attempt: %v", fallbackErr)
+						}
+					}
+					return fallbackResult, fallbackErr
+				}
+				var failoverErr *UpstreamFailoverError
+				if errors.As(err, &failoverErr) {
+					return nil, err
+				}
+				return nativePartialUsageResult(), err
 			}
 			usage = streamResult.usage
 			firstTokenMs = streamResult.firstTokenMs
@@ -1173,6 +1222,109 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		return forwardResult, nil
 	}
+}
+
+// shouldFallbackOpenAIResponsesStreamToChat limits the compatibility retry to
+// an API-key Responses stream that ended before semantic output was committed.
+// Only failures explicitly marked replay-safe may downgrade; force_responses
+// and GPT-6.1-Sol tool calls stay on the Responses-only path.
+func shouldFallbackOpenAIResponsesStreamToChat(account *Account, c *gin.Context, body []byte, upstreamModel string, err error) bool {
+	if account == nil || !account.IsOpenAIApiKey() || c == nil || c.Writer == nil || c.Writer.Written() || IsResponseCommitted(c) {
+		return false
+	}
+	if mode, ok := account.Extra[openai_compat.ExtraKeyResponsesMode].(string); ok &&
+		openai_compat.NormalizeResponsesSupportMode(mode) == openai_compat.ResponsesSupportModeForceResponses {
+		return false
+	}
+	if openai.IsGPT61SolModelSpelling(upstreamModel) && len(gjson.GetBytes(body, "tools").Array()) > 0 {
+		return false
+	}
+	if !openAIResponsesRequestCanAutoFallbackToChat(body) {
+		return false
+	}
+	var failoverErr *UpstreamFailoverError
+	if !errors.As(err, &failoverErr) || failoverErr == nil {
+		return false
+	}
+	return failoverErr.ResponsesChatFallbackEligible
+}
+
+// Automatic downgrade only accepts self-contained input and tools with a Chat
+// equivalent. Explicit force-chat accounts retain their existing conversion.
+func openAIResponsesRequestCanAutoFallbackToChat(body []byte) bool {
+	for _, field := range []string{"previous_response_id", "conversation", "prompt", "context_management"} {
+		if value := gjson.GetBytes(body, field); value.Exists() && value.Type != gjson.Null {
+			return false
+		}
+	}
+	if gjson.GetBytes(body, "background").Bool() || len(gjson.GetBytes(body, "include").Array()) > 0 ||
+		gjson.GetBytes(body, "truncation").String() == "auto" {
+		return false
+	}
+	chatToolsOnly := func(tools gjson.Result) bool {
+		for _, tool := range tools.Array() {
+			if tool.Get("type").String() != "function" {
+				return false
+			}
+		}
+		return true
+	}
+	if !chatToolsOnly(gjson.GetBytes(body, "tools")) {
+		return false
+	}
+	chatContentOnly := func(content gjson.Result, role string) bool {
+		if !content.Exists() || content.Type == gjson.Null || content.Type == gjson.String {
+			return true
+		}
+		parts := content.Array()
+		if content.IsObject() {
+			parts = []gjson.Result{content}
+		} else if !content.IsArray() {
+			return false
+		}
+		for _, part := range parts {
+			if !part.IsObject() {
+				return false
+			}
+			switch part.Get("type").String() {
+			case "", "input_text", "output_text", "text":
+				if part.Get("text").Type != gjson.String {
+					return false
+				}
+			case "input_image", "image_url":
+				// The bridge only preserves URL-backed images in user messages.
+				if role != "" && role != "user" {
+					return false
+				}
+				imageURL := part.Get("image_url")
+				if imageURL.IsObject() {
+					imageURL = imageURL.Get("url")
+				}
+				if imageURL.Type != gjson.String || strings.TrimSpace(imageURL.String()) == "" {
+					return false
+				}
+			default:
+				return false
+			}
+		}
+		return true
+	}
+	for _, item := range gjson.GetBytes(body, "input").Array() {
+		switch item.Get("type").String() {
+		case "", "message":
+			if !chatContentOnly(item.Get("content"), item.Get("role").String()) {
+				return false
+			}
+		case "function_call", "function_call_output":
+		case "additional_tools":
+			if !chatToolsOnly(item.Get("tools")) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, isStream bool, promptCacheKey string, isCodexCLI bool) (*http.Request, error) {

@@ -409,13 +409,40 @@ handleSuccess:
 	var usage *ClaudeUsage
 	var firstTokenMs *int
 	var clientDisconnect bool
+	partialForwardResult := func(streamRes *antigravityStreamResult) *ForwardResult {
+		if streamRes == nil || streamRes.usage == nil || !streamRes.usage.hasObservedTokens() {
+			return nil
+		}
+		partialUsage := ClaudeUsage{}
+		if streamRes.usage != nil {
+			partialUsage = *streamRes.usage
+		}
+		return &ForwardResult{
+			RequestID:                     requestID,
+			Usage:                         partialUsage,
+			Model:                         originalModel,
+			UpstreamModel:                 billingModel,
+			UpstreamResponseModel:         observedUpstreamResponseModel(c),
+			UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
+			Stream:                        stream,
+			ReasoningEffort:               extractGeminiReasoningEffortFromBody(injectedBody),
+			Duration:                      time.Since(startTime),
+			FirstTokenMs:                  streamRes.firstTokenMs,
+			ClientDisconnect:              streamRes.clientDisconnect,
+			// An incomplete image stream is not a successful image generation;
+			// do not charge the fixed per-image unit on the partial-error path.
+			ImageCount:     0,
+			ImageSize:      imageSize,
+			ImageInputSize: imageInputSize,
+		}
+	}
 
 	if stream {
 		// 客户端要求流式，直接透传
 		streamRes, err := s.handleGeminiStreamingResponse(c, resp, startTime)
 		if err != nil {
 			logger.LegacyPrintf("service.antigravity_gateway", "%s status=stream_error error=%v", prefix, err)
-			return nil, err
+			return partialForwardResult(streamRes), err
 		}
 		usage = streamRes.usage
 		firstTokenMs = streamRes.firstTokenMs
@@ -425,7 +452,7 @@ handleSuccess:
 		streamRes, err := s.handleGeminiStreamToNonStreaming(c, resp, startTime)
 		if err != nil {
 			logger.LegacyPrintf("service.antigravity_gateway", "%s status=stream_collect_error error=%v", prefix, err)
-			return nil, err
+			return partialForwardResult(streamRes), err
 		}
 		usage = streamRes.usage
 		firstTokenMs = streamRes.firstTokenMs

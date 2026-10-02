@@ -115,6 +115,8 @@ type antigravityCompatStreamSession struct {
 	firstTokenMs                *int
 	startTime                   time.Time
 	meaningfulData              bool
+	sawDone                     bool
+	promptBlocked               bool
 	preContentKeepaliveSent     bool
 	preContentKeepaliveInterval time.Duration
 }
@@ -142,6 +144,14 @@ func newAntigravityCompatStreamSession(
 }
 
 func (s *antigravityCompatStreamSession) consume(line string) {
+	if trimmed := strings.TrimSpace(line); strings.HasPrefix(trimmed, "data:") {
+		payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
+		if payload == "[DONE]" {
+			s.sawDone = true
+		} else if geminiResponsePromptBlocked([]byte(payload)) {
+			s.promptBlocked = true
+		}
+	}
 	claudeEvents := s.processor.ProcessLine(strings.TrimRight(line, "\r\n"))
 	if len(claudeEvents) == 0 {
 		return
@@ -150,7 +160,11 @@ func (s *antigravityCompatStreamSession) consume(line string) {
 }
 
 func (s *antigravityCompatStreamSession) hasMeaningfulData() bool {
-	return s.meaningfulData || s.processor.HasContent()
+	return s.meaningfulData || s.processor.HasContent() || s.promptBlocked || s.processor.MessageStopSent()
+}
+
+func (s *antigravityCompatStreamSession) hasTerminalEvent() bool {
+	return s.sawDone || s.promptBlocked || s.processor.MessageStopSent()
 }
 
 func (s *antigravityCompatStreamSession) writePreContentKeepalive(now time.Time) {
@@ -164,17 +178,29 @@ func (s *antigravityCompatStreamSession) writePreContentKeepalive(now time.Time)
 	}
 }
 
-func (s *antigravityCompatStreamSession) finish() (*antigravityStreamResult, error) {
+func (s *antigravityCompatStreamSession) finish(c *gin.Context) (*antigravityStreamResult, error) {
+	if !s.hasMeaningfulData() && !s.writer.Disconnected() {
+		return handleAntigravityCompatEmptyStream(c, s)
+	}
+	// Finish synthesizes a terminal event, so validate the upstream state first.
+	if !s.hasTerminalEvent() {
+		if s.writer.Disconnected() {
+			return s.collectResult(true), nil
+		}
+		writeAntigravityCompatStreamError(c, s.adapter, s.writer, "stream_incomplete")
+		return s.collectResult(false), errors.New("stream usage incomplete: missing terminal event")
+	}
+	if !s.meaningfulData {
+		// Policy blocks and empty finished candidates are valid without a text TTFT.
+		s.meaningfulData = true
+		for i := range s.pendingEvents {
+			s.adapter.Emit(&s.pendingEvents[i], s.writer)
+		}
+		s.pendingEvents = nil
+	}
 	finalEvents, usage := s.processor.Finish()
 	mergeAntigravityCompatUsage(s.usage, usage)
 	s.consumeClaudeEvents(finalEvents)
-	if !s.hasMeaningfulData() && !s.writer.Disconnected() {
-		if s.preContentKeepaliveSent {
-			s.adapter.WriteError(s.writer, "empty_stream")
-			return s.result(false), errors.New("empty Antigravity compatibility stream after keepalive")
-		}
-		return nil, antigravityCompatEmptyStreamError()
-	}
 	s.adapter.Finalize(s.writer)
 	return s.result(s.writer.Disconnected()), nil
 }
@@ -347,7 +373,7 @@ func (s *AntigravityGatewayService) handleAntigravityCompatStreamWithKeepaliveIn
 				if !session.hasMeaningfulData() && !writer.Disconnected() {
 					return handleAntigravityCompatEmptyStream(c, session)
 				}
-				return session.finish()
+				return session.finish(c)
 			}
 			if event.err != nil {
 				return s.handleAntigravityCompatReadError(c, session, event.err, maxLineSize, prefix)
@@ -357,6 +383,9 @@ func (s *AntigravityGatewayService) handleAntigravityCompatStreamWithKeepaliveIn
 			session.consume(event.line)
 
 		case <-timeoutCh:
+			if session.hasTerminalEvent() && session.hasMeaningfulData() {
+				return session.finish(c)
+			}
 			if writer.Disconnected() {
 				return session.collectResult(true), nil
 			}
@@ -478,6 +507,9 @@ func (s *AntigravityGatewayService) handleAntigravityCompatReadError(
 	maxLineSize int,
 	prefix string,
 ) (*antigravityStreamResult, error) {
+	if session.hasTerminalEvent() && session.hasMeaningfulData() {
+		return session.finish(c)
+	}
 	if !session.hasMeaningfulData() && !session.writer.Disconnected() {
 		if session.preContentKeepaliveSent {
 			writeAntigravityCompatStreamError(c, session.adapter, session.writer, "stream_read_error")
@@ -491,10 +523,10 @@ func (s *AntigravityGatewayService) handleAntigravityCompatReadError(
 	if errors.Is(err, bufio.ErrTooLong) {
 		logger.LegacyPrintf("service.antigravity_gateway", "SSE line too long (%s): max_size=%d error=%v", prefix, maxLineSize, err)
 		writeAntigravityCompatStreamError(c, session.adapter, session.writer, "response_too_large")
-		return session.result(false), err
+		return session.collectResult(false), err
 	}
 	writeAntigravityCompatStreamError(c, session.adapter, session.writer, "stream_read_error")
-	return nil, fmt.Errorf("stream read error: %w", err)
+	return session.collectResult(false), fmt.Errorf("stream read error: %w", err)
 }
 
 func writeAntigravityCompatStreamError(

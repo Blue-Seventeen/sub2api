@@ -1651,6 +1651,16 @@ func (s *OpenAIGatewayService) newOpenAIStreamFailoverErrorWithModel(
 	if failoverErr == nil {
 		return &UpstreamFailoverError{StatusCode: statusCode, ResponseBody: body, ResponseHeaders: headers}
 	}
+	// A staged native Responses attempt may end before its first semantic event
+	// without committing anything to the client. Preserve that fact so the
+	// Forward path can try the existing Chat compatibility bridge once.
+	failoverErr.PreSemanticOutput = c != nil && !openAIStreamClientOutputStarted(c, false) && !IsResponseCommitted(c)
+	// Account-side auth/rate-limit handling above may have mutated scheduling
+	// state, so those terminal failures remain on the normal failover path.
+	failoverErr.ResponsesChatFallbackEligible = failoverErr.PreSemanticOutput &&
+		gjson.GetBytes(payload, "type").String() == "response.failed" &&
+		!shouldDisable && statusCode != http.StatusUnauthorized &&
+		statusCode != http.StatusForbidden && statusCode != http.StatusTooManyRequests && statusCode != 529
 	if statusCode == http.StatusTooManyRequests && !retryableOnSameAccount {
 		// Streamed 429s are request-scoped and must not inherit the normal HTTP
 		// 429 OAuth same-account scheduling disposition.

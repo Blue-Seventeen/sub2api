@@ -374,7 +374,11 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				zap.Error(err),
 			)
 			recordGatewayProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, account, apiKey, forwardDurationMs, "handler.gateway.chat_completions")
-			return
+			if result == nil {
+				return
+			}
+			// A failed stream may still contain upstream-metered usage. Record the
+			// partial result below without retrying or changing the failure response.
 		}
 
 		// 6. Record usage

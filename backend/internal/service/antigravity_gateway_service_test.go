@@ -1233,6 +1233,143 @@ func TestStreamUpstreamResponse_UsageAndFirstToken(t *testing.T) {
 	require.Contains(t, rec.Body.String(), "data:")
 }
 
+func TestForwardUpstream_StreamRequiresTerminalEvent(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		terminal string
+		wantErr  bool
+	}{
+		{name: "incomplete", wantErr: true},
+		{name: "complete", terminal: "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := newAntigravityTestService(&config.Config{
+				Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
+			})
+			svc.httpUpstream = &httpUpstreamStub{resp: &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body: io.NopCloser(strings.NewReader(
+					"event: message_start\n" +
+						"data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":2}}}\n\n" +
+						"event: content_block_delta\n" +
+						"data: {\"type\":\"content_block_delta\",\"delta\":{\"text\":\"partial\"}}\n\n" + tt.terminal,
+				)),
+			}}
+
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(
+				`{"model":"claude-sonnet-4-5","stream":true,"messages":[{"role":"user","content":"hi"}]}`,
+			))
+
+			result, err := svc.ForwardUpstream(context.Background(), c, &Account{
+				ID:          1,
+				Name:        "compat",
+				Concurrency: 1,
+				Credentials: map[string]any{"base_url": "https://upstream.example", "api_key": "test-key"},
+			}, []byte(`{"model":"claude-sonnet-4-5","stream":true,"messages":[{"role":"user","content":"hi"}]}`))
+
+			if tt.wantErr {
+				require.ErrorContains(t, err, "missing terminal event")
+			} else {
+				require.NoError(t, err)
+			}
+			require.NotNil(t, result)
+			require.Equal(t, 2, result.Usage.InputTokens)
+		})
+	}
+}
+
+func TestHandleGeminiStreamToNonStreaming_TimeoutPreservesUsage(t *testing.T) {
+	svc := newAntigravityTestService(&config.Config{Gateway: config.GatewayConfig{
+		MaxLineSize: defaultMaxLineSize, StreamDataIntervalTimeout: 1,
+	}})
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+	go func() {
+		_, _ = io.WriteString(writer, "data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"partial\"}]}}],\"usageMetadata\":{\"promptTokenCount\":7,\"candidatesTokenCount\":2}}}\n\n")
+	}()
+
+	result, err := svc.handleGeminiStreamToNonStreaming(c, &http.Response{Body: reader}, time.Now())
+
+	require.ErrorContains(t, err, "stream data interval timeout")
+	require.NotNil(t, result)
+	require.Equal(t, 7, result.usage.InputTokens)
+	require.Equal(t, 2, result.usage.OutputTokens)
+}
+
+func TestCollectClaudeStreamResponse_TimeoutPreservesUsage(t *testing.T) {
+	svc := newAntigravityTestService(&config.Config{Gateway: config.GatewayConfig{
+		MaxLineSize: defaultMaxLineSize, StreamDataIntervalTimeout: 1,
+	}})
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+	go func() {
+		_, _ = io.WriteString(writer, "data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"partial\"}]}}],\"usageMetadata\":{\"promptTokenCount\":7,\"candidatesTokenCount\":2}}}\n\n")
+	}()
+
+	_, result, err := svc.collectClaudeStreamResponse(c, &http.Response{Body: reader}, time.Now(), "claude-sonnet-4-5")
+
+	require.ErrorContains(t, err, "stream data interval timeout")
+	require.NotNil(t, result)
+	require.Equal(t, 7, result.usage.InputTokens)
+	require.Equal(t, 2, result.usage.OutputTokens)
+}
+
+func TestAntigravityPromptBlockIsTerminal(t *testing.T) {
+	for _, route := range []string{"gemini_stream", "gemini_collect", "claude_stream", "claude_collect"} {
+		t.Run(route, func(t *testing.T) {
+			svc := newAntigravityTestService(&config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}})
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+			resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(
+				`data: {"response":{"promptFeedback":{"blockReason":"SAFETY"},"usageMetadata":{"promptTokenCount":7}}}` + "\n\n",
+			))}
+			var result *antigravityStreamResult
+			var err error
+			switch route {
+			case "gemini_stream":
+				result, err = svc.handleGeminiStreamingResponse(c, resp, time.Now())
+			case "gemini_collect":
+				result, err = svc.handleGeminiStreamToNonStreaming(c, resp, time.Now())
+			case "claude_stream":
+				result, err = svc.handleClaudeStreamingResponse(c, resp, time.Now(), "claude-sonnet-4-5")
+			case "claude_collect":
+				_, result, err = svc.collectClaudeStreamResponse(c, resp, time.Now(), "claude-sonnet-4-5")
+			}
+			require.NoError(t, err, "a prompt policy result must not become an upstream truncation/failover")
+			require.NotNil(t, result)
+			require.Equal(t, 7, result.usage.InputTokens)
+		})
+	}
+}
+
+func TestHandleClaudeStreamingResponse_DoneThenReadErrorWritesTerminal(t *testing.T) {
+	svc := newAntigravityTestService(&config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}})
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: &errAfterBytesReadCloser{
+		data: `data: {"response":{"candidates":[{"content":{"parts":[{"text":"answer"}]}}],"usageMetadata":{"promptTokenCount":7}}}` + "\n\ndata: [DONE]\n\n",
+		err:  errors.New("connection reset after terminal"),
+	}}
+
+	result, err := svc.handleClaudeStreamingResponse(c, resp, time.Now(), "claude-sonnet-4-5")
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 7, result.usage.InputTokens)
+	require.Contains(t, rec.Body.String(), "event: message_stop")
+	require.Equal(t, 1, strings.Count(rec.Body.String(), "event: message_stop"))
+}
+
 // --- 流式 happy path 测试 ---
 
 // TestStreamUpstreamResponse_NormalComplete
@@ -1364,6 +1501,161 @@ func TestHandleClaudeStreamingResponse_NormalComplete(t *testing.T) {
 	require.Contains(t, body, "event: message_stop", "should contain Claude message_stop event")
 	// 不应包含错误事件
 	require.NotContains(t, body, "event: error")
+}
+
+// TestHandleGeminiStreamingResponse_MissingTerminalKeepsPartialUsage verifies
+// that an upstream EOF before finishReason is reported as an incomplete stream
+// while preserving usage collected from the partial response.
+func TestHandleGeminiStreamingResponse_MissingTerminalKeepsPartialUsage(t *testing.T) {
+	svc := newAntigravityTestService(&config.Config{
+		Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
+	})
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(`data: {"candidates":[{"content":{"parts":[{"text":"partial"}]}}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":4}}` + "\n\n")),
+		Header:     http.Header{},
+	}
+
+	result, err := svc.handleGeminiStreamingResponse(c, resp, time.Now())
+
+	require.Error(t, err)
+	require.EqualError(t, err, "stream usage incomplete: missing terminal event")
+	require.NotNil(t, result)
+	require.NotNil(t, result.usage)
+	require.Equal(t, 10, result.usage.InputTokens)
+	require.Equal(t, 4, result.usage.OutputTokens)
+	require.Contains(t, rec.Body.String(), "partial")
+}
+
+// TestHandleClaudeStreamingResponse_MissingTerminalKeepsPartialUsage verifies
+// that the Claude conversion path does not synthesize message_stop after a
+// truncated Gemini stream.
+func TestHandleClaudeStreamingResponse_MissingTerminalKeepsPartialUsage(t *testing.T) {
+	svc := newAntigravityTestService(&config.Config{
+		Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
+	})
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(`data: {"response":{"candidates":[{"content":{"parts":[{"text":"partial"}]}}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":3}}}` + "\n\n")),
+		Header:     http.Header{},
+	}
+
+	result, err := svc.handleClaudeStreamingResponse(c, resp, time.Now(), "claude-sonnet-4-5")
+
+	require.Error(t, err)
+	require.EqualError(t, err, "stream usage incomplete: missing terminal event")
+	require.NotNil(t, result)
+	require.NotNil(t, result.usage)
+	require.Equal(t, 8, result.usage.InputTokens)
+	require.Equal(t, 3, result.usage.OutputTokens)
+	require.Contains(t, rec.Body.String(), "event: message_start")
+	require.NotContains(t, rec.Body.String(), "event: message_stop")
+}
+
+func TestHandleGeminiStreamToNonStreaming_MissingTerminalKeepsPartialUsage(t *testing.T) {
+	svc := newAntigravityTestService(&config.Config{
+		Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
+	})
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(`data: {"candidates":[{"content":{"parts":[{"text":"partial"}]}}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":4}}` + "\n\n")),
+		Header:     http.Header{},
+	}
+
+	result, err := svc.handleGeminiStreamToNonStreaming(c, resp, time.Now())
+
+	require.Error(t, err)
+	require.EqualError(t, err, "stream usage incomplete: missing terminal event")
+	require.NotNil(t, result)
+	require.Equal(t, 10, result.usage.InputTokens)
+	require.Equal(t, 4, result.usage.OutputTokens)
+	require.Empty(t, rec.Body.String(), "truncated non-stream response must not be committed")
+}
+
+func TestCollectClaudeStreamResponse_MissingTerminalKeepsPartialUsage(t *testing.T) {
+	svc := newAntigravityTestService(&config.Config{
+		Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
+	})
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(`data: {"response":{"candidates":[{"content":{"parts":[{"text":"partial"}]}}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":3}}}` + "\n\n")),
+		Header:     http.Header{},
+	}
+
+	_, result, err := svc.collectClaudeStreamResponse(c, resp, time.Now(), "claude-sonnet-4-5")
+
+	require.Error(t, err)
+	require.EqualError(t, err, "stream usage incomplete: missing terminal event")
+	require.NotNil(t, result)
+	require.Equal(t, 8, result.usage.InputTokens)
+	require.Equal(t, 3, result.usage.OutputTokens)
+	require.Empty(t, rec.Body.String(), "truncated non-stream response must not be committed")
+}
+
+func TestHandleGeminiStreamingResponse_ReadErrorKeepsPartialUsage(t *testing.T) {
+	svc := newAntigravityTestService(&config.Config{
+		Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
+	})
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: &errAfterBytesReadCloser{
+			data: `data: {"candidates":[{"content":{"parts":[{"text":"partial"}]}}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":4}}` + "\n\n",
+			err:  errors.New("upstream stream read failed"),
+		},
+		Header: http.Header{},
+	}
+
+	result, err := svc.handleGeminiStreamingResponse(c, resp, time.Now())
+
+	require.ErrorContains(t, err, "upstream stream read failed")
+	require.NotNil(t, result)
+	require.Equal(t, 10, result.usage.InputTokens)
+	require.Equal(t, 4, result.usage.OutputTokens)
+}
+
+func TestHandleClaudeStreamingResponse_ReadErrorKeepsPartialUsage(t *testing.T) {
+	svc := newAntigravityTestService(&config.Config{
+		Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
+	})
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: &errAfterBytesReadCloser{
+			data: `data: {"response":{"candidates":[{"content":{"parts":[{"text":"partial"}]}}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":3}}}` + "\n\n",
+			err:  errors.New("upstream stream read failed"),
+		},
+		Header: http.Header{},
+	}
+
+	result, err := svc.handleClaudeStreamingResponse(c, resp, time.Now(), "claude-sonnet-4-5")
+
+	require.ErrorContains(t, err, "upstream stream read failed")
+	require.NotNil(t, result)
+	require.Equal(t, 8, result.usage.InputTokens)
+	require.Equal(t, 3, result.usage.OutputTokens)
 }
 
 // TestHandleGeminiStreamingResponse_ThoughtsTokenCount

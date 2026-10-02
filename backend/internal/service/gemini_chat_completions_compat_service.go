@@ -238,7 +238,16 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 	if clientStream {
 		streamRes, err := s.handleChatCompletionsStreamingResponseFromGemini(c, resp, startTime, originalModel, account.Type == AccountTypeOAuth, includeUsage)
 		if err != nil {
-			return nil, err
+			var partialResult *ForwardResult
+			if streamRes != nil {
+				partialResult = partialStreamUsageResult(c, resp, &streamingResult{usage: streamRes.usage, firstTokenMs: streamRes.firstTokenMs}, originalModel, mappedModel, startTime, err)
+				if partialResult != nil {
+					partialResult.RequestID = requestID
+					partialResult.UpstreamHeaders = resp.Header
+					partialResult.ReasoningEffort = reasoningEffort
+				}
+			}
+			return partialResult, err
 		}
 		usage = streamRes.usage
 		firstTokenMs = streamRes.firstTokenMs
@@ -566,6 +575,8 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 	}
 
 	finishReason := ""
+	sawDone := false
+	promptBlocked := false
 	sawToolUse := false
 	nextBlockIndex := 0
 	openBlockIndex := -1
@@ -602,12 +613,18 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 			trimmed := strings.TrimRight(line, "\r\n")
 			if strings.HasPrefix(trimmed, "data:") {
 				payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
+				if payload == "[DONE]" {
+					sawDone = true
+				}
 				if payload != "" && payload != "[DONE]" {
 					rawBytes := []byte(payload)
 					if isOAuth {
 						if innerBytes, uwErr := unwrapGeminiResponse(rawBytes); uwErr == nil {
 							rawBytes = innerBytes
 						}
+					}
+					if geminiResponsePromptBlocked(rawBytes) {
+						promptBlocked = true
 					}
 
 					var geminiResp map[string]any
@@ -736,8 +753,12 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 			break
 		}
 		if err != nil {
-			return nil, fmt.Errorf("stream read error: %w", err)
+			return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, fmt.Errorf("stream read error: %w", err)
 		}
+	}
+
+	if strings.TrimSpace(finishReason) == "" && !sawDone && !promptBlocked {
+		return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, fmt.Errorf("stream usage incomplete: missing terminal event")
 	}
 
 	if closeOpenBlock() {

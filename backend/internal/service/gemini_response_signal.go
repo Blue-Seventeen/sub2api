@@ -59,6 +59,11 @@ func geminiPayloadMayCarrySignal(payload []byte) bool {
 	return false
 }
 
+func geminiResponsePromptBlocked(payload []byte) bool {
+	signal, ok := detectGeminiResponseSignal(payload)
+	return ok && signal.Kind == geminiSignalPromptBlocked
+}
+
 // detectGeminiResponseSignal 检查一个 Gemini 响应事件是否携带带内信号；Code Assist 的
 // {"response":{...}} 包装体先解包。判定顺序：错误信封 > promptFeedback.blockReason > 首候选 finishReason。
 // finishReason 只有内容过滤类枚举登记为信号；STOP、MAX_TOKENS、OTHER、MALFORMED_FUNCTION_CALL、

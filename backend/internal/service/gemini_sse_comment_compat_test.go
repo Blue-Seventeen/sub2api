@@ -70,7 +70,7 @@ func runAntigravityGeminiStreamWithIdle(t *testing.T, userAgent string, idle tim
 	}()
 	_, err := io.WriteString(
 		writer,
-		`data: {"response":{"responseId":"resp_1","candidates":[{"content":{"parts":[{"text":"partial"}]}}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":1}}}`+"\n\n",
+		`data: {"response":{"responseId":"resp_1","candidates":[{"content":{"parts":[{"text":"partial"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":1}}}`+"\n\n",
 	)
 	require.NoError(t, err)
 	time.Sleep(idle)

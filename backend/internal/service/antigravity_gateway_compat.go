@@ -441,7 +441,26 @@ func (s *AntigravityGatewayService) consumeAntigravityCompatResponse(
 	}
 	streamResult, err := s.consumeAntigravityCompatSuccess(c, call, resp)
 	if err != nil {
-		return nil, err
+		if streamResult == nil || streamResult.usage == nil || !streamResult.usage.hasObservedTokens() {
+			return nil, err
+		}
+		partialUsage := ClaudeUsage{}
+		if streamResult.usage != nil {
+			partialUsage = *streamResult.usage
+		}
+		return &ForwardResult{
+			RequestID:                     requestID,
+			Usage:                         partialUsage,
+			Model:                         call.request.originalModel,
+			UpstreamModel:                 call.billingModel,
+			UpstreamResponseModel:         observedUpstreamResponseModel(c),
+			UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
+			Stream:                        call.request.clientStream,
+			Duration:                      time.Since(call.request.startTime),
+			FirstTokenMs:                  streamResult.firstTokenMs,
+			ReasoningEffort:               call.request.reasoningEffort,
+			ClientDisconnect:              streamResult.clientDisconnect,
+		}, err
 	}
 	if streamResult.usage == nil {
 		streamResult.usage = &ClaudeUsage{}
