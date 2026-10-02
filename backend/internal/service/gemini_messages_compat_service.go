@@ -2843,8 +2843,11 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 					if reason := strings.TrimSpace(geminiPrimaryCandidate(rawBytes).Get("finishReason").String()); reason != "" && reason != "FINISH_REASON_UNSPECIFIED" {
 						sawTerminal = true
 					}
-					if sig, ok := detectGeminiResponseSignal(rawBytes); ok && sig.Kind > best.Kind {
-						best = sig
+					if sig, ok := detectGeminiResponseSignal(rawBytes); ok {
+						sawTerminal = true
+						if sig.Kind > best.Kind {
+							best = sig
+						}
 					}
 					if u := extractGeminiUsage(rawBytes); u != nil {
 						usage = u
@@ -2879,6 +2882,9 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 			break
 		}
 		if err != nil {
+			if sawTerminal {
+				break
+			}
 			return &geminiNativeStreamResult{usage: usage, firstTokenMs: firstTokenMs}, err
 		}
 	}

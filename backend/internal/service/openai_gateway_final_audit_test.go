@@ -11,11 +11,23 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestCCScanner_EmptyTerminalUsagePreservesObservedUsage(t *testing.T) {
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}
+	body := "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":2}}\n\ndata: {\"type\":\"response.failed\",\"response\":{\"usage\":{},\"error\":{\"code\":\"server_error\"}}}\n\n"
+	resp := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
+	scan := svc.scanCCStream(nil, resp, "test", "", time.Now(), func(*apicompat.ChatCompletionsChunk) {})
+	require.Equal(t, 7, scan.Usage.InputTokens)
+	require.Equal(t, 2, scan.Usage.OutputTokens)
+	require.NotEmpty(t, scan.ErrorPayload)
+}
 
 func TestForwardResponses_ChatFallbackRequiresTerminal(t *testing.T) {
 	textChunk := "data: {\"id\":\"chat_1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"},\"finish_reason\":null}]}\n\n"
