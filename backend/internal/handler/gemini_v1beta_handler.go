@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -647,6 +648,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		}
 		activeUsageHandle := beginProxyActiveUsage(h.proxyActiveUsageTracker, account)
 		sessionGroupID := derefGroupID(apiKey.GroupID)
+		writerSizeBeforeForward := c.Writer.Size()
 		if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
 			result, err = h.antigravityGatewayService.ForwardGemini(
 				requestCtx,
@@ -725,7 +727,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 					}
 				})
 			}
-			failoverClientGone(c)
+			h.ensureGeminiForwardErrorResponse(c, writerSizeBeforeForward, err)
 			reqLog.Error("gemini.forward_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 			return
 		}
@@ -877,6 +879,26 @@ func mapGeminiUpstreamError(statusCode int) (int, string) {
 type pathParseError struct{ msg string }
 
 func (e *pathParseError) Error() string { return e.msg }
+
+func (h *GatewayHandler) ensureGeminiForwardErrorResponse(c *gin.Context, writerSizeBeforeForward int, err error) bool {
+	if failoverClientGone(c) || gatewayForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err) || service.IsResponseCommitted(c) {
+		return false
+	}
+	if !c.Writer.Written() {
+		googleError(c, http.StatusBadGateway, "Upstream request failed")
+		return true
+	}
+	payload, _ := json.Marshal(gin.H{"error": gin.H{
+		"code": http.StatusBadGateway, "message": "Upstream request failed",
+		"status": googleapi.HTTPStatusToGoogleStatus(http.StatusBadGateway),
+	}})
+	if _, writeErr := fmt.Fprintf(c.Writer, "data: %s\n\n", payload); writeErr != nil {
+		return false
+	}
+	c.Writer.Flush()
+	service.MarkResponseCommitted(c)
+	return true
+}
 
 func googleError(c *gin.Context, status int, message string) {
 	c.JSON(status, gin.H{

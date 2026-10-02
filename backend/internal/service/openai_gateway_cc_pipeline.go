@@ -343,6 +343,9 @@ func (s *OpenAIGatewayService) scanCCStream(
 			break
 		}
 		if isCCUpstreamErrorPayload(namedEvent, []byte(payload)) {
+			if usage, ok := extractOpenAIUsageFromJSONBytes([]byte(payload)); ok {
+				st.Usage = usage
+			}
 			st.ErrorPayload = append(st.ErrorPayload[:0], []byte(payload)...)
 			break
 		}

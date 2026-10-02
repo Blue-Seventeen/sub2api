@@ -285,6 +285,25 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 			FirstTokenMs:    scan.FirstTokenMs,
 		}, fmt.Errorf("stream usage incomplete: %w", scan.Err)
 	}
+	if !scan.SawDone && strings.TrimSpace(state.FinishReason) == "" {
+		const message = "Chat Completions upstream stream ended before a terminal event"
+		if !clientDisconnected {
+			if !c.Writer.Written() {
+				writeOpenAIResponsesFallbackError(c, http.StatusBadGateway, "upstream_error", message)
+			} else if _, err := fmt.Fprint(c.Writer, buildOpenAIResponseFailedSSE(state.ResponseID, originalModel, nil, message)); err != nil {
+				clientDisconnected = true
+			} else {
+				c.Writer.Flush()
+			}
+		}
+		return &OpenAIForwardResult{
+			RequestID: requestID, UpstreamHeaders: resp.Header, Usage: scan.Usage,
+			Model: originalModel, BillingModel: billingModel, UpstreamModel: upstreamModel,
+			ReasoningEffort: reasoningEffort, ServiceTier: resolvedOpenAIUpstreamServiceTier(c, serviceTier),
+			Stream: true, Duration: time.Since(startTime), FirstTokenMs: scan.FirstTokenMs,
+			ClientDisconnect: clientDisconnected,
+		}, errors.New(message)
+	}
 
 	finalEvents := apicompat.FinalizeChatCompletionsResponsesStream(state)
 	if state.FinishReason == "length" {

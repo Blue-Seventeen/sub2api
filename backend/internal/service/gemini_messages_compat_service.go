@@ -1600,7 +1600,19 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 	if stream {
 		streamRes, err := s.handleNativeStreamingResponse(c, resp, startTime, isOAuth, account, requestID)
 		if err != nil {
-			return nil, err
+			var partialResult *ForwardResult
+			if streamRes != nil {
+				partialResult = partialStreamUsageResult(c, resp, &streamingResult{usage: streamRes.usage, firstTokenMs: streamRes.firstTokenMs}, originalModel, mappedModel, startTime, err)
+				if partialResult != nil {
+					partialResult.RequestID = requestID
+					partialResult.UpstreamHeaders = resp.Header
+					partialResult.ReasoningEffort = extractGeminiReasoningEffortFromBody(body)
+					partialResult.ImageInputSize = s.extractImageInputSize(body)
+					partialResult.ImageSize = normalizeOpenAIImageSizeTier(partialResult.ImageInputSize)
+					partialResult.ImageCount = resolveGeminiImageCount(c, originalModel, mappedModel)
+				}
+			}
+			return partialResult, err
 		}
 		usage = streamRes.usage
 		firstTokenMs = streamRes.firstTokenMs
@@ -2796,6 +2808,7 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 	var firstTokenMs *int
 	var best geminiResponseSignal
 	sawDataEvent := false
+	sawTerminal := false
 	fallback := &geminiSSEFallbackBody{}
 
 	for {
@@ -2806,6 +2819,9 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 				payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
 				// Keepalive / done markers
 				if payload == "" || payload == "[DONE]" {
+					if payload == "[DONE]" {
+						sawTerminal = true
+					}
 					_, _ = io.WriteString(c.Writer, line)
 					flusher.Flush()
 				} else {
@@ -2824,6 +2840,9 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 					}
 
 					sawDataEvent = true
+					if reason := strings.TrimSpace(geminiPrimaryCandidate(rawBytes).Get("finishReason").String()); reason != "" && reason != "FINISH_REASON_UNSPECIFIED" {
+						sawTerminal = true
+					}
 					if sig, ok := detectGeminiResponseSignal(rawBytes); ok && sig.Kind > best.Kind {
 						best = sig
 					}
@@ -2860,11 +2879,16 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 			break
 		}
 		if err != nil {
-			return nil, err
+			return &geminiNativeStreamResult{usage: usage, firstTokenMs: firstTokenMs}, err
 		}
 	}
 
 	s.finalizeGeminiSSESignal(c, account, true, upstreamRequestID, best, sawDataEvent, fallback)
+	if sawDataEvent && !sawTerminal && best.Kind == geminiSignalNone {
+		const message = "Gemini upstream stream ended before a terminal event"
+		s.markGeminiResponseSignal(c, account, geminiResponseSignal{Kind: geminiSignalAbnormalStop, Reason: "INCOMPLETE_STREAM", Message: message, Status: http.StatusBadGateway}, true, upstreamRequestID)
+		return &geminiNativeStreamResult{usage: usage, firstTokenMs: firstTokenMs}, errors.New(message)
+	}
 
 	return &geminiNativeStreamResult{usage: usage, firstTokenMs: firstTokenMs}, nil
 }

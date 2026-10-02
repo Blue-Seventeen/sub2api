@@ -1103,7 +1103,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					if streamResult == nil || !openAIUsageHasTokens(streamResult.usage) {
 						return nil
 					}
-					return &OpenAIForwardResult{
+					result := &OpenAIForwardResult{
 						RequestID:                     resp.Header.Get("x-request-id"),
 						UpstreamHeaders:               resp.Header,
 						ResponseID:                    streamResult.responseID,
@@ -1122,6 +1122,14 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 						Duration:                      time.Since(startTime),
 						FirstTokenMs:                  streamResult.firstTokenMs,
 					}
+					if streamResult.imageCount > 0 {
+						result.ImageCount = streamResult.imageCount
+						result.ImageSize = imageSizeTier
+						result.ImageInputSize = imageInputSize
+						result.ImageOutputSizes = streamResult.imageOutputSizes
+						result.BillingModel = imageBillingModel
+					}
+					return result
 				}
 				if shouldFallbackOpenAIResponsesStreamToChat(account, c, originalBody, upstreamModel, err) {
 					_ = resp.Body.Close()
@@ -1315,7 +1323,11 @@ func openAIResponsesRequestCanAutoFallbackToChat(body []byte) bool {
 			if !chatContentOnly(item.Get("content"), item.Get("role").String()) {
 				return false
 			}
-		case "function_call", "function_call_output":
+		case "function_call":
+		case "function_call_output":
+			if !chatContentOnly(item.Get("output"), "tool") {
+				return false
+			}
 		case "additional_tools":
 			if !chatToolsOnly(item.Get("tools")) {
 				return false

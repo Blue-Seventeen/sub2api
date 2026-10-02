@@ -24,12 +24,18 @@ type responsesPartialUsageUpstream struct {
 	service.HTTPUpstream
 	failure    string
 	nativeBody string
+	chatBody   string
+	wantInput  int
+	wantOutput int
 	paths      []string
 }
 
 func (u *responsesPartialUsageUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
 	u.paths = append(u.paths, req.URL.Path)
 	if req.URL.Path == "/v1/chat/completions" {
+		if u.chatBody != "" {
+			return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}, "X-Request-Id": {"fallback-billed"}}, Body: io.NopCloser(strings.NewReader(u.chatBody))}, nil
+		}
 		if u.failure == "transport" {
 			return nil, errors.New("connection reset by peer")
 		}
@@ -48,6 +54,18 @@ func (u *responsesPartialUsageUpstream) Do(req *http.Request, _ string, _ int64,
 		Header:     http.Header{"Content-Type": {"text/event-stream"}, "X-Request-Id": {"native-billed"}},
 		Body:       io.NopCloser(strings.NewReader(body)),
 	}, nil
+}
+
+func TestOpenAIResponses_ChatFallbackPartialUsageRecordedOnce(t *testing.T) {
+	for _, body := range []string{
+		"data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"}}]}\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":2}}\n\n",
+		"data: {\"type\":\"response.failed\",\"response\":{\"usage\":{\"input_tokens\":7,\"output_tokens\":2},\"error\":{\"code\":\"server_error\",\"message\":\"temporary failure\"}}}\n\n",
+	} {
+		t.Run(body, func(t *testing.T) {
+			assertResponsesPartialUsageRecordedOnce(t, &responsesPartialUsageUpstream{chatBody: body, wantInput: 12, wantOutput: 3},
+				`{"model":"gpt-5.4","input":"hello","stream":true}`, false, []string{"/v1/responses", "/v1/chat/completions"})
+		})
+	}
 }
 
 func TestOpenAIResponses_FailedChatFallbackRecordsNativeUsageOnce(t *testing.T) {
@@ -130,12 +148,16 @@ func assertResponsesPartialUsageRecordedOnce(t *testing.T, upstream *responsesPa
 
 	require.Equal(t, wantPaths, upstream.paths, "partial usage must not trigger account replay: status=%d body=%s", rec.Code, rec.Body.String())
 	require.Len(t, logs.logs, 1, "native partial usage must survive both the fallback and handler error paths")
-	require.Equal(t, "native-billed", logs.logs[0].RequestID)
+	requestID, input, output := "native-billed", 5, 1
+	if upstream.chatBody != "" {
+		requestID, input, output = "fallback-billed", upstream.wantInput, upstream.wantOutput
+	}
+	require.Equal(t, requestID, logs.logs[0].RequestID)
 	require.Equal(t, int64(1001), logs.logs[0].AccountID)
-	require.Equal(t, 5, logs.logs[0].InputTokens)
-	require.Equal(t, 1, logs.logs[0].OutputTokens)
+	require.Equal(t, input, logs.logs[0].InputTokens)
+	require.Equal(t, output, logs.logs[0].OutputTokens)
 	require.Len(t, billing.commands, 1)
-	require.Equal(t, "native-billed", billing.commands[0].RequestID)
+	require.Equal(t, requestID, billing.commands[0].RequestID)
 	require.Greater(t, billing.commands[0].BalanceCost, 0.0)
 	require.NotContains(t, rec.Body.String(), "response.completed")
 }

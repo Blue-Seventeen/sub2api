@@ -37,6 +37,32 @@ func TestGatewayEnsureForwardErrorResponse_WritesFallbackWhenNotWritten(t *testi
 	assert.Equal(t, "Upstream request failed", errorObj["message"])
 }
 
+func TestGatewayEnsureGeminiForwardErrorResponse_PreservesExistingErrorAndCancellation(t *testing.T) {
+	for _, mode := range []string{"json_error", "committed_sse", "canceled"} {
+		t.Run(mode, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1beta/models/test:streamGenerateContent", nil)
+			before := c.Writer.Size()
+			switch mode {
+			case "json_error":
+				googleError(c, http.StatusBadRequest, "existing error")
+			case "committed_sse":
+				c.Header("Content-Type", "text/event-stream")
+				_, _ = c.Writer.WriteString("data: {\"error\":{\"code\":502}}\n\n")
+				service.MarkResponseCommitted(c)
+			case "canceled":
+				ctx, cancel := context.WithCancel(c.Request.Context())
+				cancel()
+				c.Request = c.Request.WithContext(ctx)
+			}
+			body := rec.Body.String()
+			require.False(t, (&GatewayHandler{}).ensureGeminiForwardErrorResponse(c, before, errors.New("upstream failed")))
+			require.Equal(t, body, rec.Body.String())
+		})
+	}
+}
+
 // Writer 已写后 ensureForwardErrorResponse 必须把错误以 SSE 形式追加，
 // 而不是 silent EOF。非 /responses 路径走 legacy data:{"type":"error"} 分支。
 func TestGatewayEnsureForwardErrorResponse_AppendsSSEAfterWritten(t *testing.T) {

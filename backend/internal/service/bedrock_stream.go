@@ -119,6 +119,9 @@ func (s *GatewayService) handleBedrockStreamingResponse(
 				return result, nil
 			}
 			if ev.err != nil {
+				if sawTerminalEvent {
+					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, nil
+				}
 				if clientDisconnected {
 					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, nil
 				}
@@ -175,6 +178,9 @@ func (s *GatewayService) handleBedrockStreamingResponse(
 			}
 			if clientDisconnected {
 				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, nil
+			}
+			if sawTerminalEvent {
+				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, nil
 			}
 			logger.LegacyPrintf("service.gateway", "[Bedrock] Stream data interval timeout: account=%d model=%s interval=%s", account.ID, model, streamInterval)
 			if s.rateLimitService != nil {

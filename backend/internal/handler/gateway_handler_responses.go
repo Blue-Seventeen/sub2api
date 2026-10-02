@@ -360,10 +360,12 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 				zap.Error(err),
 			)
 			recordGatewayProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, account, apiKey, forwardDurationMs, "handler.gateway.responses")
-			return
+			if result == nil {
+				return
+			}
 		}
 
-		// 6. Record usage
+		// 6. Record confirmed usage, including non-replayable partial results.
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
 		requestPayloadHash := service.HashUsageRequestPayload(body)

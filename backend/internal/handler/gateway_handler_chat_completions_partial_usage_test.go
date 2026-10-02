@@ -60,10 +60,13 @@ func (r *ccPartialUsageProxyStatsRepo) failureCount() int {
 	return r.failures
 }
 
-func newCCPartialUsageHandler(t *testing.T, upstream *ccPartialUsageUpstream) (*GatewayHandler, *gin.Context, *httptest.ResponseRecorder, *grokMediaBillingRepo, *grokMediaBillingLogRepo, *ccPartialUsageProxyStatsRepo) {
+func newCCPartialUsageHandler(t *testing.T, upstream *ccPartialUsageUpstream, platforms ...string) (*GatewayHandler, *gin.Context, *httptest.ResponseRecorder, *grokMediaBillingRepo, *grokMediaBillingLogRepo, *ccPartialUsageProxyStatsRepo) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	group := &service.Group{ID: 2001, Hydrated: true, Platform: service.PlatformGemini, Status: service.StatusActive, RateMultiplier: 1}
+	if len(platforms) > 0 {
+		group.Platform = platforms[0]
+	}
 	inputPrice, outputPrice, cacheReadPrice := 1.0, 2.0, 0.1
 	group.ModelPricing = []service.ChannelModelPricing{{
 		Models: []string{"gemini-2.5-flash"}, BillingMode: service.BillingModeToken,
@@ -79,6 +82,14 @@ func newCCPartialUsageHandler(t *testing.T, upstream *ccPartialUsageUpstream) (*
 			GroupIDs: []int64{group.ID}, Credentials: map[string]any{"api_key": "test-key"},
 			AccountGroups: []service.AccountGroup{{AccountID: 1001 + i, GroupID: group.ID}},
 		})
+		if group.Platform == service.PlatformAntigravity {
+			accounts[len(accounts)-1].Platform = service.PlatformAntigravity
+			accounts[len(accounts)-1].Type = service.AccountTypeOAuth
+			accounts[len(accounts)-1].Credentials = map[string]any{
+				"access_token": "test-oauth-token", "expires_at": time.Now().Add(time.Hour).Format(time.RFC3339),
+				"project_id": "test-project", "model_mapping": map[string]any{"gemini-2.5-flash": "gemini-2.5-flash"},
+			}
+		}
 	}
 	h, cleanup := newTestGatewayHandler(t, group, accounts)
 	t.Cleanup(cleanup)
@@ -108,6 +119,9 @@ func newCCPartialUsageHandler(t *testing.T, upstream *ccPartialUsageUpstream) (*
 	)
 	h.billingCacheService = billingCache
 	h.geminiCompatService = service.NewGeminiMessagesCompatService(nil, nil, nil, nil, nil, nil, upstream, nil, cfg)
+	h.antigravityGatewayService = service.NewAntigravityGatewayService(nil, nil, nil,
+		service.NewAntigravityTokenProvider(nil, nil, nil), nil, upstream,
+		service.NewSettingService(&settingHandlerPublicRepoStub{}, cfg), nil)
 	h.proxyStatsWorkerPool = service.NewProxyStatsWorkerPoolWithOptions(service.ProxyStatsWorkerPoolOptions{
 		WorkerCount: 1, QueueSize: 8, TaskTimeout: time.Second,
 	})
@@ -120,6 +134,92 @@ func newCCPartialUsageHandler(t *testing.T, upstream *ccPartialUsageUpstream) (*
 	c.Set(string(middleware.ContextKeyAPIKey), key)
 	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: key.UserID, Concurrency: 1})
 	return h, c, rec, billing, logs, stats
+}
+
+func TestGatewayCompatHandlers_PartialStreamUsageRecordedOnce(t *testing.T) {
+	for _, route := range []string{"messages_gemini", "responses_antigravity"} {
+		for _, readErr := range []error{nil, errors.New("upstream read failed")} {
+			name := "eof"
+			if readErr != nil {
+				name = "read_error"
+			}
+			t.Run(route+"/"+name, func(t *testing.T) {
+				platform := service.PlatformGemini
+				streamBody := ccPartialGeminiSSE
+				if route == "responses_antigravity" {
+					platform = service.PlatformAntigravity
+					streamBody = "data: {\"response\":" + strings.TrimSpace(strings.TrimPrefix(ccPartialGeminiSSE, "data: ")) + "}\n\n"
+				}
+				upstream := &ccPartialUsageUpstream{respond: func(accountID int64) (*http.Response, error) {
+					reader := io.Reader(strings.NewReader(streamBody))
+					if readErr != nil {
+						reader = io.MultiReader(reader, iotest.ErrReader(readErr))
+					}
+					return ccPartialUsageResponse(accountID, http.StatusOK, reader), nil
+				}}
+				h, c, rec, billing, logs, stats := newCCPartialUsageHandler(t, upstream, platform)
+				path := "/v1/messages"
+				body := `{"model":"gemini-2.5-flash","max_tokens":64,"stream":true,"messages":[{"role":"user","content":"hello"}]}`
+				if route == "responses_antigravity" {
+					path = "/v1/responses"
+					body = `{"model":"gemini-2.5-flash","stream":true,"input":"hello"}`
+				}
+				c.Request = httptest.NewRequest(http.MethodPost, path, strings.NewReader(body)).WithContext(c.Request.Context())
+				c.Request.Header.Set("Content-Type", "application/json")
+				if route == "messages_gemini" {
+					h.Messages(c)
+				} else {
+					h.Responses(c)
+				}
+				require.Equal(t, []int64{1001}, upstream.accountIDs, "partial output must not replay: %s", rec.Body.String())
+				require.Contains(t, rec.Body.String(), "partial")
+				require.NotContains(t, rec.Body.String(), "response.completed")
+				require.NotContains(t, rec.Body.String(), "message_stop")
+				require.Len(t, logs.logs, 1)
+				require.Equal(t, 8, logs.logs[0].InputTokens)
+				require.Equal(t, 6, logs.logs[0].OutputTokens)
+				require.Equal(t, 2, logs.logs[0].CacheReadTokens)
+				require.Len(t, billing.commands, 1)
+				require.Greater(t, billing.commands[0].BalanceCost, 0.0)
+				require.Eventually(t, func() bool { return stats.failureCount() == 1 }, time.Second, time.Millisecond)
+			})
+		}
+	}
+}
+
+func TestGatewayGeminiNative_AntigravityPartialWritesErrorAndBillsOnce(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprint(stream), func(t *testing.T) {
+			upstream := &ccPartialUsageUpstream{respond: func(accountID int64) (*http.Response, error) {
+				body := "data: {\"response\":" + strings.TrimSpace(strings.TrimPrefix(ccPartialGeminiSSE, "data: ")) + "}\n\n"
+				return ccPartialUsageResponse(accountID, http.StatusOK, strings.NewReader(body)), nil
+			}}
+			h, c, rec, billing, logs, _ := newCCPartialUsageHandler(t, upstream, service.PlatformAntigravity)
+			action := "generateContent"
+			if stream {
+				action = "streamGenerateContent"
+			}
+			path := "/antigravity/v1beta/models/gemini-2.5-flash:" + action
+			ctx := context.WithValue(c.Request.Context(), ctxkey.ForcePlatform, service.PlatformAntigravity)
+			c.Request = httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`)).WithContext(ctx)
+			c.Params = gin.Params{{Key: "modelAction", Value: "gemini-2.5-flash:" + action}}
+			c.Set(string(middleware.ContextKeyForcePlatform), service.PlatformAntigravity)
+			h.GeminiV1BetaModels(c)
+			require.Equal(t, []int64{1001}, upstream.accountIDs, "%s", rec.Body.String())
+			require.Contains(t, rec.Body.String(), `"error"`)
+			if !stream {
+				require.Equal(t, http.StatusBadGateway, rec.Code)
+			} else {
+				require.Equal(t, http.StatusOK, rec.Code)
+				require.Equal(t, 1, strings.Count(rec.Body.String(), `"error"`))
+			}
+			require.Len(t, logs.logs, 1)
+			require.Equal(t, 8, logs.logs[0].InputTokens)
+			require.Equal(t, 6, logs.logs[0].OutputTokens)
+			require.Len(t, billing.commands, 1)
+			require.Greater(t, billing.commands[0].BalanceCost, 0.0)
+		})
+	}
 }
 
 func ccPartialUsageResponse(accountID int64, status int, body io.Reader) *http.Response {
