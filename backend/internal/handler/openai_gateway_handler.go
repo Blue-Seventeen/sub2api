@@ -1386,6 +1386,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		}
 
 		h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, reqModel, err != nil, body, clientRequestedUsageFields(c, channelMappingMsg, reqModel, ""), service.HashUsageRequestPayload(body))
+		partialUsage := false
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)
 		responseLatencyMs := forwardDurationMs
@@ -1397,6 +1398,14 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			service.SetOpsLatencyMs(c, service.OpsTimeToFirstTokenMsKey, int64(*result.FirstTokenMs))
 		}
 		if err != nil {
+			var terminalFailoverErr *service.UpstreamFailoverError
+			if result != nil && !errors.As(err, &terminalFailoverErr) && service.OpenAIUsageHasTokens(&result.Usage) {
+				// A terminal upstream error can carry billable usage. Preserve it for
+				// exactly-once billing, but do not replay or report the attempt as a
+				// success. The response/error has already been written by the service.
+				partialUsage = true
+				err = nil
+			}
 			if result != nil && result.ImageCount > 0 {
 				reqLog.Warn("openai_messages.forward_partial_error_with_image_result",
 					zap.Int64("account_id", account.ID),
@@ -1504,7 +1513,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			if result.UpstreamModel != "" {
 				setOpsEndpointContext(c, result.UpstreamModel, requestType)
 			}
-			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(currentRoutingModel), true, result.FirstTokenMs)
+			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(currentRoutingModel), !partialUsage, result.FirstTokenMs)
 		} else {
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(currentRoutingModel), true, nil)
 		}
@@ -2206,8 +2215,33 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	switchCount := 0
 	profitVetoCount := 0
 	failedAccountIDs := make(map[int64]struct{})
+	sameAccountRetryCount := make(map[int64]int)
 	var lastFailoverErr *service.UpstreamFailoverError
 	var oauth429FailoverState service.OpenAIOAuth429FailoverState
+	wsAttemptMessage := append([]byte(nil), firstMessage...)
+	waitForWSSameAccountRetry := func(account *service.Account, failoverErr *service.UpstreamFailoverError) bool {
+		if account == nil || failoverErr == nil || failoverErr.StatusCode != http.StatusTooManyRequests || failoverErr.SameAccountRetryDeadline.IsZero() {
+			return false
+		}
+		retryLimit := effectiveSameAccountRetryLimit(failoverErr, account)
+		if !sameAccountRetryAllowed(failoverErr, sameAccountRetryCount[account.ID], retryLimit) {
+			return false
+		}
+		sameAccountRetryCount[account.ID]++
+		retryDelay := sameAccountRetryDelayFor(failoverErr, sameAccountRetryCount[account.ID])
+		reqLog.Warn("openai.websocket.same_account_retry",
+			zap.Int64("account_id", account.ID),
+			zap.Int("upstream_status", failoverErr.StatusCode),
+			zap.Int("retry_count", sameAccountRetryCount[account.ID]),
+			zap.Duration("retry_delay", retryDelay),
+		)
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(retryDelay):
+			return true
+		}
+	}
 	handleWSFailover := func(account *service.Account, failoverErr *service.UpstreamFailoverError) bool {
 		if ctx.Err() != nil {
 			return false
@@ -2531,6 +2565,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				// CyberBlocked 必须在 submit 前同步预捕获（task 闭包由 worker 池异步执行，
 				// 届时 defer 已清除标记）。
 				var turnFailoverErr *service.UpstreamFailoverError
+				partialUsage := turnErr != nil && result != nil && !errors.As(turnErr, &turnFailoverErr) && service.OpenAIUsageHasTokens(&result.Usage)
 				defer clearCyberPolicyAttemptState(c, !errors.As(turnErr, &turnFailoverErr))
 				releaseTurnSlots()
 				turnRequestedModel := reqModel
@@ -2561,7 +2596,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					cyberMarked && !h.cyberPolicyLogOnly(c, apiKey),
 					turnErr,
 				)
-				if turnErr != nil {
+				if turnErr != nil && !partialUsage {
 					if result == nil || result.ImageCount <= 0 {
 						return
 					}
@@ -2594,7 +2629,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				if scheduleModel == "" {
 					scheduleModel = turnRequestedModel
 				}
-				h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, scheduleModel, openAIForwardSucceededForScheduling(result), result.FirstTokenMs)
+				h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, scheduleModel, !partialUsage && openAIForwardSucceededForScheduling(result), result.FirstTokenMs)
 				inboundEndpoint := GetInboundEndpoint(c)
 				upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account, result)
 				quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
@@ -2635,7 +2670,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			},
 		}
 
-		wsFirstMessage := firstMessage
+		wsFirstMessage := append([]byte(nil), wsAttemptMessage...)
 		// 切组/会话失配防护：previous_response_id 未在当前分组命中粘连账号（StickyPreviousHit=false），
 		// 说明该会话链不属于本次调度到的账号，原样转发会触发上游会话链鉴权失败（“鉴权失败，请检查 API Key”）。
 		// 故剥离首包里的 previous_response_id，改用首包内 input 重建上下文；带 function_call_output 的
@@ -2648,19 +2683,64 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			)
 		}
 
-		// WebSocket 首包可能很大，hash 必须在 hooks 外算成字符串，避免 AfterTurn 闭包保活请求体。
-		requestPayloadHash = service.HashUsageRequestPayload(wsFirstMessage)
-
-		proxyStart := time.Now()
-		activeUsageHandle := beginProxyActiveUsage(h.proxyActiveUsageTracker, account)
-		proxyErr := func() (err error) {
-			defer endProxyActiveUsage(activeUsageHandle)
-			return h.gatewayService.ProxyResponsesWebSocketFromClient(ctx, c, wsConn, account, token, wsFirstMessage, hooks)
-		}()
-		if proxyErr != nil {
+		var proxyErr error
+		for {
+			// WebSocket 首包可能很大，hash 必须在 hooks 外算成字符串，避免
+			// AfterTurn 闭包保活旧请求体；current-turn replay 更新后重新计算。
+			requestPayloadHash = service.HashUsageRequestPayload(wsFirstMessage)
+			proxyStart := time.Now()
+			activeUsageHandle := beginProxyActiveUsage(h.proxyActiveUsageTracker, account)
+			proxyErr = func() (err error) {
+				defer endProxyActiveUsage(activeUsageHandle)
+				return h.gatewayService.ProxyResponsesWebSocketFromClient(ctx, c, wsConn, account, token, wsFirstMessage, hooks)
+			}()
+			if proxyErr == nil {
+				reqLog.Info("openai.websocket_ingress_closed", zap.Int64("account_id", account.ID))
+				return
+			}
 			if shouldRecordOpenAIWSProxyFailureStat(proxyErr) {
 				recordOpenAIProxyFailureStat(ctx, h.gatewayService, h.proxyStatsWorkerPool, account, apiKey, elapsedMillisSince(proxyStart), "handler.openai_gateway.websocket")
 			}
+			var attemptFailoverErr *service.UpstreamFailoverError
+			if errors.As(proxyErr, &attemptFailoverErr) && attemptFailoverErr != nil {
+				retryPayload, retryCurrentTurn := service.OpenAIWSCurrentTurnRetryPayload(proxyErr)
+				nextAttemptMessage, retrySafe := openAIWSNextAttemptMessage(wsAttemptMessage, retryPayload, retryCurrentTurn)
+				if !retrySafe {
+					closeOpenAIWSFailoverExhausted(c, wsConn, attemptFailoverErr)
+					return
+				}
+				wsAttemptMessage = nextAttemptMessage
+				if retryCurrentTurn {
+					previousResponseID = ""
+					reqLog.Warn("openai.websocket_current_turn_failover_retry",
+						zap.Int64("account_id", account.ID),
+						zap.Int("upstream_status", attemptFailoverErr.StatusCode),
+						zap.Int("retry_payload_bytes", len(retryPayload)),
+					)
+				}
+				if waitForWSSameAccountRetry(account, attemptFailoverErr) {
+					if attemptFailoverErr.ShouldReportAccountScheduleFailure() {
+						h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(reqModel), false, nil)
+					}
+					if !ensureUserSlotHeld() {
+						return
+					}
+					if currentAccountRelease == nil {
+						accountRelease, acquired, acquireErr := h.concurrencyHelper.TryAcquireAccountSlot(ctx, account.ID, accountMaxConcurrency)
+						if acquireErr != nil || !acquired {
+							reqLog.Warn("openai.websocket_same_account_retry_slot_unavailable", zap.Int64("account_id", account.ID), zap.Error(acquireErr))
+							closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "account is busy, please retry later")
+							return
+						}
+						currentAccountRelease = wrapReleaseOnDone(ctx, accountRelease)
+					}
+					wsFirstMessage = wsAttemptMessage
+					continue
+				}
+			}
+			break
+		}
+		if proxyErr != nil {
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(proxyErr, &failoverErr) {
 				if handleWSFailover(account, failoverErr) {
@@ -2685,6 +2765,13 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					zap.String("reason", closeErr.Reason()),
 				)
 				closeOpenAIClientWS(wsConn, closeErr.StatusCode(), closeErr.Reason())
+				return
+			}
+			if openAIWSIngressEndedByClient(proxyErr) {
+				reqLog.Info("openai.websocket_client_disconnected",
+					zap.Int64("account_id", account.ID),
+					zap.Error(proxyErr),
+				)
 				return
 			}
 

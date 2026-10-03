@@ -46,11 +46,11 @@ var cursorResponsesUnsupportedFields = []string{
 // 正确的，但 sub2api 接入 DeepSeek/Kimi/GLM 等第三方 OpenAI 兼容上游后假设破裂：
 // 这些上游普遍只支持 /v1/chat/completions，无 /v1/responses 端点。
 //
-// 当前路由策略（基于账号探测标记，详见 openai_compat.ShouldUseResponsesAPI）：
-//   - APIKey 账号 + 探测确认不支持 Responses → 走 forwardAsRawChatCompletions
-//     直转上游 /v1/chat/completions，不做协议转换
-//   - 其他所有情况（OAuth、APIKey 探测确认支持、未探测）→ 走原有 CC→Responses
-//     转换路径（保留旧行为，存量未探测账号零兼容破坏）
+// 当前路由策略：
+//   - CN 账号以 credentials.api_protocol 为权威；adaptive/chat_completions 入站 Chat
+//     直转原生 CC，anthropic 走原生 Anthropic，responses 走 Responses
+//   - 其他 APIKey 账号仍按覆盖模式/探测标记分流（详见
+//     openai_compat.ShouldUseResponsesAPI）
 func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	ctx context.Context,
 	c *gin.Context,
@@ -59,6 +59,29 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	promptCacheKey string,
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
+	return s.forwardAsChatCompletions(ctx, c, account, body, promptCacheKey, defaultMappedModel, false)
+}
+
+func (s *OpenAIGatewayService) forwardAsChatCompletions(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	body []byte,
+	promptCacheKey string,
+	defaultMappedModel string,
+	compatPromptCacheTenantIsolated bool,
+) (*OpenAIForwardResult, error) {
+	rememberOpenCodeInboundBody(c, body)
+	beginUpstreamResponseModelObservation(c)
+	ClearActualOpenAIUpstreamEndpoint(c)
+	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
+		SetActualOpenAIUpstreamEndpoint(c, "/v1/chat/completions")
+	}
+	setCodexToolNameReverse(c, nil)
+	if _, err := s.prepareCodexAccountIdentitySource(ctx, c, account); err != nil {
+		return nil, err
+	}
+
 	restrictionResult := s.detectCodexClientRestriction(c, account, body)
 	logCodexCLIOnlyDetection(ctx, c, account, getAPIKeyIDFromContext(c), restrictionResult, body)
 	if restrictionResult.Enabled && !restrictionResult.Matched {
@@ -85,35 +108,90 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		}
 		return s.forwardAsRawChatCompletions(ctx, c, account, body, defaultMappedModel)
 	}
-	if account.IsOpenCodeGo() && account.ResolveOpenCodeGoUpstreamProtocol(gjson.GetBytes(body, "model").String()) == APIProtocolChatCompletions {
-		return s.forwardAsRawChatCompletions(ctx, c, account, body, defaultMappedModel)
+
+	// Cursor compatibility: some clients send a Responses-shaped body to the
+	// /v1/chat/completions URL. Detect it before adaptive routing so adaptive
+	// accounts never forward the body unchanged to a Chat Completions endpoint.
+	isResponsesShape := !gjson.GetBytes(body, "messages").Exists() && gjson.GetBytes(body, "input").Exists()
+
+	// OpenCode Go：按模型原生协议分流（与 inbound 协议正交）。
+	// 规则未命中一律兜底 Chat Completions，只有显式 Responses 才走下方转换链。
+	if account.IsOpenCodeGo() {
+		mapped := resolveOpenCodeGoMappedModel(account, body, defaultMappedModel)
+		proto := openCodeGoNativeProtocol(account, mapped)
+		if proto != APIProtocolResponses {
+			if isResponsesShape {
+				if proto == APIProtocolAnthropic {
+					return s.forwardResponsesViaNativeAnthropic(ctx, c, account, body, "")
+				}
+				var responsesReq apicompat.ResponsesRequest
+				if err := json.Unmarshal(body, &responsesReq); err != nil {
+					return nil, fmt.Errorf("parse responses-shaped chat completions request: %w", err)
+				}
+				chatReq, err := apicompat.ResponsesToChatCompletionsRequestWithOptions(
+					&responsesReq,
+					&apicompat.ResponsesToChatOptions{ReasoningContentByID: s.reasoningContentByID},
+				)
+				if err != nil {
+					return nil, fmt.Errorf("convert responses-shaped chat completions request: %w", err)
+				}
+				chatBody, err := json.Marshal(chatReq)
+				if err != nil {
+					return nil, fmt.Errorf("marshal converted chat completions request: %w", err)
+				}
+				return s.forwardAsRawChatCompletions(ctx, c, account, chatBody, defaultMappedModel)
+			}
+			if proto == APIProtocolAnthropic {
+				return s.forwardChatCompletionsViaNativeAnthropic(ctx, c, account, body, defaultMappedModel)
+			}
+			return s.forwardAsRawChatCompletions(ctx, c, account, body, defaultMappedModel)
+		}
 	}
 
-	// 入口分流：国产账号的显式协议优先于 stale capability probe；不支持
-	// Responses 的 adaptive provider 也必须走 CC 直转。
-	// 自动模式下标记缺失（未探测）按"现状即证据"原则继续走下方原 Responses 转换路径。
-	if account.Type == AccountTypeAPIKey && shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
-		if isAdaptiveResponsesShapedChatIngress(account, body) {
-			convertedBody, convertErr := responsesShapedChatBody(body)
-			if convertErr != nil {
-				return nil, fmt.Errorf("convert adaptive responses-shaped chat request: %w", convertErr)
-			}
-			body = convertedBody
+	// 自适应账号的标准 Chat Completions 入站使用供应商原生 CC 端点。
+	// Responses 形状下，DeepSeek / Kimi 继续走下方原生 Responses 链；GLM
+	// 没有 Responses 端点，先转换成 Chat Completions 再直转。
+	if account.IsAdaptiveAPIProtocol() && !account.IsOpenCodeGo() {
+		if !isResponsesShape {
+			return s.forwardAsRawChatCompletions(ctx, c, account, body, defaultMappedModel)
 		}
-		return s.forwardAsRawChatCompletions(ctx, c, account, body, defaultMappedModel)
+		if !account.SupportsNativeCNResponses() {
+			var responsesReq apicompat.ResponsesRequest
+			if err := json.Unmarshal(body, &responsesReq); err != nil {
+				return nil, fmt.Errorf("parse responses-shaped chat completions request: %w", err)
+			}
+			chatReq, err := apicompat.ResponsesToChatCompletionsRequestWithOptions(
+				&responsesReq,
+				&apicompat.ResponsesToChatOptions{ReasoningContentByID: s.reasoningContentByID},
+			)
+			if err != nil {
+				return nil, fmt.Errorf("convert responses-shaped chat completions request: %w", err)
+			}
+			chatBody, err := json.Marshal(chatReq)
+			if err != nil {
+				return nil, fmt.Errorf("marshal converted chat completions request: %w", err)
+			}
+			return s.forwardAsRawChatCompletions(ctx, c, account, chatBody, defaultMappedModel)
+		}
+		// DeepSeek / Kimi 原生 Responses 请求继续走下方 Responses→Chat 回程转换。
 	}
-	adaptiveResponsesShape := account.IsAdaptiveAPIProtocol() &&
-		!gjson.GetBytes(body, "messages").Exists() &&
-		gjson.GetBytes(body, "input").Exists()
-	if isCNNativeAnthropicIngress(account) && !adaptiveResponsesShape {
+
+	// 入口分流（国产供应商 Anthropic 协议）：上游为供应商原生 Anthropic 端点，
+	// CC 入站请求经 CC→Responses→Anthropic 转换链直通该端点。必须先于
+	// ShouldUseResponsesAPI 分流：该类账号经 probe 落标
+	// openai_responses_supported=false，会先命中下方的 CC 直转分支。
+	if account.IsAnthropicProtocol() {
 		return s.forwardChatCompletionsViaNativeAnthropic(ctx, c, account, body, defaultMappedModel)
+	}
+
+	// 固定 chat_completions 的 CN 账号，以及强制或已探测确认不支持 Responses
+	// 的其他 APIKey 账号，均走 CC 直转。
+	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
+		return s.forwardAsRawChatCompletions(ctx, c, account, body, defaultMappedModel)
 	}
 	SetActualOpenAIUpstreamEndpoint(c, openAIResponsesUpstreamEndpoint)
 
 	startTime := time.Now()
-	SetCompatibilityRoute(c, CompatibilityRouteOpenAIChatCompletionsNative)
-	SetCompatibilityUpstreamTransport(c, UpstreamTransportSSE)
-	AppendCompatibilityFallbackStage(c, "native")
 
 	// 1. Parse Chat Completions request
 	var chatReq apicompat.ChatCompletionsRequest
@@ -134,9 +212,13 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 
 	promptCacheKey = strings.TrimSpace(promptCacheKey)
 	compatPromptCacheInjected := false
-	if promptCacheKey == "" && account.IsOpenAIOAuthLike() && shouldAutoInjectPromptCacheKeyForCompat(upstreamModel) {
+	if promptCacheKey == "" && !isResponsesShape && (account.UsesOpenAICodexProtocol() || account.IsOpenAIApiKey()) && shouldAutoInjectPromptCacheKeyForCompat(upstreamModel) {
 		promptCacheKey = deriveCompatPromptCacheKey(&chatReq, upstreamModel)
 		compatPromptCacheInjected = promptCacheKey != ""
+		if compatPromptCacheInjected && account.IsOpenAIApiKey() {
+			promptCacheKey = isolateOpenAISessionID(getAPIKeyIDFromContext(c), promptCacheKey)
+			compatPromptCacheTenantIsolated = true
+		}
 	}
 
 	// 3. Build the upstream (Responses API) body.
@@ -148,15 +230,12 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	// and produce `input: null`, which Codex upstreams reject with
 	// "Invalid type for 'input': expected a string, but got an object".
 	//
-	// Detect that shape and forward the raw body as-is, only rewriting `model`
+	// Forward that shape as-is, only rewriting `model`
 	// to the resolved upstream model. The downstream codex OAuth transform will
 	// still normalize store/stream/instructions/etc.
-	isResponsesShape := !gjson.GetBytes(body, "messages").Exists() && gjson.GetBytes(body, "input").Exists()
-
 	var (
 		responsesReq  *apicompat.ResponsesRequest
 		responsesBody []byte
-		serviceTier   *string
 		err           error
 	)
 	if isResponsesShape {
@@ -174,7 +253,8 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 				responsesBody = stripped
 			}
 		}
-		responsesBody, normalizedServiceTier, err := normalizeResponsesBodyServiceTier(responsesBody)
+		var normalizedServiceTier string
+		responsesBody, normalizedServiceTier, err = normalizeResponsesBodyServiceTier(responsesBody)
 		if err != nil {
 			return nil, fmt.Errorf("normalize service_tier in responses-shape body: %w", err)
 		}
@@ -219,7 +299,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	}
 	logger.L().Debug("openai chat_completions: model mapping applied", logFields...)
 
-	if account.IsOpenAIOAuthLike() {
+	if account.UsesOpenAICodexProtocol() {
 		var reqBody map[string]any
 		if err := json.Unmarshal(responsesBody, &reqBody); err != nil {
 			return nil, fmt.Errorf("unmarshal for codex transform: %w", err)
@@ -229,6 +309,11 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 			SkipDefaultInstructions:             !isResponsesShape,
 			OmitPromotedSystemMessagesFromInput: !isResponsesShape && !isJSONObjectFormat,
 		})
+		if codexResult.Error != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": codexResult.Error.Error()}})
+			return nil, codexResult.Error
+		}
+		setCodexToolNameReverse(c, codexResult.ToolNameReverse)
 		if !isResponsesShape {
 			ensureCodexOAuthInstructionsField(reqBody)
 		}
@@ -240,11 +325,15 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		} else if promptCacheKey != "" {
 			reqBody["prompt_cache_key"] = promptCacheKey
 		}
+		applyCodexAccountIdentityClientMetadataMap(reqBody, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c))
 		responsesBody, err = json.Marshal(reqBody)
 		if err != nil {
 			return nil, fmt.Errorf("remarshal after codex transform: %w", err)
 		}
 	}
+	// Codex transforms may normalize the model after the initial mapping pass;
+	// record the final slug immediately before policy/auth/upstream dispatch.
+	SetOpsUpstreamModel(c, upstreamModel)
 
 	if account.Type == AccountTypeAPIKey {
 		if trimmedKey := strings.TrimSpace(promptCacheKey); trimmedKey != "" {
@@ -263,15 +352,21 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	}
 
 	// 4b. Apply OpenAI fast policy (may filter service_tier or block the request).
-	responsesBody, serviceTier, err = s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, responsesBody)
+	responsesBody, _, err = normalizeGPT6ResponsesSampling(responsesBody, upstreamModel)
 	if err != nil {
+		return nil, err
+	}
+	updatedBody, _, policyErr := s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, responsesBody)
+	if policyErr != nil {
 		var blocked *OpenAIFastBlockedError
-		if errors.As(err, &blocked) {
+		if errors.As(policyErr, &blocked) {
 			MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
 			writeChatCompletionsError(c, http.StatusForbidden, "permission_error", blocked.Message)
 		}
-		return nil, err
+		return nil, policyErr
 	}
+	responsesBody = updatedBody
+	responsesReq.ServiceTier = normalizedOpenAIServiceTierValue(gjson.GetBytes(responsesBody, "service_tier").String())
 
 	// 5. Get access token
 	token, _, err := s.GetAccessToken(ctx, account)
@@ -280,48 +375,50 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	}
 
 	// 6. Build upstream request
-	upstreamCtx, releaseUpstreamCtx := newChatCompletionsUpstreamContext(ctx)
+	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
+	cancelUpstream := func() {}
+	if clientStream {
+		upstreamCtx, cancelUpstream = context.WithCancel(upstreamCtx)
+	}
+	defer cancelUpstream()
 	upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, responsesBody, token, true, promptCacheKey, false)
+	releaseUpstreamCtx()
 	if err != nil {
-		releaseUpstreamCtx()
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
 
 	if promptCacheKey != "" {
 		apiKeyID := getAPIKeyIDFromContext(c)
-		upstreamReq.Header.Set("session_id", generateSessionUUID(isolateOpenAISessionID(apiKeyID, promptCacheKey)))
+		sessionKey := promptCacheKey
+		if !compatPromptCacheTenantIsolated {
+			sessionKey = isolateOpenAIUpstreamSessionID(apiKeyID, codexAccountIdentitySource(c, account), promptCacheKey)
+		}
+		upstreamReq.Header.Set("session_id", generateSessionUUID(sessionKey))
 	}
 
 	// 7. Send request
 	proxyURL := ""
-	if account.Proxy != nil {
-		proxyURL = ResolveProxyURL(ctx, account.Proxy)
+	if account.ProxyID != nil && account.Proxy != nil {
+		proxyURL = account.Proxy.URL()
 	}
-	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 	if err != nil {
-		releaseUpstreamCtx()
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 	}
-	if resp == nil || resp.Body == nil {
-		releaseUpstreamCtx()
-		return nil, errors.New("openai upstream returned an empty response body")
-	}
-	resp.Body = &openAIRequestContextReadCloser{
-		ReadCloser: resp.Body,
-		cleanup:    releaseUpstreamCtx,
-	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		cancelUpstream()
+		_ = resp.Body.Close()
+	}()
 
 	// 8. Handle error response with failover
 	if resp.StatusCode >= 400 {
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
-		logOpenAIInstructionsRequiredDebug(ctx, c, account, resp.StatusCode, upstreamMsg, responsesBody, respBody)
 		if !agentIdentityTaskRecoveryWasTried(ctx) && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, respBody) {
 			expectedTaskID := account.GetCredential("task_id")
 			if err := s.recoverAgentIdentityTask(ctx, account, expectedTaskID); err != nil {
 				return nil, fmt.Errorf("agent identity task recovery failed: %w", err)
 			}
-			return s.ForwardAsChatCompletions(markAgentIdentityTaskRecoveryTried(ctx), c, account, body, promptCacheKey, defaultMappedModel)
+			return s.forwardAsChatCompletions(markAgentIdentityTaskRecoveryTried(ctx), c, account, body, promptCacheKey, defaultMappedModel, compatPromptCacheTenantIsolated)
 		}
 		if account.Type == AccountTypeAPIKey &&
 			!account.IsOpenCodeGo() &&
@@ -359,9 +456,14 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		return nil, handleErr
 	}
 
-	// Propagate ServiceTier and ReasoningEffort to result for billing
+	// Propagate ServiceTier and ReasoningEffort to result for billing.
+	// 计费 tier 优先采用上游回显值；上游未回显时回退到最终出站 body（经过
+	// fast policy filter/force 之后）里的 tier，policy filter 删掉字段后不再
+	// 按原请求 Fast 计费。
 	if handleErr == nil && result != nil {
-		result.ServiceTier = serviceTier
+		if tier := resolvedOpenAIUpstreamServiceTier(c, extractOpenAIServiceTierFromBody(responsesBody)); tier != nil {
+			result.ServiceTier = tier
+		}
 		if responsesReq.Reasoning != nil && responsesReq.Reasoning.Effort != "" {
 			re := responsesReq.Reasoning.Effort
 			result.ReasoningEffort = &re
@@ -374,6 +476,8 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		if snapshot := ParseCodexRateLimitHeaders(resp.Header); snapshot != nil {
 			s.updateCodexUsageSnapshot(ctx, account.ID, snapshot)
 		}
+	} else if handleErr == nil && account.IsShadow() && account.ParentAccountID != nil {
+		notifyOpenAIAutoReset(*account.ParentAccountID)
 	}
 
 	return result, handleErr
@@ -444,30 +548,29 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	upstreamModel string,
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
-	beginUpstreamResponseModelObservation(c)
-	observer := upstreamResponseModelObserverFromContext(c)
 	requestID := resp.Header.Get("x-request-id")
 
-	finalResponse, usage, acc, err := s.readOpenAICompatBufferedTerminal(resp, "openai chat_completions buffered", requestID)
+	finalResponse, usage, acc, err := s.readOpenAICompatBufferedTerminal(resp, c, "openai chat_completions buffered", requestID)
 	if err != nil {
-		if shouldClassifyOpenAIUpstreamStreamReadError(err, c.Request.Context()) && !errors.Is(err, bufio.ErrTooLong) {
-			classifiedErr := newOpenAIUpstreamStreamReadError(err)
-			code, message, _ := OpenAIUpstreamStreamReadErrorDetails(classifiedErr)
-			failoverErr := s.newOpenAIStreamFailoverError(c, account, false, requestID, nil, message, resp.Header)
-			failoverErr.ResponseBody = []byte(fmt.Sprintf(`{"error":{"type":"upstream_error","code":%q,"message":%q}}`, code, message))
-			return nil, failoverErr
-		}
-		return nil, err
+		return nil, s.newOpenAICompatBufferedReadFailoverError(c, account, resp, requestID, err)
 	}
 
 	if finalResponse == nil {
 		writeChatCompletionsError(c, http.StatusBadGateway, "api_error", "Upstream stream ended without a terminal response event")
 		return nil, fmt.Errorf("upstream stream ended without terminal event")
 	}
-	terminalPayload, _ := json.Marshal(gin.H{"type": "response.completed", "response": finalResponse})
-	observer.ObserveOpenAI(terminalPayload, "response.completed")
+	observer := upstreamResponseModelObserverFromContext(c)
+	if observer == nil {
+		observer = beginUpstreamResponseModelObservation(c)
+	}
+	observer.Observe(finalResponse.Model, true)
+	observer.ObserveServiceTier(finalResponse.ServiceTier, true)
 	if strings.TrimSpace(finalResponse.Status) == "failed" {
 		payload, _ := json.Marshal(gin.H{"type": "response.failed", "response": finalResponse})
+		var partialResult *OpenAIForwardResult
+		if openAIUsageHasTokens(&usage) {
+			partialResult = &OpenAIForwardResult{RequestID: requestID, UpstreamHeaders: resp.Header, Usage: usage, Model: originalModel, BillingModel: billingModel, UpstreamModel: upstreamModel, UpstreamResponseModel: observedUpstreamResponseModel(c), UpstreamResponseServiceTier: observedUpstreamResponseServiceTier(c), Stream: false, Duration: time.Since(startTime)}
+		}
 		// cyber_policy 致命不可重试：不 failover，以 Chat Completions 错误格式回写（F4），
 		// 标记供 handler 事后写风控/邮件/tokens=0 用量行。
 		if hit, code, msg := detectOpenAICyberPolicy(payload); hit {
@@ -479,7 +582,7 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 				UpstreamInTok:  usage.InputTokens,
 				UpstreamOutTok: usage.OutputTokens,
 			})
-			clientMsg := sanitizeUserVisibleErrorText(sanitizeUpstreamErrorMessage(msg))
+			clientMsg := msg
 			if clientMsg == "" {
 				clientMsg = "Request blocked by upstream cyber-security policy"
 			}
@@ -488,7 +591,7 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 		}
 		message := openAICompatFailedResponseMessage(finalResponse)
 		if openAIStreamFailedEventShouldFailover(payload, message) {
-			return nil, s.newOpenAIStreamFailoverError(c, account, false, requestID, payload, message, resp.Header)
+			return nil, s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, payload, message, upstreamModel, resp.Header)
 		}
 		message = s.recordOpenAIStreamUpstreamError(c, account, false, requestID, "http_error", payload, message)
 		// response.failed 到达在 HTTP 200 SSE 流上，无真实 HTTP 错误码；统一走语义
@@ -501,10 +604,17 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 			}
 			MarkResponseCommitted(c)
 			writeChatCompletionsError(c, status, errType, errMsg)
-			return nil, fmt.Errorf("upstream response failed (passthrough): %s", errMsg)
+			return partialResult, fmt.Errorf("upstream response failed (passthrough): %s", errMsg)
 		}
 		writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", message)
-		return nil, fmt.Errorf("upstream response failed: %s", message)
+		return partialResult, fmt.Errorf("upstream response failed: %s", message)
+	}
+	if strings.TrimSpace(finalResponse.Status) == "completed" {
+	}
+
+	if requiresBillableGrokChatUsage(account, billingModel, upstreamModel, finalResponse.Model) && !hasBillableGrokChatUsage(usage) {
+		upstreamRequestID := firstNonEmpty(requestID, resp.Header.Get("xai-request-id"))
+		return nil, newGrokMissingUsageFailoverError(c, account, upstreamRequestID)
 	}
 
 	// When the terminal event has an empty output array, reconstruct from
@@ -523,18 +633,69 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
 	c.JSON(http.StatusOK, chatResp)
 
-	return &OpenAIForwardResult{
+	result := &OpenAIForwardResult{
 		RequestID:                     requestID,
+		UpstreamHeaders:               resp.Header,
 		Usage:                         usage,
 		Model:                         originalModel,
 		BillingModel:                  billingModel,
 		UpstreamModel:                 upstreamModel,
 		UpstreamResponseModel:         observedUpstreamResponseModel(c),
 		UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
-		UpstreamResponseServiceTier:   observer.ServiceTier(),
+		UpstreamResponseServiceTier:   observedUpstreamResponseServiceTier(c),
 		Stream:                        false,
 		Duration:                      time.Since(startTime),
-	}, nil
+	}
+	// Grok chat bridge: bill native search tools found in the terminal Responses body.
+	if account != nil && account.IsGrok() && finalResponse != nil {
+		if body, err := json.Marshal(finalResponse); err == nil {
+			if n := countGrokNativeSearchCallsFromJSONBytes(body); n > 0 {
+				result.SearchCount = n
+			}
+		}
+	}
+	return result, nil
+}
+
+func (s *OpenAIGatewayService) newOpenAICompatBufferedReadFailoverError(
+	c *gin.Context,
+	account *Account,
+	resp *http.Response,
+	requestID string,
+	err error,
+) error {
+	var readErr *openAICompatBufferedReadError
+	if !errors.As(err, &readErr) || readErr == nil || errors.Is(readErr.cause, bufio.ErrTooLong) {
+		return err
+	}
+	var requestContext context.Context
+	if c != nil && c.Request != nil {
+		requestContext = c.Request.Context()
+	}
+	if !shouldClassifyOpenAIUpstreamStreamReadError(readErr.cause, requestContext) {
+		return err
+	}
+
+	classifiedErr := newOpenAIUpstreamStreamReadError(readErr.cause)
+	code, message, ok := OpenAIUpstreamStreamReadErrorDetails(classifiedErr)
+	if !ok {
+		return err
+	}
+	payload, _ := json.Marshal(gin.H{
+		"error": gin.H{
+			"type":    "upstream_error",
+			"code":    code,
+			"message": message,
+		},
+	})
+	var responseHeaders http.Header
+	if resp != nil {
+		responseHeaders = resp.Header
+	}
+	failoverErr := s.newOpenAIStreamFailoverError(c, account, false, requestID, payload, message, responseHeaders)
+	// 保留稳定错误码，确保重试耗尽后客户端和错误透传规则仍能识别传输故障。
+	failoverErr.ResponseBody = payload
+	return failoverErr
 }
 
 // handleChatStreamingResponse reads Responses SSE events from upstream,
@@ -549,8 +710,6 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	startTime time.Time,
 	requestBodyLen int,
 ) (*OpenAIForwardResult, error) {
-	beginUpstreamResponseModelObservation(c)
-	observer := upstreamResponseModelObserverFromContext(c)
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
 
@@ -564,10 +723,19 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	var firstTokenMs *int
 	firstChunk := true
 	clientDisconnected := false
+	clientOutputStarted := false
+	pendingSSE := make([]string, 0, 4)
 	refusalDetector := newOpenAIChatSilentRefusalDetector(requestBodyLen)
 	var streamFailoverErr *UpstreamFailoverError
-	var pendingChunks []apicompat.ChatCompletionsChunk
 	var streamNonFailoverErr error
+	// Grok chat bridge reuses Responses SSE; count native search tools for surcharge.
+	searchCount := 0
+	streamSearchSeen := make(map[string]struct{})
+	countSearch := account != nil && account.IsGrok()
+	observer := upstreamResponseModelObserverFromContext(c)
+	if observer == nil {
+		observer = beginUpstreamResponseModelObservation(c)
+	}
 
 	scanner := s.newUpstreamSSEScanner(resp.Body)
 
@@ -586,25 +754,35 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	}
 
 	resultWithUsage := func() *OpenAIForwardResult {
-		return &OpenAIForwardResult{
+		out := &OpenAIForwardResult{
 			RequestID:                     requestID,
+			UpstreamHeaders:               resp.Header,
 			Usage:                         usage,
 			Model:                         originalModel,
 			BillingModel:                  billingModel,
 			UpstreamModel:                 upstreamModel,
 			UpstreamResponseModel:         observedUpstreamResponseModel(c),
 			UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
+			UpstreamResponseServiceTier:   observedUpstreamResponseServiceTier(c),
 			Stream:                        true,
 			Duration:                      time.Since(startTime),
 			FirstTokenMs:                  firstTokenMs,
 		}
+		if searchCount > 0 {
+			out.SearchCount = searchCount
+		}
+		return out
 	}
 
 	processDataLine := func(payload string) bool {
+		payload = string(restoreCodexToolNamesFromContext(c, []byte(payload)))
 		if firstChunk {
 			firstChunk = false
 			ms := int(time.Since(startTime).Milliseconds())
 			firstTokenMs = &ms
+		}
+		if countSearch {
+			searchCount += countGrokNativeSearchCallsInSSEDataDedup([]byte(payload), streamSearchSeen)
 		}
 
 		var event apicompat.ResponsesStreamEvent
@@ -617,6 +795,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		}
 		observer.ObserveOpenAI([]byte(payload), event.Type)
 		refusalDetector.ObservePayload([]byte(payload))
+		s.parseSSEUsageBytesWithType([]byte(payload), event.Type, &usage)
 
 		isTerminalEvent := isOpenAICompatResponsesTerminalEvent(event.Type)
 		if isTerminalEvent {
@@ -627,7 +806,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				usage = copyOpenAIUsageFromResponsesUsage(event.Response.Usage)
 			}
 		}
-		if strings.TrimSpace(event.Type) == "response.failed" {
+		if strings.TrimSpace(event.Type) == "response.failed" || strings.TrimSpace(event.Type) == "error" {
 			payloadBytes := []byte(payload)
 			message := extractOpenAISSEErrorMessage(payloadBytes)
 			if hit, code, msg := detectOpenAICyberPolicy(payloadBytes); hit {
@@ -645,7 +824,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				if !clientDisconnected {
 					// 被 refusal 检测扣留的 pendingSSE 有意丢弃——cyber 拦截优先于部分内容下发。
 					writeStreamHeaders()
-					clientMsg := sanitizeUserVisibleErrorText(sanitizeUpstreamErrorMessage(msg))
+					clientMsg := msg
 					if clientMsg == "" {
 						clientMsg = "Request blocked by upstream cyber-security policy"
 					}
@@ -661,8 +840,12 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				}
 				return true
 			}
-			if openAIStreamFailedEventShouldFailover(payloadBytes, message) {
-				streamFailoverErr = s.newOpenAIStreamFailoverError(c, account, false, requestID, payloadBytes, message, resp.Header)
+			shouldFailover := openAIStreamFailedEventShouldFailover(payloadBytes, message)
+			if strings.TrimSpace(event.Type) == "error" {
+				shouldFailover = openAIStreamErrorEventShouldFailover(payloadBytes, message)
+			}
+			if !clientOutputStarted && shouldFailover {
+				streamFailoverErr = s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, payloadBytes, message, upstreamModel, resp.Header)
 				return true
 			}
 			message = s.recordOpenAIStreamUpstreamError(c, account, false, requestID, "http_error", payloadBytes, message)
@@ -686,6 +869,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			})
 			if c != nil && c.Writer != nil && !c.Writer.Written() {
 				writeChatCompletionsError(c, defaultStatus, defaultErrType, defaultMsg)
+				clientOutputStarted = true
 			} else if c != nil && c.Writer != nil && !clientDisconnected {
 				if _, err := fmt.Fprintf(c.Writer, "data: %s\n\n", errorPayload); err != nil {
 					clientDisconnected = true
@@ -703,20 +887,8 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 
 		chunks := apicompat.ResponsesEventToChatChunks(&event, state)
 		if !clientDisconnected {
-			if len(chunks) > 0 {
-				if c == nil || c.Writer == nil || !c.Writer.Written() {
-					if !chatChunksHaveSubstantiveOutput(chunks) {
-						pendingChunks = append(pendingChunks, chunks...)
-						return isTerminalEvent
-					}
-					if len(pendingChunks) > 0 {
-						chunks = append(append([]apicompat.ChatCompletionsChunk{}, pendingChunks...), chunks...)
-						pendingChunks = nil
-					}
-				}
-				writeStreamHeaders()
-			}
 			for _, chunk := range chunks {
+				refusalDetector.ObserveChatChunk(chunk)
 				sse, err := apicompat.ChatChunkToSSE(chunk)
 				if err != nil {
 					logger.L().Warn("openai chat_completions stream: failed to marshal chunk",
@@ -724,6 +896,27 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 						zap.String("request_id", requestID),
 					)
 					continue
+				}
+				if !clientOutputStarted && !refusalDetector.ShouldReleaseClientOutput() {
+					pendingSSE = append(pendingSSE, sse)
+					continue
+				}
+				if !clientOutputStarted {
+					writeStreamHeaders()
+					for _, pending := range pendingSSE {
+						if _, err := fmt.Fprint(c.Writer, pending); err != nil {
+							clientDisconnected = true
+							logger.L().Info("openai chat_completions stream: client disconnected while flushing pending chunks",
+								zap.String("request_id", requestID),
+							)
+							break
+						}
+					}
+					pendingSSE = pendingSSE[:0]
+					clientOutputStarted = !clientDisconnected
+					if clientDisconnected {
+						break
+					}
 				}
 				if _, err := fmt.Fprint(c.Writer, sse); err != nil {
 					clientDisconnected = true
@@ -734,7 +927,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				}
 			}
 		}
-		if len(chunks) > 0 && !clientDisconnected {
+		if len(chunks) > 0 && !clientDisconnected && clientOutputStarted {
 			c.Writer.Flush()
 		}
 		return isTerminalEvent
@@ -751,16 +944,32 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			return resultWithUsage(), streamNonFailoverErr
 		}
 		if finalChunks := apicompat.FinalizeResponsesChatStream(state); len(finalChunks) > 0 && !clientDisconnected {
-			if len(pendingChunks) > 0 {
-				finalChunks = append(append([]apicompat.ChatCompletionsChunk{}, pendingChunks...), finalChunks...)
-				pendingChunks = nil
-			}
-			writeStreamHeaders()
 			for _, chunk := range finalChunks {
 				refusalDetector.ObserveChatChunk(chunk)
 				sse, err := apicompat.ChatChunkToSSE(chunk)
 				if err != nil {
 					continue
+				}
+				if !clientOutputStarted && !refusalDetector.ShouldReleaseClientOutput() {
+					pendingSSE = append(pendingSSE, sse)
+					continue
+				}
+				if !clientOutputStarted {
+					writeStreamHeaders()
+					for _, pending := range pendingSSE {
+						if _, err := fmt.Fprint(c.Writer, pending); err != nil {
+							clientDisconnected = true
+							logger.L().Info("openai chat_completions stream: client disconnected during pending final flush",
+								zap.String("request_id", requestID),
+							)
+							break
+						}
+					}
+					pendingSSE = pendingSSE[:0]
+					clientOutputStarted = !clientDisconnected
+					if clientDisconnected {
+						break
+					}
 				}
 				if _, err := fmt.Fprint(c.Writer, sse); err != nil {
 					clientDisconnected = true
@@ -769,6 +978,25 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 					)
 					break
 				}
+			}
+		}
+		if !clientDisconnected && !clientOutputStarted {
+			if refusalDetector.IsSilentRefusal() {
+				return nil, newOpenAISilentRefusalFailoverError(c, account, requestID)
+			}
+			if len(pendingSSE) > 0 {
+				writeStreamHeaders()
+				for _, pending := range pendingSSE {
+					if _, err := fmt.Fprint(c.Writer, pending); err != nil {
+						clientDisconnected = true
+						logger.L().Info("openai chat_completions stream: client disconnected during final pending flush",
+							zap.String("request_id", requestID),
+						)
+						break
+					}
+				}
+				pendingSSE = pendingSSE[:0]
+				clientOutputStarted = !clientDisconnected
 			}
 		}
 		// Send [DONE] sentinel
@@ -780,6 +1008,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 					zap.String("request_id", requestID),
 				)
 			}
+			clientOutputStarted = !clientDisconnected
 		}
 		if !clientDisconnected {
 			c.Writer.Flush()
@@ -798,21 +1027,12 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	missingTerminalErr := func() (*OpenAIForwardResult, error) {
 		return resultWithUsage(), fmt.Errorf("stream usage incomplete: missing terminal event")
 	}
-	currentSSEEventType := ""
-	prepareSSEDataPayload := func(line string) (string, bool) {
-		if eventType, ok := extractOpenAISSEEventLine(line); ok {
-			currentSSEEventType = eventType
-			return "", false
+	processFrame := func(frame openAICompatSSEFrame) bool {
+		payload := openAICompatPayloadWithEventType(frame.Data, frame.EventType)
+		if strings.TrimSpace(payload) == "[DONE]" {
+			return false
 		}
-		if strings.TrimSpace(line) == "" {
-			currentSSEEventType = ""
-			return "", false
-		}
-		payload, ok := extractOpenAISSEDataLine(line)
-		if !ok {
-			return "", false
-		}
-		return openAICompatPayloadWithEventType(payload, currentSSEEventType), true
+		return processDataLine(payload)
 	}
 
 	// Determine keepalive interval
@@ -823,16 +1043,17 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 
 	// No keepalive: fast synchronous path
 	if streamInterval <= 0 && keepaliveInterval <= 0 {
+		var parser openAICompatSSEFrameParser
 		for scanner.Scan() {
 			line := scanner.Text()
-			payload, ok := prepareSSEDataPayload(line)
+			frame, ok := parser.AddLine(line)
 			if !ok {
 				continue
 			}
-			if strings.TrimSpace(payload) == "[DONE]" {
+			if strings.TrimSpace(frame.Data) == "[DONE]" {
 				return missingTerminalErr()
 			}
-			if processDataLine(payload) {
+			if processFrame(frame) {
 				return finalizeStream()
 			}
 		}
@@ -842,6 +1063,14 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				return resultWithUsage(), fmt.Errorf("stream usage incomplete: %w", err)
 			}
 			return resultWithUsage(), newOpenAIUpstreamStreamReadError(err)
+		}
+		if frame, ok := parser.Finish(); ok {
+			if strings.TrimSpace(frame.Data) == "[DONE]" {
+				return missingTerminalErr()
+			}
+			if processFrame(frame) {
+				return finalizeStream()
+			}
 		}
 		return missingTerminalErr()
 	}
@@ -887,11 +1116,20 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		keepaliveCh = keepaliveTicker.C
 	}
 	lastDataAt := time.Now()
+	var parser openAICompatSSEFrameParser
 
 	for {
 		select {
 		case ev, ok := <-events:
 			if !ok {
+				if frame, ok := parser.Finish(); ok {
+					if strings.TrimSpace(frame.Data) == "[DONE]" {
+						return missingTerminalErr()
+					}
+					if processFrame(frame) {
+						return finalizeStream()
+					}
+				}
 				return missingTerminalErr()
 			}
 			if ev.err != nil {
@@ -903,14 +1141,14 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			}
 			lastDataAt = time.Now()
 			line := ev.line
-			payload, ok := prepareSSEDataPayload(line)
+			frame, ok := parser.AddLine(line)
 			if !ok {
 				continue
 			}
-			if strings.TrimSpace(payload) == "[DONE]" {
+			if strings.TrimSpace(frame.Data) == "[DONE]" {
 				return missingTerminalErr()
 			}
-			if processDataLine(payload) {
+			if processFrame(frame) {
 				return finalizeStream()
 			}
 
@@ -933,6 +1171,9 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			if clientDisconnected {
 				continue
 			}
+			if refusalDetector.Enabled() && !clientOutputStarted {
+				continue
+			}
 			if time.Since(lastDataAt) < keepaliveInterval {
 				continue
 			}
@@ -950,23 +1191,10 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	}
 }
 
-func chatChunksHaveSubstantiveOutput(chunks []apicompat.ChatCompletionsChunk) bool {
-	for _, chunk := range chunks {
-		if chunk.Usage != nil {
-			return true
-		}
-		for _, choice := range chunk.Choices {
-			if choice.FinishReason != nil {
-				return true
-			}
-			if choice.Delta.Content != nil || choice.Delta.ReasoningContent != nil || len(choice.Delta.ToolCalls) > 0 {
-				return true
-			}
-		}
-	}
-	return false
-}
-
+// shouldFailoverOpenAIChatCompletionsUpstreamResponse keeps the Chat
+// Completions compatibility path aligned with the shared Responses failover
+// classifier. Instructions-required errors are retryable even when the
+// generic classifier cannot infer that from the upstream body.
 func (s *OpenAIGatewayService) shouldFailoverOpenAIChatCompletionsUpstreamResponse(statusCode int, upstreamMsg string, upstreamBody []byte) bool {
 	if isOpenAIInstructionsRequiredError(statusCode, upstreamMsg, upstreamBody) {
 		return true

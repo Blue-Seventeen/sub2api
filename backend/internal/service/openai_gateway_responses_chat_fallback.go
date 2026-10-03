@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -20,8 +21,6 @@ import (
 	"github.com/tidwall/sjson"
 	"go.uber.org/zap"
 )
-
-const openAIResponsesReasoningCacheTTL = 24 * time.Hour
 
 // forwardResponsesViaRawChatCompletions serves /v1/responses clients through an
 // upstream that only supports /v1/chat/completions.
@@ -45,8 +44,6 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	}
 
 	clientStream := responsesReq.Stream
-	serviceTier := extractOpenAIServiceTierFromBody(body)
-	s.cacheResponsesReasoningItems(ctx, c, responsesReq.Input)
 	// custom 工具（如 codex 的 exec）降级为 function 工具转发，回程需按名字还原为
 	// custom_tool_call 项，先记下名字集合；tool_search 工具同理，回程还原为
 	// tool_search_call 项；namespace 子工具（如 MCP 工具）摊平转发，回程按映射还原
@@ -57,13 +54,16 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 		return nil, fmt.Errorf("resolve responses tools: %w", err)
 	}
 	customTools := apicompat.CustomToolNames(effectiveTools)
+	functionTools := apicompat.FunctionToolNames(effectiveTools)
 	toolSearch := apicompat.HasToolSearchTool(effectiveTools)
 	namespaceTools := apicompat.NamespaceToolNames(effectiveTools)
 
-	chatReq, err := apicompat.ResponsesToChatCompletionsRequestWithOptions(
-		&responsesReq,
-		&apicompat.ResponsesToChatOptions{ReasoningContentByID: s.cachedResponsesReasoningContent(ctx, c)},
-	)
+	// 自愈回写：历史里带明文 summary 的 reasoning item 刷新进缓存，覆盖 Redis
+	// 被 flush / 跨实例漂移后同 id 的 encrypted-only 副本无法再取明文的情况。
+
+	chatReq, err := apicompat.ResponsesToChatCompletionsRequestWithOptions(&responsesReq, &apicompat.ResponsesToChatOptions{
+		ReasoningContentByID: s.cachedResponsesReasoningContent(ctx, c),
+	})
 	if err != nil {
 		writeOpenAIResponsesFallbackError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, fmt.Errorf("convert responses to chat completions: %w", err)
@@ -92,7 +92,7 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	if err != nil {
 		return nil, fmt.Errorf("marshal chat completions fallback request: %w", err)
 	}
-	chatBody, fastPolicyTier, err := s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, chatBody)
+	chatBody, _, err = s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, chatBody)
 	if err != nil {
 		var blocked *OpenAIFastBlockedError
 		if errors.As(err, &blocked) {
@@ -100,14 +100,12 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 		}
 		return nil, err
 	}
-	if serviceTier == nil {
-		serviceTier = fastPolicyTier
-	}
-	if serviceTier == nil {
-		serviceTier = extractOpenAIServiceTierFromBody(chatBody)
-	}
-	chatBody = applyOllamaCloudRawChatCompletionsRequest(account, chatBody)
+	// /v1/responses 降级到 raw CC 的出站与 forwardAsRawChatCompletions 共用同一个
+	// 独立 Ollama Cloud token 钩子；chatReq.Model 已是模型映射后的 upstreamModel。
 	chatBody = clampOllamaCloudUpstreamMaxTokens(account, chatBody)
+	// Keep the final outbound tier for usage-time reconciliation. A policy
+	// filter that removes the field therefore leaves this nil.
+	serviceTier := extractOpenAIServiceTierFromBody(chatBody)
 
 	logger.L().Debug("openai responses: forwarding via raw chat completions",
 		zap.Int64("account_id", account.ID),
@@ -116,6 +114,7 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 		zap.String("upstream_model", upstreamModel),
 		zap.Bool("stream", clientStream),
 	)
+	SetOpsUpstreamModel(c, upstreamModel)
 
 	// Build and send upstream request via the shared CC pipeline
 	apiKey, targetURL, err := s.resolveCCFallbackTarget(account)
@@ -137,9 +136,17 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	}
 
 	if clientStream {
-		return s.streamChatCompletionsAsResponses(c, resp, account, originalModel, customTools, toolSearch, namespaceTools, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+		result, forwardErr := s.streamChatCompletionsAsResponses(c, resp, account, originalModel, customTools, functionTools, toolSearch, namespaceTools, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+		if forwardErr == nil {
+			s.cacheResponsesReasoningItems(context.Background(), c, responsesReq.Input)
+		}
+		return result, forwardErr
 	}
-	return s.bufferChatCompletionsAsResponses(c, resp, account, originalModel, customTools, toolSearch, namespaceTools, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+	result, forwardErr := s.bufferChatCompletionsAsResponses(c, resp, account, originalModel, customTools, functionTools, toolSearch, namespaceTools, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+	if forwardErr == nil {
+		s.cacheResponsesReasoningItems(context.Background(), c, responsesReq.Input)
+	}
+	return result, forwardErr
 }
 
 func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
@@ -148,6 +155,7 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 	account *Account,
 	originalModel string,
 	customTools map[string]bool,
+	functionTools map[string]bool,
 	toolSearch bool,
 	namespaceTools map[string]apicompat.NamespacedToolName,
 	billingModel string,
@@ -161,7 +169,8 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 	if err != nil {
 		return nil, err
 	}
-	responsesResp := apicompat.ChatCompletionsResponseToResponses(ccResp, originalModel, customTools, toolSearch, namespaceTools)
+	responsesResp := apicompat.ChatCompletionsResponseToResponses(ccResp, originalModel, customTools, functionTools, toolSearch, namespaceTools)
+	s.cacheResponsesReasoningOutput(context.Background(), c, responsesResp.Output)
 
 	if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
@@ -170,12 +179,13 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 
 	return &OpenAIForwardResult{
 		RequestID:                   requestID,
+		UpstreamHeaders:             resp.Header,
 		Usage:                       usage,
 		Model:                       originalModel,
 		BillingModel:                billingModel,
 		UpstreamModel:               upstreamModel,
-		UpstreamResponseServiceTier: observedUpstreamResponseServiceTier(c),
 		ReasoningEffort:             reasoningEffort,
+		UpstreamResponseServiceTier: observedUpstreamResponseServiceTier(c),
 		ServiceTier:                 resolvedOpenAIUpstreamServiceTier(c, serviceTier),
 		Stream:                      false,
 		Duration:                    time.Since(startTime),
@@ -188,6 +198,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	account *Account,
 	originalModel string,
 	customTools map[string]bool,
+	functionTools map[string]bool,
 	toolSearch bool,
 	namespaceTools map[string]apicompat.NamespacedToolName,
 	billingModel string,
@@ -201,9 +212,11 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 
 	state := apicompat.NewChatCompletionsToResponsesStreamState(originalModel)
 	state.CustomTools = customTools
+	state.FunctionTools = functionTools
 	state.ToolSearchDeclared = toolSearch
 	state.NamespaceTools = namespaceTools
 	clientDisconnected := false
+	var pendingReasoningEvents []apicompat.ResponsesStreamEvent
 
 	writeEvents := func(events []apicompat.ResponsesStreamEvent) {
 		if clientDisconnected || len(events) == 0 {
@@ -232,12 +245,16 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	}
 
 	scan := s.scanCCStream(c, resp, "openai responses chat fallback", requestID, startTime, func(chunk *apicompat.ChatCompletionsChunk) {
-		writeEvents(apicompat.ChatCompletionsChunkToResponsesEvents(chunk, state))
+		events := apicompat.ChatCompletionsChunkToResponsesEvents(chunk, state)
+		pendingReasoningEvents = append(pendingReasoningEvents, events...)
+		writeEvents(events)
 	})
 
 	if len(scan.ErrorPayload) > 0 {
-		// Resolve custom rules before failover, and never finalize/cache errors.
-		terminalErr := s.handleCCUpstreamErrorPayload(c, resp, account, scan.ErrorPayload, !c.Writer.Written() && !clientDisconnected && !openAIUsageHasTokens(&scan.Usage),
+		// A terminal error may carry usage. Keep that usage for billing and only
+		// allow replay when no billable tokens have been observed yet.
+		terminalErr := s.handleCCUpstreamErrorPayload(c, resp, account, scan.ErrorPayload,
+			!c.Writer.Written() && !clientDisconnected && !openAIUsageHasTokens(&scan.Usage),
 			func(c *gin.Context, status int, errType, message string) {
 				if clientDisconnected {
 					return
@@ -246,7 +263,6 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 					writeOpenAIResponsesFallbackError(c, status, errType, message)
 					return
 				}
-				// Use only the classified, redacted fields, not the upstream body.
 				source, _ := json.Marshal(gin.H{"error": gin.H{"type": errType, "message": message}})
 				if _, err := fmt.Fprint(c.Writer, buildOpenAIResponseFailedSSE(state.ResponseID, originalModel, source, message)); err != nil {
 					clientDisconnected = true
@@ -273,16 +289,18 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 
 	if scan.Err != nil {
 		return &OpenAIForwardResult{
-			RequestID:       requestID,
-			Usage:           scan.Usage,
-			Model:           originalModel,
-			BillingModel:    billingModel,
-			UpstreamModel:   upstreamModel,
-			ReasoningEffort: reasoningEffort,
-			ServiceTier:     serviceTier,
-			Stream:          true,
-			Duration:        time.Since(startTime),
-			FirstTokenMs:    scan.FirstTokenMs,
+			RequestID:                   requestID,
+			UpstreamHeaders:             resp.Header,
+			Usage:                       scan.Usage,
+			Model:                       originalModel,
+			BillingModel:                billingModel,
+			UpstreamModel:               upstreamModel,
+			ReasoningEffort:             reasoningEffort,
+			UpstreamResponseServiceTier: observedUpstreamResponseServiceTier(c),
+			ServiceTier:                 resolvedOpenAIUpstreamServiceTier(c, serviceTier),
+			Stream:                      true,
+			Duration:                    time.Since(startTime),
+			FirstTokenMs:                scan.FirstTokenMs,
 		}, fmt.Errorf("stream usage incomplete: %w", scan.Err)
 	}
 	if !scan.SawDone && strings.TrimSpace(state.FinishReason) == "" {
@@ -297,36 +315,40 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 			}
 		}
 		return &OpenAIForwardResult{
-			RequestID: requestID, UpstreamHeaders: resp.Header, Usage: scan.Usage,
-			Model: originalModel, BillingModel: billingModel, UpstreamModel: upstreamModel,
-			ReasoningEffort: reasoningEffort, ServiceTier: resolvedOpenAIUpstreamServiceTier(c, serviceTier),
-			Stream: true, Duration: time.Since(startTime), FirstTokenMs: scan.FirstTokenMs,
+			RequestID:        requestID,
+			UpstreamHeaders:  resp.Header,
+			Usage:            scan.Usage,
+			Model:            originalModel,
+			BillingModel:     billingModel,
+			UpstreamModel:    upstreamModel,
+			ReasoningEffort:  reasoningEffort,
+			ServiceTier:      resolvedOpenAIUpstreamServiceTier(c, serviceTier),
+			Stream:           true,
+			Duration:         time.Since(startTime),
+			FirstTokenMs:     scan.FirstTokenMs,
 			ClientDisconnect: clientDisconnected,
 		}, errors.New(message)
 	}
+	if err := state.ValidateToolCallArguments(); err != nil {
+		return &OpenAIForwardResult{
+			RequestID:                   requestID,
+			UpstreamHeaders:             resp.Header,
+			Usage:                       scan.Usage,
+			Model:                       originalModel,
+			BillingModel:                billingModel,
+			UpstreamModel:               upstreamModel,
+			ReasoningEffort:             reasoningEffort,
+			UpstreamResponseServiceTier: observedUpstreamResponseServiceTier(c),
+			ServiceTier:                 resolvedOpenAIUpstreamServiceTier(c, serviceTier),
+			Stream:                      true,
+			Duration:                    time.Since(startTime),
+			FirstTokenMs:                scan.FirstTokenMs,
+		}, fmt.Errorf("invalid tool call arguments from upstream: %w", err)
+	}
 
 	finalEvents := apicompat.FinalizeChatCompletionsResponsesStream(state)
-	if state.FinishReason == "length" {
-		if err := validateResponsesToolArguments(finalEvents); err != nil {
-			return &OpenAIForwardResult{
-				RequestID:       requestID,
-				Usage:           scan.Usage,
-				Model:           originalModel,
-				BillingModel:    billingModel,
-				UpstreamModel:   upstreamModel,
-				ReasoningEffort: reasoningEffort,
-				ServiceTier:     resolvedOpenAIUpstreamServiceTier(c, serviceTier),
-				Stream:          true,
-				Duration:        time.Since(startTime),
-				FirstTokenMs:    scan.FirstTokenMs,
-			}, err
-		}
-	}
-	cacheCtx := context.Background()
-	if c != nil && c.Request != nil {
-		cacheCtx = c.Request.Context()
-	}
-	s.cacheResponsesStreamReasoning(cacheCtx, c, state)
+	s.cacheResponsesReasoningEvents(context.Background(), c, pendingReasoningEvents)
+	s.cacheResponsesReasoningEvents(context.Background(), c, finalEvents)
 	writeEvents(finalEvents)
 	if !clientDisconnected {
 		writeStreamHeaders()
@@ -343,114 +365,18 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 
 	return &OpenAIForwardResult{
 		RequestID:                   requestID,
+		UpstreamHeaders:             resp.Header,
 		Usage:                       scan.Usage,
 		Model:                       originalModel,
 		BillingModel:                billingModel,
 		UpstreamModel:               upstreamModel,
-		UpstreamResponseServiceTier: observedUpstreamResponseServiceTier(c),
 		ReasoningEffort:             reasoningEffort,
+		UpstreamResponseServiceTier: observedUpstreamResponseServiceTier(c),
 		ServiceTier:                 resolvedOpenAIUpstreamServiceTier(c, serviceTier),
 		Stream:                      true,
 		Duration:                    time.Since(startTime),
 		FirstTokenMs:                scan.FirstTokenMs,
 	}, nil
-}
-
-func (s *OpenAIGatewayService) responsesReasoningCache(c *gin.Context) (ScopedReasoningContentCache, int64, int64) {
-	if s == nil || c == nil {
-		return nil, 0, 0
-	}
-	cache, ok := s.cache.(ScopedReasoningContentCache)
-	if !ok {
-		return nil, 0, 0
-	}
-	// Only the post-authentication API key context is authoritative, never
-	// request headers, body metadata, group IDs, or upstream account IDs.
-	value, _ := c.Get("api_key")
-	key, ok := value.(*APIKey)
-	if !ok || key == nil || key.UserID <= 0 || key.ID <= 0 {
-		return nil, 0, 0
-	}
-	return cache, key.UserID, key.ID
-}
-
-func (s *OpenAIGatewayService) cachedResponsesReasoningContent(ctx context.Context, c *gin.Context) func(string) string {
-	cache, userID, apiKeyID := s.responsesReasoningCache(c)
-	return func(itemID string) string {
-		if cache == nil || strings.TrimSpace(itemID) == "" {
-			return ""
-		}
-		content, err := cache.GetScopedReasoningContent(ctx, userID, apiKeyID, strings.TrimSpace(itemID))
-		if err != nil {
-			return ""
-		}
-		return strings.TrimSpace(content)
-	}
-}
-
-func (s *OpenAIGatewayService) cacheResponsesReasoningItems(ctx context.Context, c *gin.Context, input json.RawMessage) {
-	cache, userID, apiKeyID := s.responsesReasoningCache(c)
-	if cache == nil {
-		return
-	}
-	parsed := gjson.ParseBytes(input)
-	if !parsed.IsArray() {
-		return
-	}
-	for _, item := range parsed.Array() {
-		if strings.TrimSpace(item.Get("type").String()) != "reasoning" {
-			continue
-		}
-		itemID := strings.TrimSpace(item.Get("id").String())
-		content := responsesReasoningItemText(item)
-		if itemID == "" || content == "" {
-			continue
-		}
-		_ = cache.SetScopedReasoningContent(ctx, userID, apiKeyID, itemID, content, openAIResponsesReasoningCacheTTL)
-	}
-}
-
-func (s *OpenAIGatewayService) cacheResponsesStreamReasoning(ctx context.Context, c *gin.Context, state *apicompat.ChatCompletionsToResponsesStreamState) {
-	cache, userID, apiKeyID := s.responsesReasoningCache(c)
-	if cache == nil || state == nil {
-		return
-	}
-	itemID := strings.TrimSpace(state.ReasoningItemID)
-	content := strings.TrimSpace(state.Reasoning.String())
-	if itemID == "" || content == "" {
-		return
-	}
-	_ = cache.SetScopedReasoningContent(ctx, userID, apiKeyID, itemID, content, openAIResponsesReasoningCacheTTL)
-}
-
-func responsesReasoningItemText(item gjson.Result) string {
-	var parts []string
-	for _, summary := range item.Get("summary").Array() {
-		if text := strings.TrimSpace(summary.Get("text").String()); text != "" {
-			parts = append(parts, text)
-		}
-	}
-	if len(parts) == 0 {
-		for _, part := range item.Get("content").Array() {
-			if text := strings.TrimSpace(part.Get("text").String()); text != "" {
-				parts = append(parts, text)
-			}
-		}
-	}
-	return strings.Join(parts, "\n")
-}
-
-func validateResponsesToolArguments(events []apicompat.ResponsesStreamEvent) error {
-	for _, event := range events {
-		if strings.TrimSpace(event.Type) != "response.function_call_arguments.done" {
-			continue
-		}
-		arguments := strings.TrimSpace(event.Arguments)
-		if arguments != "" && !json.Valid([]byte(arguments)) {
-			return fmt.Errorf("invalid JSON tool arguments at output limit")
-		}
-	}
-	return nil
 }
 
 func chatChunkStartsResponsesOutput(chunk *apicompat.ChatCompletionsChunk) bool {
@@ -465,10 +391,204 @@ func chatChunkStartsResponsesOutput(chunk *apicompat.ChatCompletionsChunk) bool 
 	return false
 }
 
+// responsesReasoningCacheTTL 是 reasoning 缓存（按 reasoning item id）的过期时间。
+// Codex 会话可能跨多天恢复历史，取 7 天。
+const responsesReasoningCacheTTL = 7 * 24 * time.Hour
+
+func (s *OpenAIGatewayService) responsesReasoningCache(c *gin.Context) (ScopedReasoningContentCache, int64, int64) {
+	if s == nil || c == nil {
+		return nil, 0, 0
+	}
+	cache, ok := s.cache.(ScopedReasoningContentCache)
+	if !ok {
+		return nil, 0, 0
+	}
+	value, _ := c.Get("api_key")
+	key, ok := value.(*APIKey)
+	if !ok || key == nil || key.UserID <= 0 || key.ID <= 0 {
+		return nil, 0, 0
+	}
+	return cache, key.UserID, key.ID
+}
+
+func (s *OpenAIGatewayService) cachedResponsesReasoningContent(ctx context.Context, c *gin.Context) func(string) string {
+	cache, userID, apiKeyID := s.responsesReasoningCache(c)
+	return func(itemID string) string {
+		itemID = strings.TrimSpace(itemID)
+		if cache == nil || itemID == "" {
+			return ""
+		}
+		content, err := cache.GetScopedReasoningContent(ctx, userID, apiKeyID, itemID)
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(content)
+	}
+}
+
+func (s *OpenAIGatewayService) cacheResponsesReasoningItems(ctx context.Context, c *gin.Context, input json.RawMessage) {
+	cache, userID, apiKeyID := s.responsesReasoningCache(c)
+	if cache == nil {
+		return
+	}
+	var items []json.RawMessage
+	if err := json.Unmarshal(input, &items); err != nil {
+		return
+	}
+	for _, raw := range items {
+		id, content, ok := apicompat.ExtractResponsesReasoningItem(raw)
+		if !ok || strings.TrimSpace(id) == "" || strings.TrimSpace(content) == "" {
+			continue
+		}
+		_ = cache.SetScopedReasoningContent(ctx, userID, apiKeyID, strings.TrimSpace(id), strings.TrimSpace(content), responsesReasoningCacheTTL)
+	}
+}
+
+func (s *OpenAIGatewayService) cacheResponsesReasoningOutput(ctx context.Context, c *gin.Context, output []apicompat.ResponsesOutput) {
+	cache, userID, apiKeyID := s.responsesReasoningCache(c)
+	if cache == nil {
+		return
+	}
+	for i := range output {
+		item := &output[i]
+		if item.Type != "reasoning" || strings.TrimSpace(item.ID) == "" {
+			continue
+		}
+		parts := make([]string, 0, len(item.Summary))
+		for _, summary := range item.Summary {
+			if text := strings.TrimSpace(summary.Text); text != "" {
+				parts = append(parts, text)
+			}
+		}
+		content := strings.TrimSpace(strings.Join(parts, "\n"))
+		if content != "" {
+			_ = cache.SetScopedReasoningContent(ctx, userID, apiKeyID, strings.TrimSpace(item.ID), content, responsesReasoningCacheTTL)
+		}
+	}
+}
+
+func (s *OpenAIGatewayService) cacheResponsesReasoningEvents(ctx context.Context, c *gin.Context, events []apicompat.ResponsesStreamEvent) {
+	for _, event := range events {
+		if event.Type == "response.output_item.done" && event.Item != nil {
+			s.cacheResponsesReasoningOutput(ctx, c, []apicompat.ResponsesOutput{*event.Item})
+		}
+	}
+}
+
+func (s *OpenAIGatewayService) cacheResponsesStreamReasoning(ctx context.Context, c *gin.Context, state *apicompat.ChatCompletionsToResponsesStreamState) {
+	cache, userID, apiKeyID := s.responsesReasoningCache(c)
+	if cache == nil || state == nil {
+		return
+	}
+	itemID := strings.TrimSpace(state.ReasoningItemID)
+	content := strings.TrimSpace(state.Reasoning.String())
+	if itemID != "" && content != "" {
+		_ = cache.SetScopedReasoningContent(ctx, userID, apiKeyID, itemID, content, responsesReasoningCacheTTL)
+	}
+}
+
+// reasoningContentByID 按 reasoning item id 回查缓存的 reasoning 全文，供
+// Responses→CC 桥接在客户端不回传明文 summary（encrypted-only reasoning
+// item）时回注 reasoning_content。任何失败都 fail-open 返回 ""（维持桥接原
+// 行为），因为缓存只是优化而非正确性前提。
+func (s *OpenAIGatewayService) reasoningContentByID(itemID string) string {
+	if s == nil || s.cache == nil {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	content, err := s.cache.GetReasoningContent(ctx, itemID)
+	if err != nil {
+		return ""
+	}
+	return content
+}
+
+// recacheReasoningItemsFromInput 把请求历史里带明文 summary 的 reasoning item
+// 重新写入缓存（best-effort）。Codex 多数时候会原样回传明文 summary，借机
+// 刷新 TTL 并自愈 Redis 被 flush / 跨实例漂移造成的缓存缺失。
+func (s *OpenAIGatewayService) recacheReasoningItemsFromInput(inputRaw json.RawMessage) {
+	if s == nil || s.cache == nil {
+		return
+	}
+	inputRaw = bytes.TrimSpace(inputRaw)
+	if len(inputRaw) == 0 || inputRaw[0] != '[' {
+		return
+	}
+	var items []json.RawMessage
+	if err := json.Unmarshal(inputRaw, &items); err != nil {
+		return
+	}
+	for _, raw := range items {
+		id, text, ok := apicompat.ExtractResponsesReasoningItem(raw)
+		if !ok || id == "" || text == "" {
+			continue
+		}
+		s.setReasoningContent(id, text)
+	}
+}
+
+// cacheReasoningItemsFromEvents 从 Responses 流事件里提取完成的 reasoning
+// item 写入缓存（覆盖一个流中的多个 reasoning item）。
+func (s *OpenAIGatewayService) cacheReasoningItemsFromEvents(events []apicompat.ResponsesStreamEvent) {
+	for _, event := range events {
+		if event.Type != "response.output_item.done" || event.Item == nil {
+			continue
+		}
+		s.cacheReasoningItem(event.Item)
+	}
+}
+
+// cacheReasoningItemsFromOutput 从非流式 Responses 响应的 output 里提取
+// reasoning item 写入缓存。
+func (s *OpenAIGatewayService) cacheReasoningItemsFromOutput(output []apicompat.ResponsesOutput) {
+	for i := range output {
+		s.cacheReasoningItem(&output[i])
+	}
+}
+
+func (s *OpenAIGatewayService) cacheReasoningItem(item *apicompat.ResponsesOutput) {
+	if item == nil || item.Type != "reasoning" || item.ID == "" {
+		return
+	}
+	var parts []string
+	for _, sum := range item.Summary {
+		if t := strings.TrimSpace(sum.Text); t != "" {
+			parts = append(parts, t)
+		}
+	}
+	if len(parts) == 0 {
+		return
+	}
+	s.setReasoningContent(item.ID, strings.Join(parts, "\n"))
+}
+
+// setReasoningContent 写入缓存，使用 detached ctx：客户端断连后仍在 drain
+// 上游流（计费需要），此时的 reasoning 也是后续轮次回注所依赖的，不能随
+// 请求 ctx 一起取消。失败仅记日志，不影响转发。
+func (s *OpenAIGatewayService) setReasoningContent(itemID, content string) {
+	if s == nil || s.cache == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := s.cache.SetReasoningContent(ctx, itemID, content, responsesReasoningCacheTTL); err != nil {
+		logger.L().Warn("openai responses chat fallback: cache reasoning content failed",
+			zap.Error(err),
+			zap.String("item_id", itemID),
+		)
+	}
+}
+
+// deepSeekChatReasoningPlaceholderText 是 Chat Completions 侧 thinking-mode
+// 占位明文。必须是单个空格：DeepSeek 拒绝空串，非空即可通过；LiteLLM 同样注入
+// 单个空格。
 const deepSeekChatReasoningPlaceholderText = " "
 
-// targetsDeepSeekAPIHost reports whether the selected account sends requests
-// to the official DeepSeek API, including OpenAI-compatible mapped accounts.
+// targetsDeepSeekAPIHost 报告该账号实际上游是否是 DeepSeek 官方 API。
+// platform=deepseek 直接命中；platform=openai 但 base_url 指向
+// api.deepseek.com 的映射账号同样命中（Codex 把 GPT 模型名映射到 DeepSeek
+// 时的典型接入方式）。
 func targetsDeepSeekAPIHost(account *Account) bool {
 	if account == nil {
 		return false
@@ -480,15 +600,13 @@ func targetsDeepSeekAPIHost(account *Account) bool {
 	if err != nil {
 		return false
 	}
-	deepseekURL, err := url.Parse(DefaultDeepseekBaseURL)
+	ds, err := url.Parse(DefaultDeepseekBaseURL)
 	if err != nil {
 		return false
 	}
-	return strings.EqualFold(u.Hostname(), deepseekURL.Hostname())
+	return strings.EqualFold(u.Hostname(), ds.Hostname())
 }
 
-// ensureDeepSeekChatReasoningPlaceholders fills missing assistant reasoning
-// fields required by DeepSeek thinking mode without overwriting real content.
 // targetsOpenCodeZenUpstream 报告该账号上游是否是官方 OpenCode Zen / Go 网关。
 // platform=opencode_go 直接命中；其他平台按 base_url 主机判定，覆盖用 API Key
 // 直接把 openai 平台账号指向 opencode.ai 的接入方式。
@@ -545,7 +663,10 @@ func ensureDeepSeekChatReasoningPlaceholders(account *Account, body []byte) []by
 	updated := body
 	changed := false
 	for i, msg := range messages.Array() {
-		if strings.TrimSpace(msg.Get("role").String()) != "assistant" || msg.Get("reasoning_content").String() != "" {
+		if strings.TrimSpace(msg.Get("role").String()) != "assistant" {
+			continue
+		}
+		if msg.Get("reasoning_content").String() != "" {
 			continue
 		}
 		next, err := sjson.SetBytes(updated, "messages."+strconv.Itoa(i)+".reasoning_content", deepSeekChatReasoningPlaceholderText)

@@ -17,6 +17,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestOpenAIUsageHasTokensIncludesAllBillableClasses(t *testing.T) {
+	fields := []func(*OpenAIUsage){
+		func(u *OpenAIUsage) { u.InputTokens = 1 },
+		func(u *OpenAIUsage) { u.ImageInputTokens = 1 },
+		func(u *OpenAIUsage) { u.ImageCacheReadTokens = 1 },
+		func(u *OpenAIUsage) { u.OutputTokens = 1 },
+		func(u *OpenAIUsage) { u.CacheCreationInputTokens = 1 },
+		func(u *OpenAIUsage) { u.CacheCreation5mTokens = 1 },
+		func(u *OpenAIUsage) { u.CacheCreation1hTokens = 1 },
+		func(u *OpenAIUsage) { u.CacheReadInputTokens = 1 },
+		func(u *OpenAIUsage) { u.ImageOutputTokens = 1 },
+	}
+	for _, set := range fields {
+		usage := OpenAIUsage{}
+		set(&usage)
+		require.True(t, OpenAIUsageHasTokens(&usage))
+	}
+	require.False(t, OpenAIUsageHasTokens(&OpenAIUsage{}))
+}
+
 func buildResponsesFailedSSEStream(errType, errorMessage string) string {
 	failed := fmt.Sprintf(`{"type":"response.failed","response":{"id":"resp_err","object":"response","status":"failed","error":{"type":"%s","message":"%s"},"output":[],"usage":{"input_tokens":10,"output_tokens":0,"total_tokens":10}}}`, errType, errorMessage)
 	return fmt.Sprintf("data: %s\n\n", failed)

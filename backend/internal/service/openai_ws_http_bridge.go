@@ -494,23 +494,12 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	buildUpstreamRequest := func(requestBody []byte) (*http.Request, error) {
 		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 		defer releaseUpstreamCtx()
-		// Keep the bridge/replay source client-scoped. Project Codex identity
-		// only on the per-account request body so failover accounts never inherit
-		// the previous account's session or thread identifiers.
-		scopedRequestBody, _, scopeErr := applyCodexAccountIdentityClientMetadataRaw(
-			requestBody,
-			codexAccountIdentitySource(c, account),
-			getAPIKeyIDFromContext(c),
-		)
-		if scopeErr != nil {
-			return nil, fmt.Errorf("scope websocket http bridge client metadata: %w", scopeErr)
-		}
 		var upstreamReq *http.Request
 		var buildErr error
 		if account.Platform == PlatformGrok {
-			upstreamReq, buildErr = buildGrokResponsesRequest(upstreamCtx, c, account, scopedRequestBody, token, grokCacheIdentity, s.cfg, s.settingService)
+			upstreamReq, buildErr = buildGrokResponsesRequest(upstreamCtx, c, account, requestBody, token, grokCacheIdentity, s.cfg, s.settingService)
 		} else {
-			upstreamReq, buildErr = s.buildUpstreamRequestOpenAIPassthrough(upstreamCtx, c, account, scopedRequestBody, token)
+			upstreamReq, buildErr = s.buildUpstreamRequestOpenAIPassthrough(upstreamCtx, c, account, requestBody, token)
 		}
 		if buildErr != nil {
 			return nil, buildErr
