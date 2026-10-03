@@ -990,15 +990,19 @@ func writeChatCompletionsError(c *gin.Context, statusCode int, errType, message 
 // error (e.g. upstream cyber_policy), so programmatic clients stop retrying.
 // Marshal 失败的兜底会丢弃 message 原文，仅保留 code 与固定提示。
 func buildChatStreamErrorSSE(code, message string) string {
+	errorType := "invalid_request_error"
+	if code == "upstream_error" {
+		errorType = code
+	}
 	payload, err := json.Marshal(gin.H{
 		"error": gin.H{
-			"type":    "invalid_request_error",
+			"type":    errorType,
 			"code":    code,
 			"message": message,
 		},
 	})
 	if err != nil {
-		return "data: {\"error\":{\"type\":\"invalid_request_error\",\"code\":\"" + code + "\",\"message\":\"upstream error\"}}\n\n"
+		return "data: {\"error\":{\"type\":\"" + errorType + "\",\"code\":\"" + code + "\",\"message\":\"upstream error\"}}\n\n"
 	}
 	return "data: " + string(payload) + "\n\n"
 }

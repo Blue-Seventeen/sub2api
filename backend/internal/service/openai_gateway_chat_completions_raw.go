@@ -341,7 +341,16 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 			}
 		}
 		if payload, ok := extractOpenAISSEDataLine(line); ok && isCCUpstreamErrorPayload(namedEvent, []byte(payload)) {
-			terminalErr = s.handleCCUpstreamErrorPayload(c, resp, account, []byte(payload), !clientOutputStarted && !clientDisconnected,
+			payloadBytes := []byte(payload)
+			// Providers may attach final usage to a response.failed/error event. Capture
+			// it before deciding whether the stream is safe to replay; replaying a
+			// billable terminal response would double-charge the client request.
+			if parsedUsage, usageOK := extractOpenAIUsageFromJSONBytes(payloadBytes); usageOK &&
+				(openAIUsageHasTokens(&parsedUsage) || !openAIUsageHasTokens(&usage)) {
+				usage = parsedUsage
+			}
+			allowFailover := !clientOutputStarted && !clientDisconnected && !openAIUsageHasTokens(&usage)
+			terminalErr = s.handleCCUpstreamErrorPayload(c, resp, account, payloadBytes, allowFailover,
 				func(c *gin.Context, status int, errType, message string) {
 					if clientDisconnected {
 						return
@@ -350,7 +359,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 						writeChatCompletionsError(c, status, errType, message)
 						return
 					}
-					if _, err := fmt.Fprint(c.Writer, buildAnthropicStreamErrorSSE(errType, message)); err == nil {
+					if _, err := fmt.Fprint(c.Writer, buildChatStreamErrorSSE(errType, message)); err == nil {
 						c.Writer.Flush()
 					}
 				})

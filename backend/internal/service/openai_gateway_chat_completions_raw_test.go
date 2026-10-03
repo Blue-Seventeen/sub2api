@@ -1108,6 +1108,50 @@ func TestForwardAsRawChatCompletions_UpstreamRequestIgnoresClientCancel(t *testi
 	require.NoError(t, upstream.lastReq.Context().Err())
 }
 
+func TestForwardAsRawChatCompletions_TerminalErrorUsageDisablesFailover(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	stream := "data: {\"type\":\"error\",\"error\":{\"type\":\"server_error\",\"message\":\"temporary failure\"},\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":2}}\n\n"
+	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(stream))}
+
+	result, err := (&OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}).streamRawChatCompletions(
+		c, resp, rawChatCompletionsTestAccount(), "gpt-5.4", "gpt-5.4", "gpt-5.4", nil, nil, time.Now(), 0,
+	)
+	require.Error(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 7, result.Usage.InputTokens)
+	require.Equal(t, 2, result.Usage.OutputTokens)
+	var failoverErr *UpstreamFailoverError
+	require.NotErrorAs(t, err, &failoverErr, "terminal usage must prevent replay")
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+}
+
+func TestForwardAsRawChatCompletions_TerminalErrorAfterOutputUsesChatSSE(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	stream := "data: {\"id\":\"chat_1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"}}]}\n\ndata: {\"type\":\"error\",\"error\":{\"type\":\"server_error\",\"message\":\"temporary failure\"}}\n\n"
+	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(stream))}
+	result, err := (&OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}).streamRawChatCompletions(
+		c, resp, rawChatCompletionsTestAccount(), "gpt-5.4", "gpt-5.4", "gpt-5.4", nil, nil, time.Now(), 0,
+	)
+	require.Error(t, err)
+	require.NotNil(t, result)
+	bodyText := rec.Body.String()
+	require.Contains(t, bodyText, `data: {"error":`)
+	require.NotContains(t, bodyText, "event: error")
+	for _, line := range strings.Split(bodyText, "\n") {
+		if payload, ok := extractOpenAISSEDataLine(line); ok && strings.TrimSpace(payload) != "" {
+			require.True(t, gjson.Valid(payload), "all Chat Completions data frames must be JSON")
+		}
+	}
+}
+
 func TestIsOpenAIChatUsageOnlyStreamChunk(t *testing.T) {
 	t.Parallel()
 
