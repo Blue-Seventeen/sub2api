@@ -118,13 +118,14 @@ ARG MIHOMO_VERSION
 ARG MIHOMO_AMD64_SHA256
 ARG MIHOMO_ARM64_SHA256
 
-RUN apk add --no-cache ca-certificates wget gzip && \
+RUN apk add --no-cache ca-certificates curl gzip && \
     case "${TARGETARCH}" in \
       amd64) MIHOMO_ASSET="mihomo-linux-amd64-compatible-v${MIHOMO_VERSION}.gz"; MIHOMO_SHA256="${MIHOMO_AMD64_SHA256}" ;; \
       arm64) MIHOMO_ASSET="mihomo-linux-arm64-v${MIHOMO_VERSION}.gz"; MIHOMO_SHA256="${MIHOMO_ARM64_SHA256}" ;; \
       *) echo "unsupported TARGETARCH for bundled mihomo: ${TARGETARCH}" >&2; exit 1 ;; \
     esac && \
-    wget -O /tmp/mihomo.gz "https://github.com/MetaCubeX/mihomo/releases/download/v${MIHOMO_VERSION}/${MIHOMO_ASSET}" && \
+    curl --fail --location --show-error --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 15 --max-time 180 \
+      -o /tmp/mihomo.gz "https://github.com/MetaCubeX/mihomo/releases/download/v${MIHOMO_VERSION}/${MIHOMO_ASSET}" && \
     echo "${MIHOMO_SHA256}  /tmp/mihomo.gz" | sha256sum -c - && \
     mkdir -p /app/bin && \
     gzip -dc /tmp/mihomo.gz > /app/bin/mihomo && \
