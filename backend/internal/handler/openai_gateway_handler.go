@@ -707,7 +707,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					accountReleaseFunc()
 				}
 			}()
-			if h.newAPIStyleService != nil && h.newAPIStyleService.SupportsForGroup(account, apiKey.Group, service.NewAPIStyleRouteResponses) {
+			if h.newAPIStyleService != nil && h.newAPIStyleService.SupportsForGatewayHandler(account, apiKey.Group, service.NewAPIStyleRouteResponses) {
 				return h.newAPIStyleService.ForwardOpenAI(
 					c.Request.Context(),
 					c,

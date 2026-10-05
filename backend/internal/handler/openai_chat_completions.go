@@ -263,7 +263,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		var result *service.OpenAIForwardResult
 		var upstreamEndpoint string
 		activeUsageHandle := beginProxyActiveUsage(h.proxyActiveUsageTracker, account)
-		if h.newAPIStyleService != nil && h.newAPIStyleService.SupportsForGroup(account, apiKey.Group, service.NewAPIStyleRouteChatCompletions) {
+		if h.newAPIStyleService != nil && h.newAPIStyleService.SupportsForGatewayHandler(account, apiKey.Group, service.NewAPIStyleRouteChatCompletions) {
 			result, upstreamEndpoint, err = h.newAPIStyleService.ForwardOpenAI(
 				c.Request.Context(),
 				c,

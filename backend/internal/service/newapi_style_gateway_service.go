@@ -153,6 +153,19 @@ func (s *NewAPIStyleGatewayService) SupportsForGroup(account *Account, group *Gr
 	}
 }
 
+// SupportsForGatewayHandler applies the official OpenAI text routing boundary
+// before the generic New-API capability matrix. The upstream v0.2.13 OpenAI
+// handler does not use the custom New-API text bridge; that bridge lacks the
+// native pool failover metadata and can exhaust a single account on a transient
+// 5xx. Media routes and non-OpenAI platforms retain their existing behavior.
+func (s *NewAPIStyleGatewayService) SupportsForGatewayHandler(account *Account, group *Group, route NewAPIStyleRoute) bool {
+	if account != nil && account.Platform == PlatformOpenAI &&
+		(route == NewAPIStyleRouteChatCompletions || route == NewAPIStyleRouteResponses) {
+		return false
+	}
+	return s.SupportsForGroup(account, group, route)
+}
+
 func platformSupportsNewAPIStyleEmbeddings(platform string) bool {
 	switch strings.TrimSpace(platform) {
 	case PlatformOpenAI, PlatformZhipu, PlatformDeepSeek, PlatformVolcEngine, PlatformAli, PlatformMoonshot,

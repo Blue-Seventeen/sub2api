@@ -80,6 +80,31 @@ func TestAccountUseNewAPIStyleInterface(t *testing.T) {
 	}
 }
 
+func TestNewAPIStyleDoesNotOverrideOfficialOpenAITextRelay(t *testing.T) {
+	group := &Group{
+		ID:                          124,
+		Platform:                    PlatformOpenAI,
+		Status:                      StatusActive,
+		Hydrated:                    true,
+		NewAPIStyleInterfaceEnabled: true,
+	}
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Extra: map[string]any{
+			AccountExtraNewAPIStyleInterfaceEnabled: true,
+		},
+	}
+
+	for _, route := range []NewAPIStyleRoute{
+		NewAPIStyleRouteChatCompletions,
+		NewAPIStyleRouteResponses,
+	} {
+		if (&NewAPIStyleGatewayService{}).SupportsForGatewayHandler(account, group, route) {
+			t.Fatalf("OpenAI text route %q must use the official gateway, not New-API style forwarding", route)
+		}
+	}
+}
+
 func TestApplyCompatibleUsageFallbackAppliesToNewAPIOnlyPlatforms(t *testing.T) {
 	result := &ForwardResult{
 		Usage: ClaudeUsage{
