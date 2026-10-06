@@ -1092,6 +1092,38 @@ func TestProxyOpenAIWSHTTPBridgeTurnFailedTerminalReturnsError(t *testing.T) {
 	}
 }
 
+func TestProxyOpenAIWSHTTPBridgeTurnBillableTerminalFailureDoesNotRemainReplayable(t *testing.T) {
+	body := "data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_billable\",\"status\":\"failed\",\"usage\":{\"input_tokens\":4,\"output_tokens\":1},\"error\":{\"code\":\"server_error\",\"message\":\"temporary upstream failure\"}}}\n\n"
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	account := &Account{ID: 111, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	payload := []byte(`{"type":"response.create","model":"gpt-5.5","input":"hi"}`)
+	var writes [][]byte
+
+	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(
+		context.Background(), c, account, "sk-test", payload, len(payload),
+		"gpt-5.5", "", "", "", "", 1,
+		func(message []byte) error {
+			writes = append(writes, append([]byte(nil), message...))
+			return nil
+		},
+	)
+
+	require.Error(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 4, result.Usage.InputTokens)
+	var failoverErr *UpstreamFailoverError
+	require.False(t, errors.As(err, &failoverErr), "billable WS terminal failure must not remain replayable")
+	require.Empty(t, writes)
+}
+
 func TestProxyOpenAIWSHTTPBridgeTurnMarksCyberPolicyForFailureShapes(t *testing.T) {
 
 	tests := []struct {

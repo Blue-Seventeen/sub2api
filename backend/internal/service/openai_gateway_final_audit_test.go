@@ -127,26 +127,88 @@ func TestForwardResponses_NativeImagePartialPreservesBillingMetadata(t *testing.
 	require.Len(t, upstream.requests, 1)
 }
 
-func TestForwardResponses_FailedChatFallbackIncludesTerminalUsage(t *testing.T) {
+func TestForwardResponses_BillableNativeFailureDoesNotChatFallback(t *testing.T) {
 	body := []byte(`{"model":"gpt-5.4","input":"hello","stream":true}`)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
-	upstream := &httpUpstreamRecorder{}
-	for _, usage := range []string{`{"input_tokens":5,"output_tokens":1}`, `{"input_tokens":7,"output_tokens":2}`} {
-		upstream.responses = append(upstream.responses, &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.failed\",\"response\":{\"usage\":" + usage + ",\"error\":{\"code\":\"server_error\",\"message\":\"temporary failure\"}}}\n\n"))})
-	}
+	upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.failed\",\"response\":{\"usage\":{\"input_tokens\":5,\"output_tokens\":1},\"error\":{\"code\":\"server_error\",\"message\":\"temporary failure\"}}}\n\n"))}}
 	account := rawChatCompletionsTestAccount()
-	account.Extra = map[string]any{openai_compat.ExtraKeyResponsesSupported: true}
+	account.Extra = map[string]any{
+		openai_compat.ExtraKeyResponsesSupported: true,
+		openai_compat.ExtraKeyResponsesMode:      string(openai_compat.ResponsesSupportModeForceResponses),
+	}
 	result, err := (&OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}).Forward(context.Background(), c, account, body)
 	require.Error(t, err)
 	require.NotNil(t, result)
-	require.Equal(t, 12, result.Usage.InputTokens)
-	require.Equal(t, 3, result.Usage.OutputTokens)
-	require.Len(t, upstream.requests, 2)
+	require.Equal(t, 5, result.Usage.InputTokens)
+	require.Equal(t, 1, result.Usage.OutputTokens)
+	require.Len(t, upstream.requests, 1)
 	var failoverErr *UpstreamFailoverError
 	require.False(t, errors.As(err, &failoverErr))
 	require.NotContains(t, rec.Body.String(), "response.completed")
+}
+
+func TestForwardResponses_BillableTerminalFailureDoesNotReplayNativeAttempt(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.4","input":"hello","stream":true}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": {"text/event-stream"}, "X-Request-ID": {"native-failed-1"}},
+		Body: io.NopCloser(strings.NewReader(
+			"data: {\"type\":\"response.failed\",\"response\":{\"usage\":{\"input_tokens\":7,\"output_tokens\":2},\"error\":{\"code\":\"server_error\",\"message\":\"temporary failure\"}}}\n\n",
+		)),
+	}}
+	account := rawChatCompletionsTestAccount()
+	account.Extra = map[string]any{
+		openai_compat.ExtraKeyResponsesSupported: true,
+		openai_compat.ExtraKeyResponsesMode:      string(openai_compat.ResponsesSupportModeForceResponses),
+	}
+
+	result, err := (&OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}).Forward(
+		context.Background(), c, account, body,
+	)
+
+	require.Error(t, err)
+	require.NotNil(t, result, "billable terminal usage must be returned to the handler")
+	require.Equal(t, 7, result.Usage.InputTokens)
+	require.Equal(t, 2, result.Usage.OutputTokens)
+	require.Len(t, upstream.requests, 1, "a terminal response with usage must not be replayed")
+	var failoverErr *UpstreamFailoverError
+	require.False(t, errors.As(err, &failoverErr), "billable terminal failure must not remain replayable")
+}
+
+func TestForwardChatCompletions_BillableTerminalFailureDoesNotRemainReplayable(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.6-sol","messages":[{"role":"user","content":"hello"}],"stream":false}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": {"text/event-stream"}, "X-Request-ID": {"chat-failed-1"}},
+		Body: io.NopCloser(strings.NewReader(
+			"data: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"output\":[],\"usage\":{\"input_tokens\":9,\"output_tokens\":1},\"error\":{\"code\":\"server_error\",\"message\":\"temporary failure\"}}}\n\n",
+		)),
+	}}
+	account := rawChatCompletionsTestAccount()
+	account.Extra = map[string]any{
+		openai_compat.ExtraKeyResponsesSupported: true,
+		openai_compat.ExtraKeyResponsesMode:      string(openai_compat.ResponsesSupportModeForceResponses),
+	}
+
+	result, err := (&OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}).ForwardAsChatCompletions(
+		context.Background(), c, account, body, "", "",
+	)
+
+	require.Error(t, err)
+	require.NotNil(t, result, "Chat bridge must return billable terminal usage")
+	require.Equal(t, 9, result.Usage.InputTokens)
+	require.Equal(t, 1, result.Usage.OutputTokens)
+	require.Len(t, upstream.requests, 1, "a billable Chat bridge failure must not be replayed")
+	var failoverErr *UpstreamFailoverError
+	require.False(t, errors.As(err, &failoverErr), "billable Chat bridge failure must not remain replayable")
 }
 
 func TestChatFallback_BillableTerminalErrorWithoutNativeUsageDoesNotReplay(t *testing.T) {

@@ -95,6 +95,31 @@ func TestForwardAsAnthropic_StreamingResponseFailed_ReturnsError(t *testing.T) {
 	require.Contains(t, err.Error(), "upstream response failed")
 }
 
+func TestForwardAsAnthropic_BillableTerminalFailureDoesNotRemainReplayable(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.4","max_tokens":32,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(
+			buildResponsesFailedSSEStream("server_error", "temporary upstream failure"),
+		)),
+	}}
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, rawChatCompletionsTestAccount(), body, "", "")
+
+	require.Error(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 10, result.Usage.InputTokens)
+	var failoverErr *UpstreamFailoverError
+	require.False(t, errors.As(err, &failoverErr), "billable Messages terminal failure must not remain replayable")
+}
+
 func TestForwardAsAnthropic_StreamingBareErrorAfterOutputIsVisible(t *testing.T) {
 
 	body := []byte(`{"model":"gpt-5.4","max_tokens":32,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
@@ -218,9 +243,12 @@ func TestForwardAsAnthropic_BufferedResponseFailed_Failover(t *testing.T) {
 	}
 
 	account := rawChatCompletionsTestAccount()
-	_, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "")
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "")
 
 	require.Error(t, err)
 	var failoverErr *UpstreamFailoverError
-	require.True(t, errors.As(err, &failoverErr), "rate_limit_error should trigger UpstreamFailoverError for failover, got: %T: %v", err, err)
+	require.False(t, errors.As(err, &failoverErr), "billable terminal usage must not trigger replay, got: %T: %v", err, err)
+	require.NotNil(t, result)
+	require.Equal(t, 10, result.Usage.InputTokens)
+	require.Len(t, upstream.requests, 1)
 }

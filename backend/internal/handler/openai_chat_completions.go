@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -288,7 +289,17 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
 		}
-		h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, reqModel, err != nil, body, clientRequestedUsageFields(c, channelMapping, reqModel, ""), service.HashUsageRequestPayload(body))
+		partialUsage := err != nil && result != nil && service.OpenAIUsageHasTokens(&result.Usage)
+		if partialUsage {
+			// A provider may charge input tokens before emitting response.failed.
+			// Make any remaining failover error non-replayable at the handler
+			// boundary as a defense-in-depth guard for alternate bridge paths.
+			var failoverErr *service.UpstreamFailoverError
+			if errors.As(err, &failoverErr) {
+				err = fmt.Errorf("Chat Completions request ended after billable usage: %v", err)
+			}
+		}
+		h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, reqModel, err != nil && !partialUsage, body, clientRequestedUsageFields(c, channelMapping, reqModel, ""), service.HashUsageRequestPayload(body))
 
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)
@@ -300,7 +311,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		if err == nil && result != nil && result.FirstTokenMs != nil {
 			service.SetOpsLatencyMs(c, service.OpsTimeToFirstTokenMsKey, int64(*result.FirstTokenMs))
 		}
-		if err != nil {
+		if err != nil && !partialUsage {
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(err, &failoverErr) {
 				if c.Writer.Size() != writerSizeBeforeForward {
@@ -388,7 +399,20 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			recordOpenAIProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, account, apiKey, forwardDurationMs, "handler.openai_gateway.chat_completions")
 			return
 		}
-		if result != nil {
+		if err != nil && partialUsage {
+			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(reqModel), false, nil)
+			wroteFallback := h.ensureForwardErrorResponse(c, streamStarted)
+			reqLog.Warn("openai_chat_completions.forward_partial_usage",
+				zap.Int64("account_id", account.ID),
+				zap.Bool("fallback_error_response_written", wroteFallback),
+				zap.Error(err),
+			)
+			recordOpenAIProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, account, apiKey, forwardDurationMs, "handler.openai_gateway.chat_completions")
+		}
+		if partialUsage {
+			// Keep the account marked failed above, but continue to the single
+			// usage-record submission below. No retry or account switch is allowed.
+		} else if result != nil {
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(reqModel), true, result.FirstTokenMs)
 		} else {
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(reqModel), true, nil)

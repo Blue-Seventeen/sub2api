@@ -523,6 +523,14 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		// Client wants JSON: buffer the streaming response and assemble a JSON reply.
 		result, handleErr = s.handleAnthropicBufferedStreamingResponse(resp, c, account, originalModel, billingModel, upstreamModel, startTime)
 	}
+	if handleErr != nil && result != nil && openAIUsageHasTokens(&result.Usage) {
+		var failoverErr *UpstreamFailoverError
+		if errors.As(handleErr, &failoverErr) {
+			// Preserve provider-billed terminal usage and prevent the handler
+			// from replaying this Messages turn on another account.
+			handleErr = fmt.Errorf("Messages bridge ended after billable usage: %v", handleErr)
+		}
+	}
 
 	// cyber_policy：标记已设、error 已按 Anthropic 格式发给客户端。丢弃 result、返回哨兵，
 	// 使 handler 落入 tokens=0 免费用量行（对齐 /v1/responses），不计费、不 failover。
@@ -651,7 +659,11 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 		}
 		message := openAICompatFailedResponseMessage(finalResponse)
 		if openAIStreamFailedEventShouldFailover(payload, message) {
-			return nil, s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, payload, message, upstreamModel, resp.Header)
+			failoverErr := s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, payload, message, upstreamModel, resp.Header)
+			if partialResult != nil {
+				return partialResult, fmt.Errorf("Messages bridge ended after billable usage: %v", failoverErr)
+			}
+			return nil, failoverErr
 		}
 		message = s.recordOpenAIStreamUpstreamError(c, account, false, requestID, "http_error", payload, message)
 		// 统一走语义状态推断 + body 归一化（与 /v1/responses 路径一致），

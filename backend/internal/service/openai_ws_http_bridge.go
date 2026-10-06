@@ -879,7 +879,15 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 				if account.Platform == PlatformGrok {
 					return nil, newOpenAIUpstreamFailoverError(statusCode, resp.Header, upstreamMessage, errMessage, false)
 				}
-				return nil, s.newOpenAIStreamFailoverErrorWithModel(c, account, true, resp.Header.Get("x-request-id"), upstreamMessage, errMessage, mappedModel, resp.Header)
+				failoverErr := s.newOpenAIStreamFailoverErrorWithModel(c, account, true, resp.Header.Get("x-request-id"), upstreamMessage, errMessage, mappedModel, resp.Header)
+				if openAIUsageHasTokens(&usage) {
+					// The provider may have charged this turn before emitting a
+					// terminal failure. Keep its usage and make the turn error
+					// non-replayable; replaying current-turn payload would double
+					// charge the upstream and can delay the client close.
+					return resultWithUsage(), fmt.Errorf("WS HTTP bridge ended after billable usage: %v", failoverErr)
+				}
+				return nil, failoverErr
 			}
 			if wroteDownstream && requestScopedCapacity && !capacityFailoverSuppressedLogged {
 				logOpenAICapacityFailoverSuppressed(ctx, account, "ws_http_bridge", resp.Header.Get("x-request-id"), eventType)

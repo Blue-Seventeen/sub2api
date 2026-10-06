@@ -1131,6 +1131,14 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					}
 					return result
 				}
+				// A terminal upstream error may already carry billable usage (the
+				// provider can charge input tokens before emitting response.failed).
+				// Replaying through the Chat bridge would charge/replay the same
+				// request twice and can turn a single terminal failure into a delayed
+				// 502. Preserve the partial result and let the handler record it once.
+				if streamResult != nil && openAIUsageHasTokens(streamResult.usage) {
+					return nativePartialUsageResult(), fmt.Errorf("native Responses attempt ended after billable usage: %v", err)
+				}
 				if shouldFallbackOpenAIResponsesStreamToChat(account, c, originalBody, upstreamModel, err) {
 					_ = resp.Body.Close()
 					SetActualOpenAIUpstreamEndpoint(c, "/v1/chat/completions")

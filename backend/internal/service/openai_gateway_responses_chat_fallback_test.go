@@ -418,7 +418,7 @@ func TestForwardResponses_GPT61SolToolsDoesNotDowngradeAfterNativeStreamFailure(
 	require.Equal(t, "/v1/responses", upstream.requests[0].URL.Path)
 }
 
-func TestForwardResponses_RetryableNativeFailedEventFallsBackBeforeSemanticOutput(t *testing.T) {
+func TestForwardResponses_BillableNativeFailedEventDoesNotReplayThroughChat(t *testing.T) {
 	body := []byte(`{"model":"gpt-6-astra","input":"hello","stream":true}`)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -444,12 +444,14 @@ func TestForwardResponses_RetryableNativeFailedEventFallsBackBeforeSemanticOutpu
 	account.Extra = map[string]any{openai_compat.ExtraKeyResponsesSupported: true}
 
 	result, err := svc.Forward(context.Background(), c, account, body)
-	require.NoError(t, err)
+	require.Error(t, err)
 	require.NotNil(t, result)
-	require.Len(t, upstream.requests, 2)
-	require.Equal(t, "/v1/chat/completions", upstream.requests[1].URL.Path)
-	require.Equal(t, 7, result.Usage.InputTokens)
-	require.Equal(t, 2, result.Usage.OutputTokens)
+	var failoverErr *UpstreamFailoverError
+	require.False(t, errors.As(err, &failoverErr))
+	require.Len(t, upstream.requests, 1)
+	require.Equal(t, "/v1/responses", upstream.requests[0].URL.Path)
+	require.Equal(t, 5, result.Usage.InputTokens)
+	require.Equal(t, 1, result.Usage.OutputTokens)
 }
 
 func TestForwardResponses_TransportErrorDoesNotFallbackToChat(t *testing.T) {
@@ -663,7 +665,7 @@ func (u *responsesFallbackChatTransportError) Do(req *http.Request, proxyURL str
 	return u.httpUpstreamRecorder.Do(req, proxyURL, accountID, concurrency)
 }
 
-func TestForwardResponses_FailedChatFallbackPreservesNativeUsageWithoutFailover(t *testing.T) {
+func TestForwardResponses_BillableNativeFailureDoesNotReplayThroughChat(t *testing.T) {
 	for _, failure := range []string{"transport", "http_400", "http_502"} {
 		t.Run(failure, func(t *testing.T) {
 			body := []byte(`{"model":"gpt-5.4","input":"hello","stream":true}`)
@@ -696,7 +698,8 @@ func TestForwardResponses_FailedChatFallbackPreservesNativeUsageWithoutFailover(
 			require.Equal(t, "gpt-5.4", result.BillingModel)
 			require.Equal(t, 5, result.Usage.InputTokens)
 			require.Equal(t, 1, result.Usage.OutputTokens)
-			require.Len(t, *requests, 2)
+			require.Len(t, *requests, 1)
+			require.Equal(t, "/v1/responses", (*requests)[0].URL.Path)
 			var failoverErr *UpstreamFailoverError
 			require.False(t, errors.As(err, &failoverErr), "billable partial results must not trigger another replay")
 		})
@@ -758,7 +761,7 @@ func TestForwardResponses_NativeTerminalErrorPreservesUsageWithoutReplay(t *test
 	}
 }
 
-func TestForwardResponses_NativeFailoverStillReturnsNilResult(t *testing.T) {
+func TestForwardResponses_NativeBillableFailurePreservesUsageWithoutReplay(t *testing.T) {
 	body := []byte(`{"model":"gpt-5.4","input":"hello","stream":true}`)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
@@ -773,8 +776,10 @@ func TestForwardResponses_NativeFailoverStillReturnsNilResult(t *testing.T) {
 
 	require.Error(t, err)
 	var failoverErr *UpstreamFailoverError
-	require.True(t, errors.As(err, &failoverErr))
-	require.Nil(t, result, "a replayable failover must not carry per-attempt usage into another account")
+	require.False(t, errors.As(err, &failoverErr))
+	require.NotNil(t, result, "a non-replayable terminal error must preserve billable usage")
+	require.Equal(t, 5, result.Usage.InputTokens)
+	require.Equal(t, 1, result.Usage.OutputTokens)
 	require.Len(t, upstream.requests, 1)
 }
 

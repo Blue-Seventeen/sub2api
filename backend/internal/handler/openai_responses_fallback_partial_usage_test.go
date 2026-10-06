@@ -57,16 +57,7 @@ func (u *responsesPartialUsageUpstream) Do(req *http.Request, _ string, _ int64,
 	}, nil
 }
 
-func TestOpenAIResponses_ChatFallbackPartialUsageRecordedOnce(t *testing.T) {
-	for _, body := range []string{
-		"data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"}}]}\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":2}}\n\n",
-		"data: {\"type\":\"response.failed\",\"response\":{\"usage\":{\"input_tokens\":7,\"output_tokens\":2},\"error\":{\"code\":\"server_error\",\"message\":\"temporary failure\"}}}\n\n",
-	} {
-		t.Run(body, func(t *testing.T) {
-			assertResponsesPartialUsageRecordedOnce(t, &responsesPartialUsageUpstream{chatBody: body, wantInput: 12, wantOutput: 3},
-				`{"model":"gpt-5.4","input":"hello","stream":true}`, false, []string{"/v1/responses", "/v1/chat/completions"})
-		})
-	}
+func TestOpenAIResponses_ZeroNativeUsageFallbackRecordsUsageOnce(t *testing.T) {
 	for _, forceChat := range []bool{false, true} {
 		name := "auto_zero_native_usage"
 		paths := []string{"/v1/responses", "/v1/chat/completions"}
@@ -84,11 +75,11 @@ func TestOpenAIResponses_ChatFallbackPartialUsageRecordedOnce(t *testing.T) {
 	}
 }
 
-func TestOpenAIResponses_FailedChatFallbackRecordsNativeUsageOnce(t *testing.T) {
+func TestOpenAIResponses_BillableNativeFailureDoesNotReplay(t *testing.T) {
 	for _, failure := range []string{"transport", "http_400", "http_502"} {
 		t.Run(failure, func(t *testing.T) {
 			assertResponsesPartialUsageRecordedOnce(t, &responsesPartialUsageUpstream{failure: failure},
-				`{"model":"gpt-5.4","input":"hello","stream":true}`, false, []string{"/v1/responses", "/v1/chat/completions"})
+				`{"model":"gpt-5.4","input":"hello","stream":true}`, false, []string{"/v1/responses"})
 		})
 	}
 }

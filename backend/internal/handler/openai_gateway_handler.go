@@ -2560,12 +2560,15 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				return checkSimpleModeTurnBilling()
 			},
 			AfterTurn: func(turn int, result *service.OpenAIForwardResult, turnErr error) {
+				// Snapshot the current turn before the usage task can outlive a
+				// current-turn replay or the next WebSocket turn.
+				turnRequestPayloadHash := requestPayloadHash
 				cyberBlockBody := takeCyberTurnBody(turn)
 				// F1: cyber 标记按 turn 生命周期清理——defer 保证任意早返回路径都执行；
 				// CyberBlocked 必须在 submit 前同步预捕获（task 闭包由 worker 池异步执行，
 				// 届时 defer 已清除标记）。
 				var turnFailoverErr *service.UpstreamFailoverError
-				partialUsage := turnErr != nil && result != nil && !errors.As(turnErr, &turnFailoverErr) && service.OpenAIUsageHasTokens(&result.Usage)
+				partialUsage := turnErr != nil && result != nil && service.OpenAIUsageHasTokens(&result.Usage)
 				defer clearCyberPolicyAttemptState(c, !errors.As(turnErr, &turnFailoverErr))
 				releaseTurnSlots()
 				turnRequestedModel := reqModel
@@ -2589,7 +2592,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				}
 				turnUsageFields := turnMapping.ToUsageFields(turnRequestedModel, turnUpstreamModel)
 				cyberMarked := service.GetOpsCyberPolicy(c) != nil
-				h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, turnRequestedModel, turnErr != nil, cyberBlockBody, turnUsageFields, requestPayloadHash)
+				h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, turnRequestedModel, turnErr != nil && !partialUsage, cyberBlockBody, turnUsageFields, turnRequestPayloadHash)
 				cyberBlockedThisConn, cyberBlockPendingAfterFailover = advanceOpenAIWSCyberBlockState(
 					cyberBlockedThisConn,
 					cyberBlockPendingAfterFailover,
@@ -2648,7 +2651,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 						UpstreamEndpoint:   upstreamEndpoint,
 						UserAgent:          userAgent,
 						IPAddress:          clientIP,
-						RequestPayloadHash: requestPayloadHash,
+						RequestPayloadHash: turnRequestPayloadHash,
 						ClientProfile:      compat.ClientProfile,
 						CompatibilityRoute: compat.CompatibilityRoute,
 						FallbackChain:      compat.FallbackChain,
