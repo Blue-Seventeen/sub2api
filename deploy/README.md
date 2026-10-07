@@ -46,6 +46,7 @@ Apple silicon 且运行 macOS 26 的机器可使用 Apple `container` 1.1.0 或�
 - `NODE_ID`：多实例部署时建议显式设置且每个节点唯一，避免节点本地代理延迟、粘性会话和备份调度状态互相干扰。
 - `SERVER_TRUSTED_PROXIES`：反向代理/CDN/LB 场景下用于真实客户端 IP 解析；只填写你控制的代理地址或 CIDR，不要使用 `0.0.0.0/0`。
 - `UPDATE_GITHUB_TOKEN`：仅用于 GitHub Release API 更新检查；Release asset 下载仍匿名，不读取 `GITHUB_TOKEN` 或 `GH_TOKEN`。
+- `ADMIN_EMAIL` / `ADMIN_PASSWORD`：首次安装可留空，由应用生成随机登录邮箱和密码并写入启动日志；手动设置的密码必须为 8-72 字节，已有管理员不会被重置。
 
 ## 安全注意事项
 

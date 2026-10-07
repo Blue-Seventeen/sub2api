@@ -196,8 +196,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		v := resp.Header.Get("x-request-id")
 		c.Header("x-request-id", v)
 	}
+	attemptResponseHeadersApplied := false
 	applyAttemptResponseHeaders := func() {
-		if !stageFirstOutput || len(attemptResponseHeaders) == 0 || c.Writer.Written() {
+		if !stageFirstOutput || attemptResponseHeadersApplied || len(attemptResponseHeaders) == 0 || c.Writer.Written() {
 			return
 		}
 		for key, values := range attemptResponseHeaders {
@@ -205,6 +206,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				c.Writer.Header().Add(key, value)
 			}
 		}
+		attemptResponseHeadersApplied = true
 		s.noteStagedOpenAICodexTurnStateCommitted(c, account, attemptResponseHeaders)
 		// These headers describe this gateway's SSE stream and are stable across
 		// account attempts. Keep them authoritative over upstream values.
@@ -392,7 +394,8 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	completeGuardedEvent := func(queueDrained bool) {
 		completedProgressEvent := eventStartsClientOutput
 		completedTTFTEvent := eventStartsTTFTOutput
-		shouldFlush := eventShouldFlush || (queueDrained && clientOutputStarted)
+		// Deliver the first complete semantic event independently of TTFT and queue drain.
+		shouldFlush := eventShouldFlush || (completedProgressEvent && !clientOutputStarted) || (queueDrained && clientOutputStarted)
 		eventInProgress = false
 		if !clientDisconnected {
 			if completedProgressEvent {
