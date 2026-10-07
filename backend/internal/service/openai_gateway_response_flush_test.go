@@ -757,13 +757,21 @@ func (r *hangingOpenAISSEAfterTerminal) Close() error {
 	return nil
 }
 
-func TestOpenAIResponseFlush_TerminalEventEndsStreamWithoutEOF(t *testing.T) {
+func TestOpenAIResponseFlush_TerminalEventWaitsForEOF(t *testing.T) {
 	body := "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":7,\"output_tokens\":5}}}\n\n"
 	reader := &hangingOpenAISSEAfterTerminal{payload: []byte(body), release: make(chan struct{})}
 	recorder := newOpenAIResponseFlushRecorder()
 	resultCh, errCh := runOpenAIResponseFlushTestAsync(recorder, reader, config.GatewayConfig{StreamKeepaliveInterval: 1, StreamDataIntervalTimeout: 30})
 	t.Cleanup(func() { _ = reader.Close() })
 
+	select {
+	case <-errCh:
+		t.Fatal("stream ended before upstream EOF")
+	case <-resultCh:
+		t.Fatal("stream ended before upstream EOF")
+	case <-time.After(100 * time.Millisecond):
+	}
+	_ = reader.Close()
 	select {
 	case err := <-errCh:
 		require.NoError(t, err)
@@ -772,7 +780,7 @@ func TestOpenAIResponseFlush_TerminalEventEndsStreamWithoutEOF(t *testing.T) {
 		require.Equal(t, 7, result.usage.InputTokens)
 		require.Equal(t, 5, result.usage.OutputTokens)
 	case <-time.After(3 * time.Second):
-		t.Fatal("stream did not end after terminal event; still waiting for upstream EOF")
+		t.Fatal("stream did not finish after upstream EOF")
 	}
 	gotBody, _ := recorder.snapshot()
 	require.Equal(t, body, gotBody)

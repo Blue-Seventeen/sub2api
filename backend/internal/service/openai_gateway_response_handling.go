@@ -936,12 +936,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			if streamEarlyErr != nil {
 				return resultWithUsage(), streamEarlyErr
 			}
-			// Terminal 事件完整写出后直接结束，不等上游 EOF（见下方异步循环同款说明）。
-			// Codex bare error 序列（error 后可能跟 response.failed 或翻盘的 completed）
-			// 必须继续读取，不适用提前结束。
-			if sawTerminalEvent && !eventInProgress && (!codexFailureTerminal || !sawBareError) {
-				return finalizeStream()
-			}
+			// 即使已看到 terminal event，也要继续读取到上游 EOF。Codex/部分
+			// ChatGPT Responses 上游会在终态后完成 SSE/HTTP 收尾；提前关闭 body
+			// 会让客户端把成功响应误判为断流并重放同一 turn。
 		}
 		if result, err, done := handleScanErr(documentScanner.Err()); done {
 			return result, err
@@ -1001,15 +998,8 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			if streamEarlyErr != nil {
 				return resultWithUsage(), streamEarlyErr
 			}
-			// Terminal 事件（response.completed 等）已完整写出后不再等上游 EOF：
-			// 上游在 keep-alive/HTTP2 复用连接上可能拖延关闭连接，空等期间只能
-			// 靠 keepalive 维持，白白拉长尾延迟。usage 已在 terminal 事件中解析。
-			// Codex bare error 序列（error 后可能跟 response.failed 或翻盘的 completed）
-			// 必须继续读取，不适用提前结束。
-			if sawTerminalEvent && !eventInProgress && (!codexFailureTerminal || !sawBareError) {
-				_ = resp.Body.Close()
-				return finalizeStream()
-			}
+			// 不在 terminal event 后提前关闭上游 body。必须让 SSE/HTTP 正常 EOF
+			// 收尾，避免 Codex 将被截断的成功响应当作可重试断流。
 
 		case <-intervalCh:
 			if len(events) > 0 {

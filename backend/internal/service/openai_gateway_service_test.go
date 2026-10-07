@@ -272,6 +272,21 @@ func (r *openAIStreamReadThenErrorCloser) Read(p []byte) (int, error) {
 
 func (r *openAIStreamReadThenErrorCloser) Close() error { return nil }
 
+type openAIStreamEOFTrackingCloser struct {
+	reader   *strings.Reader
+	eofReads int
+}
+
+func (r *openAIStreamEOFTrackingCloser) Read(p []byte) (int, error) {
+	if r.reader != nil && r.reader.Len() > 0 {
+		return r.reader.Read(p)
+	}
+	r.eofReads++
+	return 0, io.EOF
+}
+
+func (r *openAIStreamEOFTrackingCloser) Close() error { return nil }
+
 type failingGinWriter struct {
 	gin.ResponseWriter
 	failAfter int
@@ -1706,6 +1721,24 @@ func TestOpenAIStreamingTerminalAndClientCancellationDoNotQuarantineProxy(t *tes
 	compatible, reason := scheduler.isAccountRequestCompatibleReason(context.Background(), account, OpenAIAccountScheduleRequest{})
 	require.True(t, compatible)
 	require.Empty(t, reason)
+}
+
+func TestOpenAIStreamingReadsEOFAfterTerminalEvent(t *testing.T) {
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+	svc := &OpenAIGatewayService{cfg: cfg}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	body := &openAIStreamEOFTrackingCloser{reader: strings.NewReader(strings.Join([]string{
+		"event: response.completed",
+		`data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":1,"output_tokens":1}}}`,
+		"",
+	}, "\n"))}
+	resp := &http.Response{StatusCode: http.StatusOK, Body: body, Header: http.Header{}}
+
+	_, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, &Account{ID: 1, Platform: PlatformOpenAI, Name: "acc"}, time.Now(), "model", "model")
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, body.eofReads, 1, "terminal event must not close the upstream body before EOF")
 }
 
 func TestOpenAIStreamingResponseFailedBeforeOutputReturnsFailover(t *testing.T) {
