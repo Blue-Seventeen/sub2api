@@ -123,6 +123,13 @@ func TestOpenAIWSIngressEndedByClient_AbnormalClosuresStillReportAccountFailure(
 	}
 }
 
+func TestShouldReportOpenAIWSProxyAccountFailure_SessionPreemptionIsNotAccountFailure(t *testing.T) {
+	err := fmt.Errorf("wrapped preemption: %w", service.NewOpenAIWSSessionPreemptedError())
+
+	require.True(t, service.IsOpenAIWSSessionPreemptedError(err))
+	require.False(t, shouldReportOpenAIWSProxyAccountFailure(err))
+}
+
 // 不变式：同一条错误，日志侧与归因侧必须给出一致的结论。
 // summarizeWSCloseErrorForLog 一直用 coderws.CloseStatus 读关闭码，这正是缺陷时期
 // WARN 打印 close_status=1000(StatusNormalClosure) 却同时把账号记为故障的原因。

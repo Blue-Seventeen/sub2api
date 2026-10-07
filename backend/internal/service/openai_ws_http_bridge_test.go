@@ -45,6 +45,32 @@ func TestPrepareOpenAIWSHTTPBridgeBodyStripsWSFields(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestProxyOpenAIWSHTTPBridgeTurnMappedGPT55RemovesResponsesLiteWire(t *testing.T) {
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": {"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_lite_mapped\",\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n")),
+	}}
+	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}, httpUpstream: upstream}
+	account := &Account{
+		ID: 7781, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token", "model_mapping": map[string]any{"gpt-5.6-sol": "gpt-5.5"}},
+	}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	payload := []byte(`{"type":"response.create","model":"gpt-5.5","stream":true,"input":"hi","client_metadata":{"ws_request_header_x_openai_internal_codex_responses_lite":"true","keep":"yes"}}`)
+
+	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(context.Background(), c, account, "oauth-token", payload, len(payload), "gpt-5.5", "", "", "", "", 1, func([]byte) error { return nil })
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, upstream.lastReq)
+	require.Empty(t, upstream.lastReq.Header.Get(responsesLiteHeader))
+	require.False(t, isOpenAIResponsesLiteWebSocketPayload(upstream.lastBody))
+	require.Equal(t, "yes", gjson.GetBytes(upstream.lastBody, "client_metadata.keep").String())
+}
+
 func TestPrepareOpenAIWSHTTPBridgeBodyStripsNoneReasoningForCompatibleEndpoint(t *testing.T) {
 	payload := []byte(`{"type":"response.create","model":"company-coding-model","reasoning":{"effort":"none"},"input":"hi"}`)
 	compatible := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{
@@ -962,10 +988,9 @@ func TestProxyOpenAIWSHTTPBridgeTurnRewritesCapacityShedCodeForClient(t *testing
 		},
 		{
 			// 后续 turn 不允许 replay，容量错误必须改写后交给客户端重试。
-			name:    "turn2_bare_response_failed",
-			turn:    2,
-			body:    "data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_shed\",\"status\":\"failed\",\"error\":{\"code\":\"server_is_overloaded\",\"message\":\"Our servers are currently overloaded. Please try again later.\"}}}\n\n",
-			wantErr: true,
+			name: "turn2_bare_response_failed",
+			turn: 2,
+			body: "data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_shed\",\"status\":\"failed\",\"error\":{\"code\":\"server_is_overloaded\",\"message\":\"Our servers are currently overloaded. Please try again later.\"}}}\n\n",
 		},
 	}
 	for _, tt := range tests {
@@ -1029,7 +1054,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnBareErrorUsesAuthoritativeFailed(t *testing.
 		return nil
 	})
 
-	require.Error(t, err)
+	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, 9, result.Usage.InputTokens)
 	require.Equal(t, 2, result.Usage.OutputTokens)
@@ -1039,7 +1064,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnBareErrorUsesAuthoritativeFailed(t *testing.
 	require.Equal(t, "response.failed", gjson.GetBytes(writes[1], "type").String())
 }
 
-func TestProxyOpenAIWSHTTPBridgeTurnFailedTerminalReturnsError(t *testing.T) {
+func TestProxyOpenAIWSHTTPBridgeTurnFailedTerminalReturnsResult(t *testing.T) {
 	for _, eventType := range []string{"response.fail", "response.failed"} {
 		for _, tc := range []struct {
 			name          string
@@ -1071,10 +1096,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnFailedTerminalReturnsError(t *testing.T) {
 					writes = append(writes, append([]byte(nil), message...))
 					return nil
 				})
-				// AfterTurn skips normal text-usage settlement on a non-nil turn error.
-				require.ErrorContains(t, err, "upstream failed")
-				var failover *UpstreamFailoverError
-				require.False(t, errors.As(err, &failover), "partial output cannot be replayed")
+				require.NoError(t, err, "response.failed is a terminal result, not an ingress turn error")
 				require.NotNil(t, result)
 				require.Equal(t, "response.failed", result.UpstreamTerminalEvent)
 				require.False(t, result.SucceededForScheduling())
@@ -1086,13 +1108,13 @@ func TestProxyOpenAIWSHTTPBridgeTurnFailedTerminalReturnsError(t *testing.T) {
 				require.Equal(t, "partial output", gjson.GetBytes(writes[0], "delta").String())
 				require.Equal(t, "response.failed", gjson.GetBytes(writes[1], "type").String())
 				require.Equal(t, "failed", gjson.GetBytes(writes[1], "response.status").String())
-				require.False(t, logSink.ContainsMessage("ingress_ws_http_bridge_turn_completed"))
+				require.True(t, logSink.ContainsMessage("ingress_ws_http_bridge_turn_completed"))
 			})
 		}
 	}
 }
 
-func TestProxyOpenAIWSHTTPBridgeTurnBillableTerminalFailureDoesNotRemainReplayable(t *testing.T) {
+func TestProxyOpenAIWSHTTPBridgeTurnBillableTerminalFailureKeepsOfficialFailoverClassification(t *testing.T) {
 	body := "data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_billable\",\"status\":\"failed\",\"usage\":{\"input_tokens\":4,\"output_tokens\":1},\"error\":{\"code\":\"server_error\",\"message\":\"temporary upstream failure\"}}}\n\n"
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -1117,10 +1139,9 @@ func TestProxyOpenAIWSHTTPBridgeTurnBillableTerminalFailureDoesNotRemainReplayab
 	)
 
 	require.Error(t, err)
-	require.NotNil(t, result)
-	require.Equal(t, 4, result.Usage.InputTokens)
+	require.Nil(t, result, "pre-output failover attempts do not contribute usage")
 	var failoverErr *UpstreamFailoverError
-	require.False(t, errors.As(err, &failoverErr), "billable WS terminal failure must not remain replayable")
+	require.True(t, errors.As(err, &failoverErr), "the current turn follows the official retry classification")
 	require.Empty(t, writes)
 }
 
@@ -1161,7 +1182,6 @@ func TestProxyOpenAIWSHTTPBridgeTurnMarksCyberPolicyForFailureShapes(t *testing.
 			wantInput:  9,
 			wantOutput: 2,
 			wantResult: true,
-			wantError:  true,
 		},
 	}
 
@@ -1359,7 +1379,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnDoesNotReplayCapacityAfterSemanticOutput(t *
 	)
 
 	require.NotNil(t, result)
-	require.Error(t, err)
+	require.NoError(t, err)
 	require.Len(t, writes, 5)
 	var failoverErr *UpstreamFailoverError
 	require.False(t, errors.As(err, &failoverErr))
@@ -1490,7 +1510,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnDisconnectedBeforeOutputDoesNotFailOver(t *t
 			}
 			require.Nil(t, result.FirstTokenMs)
 			if tc.wantTerminal {
-				require.Error(t, err, "an upstream response.failed terminal must remain a failed turn after client disconnect")
+				require.NoError(t, err, "response.failed completes the HTTP bridge turn even after client disconnect")
 				require.Equal(t, "response.failed", result.UpstreamTerminalEvent)
 				require.Equal(t, 3, result.Usage.InputTokens)
 				require.Equal(t, 2, result.Usage.OutputTokens)

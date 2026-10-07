@@ -1524,6 +1524,17 @@ func TestOpenAIResponsesWebSocket_PassthroughUsageLogPersistsUserAgentAndReasoni
 	require.True(t, got.log.OpenAIWSMode)
 }
 
+func TestOpenAIResponsesWebSocket_DoesNotBillTextUsageFromErroredTurn(t *testing.T) {
+	runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+		firstPayload:            `{"type":"response.create","model":"gpt-5.4","input":"hello"}`,
+		ingressMode:             service.OpenAIWSIngressModeHTTPBridge,
+		httpBridgeBody:          "data: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_failed_usage\",\"delta\":\"partial\"}\n\ndata: {\"type\":\"error\",\"error\":{\"code\":\"server_error\",\"message\":\"temporary upstream failure\"},\"usage\":{\"input_tokens\":4,\"output_tokens\":2}}\n\n",
+		firstResponseType:       "response.output_text.delta",
+		additionalResponseTypes: []string{"response.failed"},
+		expectNoUsage:           true,
+	})
+}
+
 func TestOpenAIResponsesWebSocket_PassthroughUsageLogInfersReasoningFromInitialRequestModel(t *testing.T) {
 	got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
 		firstPayload: `{"type":"response.create","model":"gpt-5.4-xhigh","stream":false}`,
@@ -1978,12 +1989,16 @@ func newOpenAIWSHandlerTestServer(t *testing.T, h *OpenAIGatewayHandler, subject
 }
 
 type openAIResponsesWSUsageLogCase struct {
-	simpleModeRejectAtRead int64
-	compositeResolver      *service.CompositeRouteResolver
-	accountPlatform        string
-	closeReason            string
-	closeStatus            coderws.StatusCode
-	firstPayload           string
+	httpBridgeBody          string
+	firstResponseType       string
+	additionalResponseTypes []string
+	expectNoUsage           bool
+	simpleModeRejectAtRead  int64
+	compositeResolver       *service.CompositeRouteResolver
+	accountPlatform         string
+	closeReason             string
+	closeStatus             coderws.StatusCode
+	firstPayload            string
 	// midPayload 在首个 turn 完成后发送（如 session.update），上游桩会为它
 	// 回一个 response.completed，客户端按普通事件读取。
 	midPayload                string
@@ -2938,6 +2953,16 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	upstreamPayloadCh := make(chan []byte, turnCount)
 	upstreamErrCh := make(chan error, 1)
 	var channelSvc *service.ChannelService
+	baseURL := ""
+	var httpBridgeServer *httptest.Server
+	if tc.httpBridgeBody != "" {
+		httpBridgeServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = io.WriteString(w, tc.httpBridgeBody)
+		}))
+		defer httpBridgeServer.Close()
+		baseURL = httpBridgeServer.URL
+	}
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if tc.accountPlatform == service.PlatformGrok {
 			payload, err := io.ReadAll(r.Body)
@@ -2997,6 +3022,9 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		upstreamErrCh <- nil
 	}))
 	defer upstreamServer.Close()
+	if baseURL == "" {
+		baseURL = upstreamServer.URL
+	}
 
 	groupID := int64(4201)
 	account := service.Account{
@@ -3009,7 +3037,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		Concurrency: 1,
 		Credentials: map[string]any{
 			"api_key":       "sk-test",
-			"base_url":      upstreamServer.URL,
+			"base_url":      baseURL,
 			"model_mapping": tc.accountModelMapping,
 		},
 		Extra: map[string]any{
@@ -3175,21 +3203,37 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	}
 
 	clientEvents := make([][]byte, 0, turnCount)
-	readCompleted := func() {
+	readExpected := func(expectedType string) {
 		readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
 		_, event, readErr := clientConn.Read(readCtx)
 		cancelRead()
 		require.NoError(t, readErr)
-		require.Equal(t, "response.completed", gjson.GetBytes(event, "type").String())
+		require.Equal(t, expectedType, gjson.GetBytes(event, "type").String())
 		clientEvents = append(clientEvents, append([]byte(nil), event...))
 	}
-	readCompleted()
+	firstResponseType := strings.TrimSpace(tc.firstResponseType)
+	if firstResponseType == "" {
+		firstResponseType = "response.completed"
+	}
+	readExpected(firstResponseType)
+	for _, expectedType := range tc.additionalResponseTypes {
+		readExpected(expectedType)
+	}
+	if tc.expectNoUsage {
+		_ = clientConn.CloseNow()
+		select {
+		case usageLog := <-usageRepo.created:
+			t.Fatalf("failed text turn must not create a usage log; got %+v", usageLog)
+		case <-time.After(300 * time.Millisecond):
+		}
+		return openAIResponsesWSUsageLogResult{clientEvents: clientEvents}
+	}
 	if tc.midPayload != "" {
 		writeCtx, cancelWrite = context.WithTimeout(context.Background(), 3*time.Second)
 		err = clientConn.Write(writeCtx, coderws.MessageText, []byte(tc.midPayload))
 		cancelWrite()
 		require.NoError(t, err)
-		readCompleted()
+		readExpected("response.completed")
 	}
 	if strings.TrimSpace(tc.secondPayload) != "" && (turnCount >= 2) {
 		writeCtx, cancelWrite = context.WithTimeout(context.Background(), 3*time.Second)
@@ -3217,7 +3261,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 			_ = clientConn.CloseNow()
 			return openAIResponsesWSUsageLogResult{}
 		}
-		readCompleted()
+		readExpected("response.completed")
 	}
 	_ = clientConn.Close(coderws.StatusNormalClosure, "done")
 

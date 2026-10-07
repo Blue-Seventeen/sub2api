@@ -218,6 +218,37 @@ func TestDeepSeekResponsesCompactSkipsClientToolAdaptation(t *testing.T) {
 	require.Equal(t, "/responses/compact", upstream.lastReq.URL.Path)
 }
 
+func TestKimiResponsesDoesNotUseDeepSeekClientToolAdaptation(t *testing.T) {
+	body := openAIClientToolsRequest(false)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"id":"resp_kimi","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`)),
+	}}
+	svc := openAIClientToolsTestService(upstream)
+	account := &Account{
+		ID:       5664,
+		Platform: PlatformKimi,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"api_key":      "test-key",
+			"api_protocol": APIProtocolResponses,
+			"base_url":     "https://relay.example",
+		},
+	}
+
+	_, err := svc.Forward(context.Background(), c, account, body)
+
+	require.NoError(t, err)
+	require.Equal(t, "custom", gjson.GetBytes(upstream.lastBody, "tools.0.type").String())
+	require.Equal(t, "/v1/responses", upstream.lastReq.URL.Path)
+	_, mapped := openAIResponsesClientToolMapping(c)
+	require.False(t, mapped)
+}
+
 func TestOpenAIPassthroughAPIKeyRestoresClientToolsNonStreaming(t *testing.T) {
 	body := openAIClientToolsRequest(false)
 	recorder := httptest.NewRecorder()

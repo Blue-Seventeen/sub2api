@@ -64,6 +64,29 @@ func newGatewayRoutesTestRouterWithConfigAndResolver(cfg *config.Config, composi
 	return router
 }
 
+func TestIsOpenAIGatewayTextPlatformMatchesOfficialV0213(t *testing.T) {
+	for _, tc := range []struct {
+		platform string
+		want     bool
+	}{
+		{service.PlatformOpenAI, true},
+		{service.PlatformGrok, true},
+		{service.PlatformKimi, true},
+		{service.PlatformZhipu, true},
+		{service.PlatformDeepseek, true},
+		{service.PlatformMiniMax, true},
+		{service.PlatformOpenCodeGo, true},
+		{service.PlatformAnthropic, false},
+		{service.PlatformGemini, false},
+		{service.PlatformAntigravity, false},
+		{service.PlatformOpenRouter, false},
+	} {
+		t.Run(tc.platform, func(t *testing.T) {
+			require.Equal(t, tc.want, isOpenAIGatewayTextPlatform(tc.platform))
+		})
+	}
+}
+
 func TestGatewayRoutesOpenAIResponsesCompactPathIsRegistered(t *testing.T) {
 	router := newGatewayRoutesTestRouter()
 

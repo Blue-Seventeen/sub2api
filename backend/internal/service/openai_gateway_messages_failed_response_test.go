@@ -95,7 +95,7 @@ func TestForwardAsAnthropic_StreamingResponseFailed_ReturnsError(t *testing.T) {
 	require.Contains(t, err.Error(), "upstream response failed")
 }
 
-func TestForwardAsAnthropic_BillableTerminalFailureDoesNotRemainReplayable(t *testing.T) {
+func TestForwardAsAnthropic_BillableTerminalFailureKeepsOfficialFailoverClassification(t *testing.T) {
 	body := []byte(`{"model":"gpt-5.4","max_tokens":32,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -117,7 +117,7 @@ func TestForwardAsAnthropic_BillableTerminalFailureDoesNotRemainReplayable(t *te
 	require.NotNil(t, result)
 	require.Equal(t, 10, result.Usage.InputTokens)
 	var failoverErr *UpstreamFailoverError
-	require.False(t, errors.As(err, &failoverErr), "billable Messages terminal failure must not remain replayable")
+	require.True(t, errors.As(err, &failoverErr), "the handler decides whether to replay or discard this attempt's usage")
 }
 
 func TestForwardAsAnthropic_StreamingBareErrorAfterOutputIsVisible(t *testing.T) {
@@ -247,8 +247,7 @@ func TestForwardAsAnthropic_BufferedResponseFailed_Failover(t *testing.T) {
 
 	require.Error(t, err)
 	var failoverErr *UpstreamFailoverError
-	require.False(t, errors.As(err, &failoverErr), "billable terminal usage must not trigger replay, got: %T: %v", err, err)
-	require.NotNil(t, result)
-	require.Equal(t, 10, result.Usage.InputTokens)
+	require.True(t, errors.As(err, &failoverErr), "buffered retryable failures stay eligible for official failover")
+	require.Nil(t, result)
 	require.Len(t, upstream.requests, 1)
 }

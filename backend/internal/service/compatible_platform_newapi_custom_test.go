@@ -80,28 +80,36 @@ func TestAccountUseNewAPIStyleInterface(t *testing.T) {
 	}
 }
 
-func TestNewAPIStyleDoesNotOverrideOfficialOpenAITextRelay(t *testing.T) {
-	group := &Group{
+func TestNewAPIStyleGatewayOpenAITextHonorsSwitch(t *testing.T) {
+	svc := &NewAPIStyleGatewayService{}
+	groupEnabled := &Group{
 		ID:                          124,
 		Platform:                    PlatformOpenAI,
 		Status:                      StatusActive,
 		Hydrated:                    true,
 		NewAPIStyleInterfaceEnabled: true,
 	}
-	account := &Account{
+	groupDisabled := &Group{
+		ID:       124,
 		Platform: PlatformOpenAI,
-		Extra: map[string]any{
-			AccountExtraNewAPIStyleInterfaceEnabled: true,
-		},
+		Status:   StatusActive,
+		Hydrated: true,
 	}
 
-	for _, route := range []NewAPIStyleRoute{
-		NewAPIStyleRouteChatCompletions,
-		NewAPIStyleRouteResponses,
-	} {
-		if (&NewAPIStyleGatewayService{}).SupportsForGatewayHandler(account, group, route) {
-			t.Fatalf("OpenAI text route %q must use the official gateway, not New-API style forwarding", route)
-		}
+	for _, route := range []NewAPIStyleRoute{NewAPIStyleRouteChatCompletions, NewAPIStyleRouteResponses} {
+		t.Run(string(route), func(t *testing.T) {
+			if svc.SupportsForGatewayHandler(&Account{Platform: PlatformOpenAI}, groupDisabled, route) {
+				t.Fatalf("OpenAI text route %q must stay on the official path when New-API is disabled", route)
+			}
+			if !svc.SupportsForGatewayHandler(&Account{Platform: PlatformOpenAI}, groupEnabled, route) {
+				t.Fatalf("OpenAI text route %q must honor the enabled group switch", route)
+			}
+			if !svc.SupportsForGatewayHandler(&Account{Platform: PlatformOpenAI, Extra: map[string]any{
+				AccountExtraNewAPIStyleInterfaceEnabled: true,
+			}}, nil, route) {
+				t.Fatalf("OpenAI text route %q must honor the enabled account switch", route)
+			}
+		})
 	}
 }
 

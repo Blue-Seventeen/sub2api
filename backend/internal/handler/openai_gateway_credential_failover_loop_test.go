@@ -312,14 +312,15 @@ func (r *grokCredentialHandlerRefresher) Refresh(ctx context.Context, _ *service
 
 type grokCredentialHandlerUpstream struct {
 	service.HTTPUpstream
-	mu            sync.Mutex
-	hits          []int64
-	requestURLs   []string
-	authorization []string
-	failAccountID int64
-	rateLimitIDs  map[int64]bool
-	failureStatus map[int64]int
-	cancelRequest context.CancelFunc
+	mu               sync.Mutex
+	hits             []int64
+	requestURLs      []string
+	authorization    []string
+	failAccountID    int64
+	rateLimitIDs     map[int64]bool
+	failureStatus    map[int64]int
+	modelCapacityIDs map[int64]bool
+	cancelRequest    context.CancelFunc
 }
 
 func (u *grokCredentialHandlerUpstream) Do(req *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
@@ -334,16 +335,21 @@ func (u *grokCredentialHandlerUpstream) Do(req *http.Request, _ string, accountI
 	failAccountID := u.failAccountID
 	rateLimited := u.rateLimitIDs[accountID]
 	failureStatus := u.failureStatus[accountID]
+	modelCapacity := u.modelCapacityIDs[accountID]
 	cancelRequest := u.cancelRequest
 	u.mu.Unlock()
 	if rateLimited {
+		message := "rate limited"
+		if modelCapacity {
+			message = "The model is currently at capacity due to high demand"
+		}
 		return &http.Response{
 			StatusCode: http.StatusTooManyRequests,
 			Header: http.Header{
 				"Content-Type": []string{"application/json"},
 				"Retry-After":  []string{"60"},
 			},
-			Body: io.NopCloser(bytes.NewBufferString(`{"error":{"message":"rate limited"}}`)),
+			Body: io.NopCloser(bytes.NewBufferString(`{"error":{"message":"` + message + `"}}`)),
 		}, nil
 	}
 	if failureStatus > 0 {
@@ -664,6 +670,36 @@ func TestResponsesGrok429FailoverHandlesMixedStatuses(t *testing.T) {
 	})
 }
 
+func TestGrokSameAccountRetryHelpersOnResponsesAndMessages(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	endpoints := []struct {
+		name string
+		path string
+		body string
+		mode string
+	}{
+		{name: "responses applies SameAccountRetryMax", path: "/openai/v1/responses", body: `{"model":"grok","input":"hello","stream":false}`, mode: "model_capacity_retry_max"},
+		{name: "messages honors pool retry budget", path: "/openai/v1/messages", body: `{"model":"grok","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, mode: "messages_retry_budget"},
+	}
+
+	for _, endpoint := range endpoints {
+		t.Run(endpoint.name, func(t *testing.T) {
+			_, _, upstream, router, cleanup := newGrokCredentialFailoverHandler(t, endpoint.mode)
+			defer cleanup()
+
+			startedAt := time.Now()
+			recorder := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, endpoint.path, bytes.NewBufferString(endpoint.body))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(recorder, req)
+
+			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+			require.Equal(t, []int64{801, 801, 802}, upstream.accountHits(), "same-account retry budget must be honored before account failover")
+			require.GreaterOrEqual(t, time.Since(startedAt), sameAccountRetryDelay, "the bounded retry should honor its configured delay")
+		})
+	}
+}
+
 func TestGrokMedia429FailoverIsBounded(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -865,6 +901,26 @@ func newGrokCredentialFailoverHandler(t *testing.T, mode string) (*OpenAIGateway
 	if mode == "postmap_cancel" || mode == "first_402" || mode == "first_429" || mode == "all_429" || mode == "mixed_429_500" || mode == "mixed_500_429" || mode == "oauth_429_apikey_500" {
 		accounts[0].Credentials["expires_at"] = time.Now().Add(2 * time.Hour).UTC().Format(time.RFC3339)
 	}
+	if mode == "model_capacity_retry_max" {
+		for i := range accounts {
+			accounts[i].Type = service.AccountTypeAPIKey
+			accounts[i].Credentials = map[string]any{
+				"api_key":               "grok-pool-key",
+				"pool_mode":             true,
+				"pool_mode_retry_count": float64(5),
+			}
+		}
+	}
+	if mode == "messages_retry_budget" {
+		for i := range accounts {
+			accounts[i].Type = service.AccountTypeAPIKey
+			accounts[i].Credentials = map[string]any{
+				"api_key":               "grok-pool-key",
+				"pool_mode":             true,
+				"pool_mode_retry_count": float64(1),
+			}
+		}
+	}
 	if mode == "all_429" || mode == "mixed_429_500" || mode == "mixed_500_429" || mode == "oauth_429_apikey_500" {
 		accounts = append(accounts, service.Account{
 			ID: 803, Name: "untried-healthy", Platform: service.PlatformGrok, Type: service.AccountTypeOAuth,
@@ -905,6 +961,11 @@ func newGrokCredentialFailoverHandler(t *testing.T, mode string) (*OpenAIGateway
 	}
 	upstream := &grokCredentialHandlerUpstream{}
 	switch mode {
+	case "model_capacity_retry_max":
+		upstream.rateLimitIDs = map[int64]bool{801: true}
+		upstream.modelCapacityIDs = map[int64]bool{801: true}
+	case "messages_retry_budget":
+		upstream.rateLimitIDs = map[int64]bool{801: true}
 	case "first_402":
 		upstream.failAccountID = 801
 	case "first_429":

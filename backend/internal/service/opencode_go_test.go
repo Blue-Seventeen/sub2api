@@ -1,8 +1,15 @@
 package service
 
 import (
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -157,6 +164,93 @@ func TestShouldForwardOpenAIResponsesViaRawChatCompletions_OpenCodeGoIgnoresProb
 	require.Equal(t, APIProtocolResponses, account.ResolveOpenCodeGoUpstreamProtocol("grok-4.6"))
 	require.Equal(t, APIProtocolResponses, account.ResolveOpenCodeGoUpstreamProtocol("gpt-5.6-luna"))
 	require.Equal(t, APIProtocolAnthropic, account.ResolveOpenCodeGoUpstreamProtocol("qwen3.8-flash"))
+}
+
+func TestForwardOpenCodeGoResponsesUsesMappedModelProtocol(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	protocols := []struct {
+		name     string
+		model    string
+		mapped   string
+		protocol string
+		wantPath string
+	}{
+		{name: "responses model", model: "public-gpt", mapped: "gpt-5.6-luna", protocol: APIProtocolResponses, wantPath: "/v1/responses"},
+		{name: "chat model", model: "glm-5.3", protocol: APIProtocolChatCompletions, wantPath: "/v1/chat/completions"},
+		{name: "anthropic model", model: "qwen3.8-flash", protocol: APIProtocolAnthropic, wantPath: "/v1/messages"},
+	}
+	inbounds := []struct {
+		name    string
+		path    string
+		body    func(string) []byte
+		forward func(*OpenAIGatewayService, context.Context, *gin.Context, *Account, []byte) (*OpenAIForwardResult, error)
+	}{
+		{
+			name: "responses", path: "/v1/responses",
+			body: func(model string) []byte { return []byte(`{"model":"` + model + `","input":"hello","stream":false}`) },
+			forward: func(s *OpenAIGatewayService, ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+				return s.Forward(ctx, c, account, body)
+			},
+		},
+		{
+			name: "chat", path: "/v1/chat/completions",
+			body: func(model string) []byte {
+				return []byte(`{"model":"` + model + `","messages":[{"role":"user","content":"hello"}],"stream":false}`)
+			},
+			forward: func(s *OpenAIGatewayService, ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+				return s.ForwardAsChatCompletions(ctx, c, account, body, "", "")
+			},
+		},
+		{
+			name: "messages", path: "/v1/messages",
+			body: func(model string) []byte {
+				return []byte(`{"model":"` + model + `","max_tokens":32,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
+			},
+			forward: func(s *OpenAIGatewayService, ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+				return s.ForwardAsAnthropic(ctx, c, account, body, "", "")
+			},
+		},
+	}
+	for _, protocol := range protocols {
+		for _, inbound := range inbounds {
+			t.Run(inbound.name+"/"+protocol.name, func(t *testing.T) {
+				credentials := map[string]any{
+					"api_key":      "test-key",
+					"base_url":     "http://upstream.example",
+					"account_mode": AccountModeGo,
+					"api_protocol": APIProtocolAdaptive,
+				}
+				if protocol.mapped != "" {
+					credentials["model_mapping"] = map[string]any{protocol.model: protocol.mapped}
+				}
+				mappedModel := protocol.mapped
+				if mappedModel == "" {
+					mappedModel = protocol.model
+				}
+				credentials[openCodeGoProtocolRulesKey] = []map[string]any{{"pattern": mappedModel, "protocol": protocol.protocol}}
+				account := &Account{ID: 41, Name: "opencode-go", Platform: PlatformOpenCodeGo, Type: AccountTypeAPIKey, Credentials: credentials}
+				body := inbound.body(protocol.model)
+				rec := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rec)
+				c.Request = httptest.NewRequest(http.MethodPost, inbound.path, strings.NewReader(string(body)))
+				upstream := &httpUpstreamRecorder{resp: &http.Response{
+					StatusCode: http.StatusServiceUnavailable,
+					Header:     http.Header{"Content-Type": {"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"injected failure"}}`)),
+				}}
+				svc := &OpenAIGatewayService{cfg: &config.Config{
+					Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{AllowInsecureHTTP: true}},
+				}, httpUpstream: upstream}
+
+				_, err := inbound.forward(svc, context.Background(), c, account, body)
+
+				require.Error(t, err)
+				require.Len(t, upstream.requests, 1)
+				require.True(t, strings.HasSuffix(upstream.lastReq.URL.Path, protocol.wantPath), "upstream path=%q want suffix=%q", upstream.lastReq.URL.Path, protocol.wantPath)
+				require.Contains(t, string(upstream.lastBody), `"model":"`+mappedModel+`"`)
+			})
+		}
+	}
 }
 
 func TestStampOpenAIResponsesUpstreamEndpoint(t *testing.T) {

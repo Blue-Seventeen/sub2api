@@ -66,9 +66,9 @@ func (u *legacyCNRouteUpstream) DoWithTLS(req *http.Request, proxyURL string, ac
 
 func TestGatewayRoutesLegacyCNUnprobedAccountsKeepProviderPaths(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	for _, provider := range []struct{ platform, baseURL, model, path string }{
-		{service.PlatformZhipu, "https://open.bigmodel.cn", "glm-4-plus", "/api/paas/v4/chat/completions"},
-		{service.PlatformDeepseek, "https://api.deepseek.com", "deepseek-chat", "/chat/completions"},
+	for _, provider := range []struct{ platform, baseURL, model string }{
+		{service.PlatformZhipu, "https://open.bigmodel.cn", "glm-4-plus"},
+		{service.PlatformDeepseek, "https://api.deepseek.com", "deepseek-chat"},
 	} {
 		for _, newAPI := range []bool{false, true} {
 			for _, route := range []string{"/v1/responses", "/responses", "/v1/chat/completions"} {
@@ -91,11 +91,18 @@ func TestGatewayRoutesLegacyCNUnprobedAccountsKeepProviderPaths(t *testing.T) {
 					gateway := service.NewGatewayService(accounts, legacyCNRouteGroups{group: group}, nil, nil, nil, nil, nil, nil, cfg,
 						nil, nil, nil, nil, billing, nil, upstream, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 					newAPIService := service.NewNewAPIStyleGatewayService(gateway, upstream, cfg, nil, nil)
+					openAIGateway := service.NewOpenAIGatewayService(accounts, nil, nil, nil, nil, nil, nil, cfg,
+						nil, nil, service.NewBillingService(cfg, nil), nil, billing, upstream, &service.DeferredService{},
+						nil, nil, nil, nil, nil, nil, nil)
+					openAIHandler := handler.NewOpenAIGatewayHandler(
+						openAIGateway, newAPIService, service.NewConcurrencyService(nil), billing,
+						service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg), nil, nil, nil, nil, nil, nil, cfg,
+					)
 					base := handler.NewGatewayHandler(gateway, newAPIService, nil, nil, nil, nil, service.NewConcurrencyService(nil), billing,
 						nil, nil, nil, nil, nil, nil, nil, nil, cfg, nil)
 					router := gin.New()
 					RegisterGatewayRoutes(router, &handler.Handlers{
-						Gateway: base, OpenAIGateway: &handler.OpenAIGatewayHandler{},
+						Gateway: base, OpenAIGateway: openAIHandler,
 						CompatibleGateway:  handler.NewCompatibleGatewayHandler(service.NewCompatibleGatewayService(gateway, upstream, cfg, nil), base),
 						NewAPIStyleGateway: handler.NewNewAPIStyleGatewayHandler(base), AsyncImage: handler.NewAsyncImageHandler(nil, nil),
 					}, servermiddleware.APIKeyAuthMiddleware(func(c *gin.Context) {
@@ -108,12 +115,12 @@ func TestGatewayRoutesLegacyCNUnprobedAccountsKeepProviderPaths(t *testing.T) {
 					req.Header.Set("Content-Type", "application/json")
 					w := httptest.NewRecorder()
 					router.ServeHTTP(w, req)
-					require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
-					wantPath := provider.path
+					wantStatus := http.StatusBadRequest
 					if newAPI && route == "/v1/chat/completions" {
-						wantPath = "/v1/chat/completions"
+						wantStatus = http.StatusBadGateway
 					}
-					require.Equal(t, []string{provider.baseURL + wantPath}, upstream.urls)
+					require.Equal(t, wantStatus, w.Code, w.Body.String())
+					require.Equal(t, []string{provider.baseURL + "/v1/chat/completions"}, upstream.urls)
 				})
 			}
 		}

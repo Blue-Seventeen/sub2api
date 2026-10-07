@@ -1537,6 +1537,148 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_HTTPBridgeModeRe
 	require.False(t, gjson.GetBytes(upstream.lastBody, "parallel_tool_calls").Bool())
 }
 
+func TestOpenAIGatewayService_HTTPBridgeFailedTerminalAllowsFollowingTurn(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	cfg.Gateway.OpenAIWS.Enabled = true
+	cfg.Gateway.OpenAIWS.OAuthEnabled = true
+	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+	cfg.Gateway.OpenAIWS.ModeRouterV2Enabled = true
+	cfg.Gateway.OpenAIWS.IngressModeDefault = OpenAIWSIngressModeCtxPool
+	cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
+	cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
+
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body: io.NopCloser(strings.NewReader(
+				"data: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_failed_1\",\"delta\":\"partial\"}\n\n" +
+					"data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_failed_1\",\"status\":\"failed\",\"usage\":{\"input_tokens\":3,\"output_tokens\":1},\"error\":{\"status_code\":403,\"code\":\"workspace_suspended\",\"message\":\"workspace is suspended\"}}}\n\n",
+			)),
+		},
+		{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body: io.NopCloser(strings.NewReader(
+				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_completed_2\",\"status\":\"completed\",\"usage\":{\"input_tokens\":2,\"output_tokens\":1}}}\n\n",
+			)),
+		},
+	}}
+	svc := &OpenAIGatewayService{
+		cfg:              cfg,
+		httpUpstream:     upstream,
+		cache:            &stubGatewayCache{},
+		openaiWSResolver: NewOpenAIWSProtocolResolver(cfg),
+		toolCorrector:    NewCodexToolCorrector(),
+	}
+	account := &Account{
+		ID:          553,
+		Name:        "openai-ingress-http-bridge-failed-turn",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "sk-test"},
+		Extra:       map[string]any{"openai_apikey_responses_websockets_v2_mode": OpenAIWSIngressModeHTTPBridge},
+	}
+	type turnResult struct {
+		turn   int
+		result *OpenAIForwardResult
+		err    error
+	}
+	turnResults := make(chan turnResult, 2)
+	hooks := &OpenAIWSIngressHooks{AfterTurn: func(turn int, result *OpenAIForwardResult, err error) {
+		turnResults <- turnResult{turn: turn, result: result, err: err}
+	}}
+	serverErrCh := make(chan error, 1)
+	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := coderws.Accept(w, r, nil)
+		if err != nil {
+			serverErrCh <- err
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+		readCtx, cancelRead := context.WithTimeout(r.Context(), 3*time.Second)
+		msgType, firstMessage, readErr := conn.Read(readCtx)
+		cancelRead()
+		if readErr != nil {
+			serverErrCh <- readErr
+			return
+		}
+		if msgType != coderws.MessageText && msgType != coderws.MessageBinary {
+			serverErrCh <- errors.New("unsupported websocket client message type")
+			return
+		}
+		rec := httptest.NewRecorder()
+		ginCtx, _ := gin.CreateTestContext(rec)
+		ginCtx.Request = r.Clone(r.Context())
+		ginCtx.Request.Header = r.Header.Clone()
+		serverErrCh <- svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, "sk-test", firstMessage, hooks)
+	}))
+	defer wsServer.Close()
+
+	dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
+	clientConn, _, err := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(wsServer.URL, "http"), nil)
+	cancelDial()
+	require.NoError(t, err)
+	defer func() { _ = clientConn.CloseNow() }()
+
+	writeTurn := func(payload string) {
+		t.Helper()
+		writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
+		err := clientConn.Write(writeCtx, coderws.MessageText, []byte(payload))
+		cancelWrite()
+		require.NoError(t, err)
+	}
+	readEvent := func(wantType string) []byte {
+		t.Helper()
+		readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
+		_, message, err := clientConn.Read(readCtx)
+		cancelRead()
+		require.NoError(t, err)
+		require.Equal(t, wantType, gjson.GetBytes(message, "type").String())
+		return message
+	}
+	writeTurn(`{"type":"response.create","model":"gpt-5.1","input":"first"}`)
+	partialEvent := readEvent("response.output_text.delta")
+	require.Equal(t, "partial", gjson.GetBytes(partialEvent, "delta").String())
+	failedEvent := readEvent("response.failed")
+	require.Equal(t, "resp_failed_1", gjson.GetBytes(failedEvent, "response.id").String())
+	writeTurn(`{"type":"response.create","model":"gpt-5.1","input":"second"}`)
+	completedEvent := readEvent("response.completed")
+	require.Equal(t, "resp_completed_2", gjson.GetBytes(completedEvent, "response.id").String())
+	_ = clientConn.Close(coderws.StatusNormalClosure, "done")
+
+	for wantTurn := 1; wantTurn <= 2; wantTurn++ {
+		select {
+		case got := <-turnResults:
+			require.Equal(t, wantTurn, got.turn)
+			require.NoError(t, got.err)
+			require.NotNil(t, got.result)
+			if wantTurn == 1 {
+				require.Equal(t, "response.failed", got.result.UpstreamTerminalEvent)
+				require.Equal(t, 3, got.result.Usage.InputTokens)
+			} else {
+				require.Equal(t, "response.completed", got.result.UpstreamTerminalEvent)
+				require.Equal(t, 2, got.result.Usage.InputTokens)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatalf("timed out waiting for HTTP bridge turn %d callback", wantTurn)
+		}
+	}
+	select {
+	case serverErr := <-serverErrCh:
+		require.NoError(t, serverErr)
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for HTTP bridge websocket ingress to close")
+	}
+	require.Len(t, upstream.requests, 2, "the second client turn must reach the HTTP upstream")
+}
+
 func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_ModeOffReturnsPolicyViolation(t *testing.T) {
 
 	cfg := &config.Config{}

@@ -57,60 +57,68 @@ func (u *responsesPartialUsageUpstream) Do(req *http.Request, _ string, _ int64,
 	}, nil
 }
 
-func TestOpenAIResponses_ZeroNativeUsageFallbackRecordsUsageOnce(t *testing.T) {
+func TestOpenAIResponses_OfficialRetryAndExplicitChatModeBilling(t *testing.T) {
 	for _, forceChat := range []bool{false, true} {
-		name := "auto_zero_native_usage"
-		paths := []string{"/v1/responses", "/v1/chat/completions"}
+		name := "official_responses_retry_does_not_bill_failed_attempts"
+		paths := []string{"/v1/responses", "/v1/responses"}
+		wantBilling := false
 		if forceChat {
 			name = "force_chat"
-			paths = paths[1:]
+			paths = []string{"/v1/chat/completions"}
+			// Explicit force-chat is a non-failover bridge result in the official
+			// handler and its terminal result+error is recorded once.
+			wantBilling = true
 		}
 		t.Run(name, func(t *testing.T) {
-			assertResponsesPartialUsageRecordedOnce(t, &responsesPartialUsageUpstream{
+			assertResponsesFailureUsageBehavior(t, &responsesPartialUsageUpstream{
 				forceChat: forceChat, wantInput: 7, wantOutput: 2,
 				nativeBody: "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"server_error\",\"message\":\"temporary failure\"}}}\n\n",
 				chatBody:   "data: {\"type\":\"response.failed\",\"response\":{\"usage\":{\"input_tokens\":7,\"output_tokens\":2},\"error\":{\"code\":\"server_error\",\"message\":\"temporary failure\"}}}\n\n",
-			}, `{"model":"gpt-5.4","input":"hello","stream":true}`, false, paths)
+			}, `{"model":"gpt-5.4","input":"hello","stream":true}`, false, paths, wantBilling)
 		})
 	}
 }
 
-func TestOpenAIResponses_BillableNativeFailureDoesNotReplay(t *testing.T) {
+func TestOpenAIResponses_OfficialRetriesDoNotBillFailedAttempts(t *testing.T) {
 	for _, failure := range []string{"transport", "http_400", "http_502"} {
 		t.Run(failure, func(t *testing.T) {
-			assertResponsesPartialUsageRecordedOnce(t, &responsesPartialUsageUpstream{failure: failure},
-				`{"model":"gpt-5.4","input":"hello","stream":true}`, false, []string{"/v1/responses"})
+			assertResponsesFailureUsageBehavior(t, &responsesPartialUsageUpstream{failure: failure},
+				`{"model":"gpt-5.4","input":"hello","stream":true}`, false, []string{"/v1/responses", "/v1/responses"}, false)
 		})
 	}
 }
 
-func TestOpenAIResponses_NativeTerminalErrorRecordsUsageOnce(t *testing.T) {
+func TestOpenAIResponses_NativeTerminalErrorDoesNotRecordFailedAttemptUsage(t *testing.T) {
 	for _, tc := range []struct {
 		name           string
 		requestBody    string
 		nativeBody     string
 		forceResponses bool
+		wantPaths      []string
 	}{
 		{
 			name: "after_visible_output", requestBody: `{"model":"gpt-5.4","input":"hello","stream":true}`,
 			nativeBody: "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_native\",\"status\":\"failed\",\"usage\":{\"input_tokens\":5,\"output_tokens\":1},\"error\":{\"code\":\"server_error\",\"message\":\"temporary upstream failure\"}}}\n\n",
+			wantPaths:  []string{"/v1/responses"},
 		},
 		{
 			name: "force_responses", requestBody: `{"model":"gpt-5.4","input":"hello","stream":true}`, forceResponses: true,
 			nativeBody: "data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_native\",\"status\":\"failed\",\"usage\":{\"input_tokens\":5,\"output_tokens\":1},\"error\":{\"code\":\"invalid_request_error\",\"message\":\"native terminal failure\"}}}\n\n",
+			wantPaths:  []string{"/v1/responses"},
 		},
 		{
 			name: "responses_only_tool", requestBody: `{"model":"gpt-5.4","input":"hello","stream":true,"tools":[{"type":"web_search"}]}`,
 			nativeBody: "data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_native\",\"status\":\"failed\",\"usage\":{\"input_tokens\":5,\"output_tokens\":1},\"error\":{\"code\":\"invalid_request_error\",\"message\":\"native terminal failure\"}}}\n\n",
+			wantPaths:  []string{"/v1/responses"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			assertResponsesPartialUsageRecordedOnce(t, &responsesPartialUsageUpstream{nativeBody: tc.nativeBody}, tc.requestBody, tc.forceResponses, []string{"/v1/responses"})
+			assertResponsesFailureUsageBehavior(t, &responsesPartialUsageUpstream{nativeBody: tc.nativeBody}, tc.requestBody, tc.forceResponses, tc.wantPaths, false)
 		})
 	}
 }
 
-func assertResponsesPartialUsageRecordedOnce(t *testing.T, upstream *responsesPartialUsageUpstream, body string, forceResponses bool, wantPaths []string) {
+func assertResponsesFailureUsageBehavior(t *testing.T, upstream *responsesPartialUsageUpstream, body string, forceResponses bool, wantPaths []string, wantBilling bool) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	cfg := &config.Config{}
@@ -158,16 +166,18 @@ func assertResponsesPartialUsageRecordedOnce(t *testing.T, upstream *responsesPa
 
 	h.Responses(c)
 
-	require.Equal(t, wantPaths, upstream.paths, "partial usage must not trigger account replay: status=%d body=%s", rec.Code, rec.Body.String())
-	require.Len(t, logs.logs, 1, "native partial usage must survive both the fallback and handler error paths")
-	requestID, input, output := "native-billed", 5, 1
-	if upstream.chatBody != "" {
-		requestID, input, output = "fallback-billed", upstream.wantInput, upstream.wantOutput
+	require.Equal(t, wantPaths, upstream.paths, "unexpected upstream attempts: status=%d body=%s", rec.Code, rec.Body.String())
+	if !wantBilling {
+		require.Empty(t, logs.logs, "failed retry attempts do not enter the billing chain")
+		require.Empty(t, billing.commands, "failed retry attempts do not affect balance")
+		return
 	}
+	require.Len(t, logs.logs, 1)
+	requestID := "fallback-billed"
 	require.Equal(t, requestID, logs.logs[0].RequestID)
 	require.Equal(t, int64(1001), logs.logs[0].AccountID)
-	require.Equal(t, input, logs.logs[0].InputTokens)
-	require.Equal(t, output, logs.logs[0].OutputTokens)
+	require.Equal(t, upstream.wantInput, logs.logs[0].InputTokens)
+	require.Equal(t, upstream.wantOutput, logs.logs[0].OutputTokens)
 	require.Len(t, billing.commands, 1)
 	require.Equal(t, requestID, billing.commands[0].RequestID)
 	require.Greater(t, billing.commands[0].BalanceCost, 0.0)

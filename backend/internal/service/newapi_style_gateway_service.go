@@ -153,16 +153,9 @@ func (s *NewAPIStyleGatewayService) SupportsForGroup(account *Account, group *Gr
 	}
 }
 
-// SupportsForGatewayHandler applies the official OpenAI text routing boundary
-// before the generic New-API capability matrix. The upstream v0.2.13 OpenAI
-// handler does not use the custom New-API text bridge; that bridge lacks the
-// native pool failover metadata and can exhaust a single account on a transient
-// 5xx. Media routes and non-OpenAI platforms retain their existing behavior.
+// SupportsForGatewayHandler applies the New-API capability matrix to routes
+// dispatched through the shared OpenAI and generic gateway handlers.
 func (s *NewAPIStyleGatewayService) SupportsForGatewayHandler(account *Account, group *Group, route NewAPIStyleRoute) bool {
-	if account != nil && account.Platform == PlatformOpenAI &&
-		(route == NewAPIStyleRouteChatCompletions || route == NewAPIStyleRouteResponses) {
-		return false
-	}
 	return s.SupportsForGroup(account, group, route)
 }
 
@@ -545,7 +538,9 @@ func OpenAIForwardResultFromForwardResult(result *ForwardResult) *OpenAIForwardR
 	openAIInputTokens := result.Usage.InputTokens
 	openAIInputTokens += result.Usage.CacheReadInputTokens + result.Usage.CacheCreationInputTokens
 	return &OpenAIForwardResult{
-		RequestID: result.RequestID,
+		RequestID:       result.RequestID,
+		UpstreamHeaders: result.UpstreamHeaders,
+		ResponseHeaders: result.UpstreamHeaders,
 		Usage: OpenAIUsage{
 			InputTokens:              openAIInputTokens,
 			OutputTokens:             result.Usage.OutputTokens,
@@ -555,26 +550,35 @@ func OpenAIForwardResultFromForwardResult(result *ForwardResult) *OpenAIForwardR
 			CacheReadInputTokens:     result.Usage.CacheReadInputTokens,
 			ImageOutputTokens:        result.Usage.ImageOutputTokens,
 		},
-		Model:                   result.Model,
-		UpstreamModel:           result.UpstreamModel,
-		ReasoningEffort:         result.ReasoningEffort,
-		Stream:                  result.Stream,
-		Duration:                result.Duration,
-		FirstTokenMs:            result.FirstTokenMs,
-		ImageCount:              result.ImageCount,
-		SkipUsageBilling:        result.SkipUsageBilling,
-		ImageSize:               result.ImageSize,
-		ImageInputSize:          result.ImageInputSize,
-		ImageOutputSize:         result.ImageOutputSize,
-		ImageOutputSizes:        result.ImageOutputSizes,
-		ImageSizeSource:         result.ImageSizeSource,
-		ImageSizeBreakdown:      result.ImageSizeBreakdown,
-		RequestCount:            result.RequestCount,
-		TaskCount:               result.TaskCount,
-		BillableDurationSeconds: result.BillableDurationSeconds,
-		BillableCharacterCount:  result.BillableCharacterCount,
-		UsageEstimated:          result.UsageEstimated,
-		BillableUnitType:        result.BillableUnitType,
+		Model:                         result.Model,
+		BillingModel:                  result.BillingModel,
+		UpstreamModel:                 result.UpstreamModel,
+		UpstreamResponseModel:         result.UpstreamResponseModel,
+		UpstreamResponseModelConflict: result.UpstreamResponseModelConflict,
+		UpstreamResponseServiceTier:   result.UpstreamResponseServiceTier,
+		RequestedReasoningEffort:      result.RequestedReasoningEffort,
+		ServiceTier:                   result.ServiceTier,
+		SearchCount:                   result.SearchCount,
+		AudioUsage:                    result.AudioUsage,
+		ReasoningEffort:               result.ReasoningEffort,
+		Stream:                        result.Stream,
+		Duration:                      result.Duration,
+		FirstTokenMs:                  result.FirstTokenMs,
+		ClientDisconnect:              result.ClientDisconnect,
+		SkipUsageBilling:              result.SkipUsageBilling,
+		ImageCount:                    result.ImageCount,
+		ImageSize:                     result.ImageSize,
+		ImageInputSize:                result.ImageInputSize,
+		ImageOutputSize:               result.ImageOutputSize,
+		ImageOutputSizes:              result.ImageOutputSizes,
+		ImageSizeSource:               result.ImageSizeSource,
+		ImageSizeBreakdown:            result.ImageSizeBreakdown,
+		RequestCount:                  result.RequestCount,
+		TaskCount:                     result.TaskCount,
+		BillableDurationSeconds:       result.BillableDurationSeconds,
+		BillableCharacterCount:        result.BillableCharacterCount,
+		UsageEstimated:                result.UsageEstimated,
+		BillableUnitType:              result.BillableUnitType,
 	}
 }
 

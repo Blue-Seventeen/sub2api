@@ -507,6 +507,9 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if account.Platform != PlatformGrok && isOpenAIResponsesLiteWebSocketPayload(payload) {
 			upstreamReq.Header.Set(responsesLiteHeader, "true")
 		}
+		if err := applyMappedGPT55LiteCompatibility(upstreamReq, account, requestBody); err != nil {
+			return nil, err
+		}
 		if c != nil {
 			if turnState := strings.TrimSpace(c.GetHeader(openAIWSTurnStateHeader)); turnState != "" {
 				upstreamReq.Header.Set(openAIWSTurnStateHeader, turnState)
@@ -879,15 +882,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 				if account.Platform == PlatformGrok {
 					return nil, newOpenAIUpstreamFailoverError(statusCode, resp.Header, upstreamMessage, errMessage, false)
 				}
-				failoverErr := s.newOpenAIStreamFailoverErrorWithModel(c, account, true, resp.Header.Get("x-request-id"), upstreamMessage, errMessage, mappedModel, resp.Header)
-				if openAIUsageHasTokens(&usage) {
-					// The provider may have charged this turn before emitting a
-					// terminal failure. Keep its usage and make the turn error
-					// non-replayable; replaying current-turn payload would double
-					// charge the upstream and can delay the client close.
-					return resultWithUsage(), fmt.Errorf("WS HTTP bridge ended after billable usage: %v", failoverErr)
-				}
-				return nil, failoverErr
+				return nil, s.newOpenAIStreamFailoverErrorWithModel(c, account, true, resp.Header.Get("x-request-id"), upstreamMessage, errMessage, mappedModel, resp.Header)
 			}
 			if wroteDownstream && requestScopedCapacity && !capacityFailoverSuppressedLogged {
 				logOpenAICapacityFailoverSuppressed(ctx, account, "ws_http_bridge", resp.Header.Get("x-request-id"), eventType)
@@ -981,13 +976,6 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if isOpenAIWSTerminalEvent(eventType) && !bareErrorPending {
 			if eventType == "response.failed" {
 				upstreamTerminalEvent = "response.failed"
-				errMessage := extractOpenAISSEErrorMessage(upstreamMessage)
-				if errMessage == "" {
-					errMessage = "upstream response failed"
-				}
-				// Preserve partial output/usage for diagnostics and existing image
-				// settlement, but do not report a failed text turn as billable success.
-				return resultWithUsage(), errors.New(errMessage)
 			} else {
 				upstreamTerminalEvent = s.handleOpenAIWSTerminalTransientFailure(ctx, account, mappedModel, resp.Header, upstreamMessage)
 			}

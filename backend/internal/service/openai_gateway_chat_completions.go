@@ -445,15 +445,6 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	} else {
 		result, handleErr = s.handleChatBufferedStreamingResponse(resp, c, account, originalModel, billingModel, upstreamModel, startTime)
 	}
-	if handleErr != nil && result != nil && openAIUsageHasTokens(&result.Usage) {
-		var failoverErr *UpstreamFailoverError
-		if errors.As(handleErr, &failoverErr) {
-			// The provider may have charged this attempt before emitting a
-			// terminal failure. Keep the partial result and make the error
-			// non-replayable so the handler records it exactly once.
-			handleErr = fmt.Errorf("Chat Completions bridge ended after billable usage: %v", handleErr)
-		}
-	}
 	stampOpenAIResponsesUpstreamEndpoint(c, result)
 
 	// cyber_policy：标记已设、error 已按 Chat Completions 格式发给客户端。丢弃 result、
@@ -576,10 +567,6 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	observer.ObserveServiceTier(finalResponse.ServiceTier, true)
 	if strings.TrimSpace(finalResponse.Status) == "failed" {
 		payload, _ := json.Marshal(gin.H{"type": "response.failed", "response": finalResponse})
-		var partialResult *OpenAIForwardResult
-		if openAIUsageHasTokens(&usage) {
-			partialResult = &OpenAIForwardResult{RequestID: requestID, UpstreamHeaders: resp.Header, Usage: usage, Model: originalModel, BillingModel: billingModel, UpstreamModel: upstreamModel, UpstreamResponseModel: observedUpstreamResponseModel(c), UpstreamResponseServiceTier: observedUpstreamResponseServiceTier(c), Stream: false, Duration: time.Since(startTime)}
-		}
 		// cyber_policy 致命不可重试：不 failover，以 Chat Completions 错误格式回写（F4），
 		// 标记供 handler 事后写风控/邮件/tokens=0 用量行。
 		if hit, code, msg := detectOpenAICyberPolicy(payload); hit {
@@ -600,11 +587,7 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 		}
 		message := openAICompatFailedResponseMessage(finalResponse)
 		if openAIStreamFailedEventShouldFailover(payload, message) {
-			failoverErr := s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, payload, message, upstreamModel, resp.Header)
-			if partialResult != nil {
-				return partialResult, fmt.Errorf("Chat Completions bridge ended after billable usage: %v", failoverErr)
-			}
-			return nil, failoverErr
+			return nil, s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, payload, message, upstreamModel, resp.Header)
 		}
 		message = s.recordOpenAIStreamUpstreamError(c, account, false, requestID, "http_error", payload, message)
 		// response.failed 到达在 HTTP 200 SSE 流上，无真实 HTTP 错误码；统一走语义
@@ -617,10 +600,10 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 			}
 			MarkResponseCommitted(c)
 			writeChatCompletionsError(c, status, errType, errMsg)
-			return partialResult, fmt.Errorf("upstream response failed (passthrough): %s", errMsg)
+			return nil, fmt.Errorf("upstream response failed (passthrough): %s", errMsg)
 		}
 		writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", message)
-		return partialResult, fmt.Errorf("upstream response failed: %s", message)
+		return nil, fmt.Errorf("upstream response failed: %s", message)
 	}
 	if strings.TrimSpace(finalResponse.Status) == "completed" {
 	}

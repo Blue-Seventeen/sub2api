@@ -17,6 +17,16 @@ import (
 	"github.com/tidwall/sjson"
 )
 
+func isOpenAIGatewayTextPlatform(platform string) bool {
+	switch platform {
+	case service.PlatformOpenAI, service.PlatformGrok, service.PlatformKimi,
+		service.PlatformZhipu, service.PlatformDeepseek, service.PlatformMiniMax, service.PlatformOpenCodeGo:
+		return true
+	default:
+		return false
+	}
+}
+
 // RegisterGatewayRoutes 注册 API 网关路由（Claude/OpenAI/Gemini 兼容）
 func RegisterGatewayRoutes(
 	r *gin.Engine,
@@ -41,11 +51,11 @@ func RegisterGatewayRoutes(
 	requireGroupAnthropic := middleware.RequireGroupAssignment(settingService, middleware.AnthropicErrorWriter)
 	requireGroupGoogle := middleware.RequireGroupAssignment(settingService, middleware.GoogleErrorWriter)
 	groupModelAllowlist := middleware.GroupModelAllowlist()
-	withLegacyCNNewAPIGroup := func(c *gin.Context, next gin.HandlerFunc) {
+	withLegacyNewAPIGroup := func(c *gin.Context, next gin.HandlerFunc) {
 		apiKey, ok := middleware.GetAPIKeyFromContext(c)
 		if !ok || apiKey == nil || apiKey.Group == nil ||
 			!apiKey.Group.NewAPIStyleInterfaceEnabled ||
-			(getGroupPlatform(c) != service.PlatformZhipu && getGroupPlatform(c) != service.PlatformDeepseek) ||
+			(getGroupPlatform(c) != service.PlatformOpenAI && getGroupPlatform(c) != service.PlatformZhipu && getGroupPlatform(c) != service.PlatformDeepseek) ||
 			service.IsGroupContextValid(apiKey.Group) {
 			next(c)
 			return
@@ -68,17 +78,12 @@ func RegisterGatewayRoutes(
 	}
 
 	isOpenAIResponsesCompatibleGatewayPlatform := func(c *gin.Context) bool {
-		switch getGroupPlatform(c) {
-		case service.PlatformOpenAI, service.PlatformGrok,
-			service.PlatformKimi, service.PlatformMiniMax:
-			return true
-		default:
-			return false
-		}
+		return isOpenAIGatewayTextPlatform(getGroupPlatform(c))
 	}
 	countTokensHandler := func(c *gin.Context) {
 		switch getGroupPlatform(c) {
-		case service.PlatformOpenAI, service.PlatformKimi, service.PlatformMiniMax:
+		case service.PlatformOpenAI, service.PlatformKimi, service.PlatformZhipu,
+			service.PlatformDeepseek, service.PlatformMiniMax, service.PlatformOpenCodeGo:
 			h.OpenAIGateway.CountTokens(c)
 		case service.PlatformGrok:
 			h.OpenAIGateway.GrokCountTokens(c)
@@ -281,7 +286,7 @@ func RegisterGatewayRoutes(
 	{
 		// /v1/messages: auto-route based on group platform
 		gateway.POST("/messages", func(c *gin.Context) {
-			if isOpenAIResponsesCompatibleGatewayPlatform(c) {
+			if isOpenAIGatewayTextPlatform(getGroupPlatform(c)) {
 				h.OpenAIGateway.Messages(c)
 				return
 			}
@@ -305,7 +310,11 @@ func RegisterGatewayRoutes(
 		gateway.GET("/live/:call_id", h.OpenAIGateway.LiveSideband)
 		// OpenAI Responses API: auto-route based on group platform
 		gateway.POST("/responses", func(c *gin.Context) {
-			if isOpenAIResponsesCompatibleGatewayPlatform(c) {
+			if isOpenAIGatewayTextPlatform(getGroupPlatform(c)) {
+				if getGroupPlatform(c) == service.PlatformOpenAI {
+					withLegacyNewAPIGroup(c, h.OpenAIGateway.Responses)
+					return
+				}
 				h.OpenAIGateway.Responses(c)
 				return
 			}
@@ -316,7 +325,11 @@ func RegisterGatewayRoutes(
 			h.Gateway.Responses(c)
 		})
 		gateway.POST("/responses/*subpath", guardResponsesSubpath(func(c *gin.Context) {
-			if isOpenAIResponsesCompatibleGatewayPlatform(c) {
+			if isOpenAIGatewayTextPlatform(getGroupPlatform(c)) {
+				if getGroupPlatform(c) == service.PlatformOpenAI {
+					withLegacyNewAPIGroup(c, h.OpenAIGateway.Responses)
+					return
+				}
 				h.OpenAIGateway.Responses(c)
 				return
 			}
@@ -332,12 +345,16 @@ func RegisterGatewayRoutes(
 		})
 		// OpenAI Chat Completions API: auto-route based on group platform
 		gateway.POST("/chat/completions", func(c *gin.Context) {
-			if isOpenAIResponsesCompatibleGatewayPlatform(c) {
+			if isOpenAIGatewayTextPlatform(getGroupPlatform(c)) {
+				if getGroupPlatform(c) == service.PlatformOpenAI || getGroupPlatform(c) == service.PlatformZhipu || getGroupPlatform(c) == service.PlatformDeepseek {
+					withLegacyNewAPIGroup(c, h.OpenAIGateway.ChatCompletions)
+					return
+				}
 				h.OpenAIGateway.ChatCompletions(c)
 				return
 			}
 			if service.IsCompatiblePlatform(getGroupPlatform(c)) {
-				withLegacyCNNewAPIGroup(c, h.CompatibleGateway.ChatCompletions)
+				withLegacyNewAPIGroup(c, h.CompatibleGateway.ChatCompletions)
 				return
 			}
 			h.Gateway.ChatCompletions(c)
@@ -410,7 +427,11 @@ func RegisterGatewayRoutes(
 
 	// OpenAI Responses API（不带v1前缀的别名）— auto-route based on group platform
 	responsesHandler := func(c *gin.Context) {
-		if isOpenAIResponsesCompatibleGatewayPlatform(c) {
+		if isOpenAIGatewayTextPlatform(getGroupPlatform(c)) {
+			if getGroupPlatform(c) == service.PlatformOpenAI {
+				withLegacyNewAPIGroup(c, h.OpenAIGateway.Responses)
+				return
+			}
 			h.OpenAIGateway.Responses(c)
 			return
 		}
@@ -452,7 +473,11 @@ func RegisterGatewayRoutes(
 	}
 	// OpenAI Chat Completions API（不带v1前缀的别名）— auto-route based on group platform
 	rootRoute(http.MethodPost, "/chat/completions", bodyLimit, func(c *gin.Context) {
-		if isOpenAIResponsesCompatibleGatewayPlatform(c) {
+		if isOpenAIGatewayTextPlatform(getGroupPlatform(c)) {
+			if getGroupPlatform(c) == service.PlatformOpenAI || getGroupPlatform(c) == service.PlatformZhipu || getGroupPlatform(c) == service.PlatformDeepseek {
+				withLegacyNewAPIGroup(c, h.OpenAIGateway.ChatCompletions)
+				return
+			}
 			h.OpenAIGateway.ChatCompletions(c)
 			return
 		}
