@@ -34,12 +34,6 @@ func legacyProviderDefaultBaseURL(platform, mode, protocol string) string {
 			return DefaultOpenCodeGoAnthropicBaseURL
 		}
 	case APIProtocolChatCompletions, APIProtocolResponses:
-		if platform == PlatformZhipu && protocol == APIProtocolResponses {
-			// 唯一的函数级差异：旧 switch 对智谱 Responses 也返回 CC 基址，profile
-			// 以"缺条目即不支持"建模后返回空串。所有运行时调用方都先经
-			// UsesNativeCNResponses / SupportsNativeCNResponses 守卫，智谱不会走到这里。
-			return ""
-		}
 		switch platform {
 		case PlatformKimi:
 			if coding {

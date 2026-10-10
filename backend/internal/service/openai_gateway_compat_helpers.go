@@ -59,6 +59,12 @@ func shouldForwardOpenAIResponsesViaRawChatCompletions(account *Account) bool {
 	if account == nil || account.Type != AccountTypeAPIKey {
 		return false
 	}
+	// Model-routed providers use their protocol rules as the source of truth.
+	// Probe metadata must not collapse a model that is explicitly routed to
+	// Responses or Anthropic back to the generic Chat Completions path.
+	if account.routesByModel() {
+		return false
+	}
 	if account.IsCNProvider() {
 		switch account.GetAPIProtocol() {
 		case APIProtocolChatCompletions:

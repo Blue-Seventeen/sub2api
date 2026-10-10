@@ -42,6 +42,8 @@ func TestAstraForwardPreservesMaxInPayloadAndUsage(t *testing.T) {
 				require.Equal(t, "max", gjson.GetBytes(upstream.lastBody, "reasoning.effort").String())
 				require.NotNil(t, result.ReasoningEffort)
 				require.Equal(t, "max", *result.ReasoningEffort)
+				require.NotNil(t, result.RequestedReasoningEffort)
+				require.Equal(t, "max", *result.RequestedReasoningEffort)
 				usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 				billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
 				usageService := newOpenAIRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
@@ -50,6 +52,7 @@ func TestAstraForwardPreservesMaxInPayloadAndUsage(t *testing.T) {
 				})
 				require.NoError(t, err)
 				require.NotNil(t, usageRepo.lastLog)
+				require.NotNil(t, usageRepo.lastLog.RequestedReasoningEffort)
 				require.Equal(t, "max", *usageRepo.lastLog.ReasoningEffort)
 				require.Equal(t, "max", *usageRepo.lastLog.RequestedReasoningEffort)
 			})

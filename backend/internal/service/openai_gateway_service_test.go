@@ -3754,8 +3754,7 @@ func TestHandleSSEToJSON_ResponseFailedReturnsProtocolError(t *testing.T) {
 	require.Contains(t, rec.Header().Get("Content-Type"), "application/json")
 }
 
-func TestOpenAIGatewayService_ShouldFailoverOpenAIChatCompletionsUpstreamResponse_InstructionsRequired(t *testing.T) {
-	svc := &OpenAIGatewayService{}
+func TestIsOpenAIInstructionsRequiredError(t *testing.T) {
 	tests := []struct {
 		name string
 		body []byte
@@ -3781,7 +3780,7 @@ func TestOpenAIGatewayService_ShouldFailoverOpenAIChatCompletionsUpstreamRespons
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			msg := strings.TrimSpace(extractUpstreamErrorMessage(tt.body))
-			require.Equal(t, tt.want, svc.shouldFailoverOpenAIChatCompletionsUpstreamResponse(http.StatusBadRequest, msg, tt.body))
+			require.Equal(t, tt.want, isOpenAIInstructionsRequiredError(http.StatusBadRequest, msg, tt.body))
 		})
 	}
 }

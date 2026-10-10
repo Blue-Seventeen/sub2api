@@ -227,7 +227,7 @@ func TestForwardOpenCodeGoResponsesUsesMappedModelProtocol(t *testing.T) {
 				if mappedModel == "" {
 					mappedModel = protocol.model
 				}
-				credentials[openCodeGoProtocolRulesKey] = []map[string]any{{"pattern": mappedModel, "protocol": protocol.protocol}}
+				credentials[protocolRulesCredentialKey] = []map[string]any{{"pattern": mappedModel, "protocol": protocol.protocol}}
 				account := &Account{ID: 41, Name: "opencode-go", Platform: PlatformOpenCodeGo, Type: AccountTypeAPIKey, Credentials: credentials}
 				body := inbound.body(protocol.model)
 				rec := httptest.NewRecorder()

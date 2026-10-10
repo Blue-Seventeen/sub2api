@@ -301,6 +301,25 @@ func (a *Account) IsOpenCodeGoPlan() bool {
 	return a.GetOpenCodeAccountMode() == AccountModeGo
 }
 
+// openCodeDefaultChatBaseURL returns the account-mode-specific default for
+// Chat Completions and Responses traffic. Explicit credentials continue to be
+// resolved by Account.GetOpenAIBaseURL; this helper is only the fallback.
+func (a *Account) openCodeDefaultChatBaseURL() string {
+	if a.IsOpenCodeZen() {
+		return DefaultOpenCodeZenBaseURL
+	}
+	return DefaultOpenCodeGoBaseURL
+}
+
+// openCodeDefaultAnthropicBaseURL returns the account-mode-specific default
+// for native Anthropic traffic.
+func (a *Account) openCodeDefaultAnthropicBaseURL() string {
+	if a.IsOpenCodeZen() {
+		return DefaultOpenCodeZenAnthropicBaseURL
+	}
+	return DefaultOpenCodeGoAnthropicBaseURL
+}
+
 func (a *Account) IsMultiProtocolAPIKey() bool {
 	return a != nil && IsMultiProtocolAPIKeyProvider(a.Platform)
 }
