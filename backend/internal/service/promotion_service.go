@@ -92,7 +92,7 @@ func (s *PromotionService) BindReferrer(ctx context.Context, userID int64, invit
 		return nil, ErrPromotionInviteCodeNotFound
 	}
 
-	current, err := s.repo.EnsurePromotionUser(ctx, userID)
+	_, err := s.repo.EnsurePromotionUser(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -103,26 +103,7 @@ func (s *PromotionService) BindReferrer(ctx context.Context, userID int64, invit
 	if referrer.UserID == userID {
 		return nil, ErrPromotionBindSelf
 	}
-	if current.ParentUserID != nil {
-		if *current.ParentUserID == referrer.UserID {
-			return current, nil
-		}
-		return nil, ErrPromotionAlreadyBound
-	}
-	totalCost, err := s.repo.GetUserRealActualCost(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	if totalCost > 0 {
-		return nil, ErrPromotionBindAfterConsumption
-	}
-	hasCycle, err := s.repo.HasPromotionDescendant(ctx, userID, referrer.UserID)
-	if err != nil {
-		return nil, err
-	}
-	if hasCycle {
-		return nil, ErrPromotionBindCycle
-	}
+	// Parent, consumption and cycle validation belong to the locked repository transaction.
 	return s.repo.SetPromotionParent(ctx, userID, &referrer.UserID, PromotionBindingSourceSelf, "", time.Now())
 }
 
@@ -333,13 +314,6 @@ func (s *PromotionService) BindAdminParent(ctx context.Context, userID, parentUs
 	}
 	if _, err := s.repo.EnsurePromotionUser(ctx, parentUserID); err != nil {
 		return nil, err
-	}
-	hasCycle, err := s.repo.HasPromotionDescendant(ctx, userID, parentUserID)
-	if err != nil {
-		return nil, err
-	}
-	if hasCycle {
-		return nil, ErrPromotionBindCycle
 	}
 	return s.repo.SetPromotionParent(ctx, userID, &parentUserID, PromotionBindingSourceAdmin, strings.TrimSpace(note), time.Now())
 }

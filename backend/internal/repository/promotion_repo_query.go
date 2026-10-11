@@ -394,7 +394,7 @@ func (r *promotionRepository) GetPromotionRelationChain(ctx context.Context, use
 	}
 	chain := &service.PromotionRelationChain{Current: current}
 	pu, err := r.GetPromotionUserByUserID(ctx, userID)
-	if err != nil || pu == nil || pu.ParentUserID == nil {
+	if err != nil || pu == nil || pu.ParentUserID == nil || *pu.ParentUserID == userID {
 		return chain, nil
 	}
 	parent, _ := r.loadPromotionRelationNode(ctx, *pu.ParentUserID)
@@ -406,7 +406,8 @@ func (r *promotionRepository) GetPromotionRelationChain(ctx context.Context, use
 	}
 	chain.Parent = parent
 	parentPU, err := r.GetPromotionUserByUserID(ctx, *pu.ParentUserID)
-	if err == nil && parentPU != nil && parentPU.ParentUserID != nil {
+	if err == nil && parentPU != nil && parentPU.ParentUserID != nil &&
+		*parentPU.ParentUserID != userID && *parentPU.ParentUserID != *pu.ParentUserID {
 		chain.Grandparent, _ = r.loadPromotionRelationNode(ctx, *parentPU.ParentUserID)
 		if chain.Grandparent != nil {
 			if level, levelErr := r.GetCurrentPromotionLevel(ctx, *parentPU.ParentUserID); levelErr == nil && level != nil {
@@ -423,7 +424,25 @@ func (r *promotionRepository) ListPromotionDownlines(ctx context.Context, rootUs
 }
 
 func (r *promotionRepository) RemovePromotionDirectDownline(ctx context.Context, parentUserID, downlineUserID int64, note string) error {
-	res, err := r.db.ExecContext(ctx, `
+	if parentUserID <= 0 || downlineUserID <= 0 {
+		return service.ErrPromotionInvalidBindRequest
+	}
+	tx, err := r.beginPromotionGraphTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	current, err := promotionUserInTx(ctx, tx, downlineUserID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return service.ErrPromotionDownlineNotDirect
+	}
+	if err != nil {
+		return err
+	}
+	if current == nil || current.ParentUserID == nil || *current.ParentUserID != parentUserID {
+		return service.ErrPromotionDownlineNotDirect
+	}
+	res, err := tx.ExecContext(ctx, `
 		UPDATE promotion_users
 		SET parent_user_id = NULL,
 		    binding_source = $3,
@@ -440,7 +459,7 @@ func (r *promotionRepository) RemovePromotionDirectDownline(ctx context.Context,
 	if affected == 0 {
 		return service.ErrPromotionDownlineNotDirect
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (r *promotionRepository) ListPromotionCommissions(ctx context.Context, filter service.PromotionCommissionAdminFilter) ([]service.PromotionCommissionListItem, int64, error) {
@@ -509,14 +528,14 @@ func (r *promotionRepository) listPromotionTeamByCommission(ctx context.Context,
 	var total int64
 	if err := r.db.QueryRowContext(ctx, `
 		WITH RECURSIVE tree AS (
-			SELECT pu.user_id, 1 AS depth
+			SELECT pu.user_id, 1 AS depth, ARRAY[$1::bigint, pu.user_id] AS visited
 			FROM promotion_users pu
-			WHERE pu.parent_user_id = $1
+			WHERE pu.parent_user_id = $1 AND pu.user_id <> $1
 			UNION ALL
-			SELECT pu.user_id, tree.depth + 1
+			SELECT pu.user_id, tree.depth + 1, tree.visited || pu.user_id
 			FROM promotion_users pu
 			JOIN tree ON pu.parent_user_id = tree.user_id
-			WHERE tree.depth < 32
+			WHERE tree.depth < 32 AND NOT pu.user_id = ANY(tree.visited)
 		)
 		SELECT COUNT(*)
 		FROM tree
@@ -533,14 +552,14 @@ func (r *promotionRepository) listPromotionTeamByCommission(ctx context.Context,
 	listArgs = append(listArgs, filter.PageSize, (filter.Page-1)*filter.PageSize)
 	rows, err := r.db.QueryContext(ctx, `
 		WITH RECURSIVE tree AS (
-			SELECT pu.user_id, 1 AS depth
+			SELECT pu.user_id, 1 AS depth, ARRAY[$1::bigint, pu.user_id] AS visited
 			FROM promotion_users pu
-			WHERE pu.parent_user_id = $1
+			WHERE pu.parent_user_id = $1 AND pu.user_id <> $1
 			UNION ALL
-			SELECT pu.user_id, tree.depth + 1
+			SELECT pu.user_id, tree.depth + 1, tree.visited || pu.user_id
 			FROM promotion_users pu
 			JOIN tree ON pu.parent_user_id = tree.user_id
-			WHERE tree.depth < 32
+			WHERE tree.depth < 32 AND NOT pu.user_id = ANY(tree.visited)
 		),
 		today_contribution_totals AS (
 			SELECT source_user_id AS user_id, COALESCE(SUM(amount), 0) AS total_amount
@@ -627,14 +646,14 @@ func (r *promotionRepository) listPromotionTreeByUsage(ctx context.Context, root
 	var total int64
 	if err := r.db.QueryRowContext(ctx, `
 		WITH RECURSIVE tree AS (
-			SELECT pu.user_id, 1 AS depth
+			SELECT pu.user_id, 1 AS depth, ARRAY[$1::bigint, pu.user_id] AS visited
 			FROM promotion_users pu
-			WHERE pu.parent_user_id = $1
+			WHERE pu.parent_user_id = $1 AND pu.user_id <> $1
 			UNION ALL
-			SELECT pu.user_id, tree.depth + 1
+			SELECT pu.user_id, tree.depth + 1, tree.visited || pu.user_id
 			FROM promotion_users pu
 			JOIN tree ON pu.parent_user_id = tree.user_id
-			WHERE tree.depth < 32
+			WHERE tree.depth < 32 AND NOT pu.user_id = ANY(tree.visited)
 		)
 		SELECT COUNT(*)
 		FROM tree
@@ -650,14 +669,14 @@ func (r *promotionRepository) listPromotionTreeByUsage(ctx context.Context, root
 	listArgs = append(listArgs, filter.PageSize, (filter.Page-1)*filter.PageSize)
 	rows, err := r.db.QueryContext(ctx, `
 		WITH RECURSIVE tree AS (
-			SELECT pu.user_id, 1 AS depth
+			SELECT pu.user_id, 1 AS depth, ARRAY[$1::bigint, pu.user_id] AS visited
 			FROM promotion_users pu
-			WHERE pu.parent_user_id = $1
+			WHERE pu.parent_user_id = $1 AND pu.user_id <> $1
 			UNION ALL
-			SELECT pu.user_id, tree.depth + 1
+			SELECT pu.user_id, tree.depth + 1, tree.visited || pu.user_id
 			FROM promotion_users pu
 			JOIN tree ON pu.parent_user_id = tree.user_id
-			WHERE tree.depth < 32
+			WHERE tree.depth < 32 AND NOT pu.user_id = ANY(tree.visited)
 		),
 		today_usage AS (
 			SELECT user_id, COALESCE(SUM(real_actual_cost), 0) AS total_cost
@@ -710,7 +729,7 @@ func (r *promotionRepository) countPromotionTree(ctx context.Context, userID int
 			SELECT pu.user_id
 			FROM promotion_users pu
 			WHERE pu.parent_user_id = $1
-			UNION ALL
+			UNION
 			SELECT pu.user_id
 			FROM promotion_users pu
 			JOIN tree ON pu.parent_user_id = tree.user_id
@@ -719,6 +738,7 @@ func (r *promotionRepository) countPromotionTree(ctx context.Context, userID int
 	if activatedOnly {
 		query += ` JOIN promotion_activations pa ON pa.user_id = tree.user_id`
 	}
+	query += ` WHERE tree.user_id <> $1`
 	var count int
 	if err := r.db.QueryRowContext(ctx, query, userID).Scan(&count); err != nil {
 		return 0, err
@@ -740,13 +760,14 @@ func (r *promotionRepository) countPromotionDescendantsByUserIDs(ctx context.Con
 			SELECT r.root_user_id, pu.user_id
 			FROM roots r
 			JOIN promotion_users pu ON pu.parent_user_id = r.root_user_id
-			UNION ALL
+			UNION
 			SELECT tree.root_user_id, pu.user_id
 			FROM promotion_users pu
 			JOIN tree ON pu.parent_user_id = tree.user_id
 		)
 		SELECT root_user_id, COUNT(*) AS descendant_count
 		FROM tree
+		WHERE user_id <> root_user_id
 		GROUP BY root_user_id
 	`, pq.Array(userIDs))
 	if err != nil {

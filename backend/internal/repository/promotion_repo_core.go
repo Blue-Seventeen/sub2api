@@ -70,11 +70,54 @@ func (r *promotionRepository) GetPromotionUserByInviteCode(ctx context.Context, 
 }
 
 func (r *promotionRepository) SetPromotionParent(ctx context.Context, userID int64, parentUserID *int64, source, note string, boundAt time.Time) (*service.PromotionUser, error) {
+	if userID <= 0 || (parentUserID != nil && *parentUserID <= 0) ||
+		(source != service.PromotionBindingSourceSelf && source != service.PromotionBindingSourceAdmin) ||
+		(source == service.PromotionBindingSourceSelf && parentUserID == nil) {
+		return nil, service.ErrPromotionInvalidBindRequest
+	}
+	if parentUserID != nil && *parentUserID == userID {
+		return nil, service.ErrPromotionBindSelf
+	}
+	tx, err := r.beginPromotionGraphTx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	current, err := promotionUserInTx(ctx, tx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if current == nil {
+		return nil, service.ErrPromotionInvalidBindRequest
+	}
+	if source == service.PromotionBindingSourceSelf {
+		if current.ParentUserID != nil {
+			if *current.ParentUserID != *parentUserID {
+				return nil, service.ErrPromotionAlreadyBound
+			}
+			if err := tx.Commit(); err != nil {
+				return nil, err
+			}
+			return current, nil
+		}
+		var totalCost float64
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(real_actual_cost), 0) FROM usage_logs WHERE user_id = $1`, userID).Scan(&totalCost); err != nil {
+			return nil, err
+		}
+		if totalCost > 0 {
+			return nil, service.ErrPromotionBindAfterConsumption
+		}
+	}
+	if parentUserID != nil {
+		if err := validatePromotionAncestorChain(ctx, tx, userID, *parentUserID); err != nil {
+			return nil, err
+		}
+	}
 	var parent any
 	if parentUserID != nil {
 		parent = *parentUserID
 	}
-	if _, err := r.db.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, `
 		UPDATE promotion_users
 		SET parent_user_id = $2,
 		    binding_source = $3,
@@ -85,7 +128,14 @@ func (r *promotionRepository) SetPromotionParent(ctx context.Context, userID int
 	`, userID, parent, source, boundAt.UTC(), nullableTrimmedString(note)); err != nil {
 		return nil, err
 	}
-	return r.GetPromotionUserByUserID(ctx, userID)
+	updated, err := promotionUserInTx(ctx, tx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return updated, nil
 }
 
 func (r *promotionRepository) HasPromotionDescendant(ctx context.Context, ancestorUserID, descendantUserID int64) (bool, error) {
@@ -94,12 +144,12 @@ func (r *promotionRepository) HasPromotionDescendant(ctx context.Context, ancest
 			SELECT user_id
 			FROM promotion_users
 			WHERE parent_user_id = $1
-			UNION ALL
+			UNION
 			SELECT pu.user_id
 			FROM promotion_users pu
 			JOIN tree ON pu.parent_user_id = tree.user_id
 		)
-		SELECT EXISTS(SELECT 1 FROM tree WHERE user_id = $2)
+		SELECT EXISTS(SELECT 1 FROM tree WHERE user_id = $2 AND user_id <> $1)
 	`, ancestorUserID, descendantUserID)
 	var exists bool
 	if err := row.Scan(&exists); err != nil {
