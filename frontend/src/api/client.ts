@@ -14,6 +14,7 @@ import {
 } from './adminUIRequest'
 import { refreshAuthTokens } from './tokenRefresh'
 import { getAPIBaseURL } from './url'
+import { getAuthSessionID, assertAuthSession, authSessionChanged, clearAuthSession, rememberResponseSession, type AuthSessionID } from './authSession'
 export { buildApiUrl, buildGatewayUrl } from './url'
 
 // ==================== Axios Instance Configuration ====================
@@ -28,6 +29,7 @@ export const apiClient: AxiosInstance = axios.create({
 })
 
 // ==================== Request Interceptor ====================
+type SessionRequest = InternalAxiosRequestConfig & { _retry?: boolean; _authSessionID?: AuthSessionID }
 
 // Get user's timezone
 const getUserTimezone = (): string => {
@@ -38,8 +40,15 @@ const getUserTimezone = (): string => {
   }
 }
 
+function getStoredUserIdentity(): unknown {
+  try { return JSON.parse(localStorage.getItem('auth_user') || 'null')?.id ?? null } catch { return null }
+}
+
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
+    const request = config as SessionRequest
+    if (request._authSessionID !== undefined) assertAuthSession(request._authSessionID)
+    else request._authSessionID = getAuthSessionID()
     // Attach token from localStorage
     const token = localStorage.getItem('auth_token')
     if (token && config.headers) {
@@ -98,6 +107,8 @@ apiClient.interceptors.response.use(
         })
       }
     }
+    const request = response.config as SessionRequest
+    rememberResponseSession(response.data, request?._authSessionID !== undefined ? request._authSessionID : getAuthSessionID())
     return response
   },
   async (error: AxiosError<ApiResponse<unknown>>) => {
@@ -106,8 +117,11 @@ apiClient.interceptors.response.use(
     if (error.code === 'ERR_CANCELED' || axios.isCancel(error)) {
       return Promise.reject(error)
     }
+    if (error.code === 'AUTH_SESSION_CHANGED') return Promise.reject(error)
 
-    const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean }
+    const originalRequest = error.config as SessionRequest
+    const session = originalRequest?._authSessionID !== undefined
+      ? originalRequest._authSessionID : getAuthSessionID()
 
     // Handle common errors
     if (error.response) {
@@ -162,14 +176,18 @@ apiClient.interceptors.response.use(
 
       // 401: Try to refresh the token if we have a refresh token
       // This handles TOKEN_EXPIRED, INVALID_TOKEN, TOKEN_REVOKED, etc.
+      if (status === 401) {
+        try { assertAuthSession(session) } catch { return Promise.reject(authSessionChanged()) }
+      }
       if (status === 401 && !originalRequest._retry) {
         const refreshToken = localStorage.getItem('refresh_token')
         const isAuthEndpoint =
-          url.includes('/auth/login') || url.includes('/auth/register') || url.includes('/auth/refresh')
+          url.includes('/auth/login') || url.includes('/auth/register') || url.includes('/auth/refresh') || url.includes('/auth/passkey/login')
 
         // If we have a refresh token and this is not an auth endpoint, try to refresh
         if (refreshToken && !isAuthEndpoint) {
-          const refreshSessionUser = localStorage.getItem('auth_user')
+          // Compatibility with a peer running an older client without stable session IDs.
+          const refreshSessionUser = getStoredUserIdentity()
           originalRequest._retry = true
 
           try {
@@ -180,6 +198,7 @@ apiClient.interceptors.response.use(
                 ? authHeader.slice('Bearer '.length)
                 : null
             const tokens = await refreshAuthTokens({ failedAccessToken })
+            assertAuthSession(session)
 
             // Retry the original request with the refreshed token
             if (originalRequest.headers) {
@@ -189,9 +208,9 @@ apiClient.interceptors.response.use(
           } catch (refreshError) {
             // A stale request must never destroy a session that was logged out or replaced while
             // its refresh was in flight (for example, when another tab signs in as another user).
-            const sessionChanged =
+            const sessionChanged = getAuthSessionID() !== session ||
               localStorage.getItem('refresh_token') !== refreshToken ||
-              localStorage.getItem('auth_user') !== refreshSessionUser
+              getStoredUserIdentity() !== refreshSessionUser
             if (sessionChanged) {
               return Promise.reject({
                 status: 401,
@@ -212,10 +231,8 @@ apiClient.interceptors.response.use(
             }
 
             // Clear tokens and redirect to login
-            localStorage.removeItem('auth_token')
-            localStorage.removeItem('refresh_token')
-            localStorage.removeItem('auth_user')
-            localStorage.removeItem('token_expires_at')
+            assertAuthSession(session)
+            clearAuthSession()
             sessionStorage.setItem('auth_expired', '1')
 
             if (!window.location.pathname.includes('/login')) {
@@ -225,6 +242,8 @@ apiClient.interceptors.response.use(
             return Promise.reject({
               status: 401,
               code: 'TOKEN_REFRESH_FAILED',
+              invalidatedSession: session,
+              invalidatedGeneration: getAuthSessionID(),
               message: 'Session expired. Please log in again.'
             })
           }
@@ -241,10 +260,8 @@ apiClient.interceptors.response.use(
               ? authHeader.length > 0
               : !!authHeader
 
-        localStorage.removeItem('auth_token')
-        localStorage.removeItem('refresh_token')
-        localStorage.removeItem('auth_user')
-        localStorage.removeItem('token_expires_at')
+        assertAuthSession(session)
+        clearAuthSession()
         if ((hasToken || sentAuth) && !isAuthEndpoint) {
           sessionStorage.setItem('auth_expired', '1')
         }
@@ -257,6 +274,7 @@ apiClient.interceptors.response.use(
       // Return structured error
       return Promise.reject({
         status,
+        ...(status === 401 ? { invalidatedSession: session, invalidatedGeneration: getAuthSessionID() } : {}),
         code: apiData.code,
         reason: apiData.reason,
         error: apiData.error,

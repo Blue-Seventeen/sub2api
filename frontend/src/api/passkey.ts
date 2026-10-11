@@ -1,4 +1,5 @@
 import { apiClient } from './client'
+import { getAuthSessionID, assertAuthSession } from './authSession'
 import type { ActionCaptchaRequestProof, AuthResponse } from '@/types'
 
 export interface PasskeyCredentialSummary {
@@ -105,13 +106,16 @@ function serializeAssertionCredential(credential: PublicKeyCredential): Record<s
 }
 
 async function login(proof?: ActionCaptchaRequestProof): Promise<AuthResponse> {
+  const session = getAuthSessionID()
   requirePasskeySupport()
   const { data: begin } = proof
     ? await apiClient.post<CeremonyOptionsResponse>('/auth/passkey/login/begin', proof)
     : await apiClient.post<CeremonyOptionsResponse>('/auth/passkey/login/begin')
+  assertAuthSession(session)
   const credential = await navigator.credentials.get({
     publicKey: requestOptionsFromJSON(begin.options.publicKey)
   })
+  assertAuthSession(session)
   if (!(credential instanceof PublicKeyCredential)) {
     throw new Error('Passkey sign-in was cancelled')
   }
@@ -119,6 +123,7 @@ async function login(proof?: ActionCaptchaRequestProof): Promise<AuthResponse> {
     session_token: begin.session_token,
     credential: serializeAssertionCredential(credential)
   })
+  assertAuthSession(session)
   return data
 }
 

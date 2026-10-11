@@ -4,6 +4,7 @@
  */
 
 import { apiClient } from './client'
+import { getAuthSessionID, assertAuthSession, commitAuthResponse, clearAuthSession, persistOAuthSession } from './authSession'
 import { refreshAuthTokens, type RefreshTokenResponse } from './tokenRefresh'
 export type { RefreshTokenResponse } from './tokenRefresh'
 import type {
@@ -117,10 +118,7 @@ export function getTokenExpiresAt(): number | null {
  * Clear authentication token from localStorage
  */
 export function clearAuthToken(): void {
-  localStorage.removeItem('auth_token')
-  localStorage.removeItem('refresh_token')
-  localStorage.removeItem('auth_user')
-  localStorage.removeItem('token_expires_at')
+  clearAuthSession()
 }
 
 /**
@@ -129,19 +127,11 @@ export function clearAuthToken(): void {
  * @returns Authentication response with token and user data, or 2FA required response
  */
 export async function login(credentials: LoginRequest): Promise<LoginResponse> {
+  const session = getAuthSessionID()
   const { data } = await apiClient.post<LoginResponse>('/auth/login', credentials)
+  assertAuthSession(session)
 
-  // Only store token if 2FA is not required
-  if (!isTotp2FARequired(data)) {
-    setAuthToken(data.access_token)
-    if (data.refresh_token) {
-      setRefreshToken(data.refresh_token)
-    }
-    if (data.expires_in) {
-      setTokenExpiresAt(data.expires_in)
-    }
-    localStorage.setItem('auth_user', JSON.stringify(data.user))
-  }
+  if (!isTotp2FARequired(data)) commitAuthResponse(data, session, true)
 
   return data
 }
@@ -152,17 +142,10 @@ export async function login(credentials: LoginRequest): Promise<LoginResponse> {
  * @returns Authentication response with token and user data
  */
 export async function login2FA(request: TotpLogin2FARequest): Promise<AuthResponse> {
+  const session = getAuthSessionID()
   const { data } = await apiClient.post<AuthResponse>('/auth/login/2fa', request)
 
-  // Store token and user data
-  setAuthToken(data.access_token)
-  if (data.refresh_token) {
-    setRefreshToken(data.refresh_token)
-  }
-  if (data.expires_in) {
-    setTokenExpiresAt(data.expires_in)
-  }
-  localStorage.setItem('auth_user', JSON.stringify(data.user))
+  commitAuthResponse(data, session, true)
 
   return data
 }
@@ -173,17 +156,10 @@ export async function login2FA(request: TotpLogin2FARequest): Promise<AuthRespon
  * @returns Authentication response with token and user data
  */
 export async function register(userData: RegisterRequest): Promise<AuthResponse> {
+  const session = getAuthSessionID()
   const { data } = await apiClient.post<AuthResponse>('/auth/register', userData)
 
-  // Store token and user data
-  setAuthToken(data.access_token)
-  if (data.refresh_token) {
-    setRefreshToken(data.refresh_token)
-  }
-  if (data.expires_in) {
-    setTokenExpiresAt(data.expires_in)
-  }
-  localStorage.setItem('auth_user', JSON.stringify(data.user))
+  commitAuthResponse(data, session, true)
 
   return data
 }
@@ -203,17 +179,15 @@ export async function getCurrentUser() {
  */
 export async function logout(): Promise<void> {
   const refreshToken = getRefreshToken()
-
-  // Try to revoke the refresh token on the server
+  clearAuthToken()
+  // Revoke the captured old token. Never perform local cleanup after this await.
   if (refreshToken) {
     try {
       await apiClient.post('/auth/logout', { refresh_token: refreshToken })
     } catch {
-      // Ignore errors - we still want to clear local state
+      // Local logout has already completed, including on network failure.
     }
   }
-
-  clearAuthToken()
 }
 
 /**
@@ -306,12 +280,12 @@ export function hasPendingOAuthSuggestedProfile(
 }
 
 export function persistOAuthTokenContext(tokens: Partial<OAuthTokenResponse>): void {
-  if (tokens.refresh_token) {
-    setRefreshToken(tokens.refresh_token)
+  if (tokens.access_token) {
+    persistOAuthSession(tokens as OAuthTokenResponse)
+    return
   }
-  if (tokens.expires_in) {
-    setTokenExpiresAt(tokens.expires_in)
-  }
+  if (tokens.refresh_token) setRefreshToken(tokens.refresh_token)
+  if (tokens.expires_in) setTokenExpiresAt(tokens.expires_in)
 }
 
 export async function prepareOAuthBindAccessTokenCookie(): Promise<void> {

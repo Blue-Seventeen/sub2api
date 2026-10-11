@@ -1,6 +1,7 @@
 import axios from 'axios'
 import type { ApiResponse } from '@/types'
 import { getAPIBaseURL } from './url'
+import { getAuthSessionID, assertAuthSession, type AuthSessionID } from './authSession'
 
 const AUTH_TOKEN_KEY = 'auth_token'
 const AUTH_USER_KEY = 'auth_user'
@@ -25,13 +26,14 @@ export interface RefreshAuthTokensOptions {
 }
 
 interface AuthSnapshot {
+  session: AuthSessionID
   accessToken: string | null
   refreshToken: string
   expiresAt: number
   userID: number | null
 }
 
-let inFlightRefresh: Promise<RefreshTokenResponse> | null = null
+const inFlightRefresh = new Map<AuthSessionID, Promise<RefreshTokenResponse>>()
 
 function getStoredUserID(): number | null {
   const rawUser = localStorage.getItem(AUTH_USER_KEY)
@@ -54,6 +56,7 @@ function readAuthSnapshot(): AuthSnapshot {
   }
 
   return {
+    session: getAuthSessionID(),
     accessToken: localStorage.getItem(AUTH_TOKEN_KEY),
     refreshToken,
     expiresAt: Number(localStorage.getItem(TOKEN_EXPIRES_AT_KEY)),
@@ -62,6 +65,7 @@ function readAuthSnapshot(): AuthSnapshot {
 }
 
 function readStoredTokenPair(snapshot: AuthSnapshot): RefreshTokenResponse | null {
+  assertAuthSession(snapshot.session)
   const accessToken = localStorage.getItem(AUTH_TOKEN_KEY)
   const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY)
   const expiresAt = Number(localStorage.getItem(TOKEN_EXPIRES_AT_KEY))
@@ -152,6 +156,8 @@ async function requestTokenPair(
       throw new Error(payload.message || 'Token refresh failed')
     }
 
+    assertAuthSession(snapshot.session)
+
     if (
       localStorage.getItem(REFRESH_TOKEN_KEY) !== snapshot.refreshToken ||
       getStoredUserID() !== snapshot.userID
@@ -166,6 +172,7 @@ async function requestTokenPair(
     persistTokenPair(payload.data)
     return payload.data
   } catch (error) {
+    assertAuthSession(snapshot.session)
     // A peer tab may have rotated the one-time refresh token while this request was in flight.
     // A 4xx response can arrive quickly while the winning peer's response is still in flight, so
     // wait through the shared request deadline before treating the session as expired. Transient
@@ -187,8 +194,7 @@ async function requestTokenPair(
   }
 }
 
-async function runRefresh(options: RefreshAuthTokensOptions): Promise<RefreshTokenResponse> {
-  const snapshot = readAuthSnapshot()
+async function runRefresh(options: RefreshAuthTokensOptions, snapshot: AuthSnapshot): Promise<RefreshTokenResponse> {
   const refresh = async (mayHaveUncoordinatedPeer = false): Promise<RefreshTokenResponse> => {
     const peerResult = readPeerRefreshResult(snapshot, options.failedAccessToken)
     if (peerResult) {
@@ -213,15 +219,15 @@ async function runRefresh(options: RefreshAuthTokensOptions): Promise<RefreshTok
 export function refreshAuthTokens(
   options: RefreshAuthTokensOptions = {}
 ): Promise<RefreshTokenResponse> {
-  if (inFlightRefresh) {
-    return inFlightRefresh
-  }
-
-  const pending = runRefresh(options)
-  inFlightRefresh = pending
+  let snapshot: AuthSnapshot
+  try { snapshot = readAuthSnapshot() } catch (error) { return Promise.reject(error) }
+  const existing = inFlightRefresh.get(snapshot.session)
+  if (existing) return existing
+  const pending = runRefresh(options, snapshot)
+  inFlightRefresh.set(snapshot.session, pending)
   const clearPending = (): void => {
-    if (inFlightRefresh === pending) {
-      inFlightRefresh = null
+    if (inFlightRefresh.get(snapshot.session) === pending) {
+      inFlightRefresh.delete(snapshot.session)
     }
   }
   void pending.then(clearPending, clearPending)

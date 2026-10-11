@@ -324,6 +324,7 @@ import PendingOAuthCreateAccountForm, {
   type PendingOAuthCreateAccountPayload
 } from '@/components/auth/PendingOAuthCreateAccountForm.vue'
 import { apiClient } from '@/api/client'
+import { getAuthSessionID, assertAuthSession } from '@/api/authSession'
 import { useAuthStore, useAppStore } from '@/stores'
 import {
   completeWeChatOAuthRegistration,
@@ -983,10 +984,18 @@ async function handleSubmitTotpChallenge() {
 }
 
 onMounted(async () => {
+  const initialSession = getAuthSessionID()
   try {
     await ensurePublicSettingsLoaded()
   } catch {
     // Binding recovery requires confirmed capability flags. Use the strict guard below.
+  }
+  try {
+    assertAuthSession(initialSession)
+  } catch (e: unknown) {
+    errorMessage.value = getRequestErrorMessage(e, t('auth.loginFailed'))
+    isProcessing.value = false
+    return
   }
 
   if (typeof route.query.email === 'string') {
