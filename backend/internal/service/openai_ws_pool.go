@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"math"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -84,6 +86,7 @@ type openAIWSAcquireRequest struct {
 }
 
 type openAIWSHandshakeCompatibilityKey struct {
+	proxyRoute          [sha256.Size]byte
 	betaFeatures        string
 	codexInstallationID string
 	sessionIDHyphen     string
@@ -1139,13 +1142,18 @@ func (p *openAIWSConnPool) acquire(ctx context.Context, req openAIWSAcquireReque
 	if stringsTrim(req.WSURL) == "" {
 		return nil, errors.New("ws url is empty")
 	}
+	proxyURL, err := normalizeOpenAIWSProxyURL(req.ProxyURL)
+	if err != nil {
+		return nil, err
+	}
+	req.ProxyURL = proxyURL
 	if queueWait == nil {
 		queueWait = &openAIWSAcquireQueueWait{}
 	}
 
 retryAcquire:
 	accountID := req.Account.ID
-	compatibility := normalizeOpenAIWSHandshakeCompatibility(req.Account, req.Headers)
+	compatibility := normalizeOpenAIWSAcquireCompatibility(req)
 	routingAffinity := normalizeOpenAIWSRoutingAffinity(req.Headers)
 	effectiveMaxConns := p.effectiveMaxConnsByAccount(req.Account)
 	if effectiveMaxConns <= 0 {
@@ -2118,8 +2126,12 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 	if p == nil || p.clientDialer == nil {
 		return nil, errors.New("openai ws client dialer is nil")
 	}
+	proxyURL, err := normalizeOpenAIWSProxyURL(req.ProxyURL)
+	if err != nil {
+		return nil, err
+	}
+	req.ProxyURL = proxyURL
 	headers := cloneHeader(req.Headers)
-	var err error
 	if req.HeadersFactory != nil {
 		headers, err = req.HeadersFactory(ctx, headers)
 		if err != nil {
@@ -2152,7 +2164,7 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 	accountID := req.Account.ID
 	evict := func() { p.evictConn(accountID, id) }
 	pooledConn.onPeerClosed.Store(&evict)
-	pooledConn.handshakeCompatibility = normalizeOpenAIWSHandshakeCompatibility(req.Account, req.Headers)
+	pooledConn.handshakeCompatibility = normalizeOpenAIWSAcquireCompatibility(req)
 	pooledConn.routingAffinity = normalizeOpenAIWSRoutingAffinity(req.Headers)
 	return pooledConn, nil
 }
@@ -2359,6 +2371,25 @@ func normalizeOpenAIWSBetaFeatures(headers http.Header) string {
 	}
 	sort.Strings(normalized)
 	return strings.Join(normalized, ",")
+}
+
+func normalizeOpenAIWSProxyURL(raw string) (string, error) {
+	proxyURL, _, err := proxyurl.Parse(raw)
+	if err != nil {
+		// Do not include the URL or parser error: either may contain node auth.
+		return "", &openAIWSDialError{Err: errors.New("invalid websocket proxy configuration")}
+	}
+	return proxyURL, nil
+}
+
+func normalizeOpenAIWSAcquireCompatibility(req openAIWSAcquireRequest) openAIWSHandshakeCompatibilityKey {
+	key := normalizeOpenAIWSHandshakeCompatibility(req.Account, req.Headers)
+	if route := stringsTrim(req.ProxyURL); route != "" {
+		// Node credentials identify routes that share one local listener.
+		// Store their digest so diagnostic formatting cannot expose the auth.
+		key.proxyRoute = sha256.Sum256([]byte(route))
+	}
+	return key
 }
 
 func normalizeOpenAIWSHandshakeCompatibility(account *Account, headers http.Header) openAIWSHandshakeCompatibilityKey {

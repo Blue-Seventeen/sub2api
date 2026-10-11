@@ -25,7 +25,10 @@ func (s *AccountTestService) doOpenAIAccountTestUpstream(
 	proxyURL string,
 	account *Account,
 	useTLSFallback bool,
-) (*http.Response, error) {
+) (response *http.Response, err error) {
+	defer func() {
+		ClearAutoSelectedProxyStickyOnTransportError(request.Context(), account, err)
+	}()
 	if s.pluginManager != nil {
 		response, handled, err := s.pluginManager.RoundTripOpenAIOAuth(request.Context(), request, proxyURL, account)
 		if handled {

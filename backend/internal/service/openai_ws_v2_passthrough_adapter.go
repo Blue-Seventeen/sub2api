@@ -308,6 +308,15 @@ func (l *openAIWSPassthroughTurnLifecycle) cancelResponseCreate() {
 	l.mu.Unlock()
 }
 
+func (l *openAIWSPassthroughTurnLifecycle) hasActiveTurn() bool {
+	if l == nil {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.inFlight
+}
+
 func (l *openAIWSPassthroughTurnLifecycle) beginTerminalWrite() {
 	if l != nil {
 		l.mu.Lock()
@@ -819,9 +828,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			responseBody = handshakeErr.Body
 		}
 		dialErr := &openAIWSDialError{StatusCode: statusCode, ResponseHeaders: cloneHeader(handshakeHeaders), ResponseBody: responseBody, Err: err}
-		if statusCode == 0 {
-			ClearAutoSelectedProxyStickyOnTransportError(ctx, account, err)
-		}
 		if s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidWSDialError(dialErr) && !agentTaskRecoveryTried {
 			agentTaskRecoveryTried = true
 			if recoveryErr := s.recoverAgentIdentityTask(ctx, account, account.GetCredential("task_id")); recoveryErr != nil {
@@ -891,6 +897,21 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	completedTurns := atomic.Int32{}
 	turnLifecycle := newOpenAIWSPassthroughTurnLifecycle(true)
 	var acceptedTurnStartedAt atomic.Pointer[time.Time]
+	var applicationErrorSeen atomic.Bool
+	clearActiveTransportError := func(err error) {
+		if err == nil || !turnLifecycle.hasActiveTurn() || applicationErrorSeen.Load() {
+			return
+		}
+		var firstOutputTimeoutErr *openAIWSPassthroughFirstOutputTimeoutError
+		if errors.As(err, &firstOutputTimeoutErr) {
+			return
+		}
+		var activeTurnTimeoutErr *openAIWSPassthroughActiveTurnTimeoutError
+		if errors.As(err, &activeTurnTimeoutErr) {
+			return
+		}
+		ClearAutoSelectedProxyStickyOnTransportError(ctx, account, err)
+	}
 	clientFrameConn := &openAIWSClientFrameConn{
 		conn:                 clientConn,
 		controlCtx:           ctx,
@@ -1026,6 +1047,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			//     service_tier 时按 default 处理，billing 应如实反映。
 			if policyErr == nil && blocked == nil && isResponseCreate {
 				usageMeta.updateFromResponseCreate(out, model, requestModelForThisFrame)
+				applicationErrorSeen.Store(false)
 				acceptedTurnStartedAt.Store(&responseCreateAt)
 				acceptedTurn = true
 			}
@@ -1050,6 +1072,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	firstWriteErr := relayUpstreamFrameConn.WriteFrame(firstWriteCtx, coderws.MessageText, firstClientMessage)
 	cancelFirstWrite()
 	if firstWriteErr != nil {
+		clearActiveTransportError(firstWriteErr)
 		return wrapOpenAIWSIngressTurnError(
 			"write_upstream",
 			fmt.Errorf("write first upstream websocket request: %w", firstWriteErr),
@@ -1068,6 +1091,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				return msgType, payload, nil
 			}
 			if writeErr := upstreamFrameConn.WriteFrame(readCtx, msgType, payload); writeErr != nil {
+				clearActiveTransportError(writeErr)
 				return msgType, payload, writeErr
 			}
 		}
@@ -1184,6 +1208,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 				eventType, _, _ := parseOpenAIWSEventEnvelope(payload)
 				if eventType == "error" || eventType == "response.failed" {
+					applicationErrorSeen.Store(true)
+				}
+				if eventType == "error" || eventType == "response.failed" {
 					usage := &OpenAIUsage{}
 					parseOpenAIWSResponseUsageFromCompletedEvent(payload, usage)
 					markOpenAICyberPolicyEvent(c, payload, http.StatusOK, usage)
@@ -1240,6 +1267,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		_ = clientConn.Close(status, normalizeOpenAIWSClientCloseReason(reason))
 		_ = clientConn.CloseNow()
 		return NewOpenAIWSClientCloseError(status, reason, cause)
+	}
+	if relayExit != nil && (relayExit.Stage == "read_upstream" || relayExit.Stage == "write_upstream") && !relayExit.Graceful {
+		clearActiveTransportError(relayExit.Err)
 	}
 
 	resultRequestModel, resultUpstreamModel := usageMeta.turnModels(relayResult.RequestModel)

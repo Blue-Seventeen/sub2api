@@ -80,6 +80,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 
 	if err := lease.WriteJSONWithContextTimeout(ctx, prewarmPayload, s.openAIWSWriteTimeout()); err != nil {
 		lease.MarkBroken()
+		ClearAutoSelectedProxyStickyOnTransportError(ctx, account, err)
 		logOpenAIWSModeInfo(
 			"prewarm_write_fail account_id=%d conn_id=%s cause=%s",
 			account.ID,
@@ -97,6 +98,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 		message, readErr := lease.ReadMessageWithContextTimeout(ctx, s.openAIWSReadTimeout())
 		if readErr != nil {
 			lease.MarkBroken()
+			ClearAutoSelectedProxyStickyOnTransportError(ctx, account, readErr)
 			closeStatus, closeReason := summarizeOpenAIWSReadCloseError(readErr)
 			logOpenAIWSModeInfo(
 				"prewarm_read_fail account_id=%d conn_id=%s close_status=%s close_reason=%s cause=%s events=%d",
@@ -377,7 +379,14 @@ func (s *OpenAIGatewayService) handleOpenAIWSFailureAccountSideEffects(ctx conte
 
 func (s *OpenAIGatewayService) handleOpenAIWSDialTransientFailure(ctx context.Context, account *Account, canonicalModel string, err error) {
 	var dialErr *openAIWSDialError
-	if !errors.As(err, &dialErr) || dialErr == nil || !shouldCooldownOpenAITransientUpstreamError(dialErr.StatusCode, dialErr.ResponseBody) {
+	if !errors.As(err, &dialErr) || dialErr == nil {
+		return
+	}
+	if dialErr.StatusCode == 0 {
+		ClearAutoSelectedProxyStickyOnTransportError(ctx, account, err)
+		return
+	}
+	if !shouldCooldownOpenAITransientUpstreamError(dialErr.StatusCode, dialErr.ResponseBody) {
 		return
 	}
 	s.handleOpenAIAccountUpstreamError(ctx, account, dialErr.StatusCode, dialErr.ResponseHeaders, dialErr.ResponseBody, canonicalModel)

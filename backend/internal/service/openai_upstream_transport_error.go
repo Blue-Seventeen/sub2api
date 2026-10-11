@@ -132,7 +132,10 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 	if isClientCanceledTransportError(ctx, err) {
 		return err
 	}
-	return handleOpenAITransportError(ctx, c, account, err, passthrough, "", accountRepo, runtimeBlocker, deferredService)
+	result := handleOpenAITransportError(ctx, c, account, err, passthrough, "", accountRepo, runtimeBlocker, deferredService)
+	// Keep the failed node attached until Ops attribution has been recorded.
+	ClearAutoSelectedProxyStickyOnTransportError(ctx, account, err)
+	return result
 }
 
 // handleOpenAIUpstreamTransportError mirrors OpenAIGatewayService's transport

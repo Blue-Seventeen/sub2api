@@ -82,6 +82,8 @@ type proxyAutoProbeOutcome struct {
 	Success       bool
 	LatencyMs     *int64
 	QualityStatus string
+	NodeEpoch     *time.Time
+	Configuration *Proxy
 }
 
 type proxyStickyCacheEntry struct {
@@ -316,15 +318,13 @@ func resolveAccountProxy(ctx context.Context, account *Account, proxyRepo ProxyR
 		return nil
 	}
 	if account.IsAutoSelectProxyEnabled() {
-		if account.Proxy != nil {
-			return account.Proxy
-		}
 		svc := GetDefaultProxyAutoProbeService()
-		if svc != nil {
+		if svc != nil && svc.snapshotConfig().Enabled {
 			selected := svc.selectProxyForAccount(ctx, account)
 			account.Proxy = selected
 			return selected
 		}
+		account.Proxy = nil
 		return nil
 	}
 	if account.Proxy != nil {
@@ -342,6 +342,12 @@ func resolveAccountProxy(ctx context.Context, account *Account, proxyRepo ProxyR
 func resolveAccountProxyURL(ctx context.Context, account *Account, proxyRepo ProxyRepository) string {
 	proxy := resolveAccountProxy(ctx, account, proxyRepo)
 	if proxy == nil {
+		if account != nil && account.IsAutoSelectProxyEnabled() {
+			// Automatic routing must not silently expose the direct egress when
+			// probing is disabled, cold, or has no healthy candidate. Like the
+			// managed-proxy sentinel, this fails before transport opens a socket.
+			return "auto-proxy://unavailable"
+		}
 		return ""
 	}
 	return ResolveProxyURL(ctx, proxy)
@@ -351,7 +357,7 @@ func ClearAutoSelectedProxyStickyOnTransportError(ctx context.Context, account *
 	if err == nil || account == nil || !account.IsAutoSelectProxyEnabled() || account.ID <= 0 {
 		return
 	}
-	if errors.Is(err, context.Canceled) {
+	if errors.Is(err, context.Canceled) || (ctx != nil && errors.Is(ctx.Err(), context.Canceled)) {
 		return
 	}
 	proxyID := account.EffectiveProxyID()
@@ -534,11 +540,11 @@ func (s *ProxyAutoProbeService) initializeEntries(ctx context.Context, now time.
 	for i := range proxies {
 		proxy := proxies[i]
 		proxySnapshots[proxy.ID] = proxy
-		queue := ProxyAutoProbeQueueSuccess
+		queue := ProxyAutoProbeQueueFailed
 		var latency *int64
-		if info := latencies[proxy.ID]; info != nil {
+		if info := latencies[proxy.ID]; isAutoProbeMeasurementCurrent(&proxy, info) {
 			latency = info.LatencyMs
-			if isAutoProbeSuccessStatus(info.QualityStatus, info.Success) {
+			if (info.QualityStatus == "healthy" || info.QualityStatus == "warn") && info.Success {
 				queue = ProxyAutoProbeQueueSuccess
 			} else {
 				queue = ProxyAutoProbeQueueFailed
@@ -546,6 +552,9 @@ func (s *ProxyAutoProbeService) initializeEntries(ctx context.Context, now time.
 		}
 
 		nextDueAt := now.Add(queueInterval(cfg, queue))
+		if info := latencies[proxy.ID]; !isAutoProbeMeasurementCurrent(&proxy, info) || (info.Success && info.QualityStatus == "") {
+			nextDueAt = now
+		}
 		entries[proxy.ID] = &proxyAutoProbeEntry{
 			ProxyID:       proxy.ID,
 			Queue:         queue,
@@ -570,7 +579,6 @@ func (s *ProxyAutoProbeService) reconcileEntries(ctx context.Context, now time.T
 		return err
 	}
 	currentIDs := make(map[int64]struct{}, len(proxies))
-	cfg := s.snapshotConfig()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -586,14 +594,15 @@ func (s *ProxyAutoProbeService) reconcileEntries(ctx context.Context, now time.T
 		proxy := proxies[i]
 		id := proxy.ID
 		currentIDs[id] = struct{}{}
+		previous, hadSnapshot := s.proxySnapshots[id]
 		s.proxySnapshots[id] = proxy
-		if _, ok := s.entries[id]; ok {
+		if _, ok := s.entries[id]; ok && hadSnapshot && sameAutoProbeConfiguration(previous, proxy) {
 			continue
 		}
 		s.entries[id] = &proxyAutoProbeEntry{
 			ProxyID:   id,
-			Queue:     ProxyAutoProbeQueueSuccess,
-			NextDueAt: now.Add(queueInterval(cfg, ProxyAutoProbeQueueSuccess)),
+			Queue:     ProxyAutoProbeQueueFailed,
+			NextDueAt: now,
 		}
 	}
 
@@ -619,6 +628,11 @@ func (s *ProxyAutoProbeService) shouldReconcile(now time.Time) bool {
 }
 
 func (s *ProxyAutoProbeService) listAllProxies(ctx context.Context) ([]Proxy, error) {
+	// The admin path attaches current node state and epoch and excludes nodes
+	// removed from the subscription or disabled by the operator.
+	if s.adminService != nil {
+		return s.adminService.GetAllProxies(ctx)
+	}
 	page := 1
 	all := make([]Proxy, 0)
 	for {
@@ -714,11 +728,17 @@ func (s *ProxyAutoProbeService) getStickyProxyFromStore(ctx context.Context, acc
 }
 
 func (s *ProxyAutoProbeService) getUsableSuccessProxy(ctx context.Context, proxyID int64) *Proxy {
-	if s == nil || proxyID <= 0 || !s.isProxyInSuccessQueue(proxyID) {
+	if s == nil || proxyID <= 0 {
 		return nil
 	}
-	proxy, ok := s.getProxySnapshot(proxyID)
-	if !ok || !proxy.IsActive() {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	entry := s.entries[proxyID]
+	if entry == nil || entry.Queue != ProxyAutoProbeQueueSuccess {
+		return nil
+	}
+	proxy, ok := s.proxySnapshots[proxyID]
+	if !ok || !isAutoProbeProxyAvailable(&proxy) {
 		return nil
 	}
 	return &proxy
@@ -902,7 +922,7 @@ func (s *ProxyAutoProbeService) getBestProxyExcluding(ctx context.Context, exclu
 			continue
 		}
 		proxy, ok := s.proxySnapshots[entry.ProxyID]
-		if !ok || !proxy.IsActive() {
+		if !ok || !isAutoProbeProxyAvailable(&proxy) {
 			continue
 		}
 		candidates = append(candidates, proxyCandidate{
@@ -966,6 +986,9 @@ func (s *ProxyAutoProbeService) acquireDueProxy(now time.Time) (int64, bool) {
 		if entry == nil || entry.NextDueAt.After(now) {
 			continue
 		}
+		if proxy, ok := s.proxySnapshots[entry.ProxyID]; ok && !isAutoProbeProxyAvailable(&proxy) {
+			continue
+		}
 		candidates = append(candidates, entry)
 	}
 	if len(candidates) == 0 {
@@ -1010,6 +1033,9 @@ func (s *ProxyAutoProbeService) probeProxy(ctx context.Context, proxyID int64) p
 		Success:       false,
 		QualityStatus: "failed",
 	}
+	if snapshot, ok := s.getProxySnapshot(proxyID); ok {
+		outcome.Configuration = &snapshot
+	}
 
 	testResult, err := s.adminService.TestProxy(ctx, proxyID)
 	if err != nil {
@@ -1036,6 +1062,9 @@ func (s *ProxyAutoProbeService) probeProxy(ctx context.Context, proxyID int64) p
 		outcome.LatencyMs = &latency
 	}
 	outcome.Success = isAutoProbeSuccessStatus(qualityStatus, true)
+	if qualityResult != nil {
+		outcome.NodeEpoch = qualityResult.nodeEpoch
+	}
 	return outcome
 }
 
@@ -1082,13 +1111,26 @@ func (s *ProxyAutoProbeService) finishProbe(proxyID int64, outcome proxyAutoProb
 	if s.currentProxyID != nil && *s.currentProxyID == proxyID {
 		s.currentProxyID = nil
 	}
-	s.recordProbeCompletionLocked(proxyID, outcome, finishedAt)
-
 	entry, ok := s.entries[proxyID]
 	if !ok || entry == nil {
+		s.recordProbeCompletionLocked(proxyID, outcome, finishedAt)
 		return
 	}
 
+	proxy, hasSnapshot := s.proxySnapshots[proxyID]
+	configurationChanged := outcome.Configuration != nil && (!hasSnapshot || !sameAutoProbeConfiguration(*outcome.Configuration, proxy))
+	nodeChanged := hasSnapshot && !proxy.nodeUpdatedAt.IsZero() && (outcome.NodeEpoch == nil || !proxy.nodeUpdatedAt.Equal(*outcome.NodeEpoch))
+	if outcome.Success && (configurationChanged || nodeChanged) {
+		// A late result from the previous installed node must not make this
+		// generation selectable, even when reconciliation already ran.
+		entry.Queue = ProxyAutoProbeQueueFailed
+		entry.LastLatencyMs = nil
+		entry.NextDueAt = finishedAt
+		outcome.Success = false
+		outcome.QualityStatus = "stale"
+		s.recordProbeCompletionLocked(proxyID, outcome, finishedAt)
+		return
+	}
 	if outcome.Success {
 		entry.Queue = ProxyAutoProbeQueueSuccess
 	} else {
@@ -1096,6 +1138,29 @@ func (s *ProxyAutoProbeService) finishProbe(proxyID int64, outcome proxyAutoProb
 	}
 	entry.LastLatencyMs = outcome.LatencyMs
 	entry.NextDueAt = finishedAt.Add(s.intervalForQueueLocked(entry.Queue))
+	s.recordProbeCompletionLocked(proxyID, outcome, finishedAt)
+}
+
+func isAutoProbeProxyAvailable(proxy *Proxy) bool {
+	return proxy != nil && proxy.IsActive() && !proxy.IsExpired(time.Now()) && !isManagedProxyNodePickerUnavailable(proxy)
+}
+
+func isAutoProbeMeasurementCurrent(proxy *Proxy, info *ProxyLatencyInfo) bool {
+	if info == nil {
+		return false
+	}
+	if proxy.nodeUpdatedAt.IsZero() {
+		return true
+	}
+	return info.NodeEpoch != nil && proxy.nodeUpdatedAt.Equal(*info.NodeEpoch) &&
+		(info.QualityStatus == "" || (info.QualityNodeEpoch != nil && proxy.nodeUpdatedAt.Equal(*info.QualityNodeEpoch)))
+}
+
+func sameAutoProbeConfiguration(previous, current Proxy) bool {
+	return previous.UpdatedAt.Equal(current.UpdatedAt) && previous.nodeUpdatedAt.Equal(current.nodeUpdatedAt) &&
+		previous.Status == current.Status && previous.NodeStatus == current.NodeStatus &&
+		previous.Protocol == current.Protocol && previous.Host == current.Host && previous.Port == current.Port &&
+		previous.Username == current.Username && previous.Password == current.Password
 }
 
 func (s *ProxyAutoProbeService) recordProbeCompletionLocked(proxyID int64, outcome proxyAutoProbeOutcome, finishedAt time.Time) {
