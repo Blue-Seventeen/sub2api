@@ -1,5 +1,11 @@
 package service
 
+// HasZeroChargeUnifiedRate reports whether an enabled unified multiplier makes
+// usage free. Missing, disabled, or negative multipliers retain paid behavior.
+func HasZeroChargeUnifiedRate(user *User) bool {
+	return user != nil && user.EffectiveUnifiedRateMultiplier() == 0
+}
+
 // effectiveUnifiedMultiplier returns the effective unified multiplier for a user.
 // Disabled or missing user multipliers default to 1; enabled zero is allowed.
 func effectiveUnifiedMultiplier(user *User) float64 {
@@ -35,7 +41,7 @@ func realCostFromActualRate(actualCost, finalRateMultiplier, realRateMultiplier 
 	if actualCost <= 0 {
 		return 0
 	}
-	if effectiveUnifiedMultiplier(user) == 0 {
+	if HasZeroChargeUnifiedRate(user) {
 		return 0
 	}
 	if finalRateMultiplier <= 0 {

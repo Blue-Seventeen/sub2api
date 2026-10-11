@@ -17,7 +17,7 @@ import (
 const maxAPIKeyAuthorizationHeaderBytes = service.MaxAPIKeyCredentialBytes + 128
 
 func hasZeroChargeUnifiedRate(user *service.User) bool {
-	return user != nil && user.EffectiveUnifiedRateMultiplier() == 0
+	return service.HasZeroChargeUnifiedRate(user)
 }
 
 // NewAPIKeyAuthMiddleware 创建 API Key 认证中间件

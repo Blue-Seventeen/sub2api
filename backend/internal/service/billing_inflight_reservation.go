@@ -237,7 +237,7 @@ func (s *BillingCacheService) ReserveInflight(ctx context.Context, user *User, g
 
 func (s *BillingCacheService) reserveInflight(ctx context.Context, user *User, group *Group, subscription *UserSubscription, estimate float64, renew bool) (*InflightReservation, error) {
 	cfg, ok := s.inflightReservationConfig()
-	if !ok || user == nil {
+	if !ok || user == nil || HasZeroChargeUnifiedRate(user) {
 		return nil, nil
 	}
 	if group != nil && group.IsSubscriptionType() && subscription != nil {
@@ -576,6 +576,9 @@ func (d inflightEstimateDeps) estimateOne(ctx context.Context, apiKey *APIKey, m
 func (d inflightEstimateDeps) estimate(ctx context.Context, apiKey *APIKey, req InflightEstimateRequest) (float64, bool) {
 	if apiKey == nil || apiKey.User == nil {
 		return 0, false
+	}
+	if HasZeroChargeUnifiedRate(apiKey.User) {
+		return 0, true
 	}
 	if req.Model == "" || (req.Kind == InflightEstimateAudio && req.AudioUnits <= 0) {
 		// 非计量请求（媒体状态查询、custom-voices 等）：无需预留，也不算「无法定价」。

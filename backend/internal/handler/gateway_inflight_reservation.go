@@ -74,6 +74,9 @@ func reserveInflightBalanceCtx(
 	if billing == nil || estimator == nil || apiKey == nil || apiKey.User == nil || !billing.InflightReservationEnabled() {
 		return ctx, inflightNoop, nil
 	}
+	if service.HasZeroChargeUnifiedRate(apiKey.User) {
+		return ctx, inflightNoop, nil
+	}
 	if apiKey.Group != nil && apiKey.Group.IsSubscriptionType() && subscription != nil {
 		return ctx, inflightNoop, nil
 	}
