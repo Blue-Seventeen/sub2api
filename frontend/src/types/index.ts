@@ -957,6 +957,8 @@ export interface ClaudeModel {
   created_at: string
 }
 
+export type ProxySubscriptionNodeStatus = 'active' | 'inactive' | 'source_missing'
+
 export interface Proxy {
   id: number
   name: string
@@ -968,6 +970,7 @@ export interface Proxy {
   status: 'active' | 'inactive' | 'expired'
   source_type?: 'manual' | 'mihomo_subscription'
   subscription_id?: number | null
+  node_status?: ProxySubscriptionNodeStatus
   runtime_status?: ManagedProxyRuntimeStatus | null
   account_count?: number // Number of accounts using this proxy
   active_egress_account_count?: number
@@ -1030,7 +1033,7 @@ export interface ProxySubscriptionManagedNode {
   type: string
   server?: string
   port?: number
-  status: 'active' | 'inactive'
+  status: ProxySubscriptionNodeStatus
   created_at: string
   updated_at: string
 }

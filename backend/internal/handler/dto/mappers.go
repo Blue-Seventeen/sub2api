@@ -546,6 +546,7 @@ func ProxyFromService(p *service.Proxy) *Proxy {
 		SourceType:     p.SourceType,
 		SubscriptionID: p.SubscriptionID,
 		RuntimeStatus:  p.RuntimeStatus,
+		NodeStatus:     p.NodeStatus,
 		CreatedAt:      p.CreatedAt,
 		UpdatedAt:      p.UpdatedAt,
 		ExpiresAt:      p.ExpiresAt,

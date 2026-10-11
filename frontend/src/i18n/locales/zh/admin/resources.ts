@@ -108,6 +108,10 @@ export default {
       },
       // Additional keys used in ProxiesView
       copyProxyUrl: '复制代理 URL',
+      clash: {
+        nodeMissing: '订阅节点已缺失',
+        nodeDisabled: '节点已禁用'
+      },
       urlCopied: '代理 URL 已复制',
       allProtocols: '全部协议',
       allStatus: '全部状态',

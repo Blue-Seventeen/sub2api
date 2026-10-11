@@ -20,6 +20,8 @@ func TestProxySubscriptionRepositorySyncNodesDeactivatesMissingActiveNode(t *tes
 	mock.ExpectQuery(`SELECT name FROM proxy_subscriptions WHERE id = \$1`).
 		WithArgs(int64(7)).
 		WillReturnRows(sqlmock.NewRows([]string{"name"}).AddRow("managed-sub"))
+	mock.ExpectQuery(`(?s)SELECT id, status FROM proxies WHERE subscription_id=\$1.*FOR NO KEY UPDATE`).WithArgs(int64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status"}).AddRow(int64(21), "active").AddRow(int64(22), "active"))
 	mock.ExpectQuery(`(?s)SELECT n\.id, n\.subscription_id, n\.proxy_id.*FROM proxy_subscription_nodes n.*WHERE n\.subscription_id = \$1`).
 		WithArgs(int64(7)).
 		WillReturnRows(sqlmock.NewRows([]string{
@@ -29,14 +31,20 @@ func TestProxySubscriptionRepositorySyncNodesDeactivatesMissingActiveNode(t *tes
 			AddRow(int64(11), int64(7), int64(21), "kept-node", "Kept", "provider-kept", "ss", "kept.example", 8388, "user", "pass", "raw", service.ProxySubscriptionNodeStatusActive, now, now).
 			AddRow(int64(12), int64(7), int64(22), "missing-node", "Missing", "provider-missing", "trojan", "missing.example", 443, "user", "pass", "raw", service.ProxySubscriptionNodeStatusActive, now, now))
 	mock.ExpectExec(`(?s)UPDATE proxy_subscription_nodes\s+SET name = \$2.*WHERE id = \$1`).
-		WithArgs(int64(11), "Kept-updated", "provider-kept", "ss", "kept.example", 8388, "raw-updated", service.ProxySubscriptionNodeStatusSourceMissing, service.ProxySubscriptionNodeStatusActive).
+		WithArgs(int64(11), "Kept-updated", "provider-kept", "ss", "kept.example", 8388, "raw-updated", service.ProxySubscriptionNodeStatusSourceMissing, service.ProxySubscriptionNodeStatusActive, true).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`(?s)UPDATE proxies\s+SET name = \$2.*WHERE id = \$1 AND deleted_at IS NULL`).
 		WithArgs(int64(21), "managed-sub / Kept-updated").
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`(?s)UPDATE accounts\s+SET extra`).WithArgs(int64(21)).WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectQuery(`(?s)UPDATE accounts\s+SET updated_at = GREATEST.*WHERE proxy_id = \$1 AND deleted_at IS NULL.*RETURNING id`).
+		WithArgs(int64(21)).WillReturnRows(sqlmock.NewRows([]string{"id"}))
 	mock.ExpectExec(`(?s)UPDATE proxy_subscription_nodes\s+SET status = \$2.*WHERE id = \$1 AND status = \$3`).
 		WithArgs(int64(12), service.ProxySubscriptionNodeStatusSourceMissing, service.ProxySubscriptionNodeStatusActive).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`(?s)UPDATE accounts\s+SET extra`).WithArgs(int64(22)).WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectQuery(`(?s)UPDATE accounts\s+SET updated_at = GREATEST.*WHERE proxy_id = \$1 AND deleted_at IS NULL.*RETURNING id`).
+		WithArgs(int64(22)).WillReturnRows(sqlmock.NewRows([]string{"id"}))
 	mock.ExpectExec(`(?s)UPDATE accounts a`).
 		WithArgs(int64(7), int64(21)).
 		WillReturnResult(sqlmock.NewResult(0, 0))
@@ -72,14 +80,26 @@ func TestProxySubscriptionRepositorySyncNodesReappearancePreservesOperatorDisabl
 			now := time.Now()
 			mock.ExpectQuery(`SELECT name FROM proxy_subscriptions WHERE id = \$1`).WithArgs(int64(7)).
 				WillReturnRows(sqlmock.NewRows([]string{"name"}).AddRow("managed-sub"))
+			operatorStatus, restoredStatus := "active", "active"
+			if status == service.ProxySubscriptionNodeStatusInactive {
+				operatorStatus, restoredStatus = "inactive", "inactive"
+			}
+			mock.ExpectQuery(`(?s)SELECT id, status FROM proxies WHERE subscription_id=\$1.*FOR NO KEY UPDATE`).WithArgs(int64(7)).
+				WillReturnRows(sqlmock.NewRows([]string{"id", "status"}).AddRow(int64(21), operatorStatus))
 			mock.ExpectQuery(`(?s)SELECT n\.id, n\.subscription_id, n\.proxy_id.*WHERE n\.subscription_id = \$1`).WithArgs(int64(7)).
 				WillReturnRows(sqlmock.NewRows([]string{"id", "subscription_id", "proxy_id", "node_key", "name", "provider_name", "type", "server", "port", "username", "password", "raw_config", "status", "created_at", "updated_at"}).
 					AddRow(int64(11), int64(7), int64(21), "node", "Node", "provider", "ss", "node.example", 8388, "user", "pass", "raw", status, now, now))
 			mock.ExpectExec(`(?s)UPDATE proxy_subscription_nodes\s+SET name = \$2.*status = CASE.*WHERE id = \$1`).
-				WithArgs(int64(11), "Returned", "provider", "ss", "node.example", 8388, "updated", "source_missing", service.ProxySubscriptionNodeStatusActive).
+				WithArgs(int64(11), "Returned", "provider", "ss", "node.example", 8388, "updated", "source_missing", restoredStatus, true).
 				WillReturnResult(sqlmock.NewResult(0, 1))
 			if status == "source_missing" {
 				mock.ExpectExec(`(?s)UPDATE proxies\s+SET name = \$2`).WithArgs(int64(21), "managed-sub / Returned").WillReturnResult(sqlmock.NewResult(0, 1))
+
+			}
+			mock.ExpectQuery(`(?s)UPDATE accounts\s+SET extra`).WithArgs(int64(21)).WillReturnRows(sqlmock.NewRows([]string{"id"}))
+			mock.ExpectQuery(`(?s)UPDATE accounts\s+SET updated_at = GREATEST.*WHERE proxy_id = \$1 AND deleted_at IS NULL.*RETURNING id`).
+				WithArgs(int64(21)).WillReturnRows(sqlmock.NewRows([]string{"id"}))
+			if status == "source_missing" {
 				mock.ExpectExec(`(?s)UPDATE accounts a`).WithArgs(int64(7), int64(21)).WillReturnResult(sqlmock.NewResult(0, 0))
 			}
 			mock.ExpectExec(`(?s)UPDATE proxies p`).WithArgs(int64(7)).WillReturnResult(sqlmock.NewResult(0, 0))

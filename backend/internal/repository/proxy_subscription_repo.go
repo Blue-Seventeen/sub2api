@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 )
 
 type proxySubscriptionRepository struct {
@@ -346,7 +347,7 @@ func (r *proxySubscriptionRepository) Update(ctx context.Context, sub *service.P
 	if r == nil || r.sql == nil || sub == nil || sub.ID <= 0 {
 		return service.ErrProxySubscriptionNotFound
 	}
-	return r.updateSubscription(ctx, r.sql, sub)
+	return r.withTransaction(ctx, func(q sqlExecutor) error { return r.updateSubscription(ctx, q, sub) })
 }
 
 func (r *proxySubscriptionRepository) UpdateWithNodes(ctx context.Context, sub *service.ProxySubscription, nodes []service.ProxySubscriptionNode) error {
@@ -375,6 +376,10 @@ func (r *proxySubscriptionRepository) UpdateWithNodes(ctx context.Context, sub *
 }
 
 func (r *proxySubscriptionRepository) updateSubscription(ctx context.Context, q sqlExecutor, sub *service.ProxySubscription) error {
+	previousDNS, err := lockSubscriptionDNS(ctx, q, sub.ID)
+	if err != nil {
+		return err
+	}
 	res, err := q.ExecContext(ctx, `
 		UPDATE proxy_subscriptions
 		SET
@@ -394,14 +399,38 @@ func (r *proxySubscriptionRepository) updateSubscription(ctx context.Context, q 
 	if affected, _ := res.RowsAffected(); affected == 0 {
 		return service.ErrProxySubscriptionNotFound
 	}
-	if _, err := q.ExecContext(ctx, `
+	rows, err := q.QueryContext(ctx, `
 		UPDATE proxies
 		SET status = $2, updated_at = NOW()
 		WHERE subscription_id = $1 AND source_type = 'mihomo_subscription' AND deleted_at IS NULL
-	`, sub.ID, sub.Status); err != nil {
+			AND status IS DISTINCT FROM $2
+			AND NOT EXISTS (SELECT 1 FROM proxy_subscription_nodes n WHERE n.proxy_id = proxies.id)
+		RETURNING id
+	`, sub.ID, sub.Status)
+	if err != nil {
 		return err
 	}
-	return nil
+	defer func() { _ = rows.Close() }()
+	var proxyIDs []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return err
+		}
+		proxyIDs = append(proxyIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, id := range proxyIDs {
+		if err := invalidateManagedProxyAccounts(ctx, q, id); err != nil {
+			return err
+		}
+	}
+	return invalidateSubscriptionDNSChange(ctx, q, sub.ID, previousDNS, sub.RawDNSConfig)
 }
 
 func (r *proxySubscriptionRepository) DeleteWithProxy(ctx context.Context, id int64) error {
@@ -409,6 +438,9 @@ func (r *proxySubscriptionRepository) DeleteWithProxy(ctx context.Context, id in
 		return service.ErrProxySubscriptionNotFound
 	}
 	return r.withTransaction(ctx, func(q sqlExecutor) error {
+		if _, err := lockSubscriptionDNS(ctx, q, id); err != nil {
+			return err
+		}
 		if _, err := q.ExecContext(ctx, `
 		UPDATE proxies
 		SET deleted_at = NOW(), updated_at = NOW()
@@ -454,7 +486,10 @@ func (r *proxySubscriptionRepository) SyncNodes(ctx context.Context, subscriptio
 	}
 	createdProxies := make([]service.Proxy, 0)
 	err := r.withTransaction(ctx, func(q sqlExecutor) error {
-		var err error
+		previousDNS, err := lockSubscriptionDNS(ctx, q, subscriptionID)
+		if err != nil {
+			return err
+		}
 		createdProxies, err = r.syncNodes(ctx, q, subscriptionID, nodes)
 		if err != nil {
 			return err
@@ -466,7 +501,7 @@ func (r *proxySubscriptionRepository) SyncNodes(ctx context.Context, subscriptio
 		`, subscriptionID, rawDNSConfig); err != nil {
 			return err
 		}
-		return nil
+		return invalidateSubscriptionDNSChange(ctx, q, subscriptionID, previousDNS, rawDNSConfig)
 	})
 	if err != nil {
 		return nil, err
@@ -476,64 +511,80 @@ func (r *proxySubscriptionRepository) SyncNodes(ctx context.Context, subscriptio
 
 func (r *proxySubscriptionRepository) syncNodes(ctx context.Context, q sqlExecutor, subscriptionID int64, nodes []service.ProxySubscriptionNode) ([]service.Proxy, error) {
 	var subscriptionName string
-	if err := scanSingleRow(ctx, q, `SELECT name FROM proxy_subscriptions WHERE id = $1`, []any{subscriptionID}, &subscriptionName); err != nil {
+	// Every operation taking both locks takes the subscription lock first.
+	if err := scanSingleRow(ctx, q, `SELECT name FROM proxy_subscriptions WHERE id = $1 FOR UPDATE`, []any{subscriptionID}, &subscriptionName); err != nil {
+		return nil, err
+	}
+	operatorStatuses, err := lockSubscriptionProxyStatuses(ctx, q, subscriptionID)
+	if err != nil {
 		return nil, err
 	}
 	existing, err := r.listAllNodesForSubscription(ctx, q, subscriptionID)
 	if err != nil {
 		return nil, err
 	}
-	existingByKey := make(map[string]service.ProxySubscriptionNode, len(existing))
-	for _, node := range existing {
-		existingByKey[node.NodeKey] = node
+	// Legacy rows may record an operator disable only on the node. Preserve it
+	// before converting source presence to source_missing or applying a refresh.
+	for _, current := range existing {
+		if current.Status == service.ProxySubscriptionNodeStatusInactive && current.ProxyID != nil && operatorStatuses[*current.ProxyID] != "inactive" {
+			if _, err := q.ExecContext(ctx, `UPDATE proxies SET status='inactive', updated_at=clock_timestamp() WHERE id=$1 AND deleted_at IS NULL`, *current.ProxyID); err != nil {
+				return nil, err
+			}
+			operatorStatuses[*current.ProxyID] = "inactive"
+			if err := invalidateSubscriptionNodeEvidence(ctx, q, *current.ProxyID); err != nil {
+				return nil, err
+			}
+		}
 	}
-	seenNodeKeys := make(map[string]struct{}, len(nodes))
-
+	matches := matchSubscriptionNodes(existing, nodes)
+	retained := make(map[int64]struct{}, len(nodes))
 	now := time.Now()
 	createdProxies := make([]service.Proxy, 0)
 	var firstActiveNodeProxyID *int64
-	for _, node := range nodes {
-		seenNodeKeys[node.NodeKey] = struct{}{}
+	for i, node := range nodes {
 		node.SubscriptionID = subscriptionID
 		if node.Status == "" {
 			node.Status = service.ProxySubscriptionNodeStatusActive
 		}
-		if current, ok := existingByKey[node.NodeKey]; ok {
-			// Provider absence is recoverable; operator-disabled nodes stay disabled.
-			if current.Status == service.ProxySubscriptionNodeStatusSourceMissing {
+		if matches[i] >= 0 {
+			current := existing[matches[i]]
+			retained[current.ID] = struct{}{}
+			recovered := current.Status == service.ProxySubscriptionNodeStatusSourceMissing
+			changed := recovered || current.Name != node.Name || current.ProviderName != node.ProviderName || current.Type != node.Type || current.Server != node.Server || current.Port != node.Port || current.RawConfig != node.RawConfig
+			if recovered {
 				current.Status = service.ProxySubscriptionNodeStatusActive
+				if current.ProxyID != nil && operatorStatuses[*current.ProxyID] == "inactive" {
+					current.Status = service.ProxySubscriptionNodeStatusInactive
+				}
 			}
 			if firstActiveNodeProxyID == nil && current.ProxyID != nil && current.Status == service.ProxySubscriptionNodeStatusActive {
 				id := *current.ProxyID
 				firstActiveNodeProxyID = &id
 			}
+			// Retain node_key, proxy_id and local authentication as stable identity.
+			// A no-op refresh must not make valid measurement evidence look stale.
 			if _, err := q.ExecContext(ctx, `
-				UPDATE proxy_subscription_nodes
-				SET name = $2,
-					provider_name = $3,
-					type = $4,
-					server = NULLIF($5, ''),
-					port = NULLIF($6, 0),
-					raw_config = $7,
-					status = CASE WHEN status = $8 THEN $9 ELSE status END,
-					updated_at = NOW()
-				WHERE id = $1
-			`, current.ID, node.Name, node.ProviderName, node.Type, node.Server, node.Port, node.RawConfig, service.ProxySubscriptionNodeStatusSourceMissing, service.ProxySubscriptionNodeStatusActive); err != nil {
+                UPDATE proxy_subscription_nodes
+                SET name = $2, provider_name = $3, type = $4,
+                    server = NULLIF($5, ''), port = NULLIF($6, 0), raw_config = $7,
+                    status = CASE WHEN status = $8 THEN $9 ELSE status END,
+                    updated_at = CASE WHEN $10 THEN GREATEST(clock_timestamp(), updated_at + interval '1 microsecond') ELSE updated_at END
+                WHERE id = $1
+            `, current.ID, node.Name, node.ProviderName, node.Type, node.Server, node.Port, node.RawConfig, service.ProxySubscriptionNodeStatusSourceMissing, current.Status, changed); err != nil {
 				return nil, err
 			}
 			if current.ProxyID != nil && current.Status == service.ProxySubscriptionNodeStatusActive {
-				_, err := q.ExecContext(ctx, `
-					UPDATE proxies
-					SET name = $2, updated_at = NOW()
-					WHERE id = $1 AND deleted_at IS NULL
-				`, *current.ProxyID, managedProxyNodeProxyName(subscriptionName, node.Name))
-				if err != nil {
+				if _, err := q.ExecContext(ctx, `UPDATE proxies SET name = $2::text, updated_at = CASE WHEN name::text IS DISTINCT FROM $2::text THEN NOW() ELSE updated_at END WHERE id = $1 AND deleted_at IS NULL`, *current.ProxyID, managedProxyNodeProxyName(subscriptionName, node.Name)); err != nil {
+					return nil, err
+				}
+			}
+			if changed && current.ProxyID != nil {
+				if err := invalidateSubscriptionNodeEvidence(ctx, q, *current.ProxyID); err != nil {
 					return nil, err
 				}
 			}
 			continue
 		}
-
 		proxyOut, err := r.createManagedProxyRow(ctx, q, subscriptionID, managedProxyNodeProxyName(subscriptionName, node.Name), node.Username, node.Password, now)
 		if err != nil {
 			return nil, err
@@ -542,25 +593,26 @@ func (r *proxySubscriptionRepository) syncNodes(ctx context.Context, q sqlExecut
 		if _, err := r.insertNode(ctx, q, node, now); err != nil {
 			return nil, err
 		}
-		if firstActiveNodeProxyID == nil {
+		if firstActiveNodeProxyID == nil && node.Status == service.ProxySubscriptionNodeStatusActive {
 			id := proxyOut.ID
 			firstActiveNodeProxyID = &id
 		}
 		createdProxies = append(createdProxies, proxyOut)
 	}
 	for _, current := range existing {
-		if current.Status != service.ProxySubscriptionNodeStatusActive {
+		if current.Status != service.ProxySubscriptionNodeStatusActive && current.Status != service.ProxySubscriptionNodeStatusInactive {
 			continue
 		}
-		if _, ok := seenNodeKeys[current.NodeKey]; ok {
+		if _, ok := retained[current.ID]; ok {
 			continue
 		}
-		if _, err := q.ExecContext(ctx, `
-			UPDATE proxy_subscription_nodes
-			SET status = $2, updated_at = NOW()
-			WHERE id = $1 AND status = $3
-		`, current.ID, service.ProxySubscriptionNodeStatusSourceMissing, service.ProxySubscriptionNodeStatusActive); err != nil {
+		if _, err := q.ExecContext(ctx, `UPDATE proxy_subscription_nodes SET status = $2, updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond') WHERE id = $1 AND status = $3`, current.ID, service.ProxySubscriptionNodeStatusSourceMissing, current.Status); err != nil {
 			return nil, err
+		}
+		if current.ProxyID != nil {
+			if err := invalidateSubscriptionNodeEvidence(ctx, q, *current.ProxyID); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if err := r.migrateLegacyManagedProxyRows(ctx, q, subscriptionID, firstActiveNodeProxyID); err != nil {
@@ -569,6 +621,73 @@ func (r *proxySubscriptionRepository) syncNodes(ctx context.Context, q sqlExecut
 	return createdProxies, nil
 }
 
+func lockSubscriptionProxyStatuses(ctx context.Context, q sqlExecutor, subscriptionID int64) (map[int64]string, error) {
+	rows, err := q.QueryContext(ctx, `SELECT id, status FROM proxies WHERE subscription_id=$1
+		AND source_type='mihomo_subscription' AND deleted_at IS NULL ORDER BY id FOR NO KEY UPDATE`, subscriptionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	statuses := make(map[int64]string)
+	for rows.Next() {
+		var id int64
+		var status string
+		if err := rows.Scan(&id, &status); err != nil {
+			return nil, err
+		}
+		statuses[id] = status
+	}
+	return statuses, rows.Err()
+}
+
+func lockSubscriptionDNS(ctx context.Context, q sqlExecutor, subscriptionID int64) (string, error) {
+	var rawDNS string
+	err := scanSingleRow(ctx, q, `SELECT COALESCE(raw_dns_config, '') FROM proxy_subscriptions WHERE id = $1 FOR UPDATE`, []any{subscriptionID}, &rawDNS)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", service.ErrProxySubscriptionNotFound
+	}
+	return rawDNS, err
+}
+
+func invalidateSubscriptionDNSChange(ctx context.Context, q sqlExecutor, subscriptionID int64, previous, next string) error {
+	if previous == next {
+		return nil
+	}
+	rows, err := q.QueryContext(ctx, `UPDATE proxy_subscription_nodes
+		SET updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
+		WHERE subscription_id = $1 RETURNING proxy_id`, subscriptionID)
+	if err != nil {
+		return err
+	}
+	var proxyIDs []int64
+	for rows.Next() {
+		var id sql.NullInt64
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if id.Valid {
+			proxyIDs = append(proxyIDs, id.Int64)
+		}
+	}
+	err = rows.Err()
+	if closeErr := rows.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	for _, id := range proxyIDs {
+		if err := invalidateSubscriptionNodeEvidence(ctx, q, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func invalidateSubscriptionNodeEvidence(ctx context.Context, q sqlExecutor, proxyID int64) error {
+	return invalidateManagedProxyAccounts(ctx, q, proxyID)
+}
 func (r *proxySubscriptionRepository) migrateLegacyManagedProxyRows(ctx context.Context, q sqlExecutor, subscriptionID int64, targetProxyID *int64) error {
 	if targetProxyID != nil {
 		if _, err := q.ExecContext(ctx, `
@@ -638,6 +757,33 @@ func (r *proxySubscriptionRepository) GetNodeByProxyID(ctx context.Context, prox
 	return &node, rows.Err()
 }
 
+// GetNodeStatesByProxyIDs is an optional batched admin capability; gateway
+// routing checks the identities installed in its local runtime instead.
+func (r *proxySubscriptionRepository) GetNodeStatesByProxyIDs(ctx context.Context, ids []int64) (map[int64]service.ProxySubscriptionNode, error) {
+	states := make(map[int64]service.ProxySubscriptionNode, len(ids))
+	if len(ids) == 0 {
+		return states, nil
+	}
+	if r == nil || r.sql == nil {
+		return nil, errors.New("proxy subscription repository unavailable")
+	}
+	rows, err := r.sql.QueryContext(ctx, `SELECT id, proxy_id, status, updated_at FROM proxy_subscription_nodes WHERE proxy_id = ANY($1)`, pq.Array(ids))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var node service.ProxySubscriptionNode
+		var proxyID int64
+		if err := rows.Scan(&node.ID, &proxyID, &node.Status, &node.UpdatedAt); err != nil {
+			return nil, err
+		}
+		node.ProxyID = &proxyID
+		states[proxyID] = node
+	}
+	return states, rows.Err()
+}
+
 func (r *proxySubscriptionRepository) SetNodeStatusByProxyID(ctx context.Context, proxyID int64, status string) error {
 	if r == nil || r.sql == nil || proxyID <= 0 {
 		return service.ErrProxySubscriptionNotFound
@@ -647,28 +793,43 @@ func (r *proxySubscriptionRepository) SetNodeStatusByProxyID(ctx context.Context
 	}
 	return r.withTransaction(ctx, func(q sqlExecutor) error {
 		var subscriptionID int64
-		if err := scanSingleRow(ctx, q, `
-			UPDATE proxy_subscription_nodes
-			SET status = $2, updated_at = NOW()
-			WHERE proxy_id = $1
-			RETURNING subscription_id
-		`, []any{proxyID, status}, &subscriptionID); err != nil {
+		var previousStatus string
+		if err := scanSingleRow(ctx, q, `SELECT id FROM proxy_subscriptions WHERE id = (
+			SELECT subscription_id FROM proxy_subscription_nodes WHERE proxy_id = $1
+		) FOR UPDATE`, []any{proxyID}, &subscriptionID); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return service.ErrProxySubscriptionNotFound
 			}
 			return err
 		}
-		if _, err := q.ExecContext(ctx, `
-			UPDATE proxy_subscriptions
-			SET revision = revision + 1, updated_at = NOW()
-			WHERE id = $1
-		`, subscriptionID); err != nil {
+		var previousOperatorStatus string
+		if err := scanSingleRow(ctx, q, `SELECT status FROM proxies WHERE id=$1 AND deleted_at IS NULL FOR NO KEY UPDATE`, []any{proxyID}, &previousOperatorStatus); err != nil {
 			return err
 		}
-		return nil
+		if err := scanSingleRow(ctx, q, `SELECT status FROM proxy_subscription_nodes WHERE proxy_id=$1 FOR UPDATE`, []any{proxyID}, &previousStatus); err != nil {
+			return err
+		}
+		nextStatus := status
+		if previousStatus == service.ProxySubscriptionNodeStatusSourceMissing {
+			nextStatus = previousStatus
+		}
+		changed := previousStatus != nextStatus || previousOperatorStatus != status
+		if !changed {
+			return nil
+		}
+		if _, err := q.ExecContext(ctx, `UPDATE proxies SET status=$2, updated_at=clock_timestamp() WHERE id=$1 AND deleted_at IS NULL`, proxyID, status); err != nil {
+			return err
+		}
+		if _, err := q.ExecContext(ctx, `UPDATE proxy_subscription_nodes SET status = $2::text, updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond') WHERE proxy_id = $1`, proxyID, nextStatus); err != nil {
+			return err
+		}
+		if err := invalidateSubscriptionNodeEvidence(ctx, q, proxyID); err != nil {
+			return err
+		}
+		_, err := q.ExecContext(ctx, `UPDATE proxy_subscriptions SET revision = revision + 1, updated_at = NOW() WHERE id = $1`, subscriptionID)
+		return err
 	})
 }
-
 func (r *proxySubscriptionRepository) ListProxyIDsBySubscriptionID(ctx context.Context, subscriptionID int64) ([]int64, error) {
 	if r == nil || r.sql == nil || subscriptionID <= 0 {
 		return []int64{}, nil

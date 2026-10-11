@@ -425,6 +425,7 @@ type Proxy struct {
 	SourceType     string                             `json:"source_type"`
 	SubscriptionID *int64                             `json:"subscription_id,omitempty"`
 	RuntimeStatus  *service.ManagedProxyRuntimeStatus `json:"runtime_status,omitempty"`
+	NodeStatus     string                             `json:"node_status,omitempty"`
 	CreatedAt      time.Time                          `json:"created_at"`
 	UpdatedAt      time.Time                          `json:"updated_at"`
 

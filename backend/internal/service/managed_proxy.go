@@ -25,9 +25,10 @@ const (
 )
 
 var (
-	ErrProxySubscriptionNotFound = errors.New("proxy subscription not found")
-	ErrManagedProxyUnavailable   = errors.New("managed proxy runtime unavailable")
-	ErrManagedProxyDisabled      = errors.New("managed proxy runtime disabled")
+	ErrProxySubscriptionNotFound   = errors.New("proxy subscription not found")
+	ErrManagedProxyUnavailable     = errors.New("managed proxy runtime unavailable")
+	ErrManagedProxyDisabled        = errors.New("managed proxy runtime disabled")
+	ErrManagedProxyNodeUnavailable = fmt.Errorf("%w: node is not installed in the current runtime", ErrManagedProxyUnavailable)
 )
 
 type ProxySubscription struct {
@@ -215,8 +216,8 @@ func ResolveProxyURL(ctx context.Context, proxy *Proxy) string {
 	if proxy.IsManagedMihomoSubscription() {
 		resolver := GetDefaultManagedProxyResolver()
 		if resolver != nil {
-			if proxyURL, err := resolver.ResolveProxyURL(ctx, *proxy.SubscriptionID); err == nil && proxyURL != "" {
-				return managedProxyURLForProxy(proxyURL, proxy)
+			if proxyURL, err := resolveManagedProxyURL(ctx, proxy, resolver); err == nil && proxyURL != "" {
+				return proxyURL
 			}
 		}
 		return fmt.Sprintf("managed-proxy://unavailable/%d", *proxy.SubscriptionID)

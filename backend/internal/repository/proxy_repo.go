@@ -99,6 +99,16 @@ func (r *proxyRepository) ListByIDs(ctx context.Context, ids []int64) ([]service
 }
 
 func (r *proxyRepository) Update(ctx context.Context, proxyIn *service.Proxy) error {
+	return r.updateWithNodeStatus(ctx, proxyIn, nil, false)
+}
+
+// UpdateWithNodeStatus preserves the locked operator state when status is omitted.
+// Proxy metadata, node availability, measurement epoch and outbox commit together.
+func (r *proxyRepository) UpdateWithNodeStatus(ctx context.Context, proxyIn *service.Proxy, status *string) error {
+	return r.updateWithNodeStatus(ctx, proxyIn, status, true)
+}
+
+func (r *proxyRepository) updateWithNodeStatus(ctx context.Context, proxyIn *service.Proxy, nodeStatus *string, preserveOmittedStatus bool) error {
 	client := r.client
 	var tx *dbent.Tx
 	if contextTx := dbent.TxFromContext(ctx); contextTx != nil {
@@ -116,7 +126,7 @@ func (r *proxyRepository) Update(ctx context.Context, proxyIn *service.Proxy) er
 		}
 	}
 
-	updated, err := updateProxyAndInvalidateProbeSnapshots(ctx, client, proxyIn)
+	updated, err := updateProxyWithNodeStatusAndInvalidateProbeSnapshots(ctx, client, proxyIn, nodeStatus, preserveOmittedStatus)
 	if err != nil {
 		return err
 	}
@@ -150,9 +160,34 @@ func proxyProbeIdentityFromService(proxyIn *service.Proxy) proxyProbeIdentity {
 }
 
 func updateProxyAndInvalidateProbeSnapshots(ctx context.Context, client *dbent.Client, proxyIn *service.Proxy) (*dbent.Proxy, error) {
+	return updateProxyWithNodeStatusAndInvalidateProbeSnapshots(ctx, client, proxyIn, nil, false)
+}
+
+func updateProxyWithNodeStatusAndInvalidateProbeSnapshots(ctx context.Context, client *dbent.Client, proxyIn *service.Proxy, nodeStatus *string, preserveOmittedStatus bool) (*dbent.Proxy, error) {
+	if proxyIn.IsManagedMihomoSubscription() {
+		var subscriptionID int64
+		if err := scanSingleRow(ctx, client, `SELECT id FROM proxy_subscriptions WHERE id = (
+			SELECT subscription_id FROM proxies WHERE id=$1 AND deleted_at IS NULL
+		) FOR UPDATE`, []any{proxyIn.ID}, &subscriptionID); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, service.ErrProxyNotFound
+			}
+			return nil, err
+		}
+	}
 	currentIdentity, err := lockProxyProbeIdentity(ctx, client, proxyIn.ID)
 	if err != nil {
 		return nil, err
+	}
+	if preserveOmittedStatus && nodeStatus == nil {
+		proxyIn.Status = currentIdentity.status
+	}
+	nodeChanged := false
+	if proxyIn.IsManagedMihomoSubscription() {
+		nodeChanged, err = updateManagedProxyOperatorNode(ctx, client, proxyIn, nodeStatus, currentIdentity != proxyProbeIdentityFromService(proxyIn))
+		if err != nil {
+			return nil, err
+		}
 	}
 	builder := client.Proxy.UpdateOneID(proxyIn.ID).
 		SetName(proxyIn.Name).
@@ -198,7 +233,13 @@ func updateProxyAndInvalidateProbeSnapshots(ctx context.Context, client *dbent.C
 	if err != nil {
 		return nil, err
 	}
-	if currentIdentity == proxyProbeIdentityFromService(proxyIn) {
+	if !nodeChanged && currentIdentity == proxyProbeIdentityFromService(proxyIn) {
+		return updated, nil
+	}
+	if proxyIn.IsManagedMihomoSubscription() {
+		if err := invalidateManagedProxyAccounts(ctx, client, proxyIn.ID); err != nil {
+			return nil, err
+		}
 		return updated, nil
 	}
 	accountIDs, err := invalidateProxyProbeSnapshots(ctx, client, proxyIn.ID)
@@ -209,6 +250,36 @@ func updateProxyAndInvalidateProbeSnapshots(ctx context.Context, client *dbent.C
 		return nil, err
 	}
 	return updated, nil
+}
+
+func updateManagedProxyOperatorNode(ctx context.Context, q sqlExecutor, proxyIn *service.Proxy, requested *string, identityChanged bool) (bool, error) {
+	var nodeID, subscriptionID int64
+	var status string
+	var epoch time.Time
+	err := scanSingleRow(ctx, q, `SELECT id, subscription_id, status, updated_at FROM proxy_subscription_nodes WHERE proxy_id=$1 FOR UPDATE`, []any{proxyIn.ID}, &nodeID, &subscriptionID, &status, &epoch)
+	if err == sql.ErrNoRows {
+		return false, nil
+	} // Legacy aggregate proxy.
+	if err != nil {
+		return false, err
+	}
+	next := status
+	if requested != nil && status != service.ProxySubscriptionNodeStatusSourceMissing {
+		next = *requested
+	}
+	changed := identityChanged || status != next
+	proxyIn.NodeStatus = next
+	if !changed {
+		return false, nil
+	}
+	if err := scanSingleRow(ctx, q, `UPDATE proxy_subscription_nodes
+		SET status=$2, username=$3, password=$4,
+		updated_at=GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
+		WHERE id=$1 RETURNING updated_at`, []any{nodeID, next, proxyIn.Username, proxyIn.Password}, &epoch); err != nil {
+		return false, err
+	}
+	_, err = q.ExecContext(ctx, `UPDATE proxy_subscriptions SET revision=revision+1, updated_at=clock_timestamp() WHERE id=$1`, subscriptionID)
+	return true, err
 }
 
 func lockProxyProbeIdentity(ctx context.Context, client *dbent.Client, proxyID int64) (proxyProbeIdentity, error) {
@@ -290,6 +361,39 @@ func enqueueProxyProbeAccountChanges(ctx context.Context, exec sqlExecutor, acco
 		}
 	}
 	return nil
+}
+
+// Managed proxy changes invalidate every bound scheduler payload, even when the
+// account has no probe snapshot. Snapshot cleanup, epochs and outbox share the caller's transaction.
+func invalidateManagedProxyAccounts(ctx context.Context, exec sqlExecutor, proxyID int64) error {
+	if _, err := invalidateProxyProbeSnapshots(ctx, exec, proxyID); err != nil {
+		return err
+	}
+	rows, err := exec.QueryContext(ctx, `
+		UPDATE accounts
+		SET updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
+		WHERE proxy_id = $1 AND deleted_at IS NULL
+		RETURNING id
+	`, proxyID)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	var accountIDs []int64
+	for rows.Next() {
+		var accountID int64
+		if err := rows.Scan(&accountID); err != nil {
+			return err
+		}
+		accountIDs = append(accountIDs, accountID)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	return enqueueProxyProbeAccountChanges(ctx, exec, accountIDs)
 }
 
 func (r *proxyRepository) Delete(ctx context.Context, id int64) error {

@@ -621,6 +621,7 @@ type ProxyQualityCheckResult struct {
 	ChallengeCount int                     `json:"challenge_count"`
 	CheckedAt      int64                   `json:"checked_at"`
 	Items          []ProxyQualityCheckItem `json:"items"`
+	nodeEpoch      *time.Time
 }
 
 type ProxyQualityCheckItem struct {

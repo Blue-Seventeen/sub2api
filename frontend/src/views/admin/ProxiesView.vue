@@ -164,22 +164,22 @@
                   type="button"
                   class="rounded p-0.5 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400"
                   :title="t('admin.proxies.copyProxyUrl')"
-                  :disabled="isManagedProxy(row) && !row.runtime_status?.local_url"
+                  :disabled="!canCopyProxyUrl(row)"
                   @click.stop="copyProxyUrl(row)"
-                  @contextmenu.prevent="toggleCopyMenu(row.id)"
+                  @contextmenu.prevent="toggleCopyMenu(row)"
                 >
                   <Icon name="copy" size="sm" />
                 </button>
                 <!-- 右键展开格式选择菜单 -->
                 <div
-                  v-if="copyMenuProxyId === row.id"
+                  v-if="copyMenuProxyId === row.id && canCopyProxyUrl(row)"
                   class="absolute left-0 top-full z-50 mt-1 w-auto min-w-[180px] rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-500 dark:bg-dark-700"
                 >
                   <button
                     v-for="fmt in getCopyFormats(row)"
                     :key="fmt.label"
                     class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-gray-100 dark:hover:bg-dark-600"
-                    @click.stop="copyFormat(fmt.value)"
+                    @click.stop="copyFormat(row, fmt.value)"
                   >
                     <span class="truncate font-mono text-gray-600 dark:text-gray-300">{{ fmt.label }}</span>
                   </button>
@@ -259,7 +259,13 @@
           <template #cell-latency="{ row }">
             <div class="flex flex-col gap-1">
               <span
-                v-if="row.latency_status === 'failed'"
+                v-if="managedNodeUnavailable(row)"
+                class="badge badge-danger"
+              >
+                {{ proxyStatusText(row) }}
+              </span>
+              <span
+                v-else-if="row.latency_status === 'failed'"
                 class="badge badge-danger"
                 :title="row.latency_message || undefined"
               >
@@ -273,7 +279,7 @@
               </span>
               <span v-else class="text-sm text-gray-400">-</span>
               <div
-                v-if="typeof row.quality_checked === 'number'"
+                v-if="!managedNodeUnavailable(row) && typeof row.quality_checked === 'number'"
                 class="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400"
                 :title="row.quality_summary || undefined"
               >
@@ -297,14 +303,14 @@
             <span class="text-xs text-gray-600 dark:text-gray-300">{{ formatDateTime(row.created_at) }}</span>
           </template>
 
-          <template #cell-status="{ value }">
+          <template #cell-status="{ row }">
             <span
               :class="[
                 'badge',
-                value === 'active' ? 'badge-success' : value === 'expired' ? 'badge-danger' : 'badge-danger'
+                row.status === 'active' && !managedNodeUnavailable(row) ? 'badge-success' : 'badge-danger'
               ]"
             >
-              {{ t('admin.accounts.status.' + value) }}
+              {{ proxyStatusText(row) }}
             </span>
           </template>
 
@@ -1567,6 +1573,9 @@ const mergeProxySnapshot = (snapshot: Proxy) => {
   assignProxyField(target, 'quality_summary', snapshot.quality_summary)
   assignProxyField(target, 'quality_checked', snapshot.quality_checked)
   assignProxyField(target, 'runtime_status', snapshot.runtime_status)
+  if (snapshot.node_status !== undefined) {
+    assignProxyField(target, 'node_status', snapshot.node_status)
+  }
 }
 
 const refreshProxySnapshots = async (ids: number[]) => {
@@ -1774,7 +1783,27 @@ const isManagedProxy = (proxy?: Proxy | null) => {
   return proxy?.source_type === 'mihomo_subscription'
 }
 
+const managedNodeUnavailable = (proxy: Proxy) => {
+  return isManagedProxy(proxy) && (
+    proxy.node_status === 'source_missing' || proxy.node_status === 'inactive' || proxy.status !== 'active'
+  )
+}
+
+const proxyStatusText = (proxy: Proxy) => {
+  if (isManagedProxy(proxy)) {
+    if (proxy.node_status === 'source_missing') return t('admin.proxies.clash.nodeMissing')
+    if (proxy.node_status === 'inactive') return t('admin.proxies.clash.nodeDisabled')
+  }
+  return t('admin.accounts.status.' + proxy.status)
+}
+
+const canCopyProxyUrl = (proxy: Proxy) => {
+  if (!isManagedProxy(proxy)) return true
+  return !managedNodeUnavailable(proxy) && proxy.runtime_status?.status === 'running' && !!proxy.runtime_status.local_url
+}
+
 const runtimeStatusText = (proxy: Proxy) => {
+  if (managedNodeUnavailable(proxy)) return proxyStatusText(proxy)
   const status = proxy.runtime_status
   if (!status) return t('admin.proxies.clash.runtimeUnknown')
   const label = t(`admin.proxies.clash.runtime.${status.status}`, status.status)
@@ -1984,7 +2013,8 @@ const handleEdit = (proxy: Proxy) => {
   editForm.port = proxy.port
   editForm.username = proxy.username || ''
   editForm.password = proxy.password || ''
-  editForm.status = proxy.status === 'expired' ? 'inactive' : proxy.status
+  editForm.status = (isManagedProxy(proxy) && proxy.node_status === 'inactive') || proxy.status === 'expired'
+    ? 'inactive' : proxy.status
   editForm.expires_at = proxy.expires_at ? proxy.expires_at.slice(0, 10) : ''
   editForm.fallback_mode = proxy.fallback_mode || 'none'
   editForm.backup_proxy_id = proxy.backup_proxy_id ?? null
@@ -2633,6 +2663,7 @@ function buildAuthPart(row: any): string {
 }
 
 function buildProxyUrl(row: any): string {
+  if (!canCopyProxyUrl(row)) return ''
   if (isManagedProxy(row)) {
     const localURL = row.runtime_status?.local_url || ''
     if (!localURL) return ''
@@ -2650,6 +2681,7 @@ function buildProxyUrl(row: any): string {
 }
 
 function getCopyFormats(row: any) {
+  if (!canCopyProxyUrl(row)) return []
   if (isManagedProxy(row)) {
     const localURL = row.runtime_status?.local_url || ''
     const nodeURL = buildProxyUrl(row)
@@ -2678,11 +2710,19 @@ function copyProxyUrl(row: any) {
   copyMenuProxyId.value = null
 }
 
-function toggleCopyMenu(id: number) {
-  copyMenuProxyId.value = copyMenuProxyId.value === id ? null : id
+function toggleCopyMenu(row: Proxy) {
+  if (!canCopyProxyUrl(row)) {
+    copyMenuProxyId.value = null
+    return
+  }
+  copyMenuProxyId.value = copyMenuProxyId.value === row.id ? null : row.id
 }
 
-function copyFormat(value: string) {
+function copyFormat(row: Proxy, value: string) {
+  if (!canCopyProxyUrl(row)) {
+    copyMenuProxyId.value = null
+    return
+  }
   copyToClipboard(value, t('admin.proxies.urlCopied'))
   copyMenuProxyId.value = null
 }

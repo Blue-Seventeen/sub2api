@@ -74,6 +74,10 @@ export default {
       dataExported: 'Data exported successfully',
       dataExportFailed: 'Failed to export data',
       copyProxyUrl: 'Copy Proxy URL',
+      clash: {
+        nodeMissing: 'Node missing from subscription',
+        nodeDisabled: 'Node disabled'
+      },
       urlCopied: 'Proxy URL copied',
       searchProxies: 'Search proxies...',
       allProtocols: 'All Protocols',

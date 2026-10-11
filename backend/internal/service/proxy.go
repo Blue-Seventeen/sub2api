@@ -29,6 +29,8 @@ type Proxy struct {
 	SourceType     string
 	SubscriptionID *int64
 	RuntimeStatus  *ManagedProxyRuntimeStatus
+	NodeStatus     string
+	nodeUpdatedAt  time.Time
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 	ExpiresAt      *time.Time

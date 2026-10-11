@@ -126,19 +126,21 @@ type ManagedProxyRuntime struct {
 }
 
 type managedProxyRuntimeEntry struct {
-	subscriptionID  int64
-	status          string
-	port            int
-	revision        int64
-	lastError       string
-	startedAt       *time.Time
-	updatedAt       time.Time
-	process         managedProxyProcess
-	instanceDir     string
-	configPath      string
-	reloadRequested bool
-	startInProgress bool
-	startGeneration int64
+	subscriptionID    int64
+	status            string
+	port              int
+	revision          int64
+	lastError         string
+	startedAt         *time.Time
+	updatedAt         time.Time
+	process           managedProxyProcess
+	instanceDir       string
+	configPath        string
+	reloadRequested   bool
+	startInProgress   bool
+	startGeneration   int64
+	installedNodeAuth map[int64]managedProxyInstalledAuth
+	nodeProxyIDs      map[int64]struct{}
 }
 
 func NewManagedProxyRuntime(cfg *config.Config, repo ProxySubscriptionRepository) *ManagedProxyRuntime {
@@ -474,6 +476,8 @@ func (r *ManagedProxyRuntime) startEntry(parent context.Context, sub ProxySubscr
 	generation := entry.startGeneration
 	entry.status = ManagedProxyRuntimeStatusStarting
 	entry.port = 0
+	entry.installedNodeAuth = nil
+	entry.nodeProxyIDs = nil
 	entry.revision = sub.Revision
 	entry.lastError = ""
 	entry.startedAt = nil
@@ -562,6 +566,7 @@ func (r *ManagedProxyRuntime) startEntry(parent context.Context, sub ProxySubscr
 		return nil
 	}
 	pendingReload := entry.reloadRequested
+	entry.installedNodeAuth, entry.nodeProxyIDs = managedProxyInstalledNodes(sub)
 	entry.status = ManagedProxyRuntimeStatusRunning
 	entry.port = port
 	entry.revision = sub.Revision
@@ -606,6 +611,8 @@ func (r *ManagedProxyRuntime) watchProcess(subscriptionID int64, process managed
 	if entry != nil && entry.process == process {
 		entry.process = nil
 		entry.port = 0
+		entry.installedNodeAuth = nil
+		entry.nodeProxyIDs = nil
 		entry.startInProgress = false
 		entry.updatedAt = time.Now()
 		if err != nil {
@@ -655,6 +662,8 @@ func (r *ManagedProxyRuntime) stopEntry(ctx context.Context, subscriptionID int6
 	process := entry.process
 	entry.process = nil
 	entry.port = 0
+	entry.installedNodeAuth = nil
+	entry.nodeProxyIDs = nil
 	entry.status = ManagedProxyRuntimeStatusStopped
 	entry.startInProgress = false
 	entry.startGeneration++
@@ -677,6 +686,8 @@ func (r *ManagedProxyRuntime) setEntryError(subscriptionID int64, message string
 	}
 	entry.status = ManagedProxyRuntimeStatusError
 	entry.port = 0
+	entry.installedNodeAuth = nil
+	entry.nodeProxyIDs = nil
 	entry.startInProgress = false
 	entry.lastError = sanitizeManagedProxyError(errors.New(message))
 	entry.updatedAt = time.Now()
@@ -692,6 +703,8 @@ func (r *ManagedProxyRuntime) setEntryStartError(subscriptionID, generation int6
 	}
 	entry.status = ManagedProxyRuntimeStatusError
 	entry.port = 0
+	entry.installedNodeAuth = nil
+	entry.nodeProxyIDs = nil
 	entry.startInProgress = false
 	entry.lastError = sanitizeManagedProxyError(errors.New(message))
 	entry.updatedAt = time.Now()

@@ -23,7 +23,9 @@ func (s *adminServiceImpl) ListProxies(ctx context.Context, page, pageSize int, 
 	if err != nil {
 		return nil, 0, err
 	}
-	s.attachManagedProxyRuntimeStatus(proxies)
+	if err := s.attachManagedProxyRuntimeStatus(ctx, proxies); err != nil {
+		return nil, 0, err
+	}
 	return proxies, result.Total, nil
 }
 
@@ -33,8 +35,10 @@ func (s *adminServiceImpl) ListProxiesWithAccountCount(ctx context.Context, page
 	if err != nil {
 		return nil, 0, err
 	}
+	if err := s.attachManagedProxyRuntimeStatusToCounts(ctx, proxies); err != nil {
+		return nil, 0, err
+	}
 	s.attachProxyLatency(ctx, proxies)
-	s.attachManagedProxyRuntimeStatusToCounts(proxies)
 	return proxies, result.Total, nil
 }
 
@@ -43,8 +47,16 @@ func (s *adminServiceImpl) GetAllProxies(ctx context.Context) ([]Proxy, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.attachManagedProxyRuntimeStatus(proxies)
-	return proxies, nil
+	if err := s.attachManagedProxyRuntimeStatus(ctx, proxies); err != nil {
+		return nil, err
+	}
+	available := proxies[:0]
+	for _, proxy := range proxies {
+		if !isManagedProxyNodePickerUnavailable(&proxy) {
+			available = append(available, proxy)
+		}
+	}
+	return available, nil
 }
 
 func (s *adminServiceImpl) GetAllProxiesWithAccountCount(ctx context.Context) ([]ProxyWithAccountCount, error) {
@@ -52,9 +64,17 @@ func (s *adminServiceImpl) GetAllProxiesWithAccountCount(ctx context.Context) ([
 	if err != nil {
 		return nil, err
 	}
-	s.attachProxyLatency(ctx, proxies)
-	s.attachManagedProxyRuntimeStatusToCounts(proxies)
-	return proxies, nil
+	if err := s.attachManagedProxyRuntimeStatusToCounts(ctx, proxies); err != nil {
+		return nil, err
+	}
+	available := proxies[:0]
+	for _, proxy := range proxies {
+		if !isManagedProxyNodePickerUnavailable(&proxy.Proxy) {
+			available = append(available, proxy)
+		}
+	}
+	s.attachProxyLatency(ctx, available)
+	return available, nil
 }
 
 func (s *adminServiceImpl) GetProxy(ctx context.Context, id int64) (*Proxy, error) {
@@ -63,6 +83,9 @@ func (s *adminServiceImpl) GetProxy(ctx context.Context, id int64) (*Proxy, erro
 		return nil, err
 	}
 	s.attachManagedProxyRuntimeStatusToProxy(proxy)
+	if err := s.attachManagedProxyNodeStates(ctx, []*Proxy{proxy}); err != nil {
+		return nil, err
+	}
 	return proxy, nil
 }
 
@@ -86,13 +109,22 @@ func (s *adminServiceImpl) GetProxySnapshots(ctx context.Context, ids []int64) (
 			AccountCount: count,
 		})
 	}
+	if err := s.attachManagedProxyRuntimeStatusToCounts(ctx, out); err != nil {
+		return nil, err
+	}
 	s.attachProxyLatency(ctx, out)
-	s.attachManagedProxyRuntimeStatusToCounts(out)
 	return out, nil
 }
 
 func (s *adminServiceImpl) GetProxiesByIDs(ctx context.Context, ids []int64) ([]Proxy, error) {
-	return s.proxyRepo.ListByIDs(ctx, ids)
+	proxies, err := s.proxyRepo.ListByIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.attachManagedProxyRuntimeStatus(ctx, proxies); err != nil {
+		return nil, err
+	}
+	return proxies, nil
 }
 
 func (s *adminServiceImpl) CreateProxy(ctx context.Context, input *CreateProxyInput) (*Proxy, error) {
@@ -193,8 +225,21 @@ func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *Upd
 		proxy.ExpiryWarnDays = *input.ExpiryWarnDays
 	}
 
-	if err := s.proxyRepo.Update(ctx, proxy); err != nil {
-		return nil, err
+	var updateErr error
+	if updater, ok := s.proxyRepo.(proxyNodeStatusUpdater); ok && proxy.IsManagedMihomoSubscription() {
+		var status *string
+		if input.Status != "" {
+			status = &input.Status
+		}
+		updateErr = updater.UpdateWithNodeStatus(ctx, proxy, status)
+	} else {
+		updateErr = s.proxyRepo.Update(ctx, proxy)
+	}
+	if updateErr != nil {
+		return nil, updateErr
+	}
+	if proxy.IsManagedMihomoSubscription() && input.Status != "" {
+		s.reloadManagedProxy(*proxy.SubscriptionID)
 	}
 	return proxy, nil
 }
@@ -444,15 +489,28 @@ func (s *adminServiceImpl) GetProxySubscriptionRuntimeStatus(ctx context.Context
 	return &status, nil
 }
 
-func (s *adminServiceImpl) TestProxy(ctx context.Context, id int64) (*ProxyTestResult, error) {
+func (s *adminServiceImpl) TestProxy(ctx context.Context, id int64) (out *ProxyTestResult, resultErr error) {
 	proxy, err := s.proxyRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 
-	proxyURL, err := s.resolveProxyURL(ctx, proxy)
+	epoch, err := s.captureProxyNodeEpoch(ctx, proxy)
 	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err := s.validateProxyNodeEpoch(ctx, id, epoch, proxy.NodeStatus); err != nil {
+			out, resultErr = nil, err
+		}
+	}()
+	proxyURL, err := s.resolveProxyMeasurementURL(ctx, proxy, epoch)
+	if err != nil {
+		if errors.Is(err, ErrManagedProxyConfigurationChanged) {
+			return nil, err
+		}
 		s.saveProxyLatency(ctx, id, &ProxyLatencyInfo{
+			NodeEpoch: epoch,
 			Success:   false,
 			Message:   err.Error(),
 			UpdatedAt: time.Now(),
@@ -465,6 +523,7 @@ func (s *adminServiceImpl) TestProxy(ctx context.Context, id int64) (*ProxyTestR
 	exitInfo, latencyMs, err := s.proxyProber.ProbeProxy(ctx, proxyURL)
 	if err != nil {
 		s.saveProxyLatency(ctx, id, &ProxyLatencyInfo{
+			NodeEpoch: epoch,
 			Success:   false,
 			Message:   err.Error(),
 			UpdatedAt: time.Now(),
@@ -477,6 +536,7 @@ func (s *adminServiceImpl) TestProxy(ctx context.Context, id int64) (*ProxyTestR
 
 	latency := latencyMs
 	s.saveProxyLatency(ctx, id, &ProxyLatencyInfo{
+		NodeEpoch:   epoch,
 		Success:     true,
 		LatencyMs:   &latency,
 		Message:     "Proxy is accessible",
@@ -499,13 +559,23 @@ func (s *adminServiceImpl) TestProxy(ctx context.Context, id int64) (*ProxyTestR
 	}, nil
 }
 
-func (s *adminServiceImpl) CheckProxyQuality(ctx context.Context, id int64) (*ProxyQualityCheckResult, error) {
+func (s *adminServiceImpl) CheckProxyQuality(ctx context.Context, id int64) (out *ProxyQualityCheckResult, resultErr error) {
 	proxy, err := s.proxyRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 
+	epoch, err := s.captureProxyNodeEpoch(ctx, proxy)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err := s.validateProxyNodeEpoch(ctx, id, epoch, proxy.NodeStatus); err != nil {
+			out, resultErr = nil, err
+		}
+	}()
 	result := &ProxyQualityCheckResult{
+		nodeEpoch: epoch,
 		ProxyID:   id,
 		Score:     100,
 		Grade:     "A",
@@ -513,8 +583,11 @@ func (s *adminServiceImpl) CheckProxyQuality(ctx context.Context, id int64) (*Pr
 		Items:     make([]ProxyQualityCheckItem, 0, len(proxyQualityTargets)+1),
 	}
 
-	proxyURL, resolveErr := s.resolveProxyURL(ctx, proxy)
+	proxyURL, resolveErr := s.resolveProxyMeasurementURL(ctx, proxy, epoch)
 	if resolveErr != nil {
+		if errors.Is(resolveErr, ErrManagedProxyConfigurationChanged) {
+			return nil, resolveErr
+		}
 		result.Items = append(result.Items, ProxyQualityCheckItem{
 			Target:  "base_connectivity",
 			Status:  "fail",
@@ -751,6 +824,8 @@ func (s *adminServiceImpl) saveProxyQualitySnapshot(ctx context.Context, proxyID
 	score := result.Score
 	checkedAt := result.CheckedAt
 	info := &ProxyLatencyInfo{
+		NodeEpoch:        result.nodeEpoch,
+		QualityNodeEpoch: result.nodeEpoch,
 		Success:          proxyQualityBaseConnectivityPass(result),
 		Message:          result.Summary,
 		QualityStatus:    proxyQualityOverallStatus(result),
@@ -775,6 +850,24 @@ func (s *adminServiceImpl) saveProxyQualitySnapshot(ctx context.Context, proxyID
 	s.saveProxyLatency(ctx, proxyID, info)
 }
 
+func (s *adminServiceImpl) resolveProxyMeasurementURL(ctx context.Context, proxy *Proxy, epoch *time.Time) (string, error) {
+	resolver := s.managedProxyResolver
+	if resolver == nil {
+		resolver = GetDefaultManagedProxyResolver()
+	}
+	if measurementResolver, ok := resolver.(managedProxyMeasurementResolver); ok && proxy.IsManagedMihomoSubscription() {
+		value, installedEpoch, err := measurementResolver.ResolveProxyURLForMeasurement(ctx, proxy)
+		if err != nil {
+			return "", err
+		}
+		if epoch != nil && (installedEpoch == nil || !epoch.Equal(*installedEpoch)) {
+			return "", ErrManagedProxyConfigurationChanged
+		}
+		return value, nil
+	}
+	return s.resolveProxyURL(ctx, proxy)
+}
+
 func (s *adminServiceImpl) resolveProxyURL(ctx context.Context, proxy *Proxy) (string, error) {
 	if proxy == nil {
 		return "", nil
@@ -792,9 +885,9 @@ func (s *adminServiceImpl) resolveProxyURL(ctx context.Context, proxy *Proxy) (s
 	if resolver == nil {
 		return "", errors.New("managed proxy runtime is unavailable")
 	}
-	proxyURL, err := resolver.ResolveProxyURL(ctx, *proxy.SubscriptionID)
+	proxyURL, err := resolveManagedProxyURL(ctx, proxy, resolver)
 	if err == nil && strings.TrimSpace(proxyURL) != "" {
-		return managedProxyURLForProxy(proxyURL, proxy), nil
+		return proxyURL, nil
 	}
 	status := resolver.GetStatus(*proxy.SubscriptionID)
 	return "", managedProxyRuntimeResolveError(status, err)
@@ -803,6 +896,8 @@ func (s *adminServiceImpl) resolveProxyURL(ctx context.Context, proxy *Proxy) (s
 func managedProxyRuntimeResolveError(status ManagedProxyRuntimeStatus, err error) error {
 	message := "managed proxy runtime is not ready"
 	switch {
+	case errors.Is(err, ErrManagedProxyNodeUnavailable):
+		message = "managed proxy node is unavailable in the current runtime"
 	case !status.Enabled || status.Status == ManagedProxyRuntimeStatusDisabled:
 		message = "managed proxy runtime is disabled; set managed_proxy.enabled=true or MANAGED_PROXY_ENABLED=true and restart Sub2API"
 	case strings.TrimSpace(status.Status) != "":
@@ -839,16 +934,22 @@ func prepareProxySubscriptionNodes(nodes []ProxySubscriptionNode) error {
 	return nil
 }
 
-func (s *adminServiceImpl) attachManagedProxyRuntimeStatus(proxies []Proxy) {
+func (s *adminServiceImpl) attachManagedProxyRuntimeStatus(ctx context.Context, proxies []Proxy) error {
+	pointers := make([]*Proxy, len(proxies))
 	for i := range proxies {
 		s.attachManagedProxyRuntimeStatusToProxy(&proxies[i])
+		pointers[i] = &proxies[i]
 	}
+	return s.attachManagedProxyNodeStates(ctx, pointers)
 }
 
-func (s *adminServiceImpl) attachManagedProxyRuntimeStatusToCounts(proxies []ProxyWithAccountCount) {
+func (s *adminServiceImpl) attachManagedProxyRuntimeStatusToCounts(ctx context.Context, proxies []ProxyWithAccountCount) error {
+	pointers := make([]*Proxy, len(proxies))
 	for i := range proxies {
 		s.attachManagedProxyRuntimeStatusToProxy(&proxies[i].Proxy)
+		pointers[i] = &proxies[i].Proxy
 	}
+	return s.attachManagedProxyNodeStates(ctx, pointers)
 }
 
 func (s *adminServiceImpl) attachManagedProxyRuntimeStatusToProxy(proxy *Proxy) {
@@ -880,9 +981,17 @@ func (s *adminServiceImpl) probeProxyLatency(ctx context.Context, proxy *Proxy) 
 	if s.proxyProber == nil || proxy == nil {
 		return
 	}
-	proxyURL, err := s.resolveProxyURL(ctx, proxy)
+	epoch, err := s.captureProxyNodeEpoch(ctx, proxy)
 	if err != nil {
+		return
+	}
+	proxyURL, err := s.resolveProxyMeasurementURL(ctx, proxy, epoch)
+	if err != nil {
+		if errors.Is(err, ErrManagedProxyConfigurationChanged) {
+			return
+		}
 		s.saveProxyLatency(ctx, proxy.ID, &ProxyLatencyInfo{
+			NodeEpoch: epoch,
 			Success:   false,
 			Message:   err.Error(),
 			UpdatedAt: time.Now(),
@@ -892,6 +1001,7 @@ func (s *adminServiceImpl) probeProxyLatency(ctx context.Context, proxy *Proxy) 
 	exitInfo, latencyMs, err := s.proxyProber.ProbeProxy(ctx, proxyURL)
 	if err != nil {
 		s.saveProxyLatency(ctx, proxy.ID, &ProxyLatencyInfo{
+			NodeEpoch: epoch,
 			Success:   false,
 			Message:   err.Error(),
 			UpdatedAt: time.Now(),
@@ -901,6 +1011,7 @@ func (s *adminServiceImpl) probeProxyLatency(ctx context.Context, proxy *Proxy) 
 
 	latency := latencyMs
 	s.saveProxyLatency(ctx, proxy.ID, &ProxyLatencyInfo{
+		NodeEpoch:   epoch,
 		Success:     true,
 		LatencyMs:   &latency,
 		Message:     "Proxy is accessible",
@@ -914,6 +1025,9 @@ func (s *adminServiceImpl) probeProxyLatency(ctx context.Context, proxy *Proxy) 
 }
 
 func (s *adminServiceImpl) attachProxyLatency(ctx context.Context, proxies []ProxyWithAccountCount) {
+	for i := range proxies {
+		clearProxyMeasurements(&proxies[i])
+	}
 	if s.proxyLatencyCache == nil || len(proxies) == 0 {
 		return
 	}
@@ -931,21 +1045,30 @@ func (s *adminServiceImpl) attachProxyLatency(ctx context.Context, proxies []Pro
 
 	for i := range proxies {
 		info := latencies[proxies[i].ID]
-		if info == nil {
+		if info == nil || isManagedProxyNodeUnavailable(&proxies[i].Proxy) {
 			continue
 		}
-		if info.Success {
-			proxies[i].LatencyStatus = "success"
-			proxies[i].LatencyMs = info.LatencyMs
-		} else {
-			proxies[i].LatencyStatus = "failed"
+		latencyCurrent := proxies[i].nodeUpdatedAt.IsZero() || (info.NodeEpoch != nil && proxies[i].nodeUpdatedAt.Equal(*info.NodeEpoch))
+		if latencyCurrent {
+			if info.Success {
+				proxies[i].LatencyStatus = "success"
+				proxies[i].LatencyMs = info.LatencyMs
+			} else {
+				proxies[i].LatencyStatus = "failed"
+			}
+			proxies[i].LatencyMessage = info.Message
+			proxies[i].IPAddress = info.IPAddress
+			proxies[i].Country = info.Country
+			proxies[i].CountryCode = info.CountryCode
+			proxies[i].Region = info.Region
+			proxies[i].City = info.City
 		}
-		proxies[i].LatencyMessage = info.Message
-		proxies[i].IPAddress = info.IPAddress
-		proxies[i].Country = info.Country
-		proxies[i].CountryCode = info.CountryCode
-		proxies[i].Region = info.Region
-		proxies[i].City = info.City
+		qualityCurrent := proxies[i].nodeUpdatedAt.IsZero() || (info.QualityNodeEpoch != nil && proxies[i].nodeUpdatedAt.Equal(*info.QualityNodeEpoch))
+		// A legacy start/completion timestamp cannot identify an installed node
+		// configuration. Node-bound caches require an independently captured epoch.
+		if !qualityCurrent {
+			continue
+		}
 		proxies[i].QualityStatus = info.QualityStatus
 		proxies[i].QualityScore = info.QualityScore
 		proxies[i].QualityGrade = info.QualityGrade
@@ -956,6 +1079,9 @@ func (s *adminServiceImpl) attachProxyLatency(ctx context.Context, proxies []Pro
 
 func (s *adminServiceImpl) saveProxyLatency(ctx context.Context, proxyID int64, info *ProxyLatencyInfo) {
 	if s.proxyLatencyCache == nil || info == nil {
+		return
+	}
+	if err := s.validateProxyNodeEpoch(ctx, proxyID, info.NodeEpoch); err != nil {
 		return
 	}
 
@@ -974,6 +1100,7 @@ func (s *adminServiceImpl) saveProxyLatency(ctx context.Context, proxyID int64, 
 				merged.QualitySummary = existing.QualitySummary
 				merged.QualityCheckedAt = existing.QualityCheckedAt
 				merged.QualityCFRay = existing.QualityCFRay
+				merged.QualityNodeEpoch = existing.QualityNodeEpoch
 			}
 		}
 	}
