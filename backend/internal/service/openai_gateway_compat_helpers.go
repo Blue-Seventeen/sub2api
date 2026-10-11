@@ -65,7 +65,7 @@ func shouldForwardOpenAIResponsesViaRawChatCompletions(account *Account) bool {
 	if account.routesByModel() {
 		return false
 	}
-	if account.IsCNProvider() {
+	if account.RoutesProtocolByInbound() {
 		switch account.GetAPIProtocol() {
 		case APIProtocolChatCompletions:
 			return true

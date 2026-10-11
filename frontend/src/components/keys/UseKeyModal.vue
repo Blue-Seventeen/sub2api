@@ -1292,7 +1292,10 @@ function generateRoutedCodexFiles(
     openrouter: 'OpenRouter',
     suno: 'Suno',
     kling: 'Kling',
-    midjourney: 'Midjourney'
+    midjourney: 'Midjourney',
+    typesafe: 'TypeSafe / Jev',
+    command_code: 'Command Code',
+    cline: 'Cline'
   }
   const label = labels[platform]
   const envContent = isWindows

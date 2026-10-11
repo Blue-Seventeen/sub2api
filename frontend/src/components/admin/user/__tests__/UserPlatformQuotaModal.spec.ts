@@ -102,25 +102,23 @@ describe('UserPlatformQuotaModal', () => {
     expect(apiMocks.getPlatformQuotas).toHaveBeenCalledWith(99)
   })
 
-  it('renders all supported platforms with empty limits', async () => {
+  it('renders all catalog platforms with empty limits', async () => {
     const w = await mountAndOpen()
-    const html = w.html()
-    expect(html).toContain('anthropic')
-    expect(html).toContain('openai')
-    expect(html).toContain('gemini')
-    expect(html).toContain('antigravity')
-    expect(html).toContain('grok')
-    expect(html).toContain('moonshot')
+    const rows = w.findAll('tbody tr')
+    expect(rows.map(row => row.find('td').text())).toEqual(ALLOWED_QUOTA_PLATFORMS)
+    for (const row of rows) {
+      const inputs = row.findAll('input[type=number]')
+      expect(inputs).toHaveLength(3)
+      expect(inputs.map(input => input.element.value)).toEqual(['', '', ''])
+    }
+    w.unmount()
   })
 
-  it.each(['kimi', 'zhipu', 'deepseek', 'minimax', 'opencode_go'] as const)(
+  it.each(ALLOWED_QUOTA_PLATFORMS)(
     'saves edits to %s without erasing existing platform limits', async (platform) => {
-      const existing: PlatformQuotaUpdateItem[] = [
-        { platform: 'openai', daily_limit_usd: 10, weekly_limit_usd: 20, monthly_limit_usd: 100 },
-        ...(['kimi', 'zhipu', 'deepseek', 'minimax', 'opencode_go'] as const).map(p => ({
+      const existing: PlatformQuotaUpdateItem[] = ALLOWED_QUOTA_PLATFORMS.map(p => ({
           platform: p, daily_limit_usd: 0, weekly_limit_usd: null, monthly_limit_usd: 50,
-        })),
-      ]
+      }))
       apiMocks.getPlatformQuotas.mockResolvedValueOnce({ platform_quotas: existing })
       const w = await mountAndOpen()
       const row = w.findAll('tbody tr').find(r => r.find('td').text() === platform)!
@@ -149,13 +147,12 @@ describe('UserPlatformQuotaModal', () => {
     })
     const w = await mountAndOpen()
     const inputs = w.findAll('input[type=number]')
-    // 5 platforms × 3 windows = 15 inputs
     expect(inputs.length).toBe(ALLOWED_QUOTA_PLATFORMS.length * 3)
     // 第一个 input 是 anthropic.daily = 10
     expect((inputs[0].element as HTMLInputElement).value).toBe('10')
   })
 
-  it('保存提交完整 10 platform payload', async () => {
+  it('保存提交完整 catalog platform payload', async () => {
     apiMocks.getPlatformQuotas.mockResolvedValueOnce({
       platform_quotas: [
         { platform: 'openai', daily_limit_usd: null, weekly_limit_usd: 20, monthly_limit_usd: null,

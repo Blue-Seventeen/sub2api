@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/requestmodel"
@@ -18,13 +19,7 @@ import (
 )
 
 func isOpenAIGatewayTextPlatform(platform string) bool {
-	switch platform {
-	case service.PlatformOpenAI, service.PlatformGrok, service.PlatformKimi,
-		service.PlatformZhipu, service.PlatformDeepseek, service.PlatformMiniMax, service.PlatformOpenCodeGo:
-		return true
-	default:
-		return false
-	}
+	return domain.UsesOpenAIGateway(platform)
 }
 
 // RegisterGatewayRoutes 注册 API 网关路由（Claude/OpenAI/Gemini 兼容）
@@ -78,20 +73,18 @@ func RegisterGatewayRoutes(
 	}
 
 	isOpenAIResponsesCompatibleGatewayPlatform := func(c *gin.Context) bool {
-		return isOpenAIGatewayTextPlatform(getGroupPlatform(c))
+		platform := getGroupPlatform(c)
+		return domain.UsesOpenAIGateway(platform) || service.IsCompatiblePlatform(platform)
 	}
 	countTokensHandler := func(c *gin.Context) {
-		switch getGroupPlatform(c) {
-		case service.PlatformOpenAI, service.PlatformKimi, service.PlatformZhipu,
-			service.PlatformDeepseek, service.PlatformMiniMax, service.PlatformOpenCodeGo:
-			h.OpenAIGateway.CountTokens(c)
-		case service.PlatformGrok:
+		switch platform := getGroupPlatform(c); {
+		case platform == service.PlatformGrok:
 			h.OpenAIGateway.GrokCountTokens(c)
+		case domain.UsesOpenAIGateway(platform):
+			h.OpenAIGateway.CountTokens(c)
+		case service.IsCompatiblePlatform(platform):
+			h.CompatibleGateway.CountTokens(c)
 		default:
-			if service.IsCompatiblePlatform(getGroupPlatform(c)) {
-				h.CompatibleGateway.CountTokens(c)
-				return
-			}
 			h.Gateway.CountTokens(c)
 		}
 	}
@@ -296,6 +289,7 @@ func RegisterGatewayRoutes(
 			}
 			h.Gateway.Messages(c)
 		})
+		gateway.POST("/systemone", textBodyLimit, h.Gateway.SystemOne)
 		// /v1/messages/count_tokens: OpenAI bridges upstream, Grok estimates
 		// locally, and Anthropic-compatible platforms retain their existing path.
 		gateway.POST("/messages/count_tokens", countTokensHandler)

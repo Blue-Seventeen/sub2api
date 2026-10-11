@@ -68,11 +68,20 @@ func mergeOpenAIUsageNonZero(dst *OpenAIUsage, src OpenAIUsage) {
 	if src.ImageInputTokens > 0 {
 		dst.ImageInputTokens = src.ImageInputTokens
 	}
+	if src.ImageCacheReadTokens > 0 {
+		dst.ImageCacheReadTokens = src.ImageCacheReadTokens
+	}
 	if src.OutputTokens > 0 {
 		dst.OutputTokens = src.OutputTokens
 	}
 	if src.CacheCreationInputTokens > 0 {
 		dst.CacheCreationInputTokens = src.CacheCreationInputTokens
+	}
+	if src.CacheCreation5mTokens > 0 {
+		dst.CacheCreation5mTokens = src.CacheCreation5mTokens
+	}
+	if src.CacheCreation1hTokens > 0 {
+		dst.CacheCreation1hTokens = src.CacheCreation1hTokens
 	}
 	if src.CacheReadInputTokens > 0 {
 		dst.CacheReadInputTokens = src.CacheReadInputTokens
@@ -836,12 +845,21 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			if startsClientOutput && !openAIStreamEventTypeIsTerminal(eventType) {
 				responsesSemanticOutputSeen = true
 			}
-			if account != nil && account.Platform == PlatformOpenAI &&
-				(eventType == "response.completed" || eventType == "response.done") && !sawFailedEvent &&
-				!responsesSemanticOutputSeen && !clientOutputStarted && openAIResponsesCompletedEventIsEmpty(dataBytes, usage) {
-				emptyCompletedFailoverPending = true
-				emptyCompletedFailoverPayload = append(emptyCompletedFailoverPayload[:0], dataBytes...)
-				emptyCompletedFailoverMessage = "OpenAI response completed without output or usage"
+			// OpenAI Responses streams that terminate with an empty
+			// response.completed (no output, no usage, no error, nothing sent
+			// to the client) are silent upstream refusals: fail over instead of
+			// recording a successful 0/0 usage turn (issue #5009). Grok
+			// subscriptions behind vendor gateways show the same silent-refusal
+			// shape on /v1/responses (forwardGrokResponses reaches this same
+			// handler), so cover PlatformGrok too — the passthrough-path guard
+			// is already unconditional.
+			if account != nil && (account.Platform == PlatformOpenAI || account.Platform == PlatformGrok) &&
+				(eventType == "response.completed" || eventType == "response.done") &&
+				!sawFailedEvent && !responsesSemanticOutputSeen && !clientOutputStarted &&
+				openAIResponsesCompletedEventIsEmpty(dataBytes, usage) {
+				sawTerminalEvent = true
+				streamEarlyErr = newOpenAIResponsesEmptyCompletedFailoverError(c, account, upstreamRequestID)
+				return
 			}
 
 			// 写入客户端（客户端断开后继续 drain 上游）
@@ -939,9 +957,11 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			if streamEarlyErr != nil {
 				return resultWithUsage(), streamEarlyErr
 			}
-			// 即使已看到 terminal event，也要继续读取到上游 EOF。Codex/部分
-			// ChatGPT Responses 上游会在终态后完成 SSE/HTTP 收尾；提前关闭 body
-			// 会让客户端把成功响应误判为断流并重放同一 turn。
+			// A complete terminal settles the stream; a pending Codex bare error
+			// still needs its authoritative response.failed or successful terminal.
+			if sawTerminalEvent && !eventInProgress && (!codexFailureTerminal || !sawBareError) {
+				return finalizeStream()
+			}
 		}
 		if result, err, done := handleScanErr(documentScanner.Err()); done {
 			return result, err
@@ -950,21 +970,37 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	}
 
 	type scanEvent struct {
-		line string
-		err  error
+		line      string
+		err       error
+		processed chan struct{}
 	}
-	// 独立 goroutine 读取上游，避免读取阻塞影响 keepalive/超时处理。下游
-	// flush 可能暂时阻塞；保留一个有界的读取队列，避免反压把 SSE 事件边界
-	// 卡在 flush 内，同时仍限制上游读取端的内存占用。
-	events := make(chan scanEvent, openAIDefaultStreamQueueSize)
+	// Guarded reads wait for event processing so the scanner cannot outrun
+	// the first-output boundary or retain an oversized pre-output queue.
+	events := make(chan scanEvent, openAIFirstOutputEventQueueSize(guardFirstOutput))
 	done := make(chan struct{})
 	sendEvent := func(ev scanEvent) bool {
+		if firstOutputScanGuard.Load() {
+			ev.processed = make(chan struct{})
+		}
 		select {
 		case events <- ev:
 		case <-done:
 			return false
 		}
-		return true
+		if ev.processed == nil {
+			return true
+		}
+		select {
+		case <-ev.processed:
+			return true
+		case <-done:
+			return false
+		}
+	}
+	markEventProcessed := func(ev scanEvent) {
+		if ev.processed != nil {
+			close(ev.processed)
+		}
 	}
 	var lastReadAt int64
 	atomic.StoreInt64(&lastReadAt, time.Now().UnixNano())
@@ -995,19 +1031,20 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				return finalizeStream()
 			}
 			if result, err, done := handleScanErr(ev.err); done {
+				markEventProcessed(ev)
 				return result, err
 			}
 			processSSELine(ev.line, len(events) == 0)
+			markEventProcessed(ev)
 			if streamEarlyErr != nil {
 				return resultWithUsage(), streamEarlyErr
 			}
-			// 不在 terminal event 后提前关闭上游 body。必须让 SSE/HTTP 正常 EOF
-			// 收尾，避免 Codex 将被截断的成功响应当作可重试断流。
+			if sawTerminalEvent && !eventInProgress && (!codexFailureTerminal || !sawBareError) {
+				_ = resp.Body.Close()
+				return finalizeStream()
+			}
 
 		case <-intervalCh:
-			if len(events) > 0 {
-				continue
-			}
 			if failureDelivered {
 				return resultWithUsage(), fmt.Errorf("upstream response failed: %s", failedMessage)
 			}
@@ -1031,18 +1068,18 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			return resultWithUsage(), fmt.Errorf("stream data interval timeout")
 
 		case <-firstOutputCh:
-			if len(events) > 0 {
-				continue
-			}
 			if firstOutputProgressObserved {
 				stopFirstOutputTimer()
 				continue
 			}
-			if codexFailureTerminal && sawBareError && !sawResponseFailed {
+			if codexFailureTerminal && sawBareError && !sawResponseFailed && len(events) == 0 {
 				_ = resp.Body.Close()
 				return finalizeStream()
 			}
 			_ = resp.Body.Close()
+			for ev := range events {
+				markEventProcessed(ev)
+			}
 			return resultWithUsage(), s.newOpenAIFirstOutputTimeoutError(
 				ctx, c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account),
 				startTime, originalModel, reasoningEffort,
@@ -1322,12 +1359,9 @@ func (s *OpenAIGatewayService) parseSSEUsageBytesWithType(data []byte, eventType
 		*usage = parsedUsage
 		return
 	}
-	// Some Responses providers attach usage to response.in_progress or another
-	// non-terminal event. Use it only when no usage has been observed yet;
-	// terminal events remain authoritative and replace the complete snapshot.
-	if !openAIUsageHasTokens(usage) {
-		*usage = parsedUsage
-	}
+	// Progressive events can supply different fields. A nonzero terminal
+	// remains authoritative as a complete snapshot, not another merge.
+	mergeOpenAIUsageNonZero(usage, parsedUsage)
 }
 
 func openAIResponsesCompletedEventIsEmpty(data []byte, usage *OpenAIUsage) bool {
@@ -1665,7 +1699,7 @@ func (s *OpenAIGatewayService) handleSSEToJSON(args ...any) (*openaiNonStreaming
 	}
 	finalResponse, ok := extractCodexFinalResponse(bodyText)
 
-	usage := &OpenAIUsage{}
+	usage := s.parseSSEUsageFromBody(bodyText)
 	if ok {
 		if parsedUsage, parsed := extractOpenAIUsageFromJSONBytes(finalResponse); parsed {
 			*usage = parsedUsage
@@ -1701,7 +1735,6 @@ func (s *OpenAIGatewayService) handleSSEToJSON(args ...any) (*openaiNonStreaming
 		}
 		body = restoredBody
 	} else {
-		usage = s.parseSSEUsageFromBody(bodyText)
 		if originalModel != mappedModel {
 			bodyText = s.replaceModelInSSEBody(bodyText, mappedModel, originalModel)
 		}
@@ -2289,8 +2322,8 @@ func extractImageGenerationOutputFromSSEData(data []byte, seen map[string]struct
 
 func (s *OpenAIGatewayService) parseSSEUsageFromBody(body string) *OpenAIUsage {
 	usage := &OpenAIUsage{}
-	forEachOpenAISSEDataPayload(body, func(data []byte) {
-		s.parseSSEUsageBytes(data, usage)
+	forEachOpenAISSEFrame(body, func(eventType string, data []byte) {
+		s.parseSSEUsageBytesWithType(data, eventType, usage)
 	})
 	return usage
 }

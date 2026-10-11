@@ -142,7 +142,7 @@
               ]"
             >
               <PlatformIcon :platform="value" size="xs" />
-              {{ t("admin.groups.platforms." + value) }}
+              {{ t("admin.groups.platforms." + value, platformLabel(value)) }}
             </span>
           </template>
 
@@ -4037,7 +4037,7 @@
                     platformBadgeClass(group.platform),
                   ]"
                 >
-                  {{ t("admin.groups.platforms." + group.platform) }}
+                  {{ t("admin.groups.platforms." + group.platform, platformLabel(group.platform)) }}
                 </span>
               </div>
             </div>
@@ -4931,10 +4931,12 @@ const exclusiveOptions = computed(() => [
 const platformDisplayName = (platform: string) => platformLabel(platform, t);
 type VisibleGroupPlatform = GroupPlatform;
 type PlatformSelectOption = { value: VisibleGroupPlatform; label: string };
-const groupPlatformValues: VisibleGroupPlatform[] = [...GROUP_PLATFORM_OPTIONS].map(({ value }) => value);
+const groupPlatformValues = computed<VisibleGroupPlatform[]>(() =>
+  GROUP_PLATFORM_OPTIONS.map(({ value }) => value),
+);
 
 const platformOptions = computed<PlatformSelectOption[]>(() =>
-  groupPlatformValues.map((value) => ({
+  groupPlatformValues.value.map((value) => ({
     value,
     label: platformDisplayName(value),
   })),
@@ -4948,10 +4950,10 @@ interface GroupPlatformSearchOption extends PlatformSelectOption {
   textActiveClass: string;
 }
 
-const createPlatformSearchMeta: Record<
+const createPlatformSearchMeta: Partial<Record<
   VisibleGroupPlatform,
   Omit<GroupPlatformSearchOption, keyof PlatformSelectOption>
-> = {
+>> = {
   anthropic: {
     subtitle: "Claude / Messages",
     searchTerms: ["anthropic", "claude", "messages", "sonnet", "opus", "haiku"],
@@ -5137,6 +5139,27 @@ const createPlatformSearchMeta: Record<
       "bg-slate-50 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
     textActiveClass: "text-slate-600 dark:text-slate-300",
   },
+  typesafe: {
+    subtitle: "TypeSafe / Jev API",
+    searchTerms: ["typesafe", "jev"],
+    activeClass: "border-sky-200 bg-white shadow-sm dark:border-sky-900/50 dark:bg-dark-600",
+    iconActiveClass: "bg-sky-50 text-sky-600 dark:bg-sky-900/30 dark:text-sky-300",
+    textActiveClass: "text-sky-700 dark:text-sky-300",
+  },
+  command_code: {
+    subtitle: "Command Code API",
+    searchTerms: ["command code", "command_code", "coding"],
+    activeClass: "border-neutral-200 bg-white shadow-sm dark:border-neutral-700 dark:bg-dark-600",
+    iconActiveClass: "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300",
+    textActiveClass: "text-neutral-700 dark:text-neutral-300",
+  },
+  cline: {
+    subtitle: "Cline API",
+    searchTerms: ["cline", "coding agent"],
+    activeClass: "border-violet-200 bg-white shadow-sm dark:border-violet-900/50 dark:bg-dark-600",
+    iconActiveClass: "bg-violet-50 text-violet-600 dark:bg-violet-900/30 dark:text-violet-300",
+    textActiveClass: "text-violet-600 dark:text-violet-300",
+  },
 };
 
 const platformFilterOptions = computed(() => [
@@ -5144,10 +5167,12 @@ const platformFilterOptions = computed(() => [
   ...platformOptions.value,
 ]);
 
-const compositeRouteTargetPlatforms: Exclude<GroupPlatform, "composite">[] = [...CONCRETE_PLATFORM_OPTIONS].map(({ value }) => value);
+const compositeRouteTargetPlatforms = computed<Exclude<GroupPlatform, "composite">[]>(() =>
+  CONCRETE_PLATFORM_OPTIONS.map(({ value }) => value),
+);
 
 const compositeRoutePlatformOptions = computed(() =>
-  compositeRouteTargetPlatforms.map((value) => ({
+  compositeRouteTargetPlatforms.value.map((value) => ({
     value,
     label: platformDisplayName(value),
   })),
@@ -5268,12 +5293,12 @@ const invalidRequestFallbackOptionsForEdit = computed(() => {
 
 const canCopyAccountsFromGroup = (targetPlatform: GroupPlatform, sourcePlatform: GroupPlatform) =>
   targetPlatform === "composite"
-    ? compositeRouteTargetPlatforms.includes(sourcePlatform as Exclude<GroupPlatform, "composite">)
+    ? compositeRouteTargetPlatforms.value.includes(sourcePlatform as Exclude<GroupPlatform, "composite">)
     : sourcePlatform === targetPlatform;
 
 const copyAccountsGroupLabel = (g: AdminGroup) => {
   const count = g.account_count || 0;
-  const platform = platformDisplayName(g.platform);
+  const platform = t("admin.groups.platforms." + g.platform, platformLabel(g.platform));
   return `${g.name} - ${platform} (${t("admin.groups.accountsCount", { count })})`;
 };
 
@@ -5554,7 +5579,13 @@ const createPlatformScrollRef = ref<HTMLElement | null>(null);
 const createPlatformSearchOptions = computed<GroupPlatformSearchOption[]>(() =>
   platformOptions.value.map((option) => ({
     ...option,
-    ...createPlatformSearchMeta[option.value],
+    ...(createPlatformSearchMeta[option.value] ?? {
+      subtitle: option.label,
+      searchTerms: [option.value],
+      activeClass: "border-primary-200 bg-white shadow-sm dark:border-primary-900/50 dark:bg-dark-600",
+      iconActiveClass: "bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-300",
+      textActiveClass: "text-primary-700 dark:text-primary-300",
+    }),
   })),
 );
 
@@ -6930,7 +6961,7 @@ const formatCompositeEndpoint = (endpoint: CompositeRouteEndpoint) =>
 
 const formatCompositePlatform = (platform: string) => {
   if (!platform) return "—";
-  return t(`admin.groups.platforms.${platform}`);
+  return t(`admin.groups.platforms.${platform}`, platformLabel(platform));
 };
 
 const compositeRouteSourceLabel = (source: string) => {

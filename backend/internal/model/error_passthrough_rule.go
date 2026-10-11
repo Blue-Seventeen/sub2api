@@ -1,7 +1,11 @@
 // Package model 定义服务层使用的数据模型。
 package model
 
-import "time"
+import (
+	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/domain"
+)
 
 // ErrorPassthroughRule 全局错误透传规则
 // 用于控制上游错误如何返回给客户端
@@ -53,29 +57,9 @@ const (
 	PlatformMidjourney  = "midjourney"
 )
 
-// AllPlatforms 返回所有支持的平台列表
+// AllPlatforms 返回所有支持的平台列表（平台清单，按展示顺序）。
 func AllPlatforms() []string {
-	return []string{
-		PlatformAnthropic,
-		PlatformOpenAI,
-		PlatformGemini,
-		PlatformAntigravity,
-		PlatformGrok,
-		PlatformKimi,
-		PlatformMiniMax,
-		PlatformZhipu,
-		PlatformDeepSeek,
-		PlatformVolcEngine,
-		PlatformAli,
-		PlatformMoonshot,
-		PlatformPerplexity,
-		PlatformMistral,
-		PlatformSiliconFlow,
-		PlatformOpenRouter,
-		PlatformSuno,
-		PlatformKling,
-		PlatformMidjourney,
-	}
+	return domain.ConcretePlatformIDs()
 }
 
 // Validate 验证规则配置的有效性

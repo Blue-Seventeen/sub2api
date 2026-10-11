@@ -1,6 +1,11 @@
 import { defineComponent } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  BUILTIN_PLATFORM_CATALOG,
+  resetPlatformCatalog,
+  setPlatformCatalog,
+} from '@/constants/platformCatalog'
 
 const {
   createAccountMock,
@@ -491,6 +496,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
         { pattern: 'gpt-*', protocol: 'responses' },
         { pattern: 'muse-spark-*', protocol: 'responses' },
         { pattern: 'claude-*', protocol: 'anthropic' },
+        { pattern: 'qwen3.8-max', protocol: 'chat_completions' },
         { pattern: 'qwen*', protocol: 'anthropic' }
       ]
     })
@@ -524,6 +530,189 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
         { pattern: 'qwen*', protocol: 'anthropic' }
       ]
     })
+  })
+
+  describe('providers using the generic form', () => {
+    const serverOnlyProviders = {
+      platforms: [
+        ...BUILTIN_PLATFORM_CATALOG.platforms,
+        {
+          id: 'acme_router',
+          display_name: 'Acme Router',
+          gateway: 'openai',
+          cn_provider: false,
+          multi_protocol: {
+            default_mode: 'standard',
+            routing: 'by_model',
+            modes: [
+              {
+                mode: 'standard',
+                base_urls: {
+                  chat_completions: 'https://api.acme-router.example/provider/v1',
+                  anthropic: 'https://api.acme-router.example/provider',
+                },
+                protocol_rules: [{ pattern: 'claude-*', protocol: 'anthropic' }],
+              },
+              {
+                mode: 'team',
+                base_urls: {
+                  chat_completions: 'https://team.acme-router.example/provider/v1',
+                  anthropic: 'https://team.acme-router.example/provider',
+                },
+                protocol_rules: [{ pattern: 'sonnet-*', protocol: 'anthropic' }],
+              },
+            ],
+          },
+        },
+        {
+          id: 'acme_chat',
+          display_name: 'Acme Chat',
+          gateway: 'openai',
+          cn_provider: false,
+          multi_protocol: {
+            default_mode: 'pass',
+            routing: 'by_inbound',
+            modes: [{ mode: 'pass', base_urls: { chat_completions: 'https://api.acme-chat.example/v1' } }],
+          },
+        },
+      ],
+      composite_precedence: [...BUILTIN_PLATFORM_CATALOG.composite_precedence, 'acme_router', 'acme_chat'],
+    }
+
+    beforeEach(() => {
+      setPlatformCatalog(serverOnlyProviders)
+    })
+
+    afterEach(() => {
+      resetPlatformCatalog()
+    })
+
+    it('creates a by-model provider account from its profile defaults', async () => {
+      const wrapper = mountModal()
+      await wrapper.get('[data-testid="account-platform-acme_router"]').trigger('click')
+      await wrapper.get('form#create-account-form input[type="text"]').setValue('cc')
+      await wrapper.get('form#create-account-form input[type="password"]').setValue('sk-cc')
+
+      await wrapper.get('form#create-account-form').trigger('submit.prevent')
+      await flushPromises()
+
+      expect(createAccountMock).toHaveBeenCalledTimes(1)
+      const payload = createAccountMock.mock.calls[0]?.[0]
+      expect(payload?.platform).toBe('acme_router')
+      expect(payload?.type).toBe('apikey')
+      expect(payload?.credentials).toMatchObject({
+        api_key: 'sk-cc',
+        account_mode: 'standard',
+        api_protocol: 'adaptive',
+        base_url: 'https://api.acme-router.example/provider/v1',
+        api_base_urls: {
+          chat_completions: 'https://api.acme-router.example/provider/v1',
+          anthropic: 'https://api.acme-router.example/provider',
+        },
+        protocol_rules: [{ pattern: 'claude-*', protocol: 'anthropic' }],
+      })
+      // 该供应商没有原生 Responses 端点，不下发 responses 基址。
+      expect(payload?.credentials?.api_base_urls).not.toHaveProperty('responses')
+      // 没有内置模型列表时不预填白名单，新账号不限制模型。
+      expect(payload?.credentials).not.toHaveProperty('model_mapping')
+    })
+
+    it('switches endpoints and default rules with the provider mode', async () => {
+      const wrapper = mountModal()
+      await wrapper.get('[data-testid="account-platform-acme_router"]').trigger('click')
+      await wrapper.get('[data-testid="generic-account-mode"]').findAll('button')[1].trigger('click')
+      await wrapper.get('form#create-account-form input[type="text"]').setValue('cc-team')
+      await wrapper.get('form#create-account-form input[type="password"]').setValue('sk-cc')
+
+      await wrapper.get('form#create-account-form').trigger('submit.prevent')
+      await flushPromises()
+
+      expect(createAccountMock.mock.calls[0]?.[0]?.credentials).toMatchObject({
+        account_mode: 'team',
+        base_url: 'https://team.acme-router.example/provider/v1',
+        api_base_urls: {
+          chat_completions: 'https://team.acme-router.example/provider/v1',
+          anthropic: 'https://team.acme-router.example/provider',
+        },
+        protocol_rules: [{ pattern: 'sonnet-*', protocol: 'anthropic' }],
+      })
+    })
+
+    it('creates a by-inbound provider account without protocol rules', async () => {
+      const wrapper = mountModal()
+      await wrapper.get('[data-testid="account-platform-acme_chat"]').trigger('click')
+      // 单一接入模式时不显示模式选择。
+      expect(wrapper.find('[data-testid="generic-account-mode"]').exists()).toBe(false)
+      await wrapper.get('form#create-account-form input[type="text"]').setValue('acme-chat')
+      await wrapper.get('form#create-account-form input[type="password"]').setValue('sk-acme-chat')
+
+      await wrapper.get('form#create-account-form').trigger('submit.prevent')
+      await flushPromises()
+
+      const credentials = createAccountMock.mock.calls[0]?.[0]?.credentials
+      expect(credentials).toMatchObject({
+        account_mode: 'pass',
+        api_protocol: 'adaptive',
+        base_url: 'https://api.acme-chat.example/v1',
+        api_base_urls: { chat_completions: 'https://api.acme-chat.example/v1' },
+      })
+      expect(credentials).not.toHaveProperty('protocol_rules')
+    })
+
+    it('falls back to the Kimi default mode after a server-only provider', async () => {
+      const wrapper = mountModal()
+      await wrapper.get('[data-testid="account-platform-acme_router"]').trigger('click')
+      await selectButtonByText(wrapper, 'Kimi')
+      await wrapper.get('form#create-account-form input[type="text"]').setValue('kimi')
+      await wrapper.get('form#create-account-form input[type="password"]').setValue('sk-kimi')
+
+      await wrapper.get('form#create-account-form').trigger('submit.prevent')
+      await flushPromises()
+
+      expect(createAccountMock.mock.calls[0]?.[0]?.credentials).toMatchObject({
+        account_mode: 'payg',
+        base_url: 'https://api.moonshot.cn/v1',
+      })
+      expect(createAccountMock.mock.calls[0]?.[0]?.credentials).not.toHaveProperty('protocol_rules')
+    })
+  })
+
+  it('renders custom platforms in the shared searchable selector', () => {
+    const wrapper = mountModal()
+    const platformStrip = wrapper.get('.platform-scroll-strip')
+    const platforms = platformStrip.findAll('[data-testid^="account-platform-"]')
+    const ids = platforms.map(button => button.attributes('data-testid'))
+    expect(ids).toContain('account-platform-kimi')
+    expect(ids).toContain('account-platform-zhipu')
+    expect(ids).toContain('account-platform-deepseek')
+    expect(ids).toContain('account-platform-minimax')
+    expect(ids).toContain('account-platform-opencode_go')
+    expect(ids).toContain('account-platform-command_code')
+    expect(ids).toContain('account-platform-cline')
+  })
+
+  it('creates a Cline account without an account type and with only the Chat Completions endpoint', async () => {
+    const wrapper = mountModal()
+    await wrapper.get('[data-testid="account-platform-cline"]').trigger('click')
+    // 积分与 ClinePass 共用同一个 Key，按模型计费，不需要选择账号类型。
+    expect(wrapper.find('[data-testid="generic-account-mode"]').exists()).toBe(false)
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('cline')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('sk-cline')
+
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    const payload = createAccountMock.mock.calls[0]?.[0]
+    expect(payload?.platform).toBe('cline')
+    expect(payload?.credentials).toMatchObject({
+      account_mode: 'payg',
+      api_protocol: 'adaptive',
+      base_url: 'https://api.cline.bot/api/v1',
+      api_base_urls: { chat_completions: 'https://api.cline.bot/api/v1' },
+    })
+    expect(payload?.credentials).not.toHaveProperty('protocol_rules')
+    expect(payload?.credentials?.api_base_urls).not.toHaveProperty('responses')
+    expect(payload?.credentials?.api_base_urls).not.toHaveProperty('anthropic')
   })
 
   it('submits adaptive Kimi protocol endpoints', async () => {
@@ -751,5 +940,35 @@ describe('CreateAccountModal platform selector', () => {
     expect(wrapper.get('[data-testid="account-platform-opencode_go"]').exists()).toBe(true)
     expect((wrapper.get('[data-testid="account-platform-zhipu"]').element.parentElement as HTMLElement).className).toContain('platform-scroll-strip')
     expect((wrapper.get('[data-testid="account-platform-minimax"]').element.parentElement as HTMLElement).className).toContain('platform-scroll-strip')
+  })
+
+  it('restores the TypeSafe default whitelist after switching from Grok mapping mode', async () => {
+    createAccountMock.mockReset().mockResolvedValue({ id: 42, platform: 'typesafe', type: 'apikey' })
+    probeUpstreamBillingMock.mockReset().mockResolvedValue({})
+    const wrapper = mountModal()
+    await wrapper.get('[data-testid="account-platform-grok"]').trigger('click')
+    await wrapper.get('[data-testid="account-platform-typesafe"]').trigger('click')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('TypeSafe account')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('ts-test-key')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    expect(createAccountMock.mock.calls[0]?.[0]).toMatchObject({
+      platform: 'typesafe',
+      type: 'apikey',
+      credentials: {
+        base_url: 'https://api.typesafe.ai',
+        model_mapping: { 'jev-latest': 'jev-latest' },
+      },
+    })
+    wrapper.unmount()
+  })
+
+  it('uses the dedicated TypeSafe API key prefix', async () => {
+    const wrapper = mountModal()
+    await wrapper.get('[data-testid="account-platform-typesafe"]').trigger('click')
+    expect(wrapper.get('form#create-account-form input[type="password"]').attributes('placeholder')).toBe('ts-...')
+    wrapper.unmount()
   })
 })

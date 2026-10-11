@@ -577,7 +577,11 @@ func TestSyncPricingModels_ValidPlatformsUseExpectedProviders(t *testing.T) {
 		service.PlatformMiniMax:     "minimax",
 		service.PlatformOpenCodeGo:  "opencode-go",
 	}
-	require.Equal(t, expectedProviders, platformToLiteLLMProvider)
+	for platform, expectedProvider := range expectedProviders {
+		provider, ok := platformLiteLLMProvider(platform)
+		require.True(t, ok, platform)
+		require.Equal(t, expectedProvider, provider, platform)
+	}
 
 	for platform := range expectedProviders {
 		req := httptest.NewRequest(http.MethodGet, "/channels/pricing/sync-models?platform="+platform, nil)

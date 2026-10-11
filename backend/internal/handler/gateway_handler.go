@@ -263,6 +263,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Model is not supported by composite groups")
 		return
 	}
+	if rejectSystemOneOnlyPlatform(c, apiKey, h.errorResponse) {
+		return
+	}
 
 	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolAnthropicMessages, reqModel, body); decision != nil && !decision.AllowNextStage {
 		h.anthropicSecurityAuditError(c, decision)
@@ -1254,16 +1257,16 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 	}
 
 	if platform == service.PlatformComposite {
-		availableModels := h.compositeAvailableModels(c.Request.Context(), groupID)
-		if apiKey != nil && apiKey.Group.ModelAllowlistEnabled() {
-			policy := apiKey.Group.EffectiveModelPolicy()
-			if len(availableModels) == 0 {
-				availableModels = defaultModelIDsForPlatform(service.PlatformComposite)
+		availableModels := h.compositeAvailableModels(c.Request.Context(), groupID, "", true)
+		if apiKey != nil && apiKey.Group != nil && apiKey.Group.ModelAllowlistEnabled() {
+			source := availableModels
+			if len(source) == 0 {
+				source = defaultModelIDsForPlatform(service.PlatformComposite)
 			}
 			if apiKey.Group.CustomModelsListEnabled() {
-				availableModels = filterCompositeModelsByCustomList(availableModels, apiKey.Group.ModelsListConfig.Models)
+				availableModels = filterCompositeModelsByCustomList(source, apiKey.Group.ModelsListConfig.Models)
 			} else {
-				availableModels = policy.FilterForListing(availableModels)
+				availableModels = apiKey.Group.EffectiveModelPolicy().FilterForListing(source)
 			}
 			writeModelsList(c, platform, availableModels)
 			return
@@ -1375,8 +1378,12 @@ func (h *GatewayHandler) codexModelIDsForGroup(ctx context.Context, group *servi
 		platform = group.Platform
 	}
 	if platform == service.PlatformComposite {
-		availableModels := h.compositeAvailableModels(ctx, groupID)
+		availableModels := h.compositeAvailableModels(ctx, groupID, service.CompositeRouteEndpointResponses, false)
 		fallbackModels := defaultCodexModelIDsForPlatform(service.PlatformComposite)
+		models := availableModels
+		if len(models) == 0 {
+			models = fallbackModels
+		}
 		if group.ModelAllowlistEnabled() {
 			policy := group.EffectiveModelPolicy()
 			source := availableModels
@@ -1384,17 +1391,17 @@ func (h *GatewayHandler) codexModelIDsForGroup(ctx context.Context, group *servi
 				source = fallbackModels
 			}
 			if group.CustomModelsListEnabled() {
-				return filterCompositeModelsByLegacyList(source, group.ModelsListConfig.Models)
+				models = filterCompositeModelsByLegacyList(source, group.ModelsListConfig.Models)
+			} else {
+				models = policy.FilterForListing(source)
 			}
-			return policy.FilterForListing(source)
+		} else if group.CustomModelsListEnabled() {
+			models = filterCompositeModelsByLegacyList(availableModels, group.ModelsListConfig.Models)
 		}
-		if group.CustomModelsListEnabled() {
-			return filterCompositeModelsByLegacyList(availableModels, group.ModelsListConfig.Models)
+		if filtered, err := h.gatewayService.FilterCompositeCodexModels(ctx, group.ID, models); err == nil {
+			return filtered
 		}
-		if len(availableModels) > 0 {
-			return availableModels
-		}
-		return fallbackModels
+		return models
 	}
 
 	availableModels := h.gatewayService.GetAvailableModels(ctx, groupID, platform)
@@ -1457,32 +1464,20 @@ func filterCompositeModelsByLegacyList(availableModels, selectedModels []string)
 	return filtered
 }
 
-func (h *GatewayHandler) compositeAvailableModels(ctx context.Context, groupID *int64) []string {
+// compositeAvailableModels lists the models the composite group can serve.
+// includeSystemOne adds TypeSafe models, which only work through /v1/systemone;
+// LLM client catalogs (Codex) must exclude them.
+func (h *GatewayHandler) compositeAvailableModels(ctx context.Context, groupID *int64, endpoint string, includeSystemOne bool) []string {
 	if h == nil || h.gatewayService == nil {
 		return nil
 	}
 	seen := make(map[string]struct{})
 	models := make([]string, 0)
-	if routeModels, err := h.gatewayService.CompositeExactPublicModels(ctx, groupID); err == nil {
-		for _, model := range routeModels {
-			model = strings.TrimSpace(model)
-			if model == "" {
-				continue
-			}
-			if _, ok := seen[model]; ok {
-				continue
-			}
-			seen[model] = struct{}{}
-			models = append(models, model)
-		}
-	}
 	schedulablePlatforms := h.gatewayService.GetSchedulablePlatforms(ctx, groupID)
-	// The upstream platform registry predates the fork's native CN providers.
-	// Include those request platforms here so composite listings see their
-	// account mappings and provider defaults as well.
-	platforms := append([]string{}, service.ConcreteRequestPlatforms()...)
-	platforms = append(platforms, service.PlatformKimi, service.PlatformZhipu, service.PlatformDeepseek, service.PlatformMiniMax)
-	for _, platform := range platforms {
+	for _, platform := range domain.CompositePrecedencePlatformIDs() {
+		if platform == service.PlatformTypeSafe && !includeSystemOne {
+			continue
+		}
 		platformModels := h.gatewayService.GetAvailableModels(ctx, groupID, platform)
 		if len(platformModels) == 0 && !isNativeCNProviderPlatform(platform) {
 			if _, ok := schedulablePlatforms[platform]; ok {
@@ -1499,6 +1494,18 @@ func (h *GatewayHandler) compositeAvailableModels(ctx context.Context, groupID *
 			}
 			seen[model] = struct{}{}
 			models = append(models, model)
+		}
+	}
+	// Exact routes can expose public IDs without a matching account model mapping.
+	if routeModels, err := h.gatewayService.GetCompositeRouteModels(ctx, groupID, endpoint, includeSystemOne); err == nil {
+		for _, model := range routeModels {
+			model = strings.TrimSpace(model)
+			if model != "" {
+				if _, ok := seen[model]; !ok {
+					seen[model] = struct{}{}
+					models = append(models, model)
+				}
+			}
 		}
 	}
 	return models
@@ -1763,14 +1770,16 @@ func defaultModelIDsForPlatform(platform string) []string {
 		return xai.DefaultModelIDs()
 	case service.PlatformOpenCodeGo:
 		return service.DefaultOpenCodeGoModelIDs()
+	case service.PlatformTypeSafe:
+		return []string{"jev-latest"}
 	case service.PlatformComposite:
 		ids := make([]string, 0)
 		seen := make(map[string]struct{})
-		for _, concretePlatform := range service.ConcreteRequestPlatforms() {
-			// Native CN providers expose account-specific catalogs. They are
-			// intentionally excluded from composite static fallbacks.
-			if concretePlatform == service.PlatformKimi || concretePlatform == service.PlatformZhipu ||
-				concretePlatform == service.PlatformDeepseek || concretePlatform == service.PlatformMiniMax {
+		for _, concretePlatform := range domain.CompositePrecedencePlatformIDs() {
+			// TypeSafe is deliberately skipped: jev-latest only works through
+			// /v1/systemone, so the static fallback never advertises it to LLM
+			// clients. compositeAvailableModels lists it when the group can serve it.
+			if concretePlatform == service.PlatformTypeSafe || isNativeCNProviderPlatform(concretePlatform) {
 				continue
 			}
 			for _, id := range defaultModelIDsForPlatform(concretePlatform) {
@@ -2505,6 +2514,9 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	}
 	if !compositeTargetPlatformResolved(c, apiKey, parsedReq.Model) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Model is not supported by composite groups")
+		return
+	}
+	if rejectSystemOneOnlyPlatform(c, apiKey, h.errorResponse) {
 		return
 	}
 

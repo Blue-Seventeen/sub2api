@@ -186,7 +186,10 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 
 	if account != nil && account.IsOpenAI() {
 		responsesLite := isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)) || isOpenAIResponsesLiteWebSocketPayload(body)
-		normalizedBody, normalized, normalizeErr := normalizeOpenAIResponsesWebSocketCompatibilityBody(body, account, responsesLite)
+		normalizedBody, normalized, normalizeErr := normalizeOpenAIResponsesCompatibilityBodyWithOptions(body, account, openAIResponsesCompatibilityOptions{
+			ResponsesLite: responsesLite,
+			Compact:       isOpenAIResponsesCompactPath(c),
+		})
 		if normalizeErr != nil {
 			return nil, fmt.Errorf("normalize passthrough Responses compatibility: %w", normalizeErr)
 		}
@@ -1747,6 +1750,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	sawFailedEvent := false
 	sawBareError := false
 	sawResponseFailed := false
+	codexFailureTerminal := account != nil && account.Platform == PlatformOpenAI
 	terminalAccountSideEffectsApplied := false
 	bareErrorPayload := []byte(nil)
 	pendingEventType := ""
@@ -1964,7 +1968,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 					return resultWithUsage(), fmt.Errorf("upstream response failed: %s", failedMessage)
 				}
 			}
-			if openAIStreamEventIsTerminal(trimmedData) || eventType == "error" {
+			if openAIStreamEventIsTerminalWithType(trimmedData, eventType) {
 				sawTerminalEvent = true
 			}
 			if responseID == "" {
@@ -2024,6 +2028,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 					flushPendingOutput()
 				}
 			}
+		}
+		if (sawDone || sawTerminalEvent) && line == "" && (!codexFailureTerminal || !sawBareError) {
+			break
 		}
 	}
 	if err := documentScanner.Err(); err != nil {
@@ -2245,7 +2252,7 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(args ...any) (*openaiN
 	}
 	finalResponse, ok := extractCodexFinalResponse(bodyText)
 
-	usage := &OpenAIUsage{}
+	usage := s.parseSSEUsageFromBody(bodyText)
 	if ok {
 		if parsedUsage, parsed := extractOpenAIUsageFromJSONBytes(finalResponse); parsed {
 			*usage = parsedUsage
@@ -2287,7 +2294,6 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(args ...any) (*openaiN
 		}
 		body = restoredBody
 	} else {
-		usage = s.parseSSEUsageFromBody(bodyText)
 		if originalModel != "" && mappedModel != "" && originalModel != mappedModel {
 			bodyText = s.replaceModelInSSEBody(bodyText, mappedModel, originalModel)
 		}

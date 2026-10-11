@@ -26,8 +26,5 @@ export function formatAdminDisplayBaseRateMultiplier(
   unifiedRateMultiplier?: number | null
 ): string {
   const baseRate = getAdminDisplayBaseRateMultiplier(rateMultiplier, unifiedRateMultiplier)
-  if (baseRate === 0) {
-    return '0.00'
-  }
   return formatMultiplier(baseRate)
 }

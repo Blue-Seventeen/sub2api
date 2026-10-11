@@ -176,18 +176,18 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		originalModel = reqModel
 	}
 
-	// 上游协议统一由 resolveUpstreamProtocol 判定。OpenAI API Key 账号只会落到
+	// Provider model catalogs can constrain which native protocols are available.
 	// Responses / Chat Completions，上面的归一化对两条路径都生效。
 	routingModel := upstreamRoutingModel(account, body, "")
 	if account.IsOpenCodeGo() && IsOpenCodeUnsupportedModel(routingModel) {
 		return nil, writeOpenCodeUnsupportedModelError(c, false, routingModel)
 	}
-	switch resolveUpstreamProtocol(account, APIProtocolResponses, routingModel) {
+	switch s.resolveUpstreamProtocolFor(ctx, account, APIProtocolResponses, routingModel) {
 	case APIProtocolAnthropic:
 		// Responses 客户端 × Anthropic 上游：转成 Anthropic 请求走原生端点。不能落到
 		// raw-CC 分支——其 URL 构造会把 anthropic base 当 CC base 用。
 		// 按模型分流的账号不以请求模型兜底模型映射。
-		defaultMappedModel := reqModel
+		defaultMappedModel := strings.TrimSpace(reqModel)
 		if account.routesByModel() {
 			defaultMappedModel = ""
 		}
@@ -511,6 +511,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				SkipDefaultInstructions:             true,
 				PreserveToolCallIDs:                 true,
 				OmitPromotedSystemMessagesFromInput: omitPromotedSystemMessages,
+				ResponsesLite:                       responsesLite,
 			})
 			ensureCodexOAuthInstructionsField(decoded)
 			markDecodedModified()
@@ -519,6 +520,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				IsCodexCLI:                          isCodexCLI,
 				IsCompact:                           isCompactRequest,
 				OmitPromotedSystemMessagesFromInput: omitPromotedSystemMessages,
+				ResponsesLite:                       responsesLite,
 			})
 		}
 		if codexResult.Error != nil {

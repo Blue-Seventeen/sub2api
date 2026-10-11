@@ -423,6 +423,7 @@ async function loadMarkdownPage() {
     )
 
     const rendered = String(await marked.parse(content))
+    if (seq !== markdownLoadSeq || slug !== markdownSlug.value) return
     const sanitized = DOMPurify.sanitize(rendered)
 
     const toc: TocItem[] = []
@@ -547,6 +548,7 @@ onUnmounted(() => {
     cancelAnimationFrame(scrollRafId)
     scrollRafId = 0
   }
+  markdownLoadSeq++
   if (themeObserver) {
     themeObserver.disconnect()
     themeObserver = null

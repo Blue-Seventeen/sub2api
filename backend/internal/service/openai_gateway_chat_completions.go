@@ -121,14 +121,14 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	// 维持原样把请求体交给所选路径。
 	convertResponsesShape := isResponsesShape && (account.routesByModel() || account.IsAdaptiveAPIProtocol())
 
-	// 上游协议统一由 resolveUpstreamProtocol 判定。Anthropic 分流必须先于
+	// 上游协议统一由目录感知 resolver 判定。Anthropic 分流必须先于
 	// ShouldUseResponsesAPI：Anthropic 协议账号经 probe 落标
 	// openai_responses_supported=false，否则会命中 CC 直转。
 	routingModel := upstreamRoutingModel(account, body, defaultMappedModel)
 	if account.IsOpenCodeGo() && IsOpenCodeUnsupportedModel(routingModel) {
 		return nil, writeOpenCodeUnsupportedModelError(c, false, routingModel)
 	}
-	switch resolveUpstreamProtocol(account, inbound, routingModel) {
+	switch s.resolveUpstreamProtocolFor(ctx, account, inbound, routingModel) {
 	case APIProtocolAnthropic:
 		if convertResponsesShape {
 			return s.forwardResponsesViaNativeAnthropic(ctx, c, account, body, "")
@@ -1165,9 +1165,13 @@ func writeChatCompletionsError(c *gin.Context, statusCode int, errType, message 
 // error (e.g. upstream cyber_policy), so programmatic clients stop retrying.
 // Marshal 失败的兜底会丢弃 message 原文，仅保留 code 与固定提示。
 func buildChatStreamErrorSSE(code, message string) string {
+	return buildChatStreamErrorSSEWithType("invalid_request_error", code, message)
+}
+
+func buildChatStreamErrorSSEWithType(errType, code, message string) string {
 	payload, err := json.Marshal(gin.H{
 		"error": gin.H{
-			"type":    "invalid_request_error",
+			"type":    errType,
 			"code":    code,
 			"message": message,
 		},

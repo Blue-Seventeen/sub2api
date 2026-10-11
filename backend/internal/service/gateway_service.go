@@ -796,44 +796,6 @@ type GatewayService struct {
 	userPlatformQuotaRepo      UserPlatformQuotaRepository
 }
 
-func (s *GatewayService) resolveCompositeModelOwnership(ctx context.Context, groupID int64, model string) (CompositeModelOwnership, error) {
-	model = strings.TrimSpace(model)
-	if s == nil || s.accountRepo == nil || groupID <= 0 || model == "" {
-		return CompositeModelOwnership{}, nil
-	}
-	key := compositeModelOwnershipCacheKey(groupID, model)
-	if s.modelsListCache != nil {
-		if cached, ok := s.modelsListCache.Get(key); ok {
-			if ownership, ok := cached.(CompositeModelOwnership); ok {
-				return ownership, nil
-			}
-		}
-	}
-	accounts, err := s.accountRepo.ListSchedulableByGroupID(ctx, groupID)
-	if err != nil {
-		return CompositeModelOwnership{}, err
-	}
-	platforms := make(map[string]struct{})
-	for _, account := range accounts {
-		if isConcreteRequestPlatform(account.Platform) && explicitModelMappingClaims(account, model) {
-			platforms[account.Platform] = struct{}{}
-		}
-	}
-	ownership := CompositeModelOwnership{}
-	if len(platforms) == 1 {
-		for platform := range platforms {
-			ownership.TargetPlatform = platform
-		}
-		ownership.Matched = true
-	} else if len(platforms) > 1 {
-		ownership.Ambiguous = true
-	}
-	if s.modelsListCache != nil {
-		s.modelsListCache.Set(key, ownership, s.modelsListCacheTTL)
-	}
-	return ownership, nil
-}
-
 // NewGatewayService creates a new GatewayService
 func NewGatewayService(
 	accountRepo AccountRepository,
@@ -1452,6 +1414,66 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 		modelsListCacheStoreTotal.Add(1)
 	}
 	return cloneStringSlice(models)
+}
+
+func (s *GatewayService) resolveCompositeModelOwnership(ctx context.Context, groupID int64, model string) (CompositeModelOwnership, error) {
+	model = strings.TrimSpace(model)
+	if s == nil || s.accountRepo == nil || groupID <= 0 || model == "" {
+		return CompositeModelOwnership{}, nil
+	}
+
+	cacheKey := compositeModelOwnershipCacheKey(groupID, model)
+	if s.modelsListCache != nil {
+		if cached, found := s.modelsListCache.Get(cacheKey); found {
+			if ownership, ok := cached.(CompositeModelOwnership); ok {
+				return ownership, nil
+			}
+		}
+	}
+
+	accounts, err := s.accountRepo.ListSchedulableByGroupID(ctx, groupID)
+	if err != nil {
+		return CompositeModelOwnership{}, err
+	}
+
+	platforms := make(map[string]struct{})
+	for _, account := range accounts {
+		platform := strings.TrimSpace(account.Platform)
+		if !isConcreteRequestPlatform(platform) || !explicitModelMappingClaims(account, model) {
+			continue
+		}
+		platforms[platform] = struct{}{}
+	}
+
+	ownership := CompositeModelOwnership{}
+	if len(platforms) == 1 {
+		for platform := range platforms {
+			ownership.TargetPlatform = platform
+		}
+		ownership.Matched = true
+	} else if len(platforms) > 1 {
+		ownership.Ambiguous = true
+	}
+
+	if s.modelsListCache != nil {
+		s.modelsListCache.Set(cacheKey, ownership, s.modelsListCacheTTL)
+	}
+	return ownership, nil
+}
+
+// GetCompositeRouteModels returns public IDs from enabled exact composite routes.
+func (s *GatewayService) GetCompositeRouteModels(ctx context.Context, groupID *int64, endpoint string, includeSystemOne bool) ([]string, error) {
+	if s == nil || s.compositeResolver == nil || groupID == nil {
+		return nil, nil
+	}
+	return s.compositeResolver.ListExactPublicModelsForEndpoint(ctx, *groupID, endpoint, includeSystemOne)
+}
+
+func (s *GatewayService) FilterCompositeCodexModels(ctx context.Context, groupID int64, models []string) ([]string, error) {
+	if s == nil || s.compositeResolver == nil {
+		return models, nil
+	}
+	return s.compositeResolver.FilterCodexModels(ctx, groupID, models)
 }
 
 // GetSchedulablePlatforms returns the concrete platforms that currently have

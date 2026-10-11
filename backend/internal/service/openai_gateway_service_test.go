@@ -1689,7 +1689,7 @@ func TestOpenAIStreamingTerminalAndClientCancellationDoNotQuarantineProxy(t *tes
 		Body: &openAIStreamReadThenErrorCloser{
 			reader: strings.NewReader(strings.Join([]string{
 				"event: response.completed",
-				`data: {"type":"response.completed","response":{"status":"completed","output":[]}}`,
+				`data: {"type":"response.completed","response":{"status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":0}}}`,
 				"",
 			}, "\n")),
 			err: io.ErrUnexpectedEOF,
@@ -1723,7 +1723,7 @@ func TestOpenAIStreamingTerminalAndClientCancellationDoNotQuarantineProxy(t *tes
 	require.Empty(t, reason)
 }
 
-func TestOpenAIStreamingReadsEOFAfterTerminalEvent(t *testing.T) {
+func TestOpenAIStreamingStopsAtTerminalEventBoundary(t *testing.T) {
 	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
 	svc := &OpenAIGatewayService{cfg: cfg}
 	rec := httptest.NewRecorder()
@@ -1733,12 +1733,15 @@ func TestOpenAIStreamingReadsEOFAfterTerminalEvent(t *testing.T) {
 		"event: response.completed",
 		`data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":1,"output_tokens":1}}}`,
 		"",
+		"",
 	}, "\n"))}
 	resp := &http.Response{StatusCode: http.StatusOK, Body: body, Header: http.Header{}}
 
 	_, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, &Account{ID: 1, Platform: PlatformOpenAI, Name: "acc"}, time.Now(), "model", "model")
 	require.NoError(t, err)
-	require.GreaterOrEqual(t, body.eofReads, 1, "terminal event must not close the upstream body before EOF")
+	// The user's official-relay convergence plan selects f2669c8c semantics:
+	// settle at a complete terminal boundary, rather than requiring upstream EOF.
+	require.Zero(t, body.eofReads, "a complete terminal boundary must not require an additional upstream read")
 }
 
 func TestOpenAIStreamingResponseFailedBeforeOutputReturnsFailover(t *testing.T) {
@@ -3497,19 +3500,21 @@ func TestParseSSEUsage_SelectiveParsing(t *testing.T) {
 	svc := &OpenAIGatewayService{}
 	usage := &OpenAIUsage{InputTokens: 9, OutputTokens: 8, CacheReadInputTokens: 7}
 
-	// 非 completed 事件，不应覆盖 usage
+	// Progressive events merge each non-zero field into the accumulated usage.
 	svc.parseSSEUsage(`{"type":"response.in_progress","response":{"usage":{"input_tokens":1,"output_tokens":2}}}`, usage)
-	require.Equal(t, 9, usage.InputTokens)
-	require.Equal(t, 8, usage.OutputTokens)
+	require.Equal(t, 1, usage.InputTokens)
+	require.Equal(t, 2, usage.OutputTokens)
 	require.Equal(t, 7, usage.CacheReadInputTokens)
 
-	// completed 事件，应提取 usage
+	// A non-zero terminal snapshot replaces the progressive snapshot.
 	svc.parseSSEUsage(`{"type":"response.completed","response":{"usage":{"input_tokens":3,"output_tokens":5,"input_tokens_details":{"cached_tokens":2}}}}`, usage)
 	require.Equal(t, 3, usage.InputTokens)
 	require.Equal(t, 5, usage.OutputTokens)
 	require.Equal(t, 2, usage.CacheReadInputTokens)
+	require.Zero(t, usage.CacheCreationInputTokens)
 
-	// done 事件同样可能携带最终 usage
+	// done events can carry a complete final usage snapshot, including cache
+	// creation and image output fields.
 	svc.parseSSEUsage(`{"type":"response.done","response":{"usage":{"input_tokens":13,"output_tokens":15,"input_tokens_details":{"cached_tokens":4},"cache_creation":{"ephemeral_5m_input_tokens":7,"ephemeral_1h_input_tokens":10},"output_tokens_details":{"image_tokens":3}}}}`, usage)
 	require.Equal(t, 13, usage.InputTokens)
 	require.Equal(t, 15, usage.OutputTokens)
@@ -3519,19 +3524,25 @@ func TestParseSSEUsage_SelectiveParsing(t *testing.T) {
 	require.Equal(t, 10, usage.CacheCreation1hTokens)
 	require.Equal(t, 3, usage.ImageOutputTokens)
 
-	// 兼容部分 OpenAI-compatible chat / relay 事件沿用 prompt/completion 命名
+	// OpenAI-compatible chat / relay events may use prompt/completion names.
 	svc.parseSSEUsage(`{"type":"response.completed","response":{"usage":{"prompt_tokens":21,"completion_tokens":34,"prompt_tokens_details":{"cached_tokens":5}}}}`, usage)
-	// failed 事件在部分上游路径也会携带已消耗 usage，应与 WS/passthrough 保持一致
-	svc.parseSSEUsage(`{"type":"response.failed","response":{"usage":{"input_tokens":17,"output_tokens":19,"input_tokens_details":{"cached_tokens":6}}}}`, usage)
+	require.Equal(t, 21, usage.InputTokens)
+	require.Equal(t, 34, usage.OutputTokens)
+	require.Equal(t, 5, usage.CacheReadInputTokens)
+	require.Zero(t, usage.CacheCreationInputTokens)
+
+	// Failed terminal events can still carry billable usage and are authoritative.
 	svc.parseSSEUsage(`{"type":"response.failed","response":{"usage":{"input_tokens":17,"output_tokens":19,"input_tokens_details":{"cached_tokens":6}}}}`, usage)
 	require.Equal(t, 17, usage.InputTokens)
 	require.Equal(t, 19, usage.OutputTokens)
 	require.Equal(t, 6, usage.CacheReadInputTokens)
 
-	svc.parseSSEUsage(`{"type":"response.completed","response":{"usage":{"prompt_tokens":21,"completion_tokens":34,"prompt_tokens_details":{"cached_tokens":5}}}}`, usage)
-	require.Equal(t, 21, usage.InputTokens)
-	require.Equal(t, 34, usage.OutputTokens)
-	require.Equal(t, 5, usage.CacheReadInputTokens)
+	// A terminal snapshot with zero values must not erase usage learned from
+	// progressive events.
+	svc.parseSSEUsage(`{"type":"response.completed","response":{"usage":{"input_tokens":0,"output_tokens":0}}}`, usage)
+	require.Equal(t, 17, usage.InputTokens)
+	require.Equal(t, 19, usage.OutputTokens)
+	require.Equal(t, 6, usage.CacheReadInputTokens)
 }
 
 func TestExtractOpenAIUsageFromJSONBytes_AcceptsResponseAndChatUsageShapes(t *testing.T) {

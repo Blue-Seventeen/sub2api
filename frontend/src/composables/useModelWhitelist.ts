@@ -1,3 +1,5 @@
+import { getProviderProfile } from '@/constants/platformCatalog'
+
 // =====================
 // 模型列表（硬编码，与 new-api 一致）
 // =====================
@@ -475,6 +477,7 @@ export function getModelsByPlatform(platform: string): string[] {
     case 'volcengine': return doubaoModels
     case 'mistral': return mistralModels
     case 'meta': return metaModels
+    case 'xai':
     case 'grok': return xaiModels
     case 'cohere': return cohereModels
     case 'yi': return yiModels
@@ -492,6 +495,7 @@ export function getModelsByPlatform(platform: string): string[] {
       'qwen3.8-max', 'qwen3.8-flash', 'qwen3.7-max', 'qwen3.7-plus', 'qwen3.6-plus',
       'hy4-preview', 'hy3', 'omen-alpha'
     ]
+    case 'typesafe': return ['jev-latest']
     case 'doubao': return doubaoModels
     case 'minimax': return minimaxModels
     case 'baidu': return baiduModels
@@ -500,7 +504,10 @@ export function getModelsByPlatform(platform: string): string[] {
     case 'perplexity': return perplexityModels
     case 'siliconflow': return siliconflowModels
     case 'openrouter': return openrouterModels
-    default: return claudeModels
+    default:
+      // 平台清单中没有内置模型列表的多协议供应商（多为多模型聚合平台，模型多且常变）
+      // 默认不预填白名单：预填 Claude 模型会让新账号只接受这些模型。
+      return getProviderProfile(platform) ? [] : claudeModels
   }
 }
 
@@ -508,7 +515,7 @@ export function getModelsByPlatform(platform: string): string[] {
 export function getPresetMappingsByPlatform(platform: string) {
   if (platform === 'openai') return openaiPresetMappings
   if (platform === 'gemini') return geminiPresetMappings
-  if (platform === 'grok') return grokPresetMappings
+  if (platform === 'grok' || platform === 'xai') return grokPresetMappings
   if (platform === 'antigravity') return antigravityPresetMappings
   if (platform === 'bedrock') return bedrockPresetMappings
   return anthropicPresetMappings

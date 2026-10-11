@@ -19,5 +19,9 @@ func TestAllPlatformsIncludesEveryConcretePlatform(t *testing.T) {
 		"minimax",
 		"volcengine", "ali", "moonshot", "perplexity", "mistral",
 		"siliconflow", "openrouter", "suno", "kling", "midjourney",
+		"opencode_go",
+		"typesafe",
+		"command_code",
+		"cline",
 	}, AllPlatforms())
 }

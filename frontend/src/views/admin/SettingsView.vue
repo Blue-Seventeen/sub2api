@@ -4156,7 +4156,7 @@
                       </tr>
                     </thead>
                     <tbody class="space-y-2">
-                      <tr v-for="p in PLATFORM_QUOTA_PLATFORMS" :key="p" class="align-top">
+                      <tr v-for="p in platformQuotaRows(form.default_platform_quotas)" :key="p" class="align-top">
                         <td class="pr-4 py-1">
                           <span class="font-mono text-xs text-gray-700 dark:text-gray-300">{{ p }}</span>
                         </td>
@@ -4541,7 +4541,7 @@
                             </tr>
                           </thead>
                           <tbody>
-                            <tr v-for="p in PLATFORM_QUOTA_PLATFORMS" :key="`${authSource.source}-pq-${p}`" class="align-top">
+                            <tr v-for="p in platformQuotaRows(authSourceDefaults[authSource.source].platform_quotas)" :key="`${authSource.source}-pq-${p}`" class="align-top">
                               <td class="pr-4 py-1">
                                 <span class="font-mono text-xs text-gray-700 dark:text-gray-300">{{ p }}</span>
                               </td>
@@ -5185,7 +5185,7 @@
                 <h3 class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.settings.scheduling.accountSchedulingThresholdsTitle') }}</h3>
                 <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.scheduling.accountSchedulingThresholdsDescription') }}</p>
                 <div class="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
-                  <label v-for="platform in ['openai', 'anthropic', 'grok', 'kimi', 'zhipu', 'minimax', 'opencode_go']" :key="platform" class="block">
+                  <label v-for="platform in schedulingThresholdPlatforms" :key="platform" class="block">
                     <span class="text-xs font-medium text-gray-600 dark:text-gray-400">{{ t(`admin.settings.scheduling.accountSchedulingThresholdPlatforms.${platform}`) }}</span>
                     <input v-model.number="form.account_scheduling_thresholds[platform]" type="number" min="1" max="100" class="input mt-1" :data-testid="`account-scheduling-threshold-${platform}`" />
                   </label>
@@ -9036,12 +9036,15 @@ import {
   buildAuthSourceDefaultsState,
   normalizePlatformQuotasMap,
   sanitizePlatformQuotasMap,
+  normalizeAccountSchedulingThresholdsMap,
+  sanitizeAccountSchedulingThresholdsMap,
+  SCHEDULING_THRESHOLD_PLATFORMS,
   defaultWeChatConnectScopesForMode,
   deriveWeChatConnectStoredMode,
   normalizeDefaultSubscriptionSettings,
   resolveWeChatConnectModeCapabilities,
 } from "@/api/admin/settings";
-import { ALLOWED_QUOTA_PLATFORMS } from "@/api/admin/users";
+import { platformQuotaPlatforms } from "@/api/admin/users";
 import type {
   AuthSourceDefaultsState,
   AuthSourceType,
@@ -9119,7 +9122,6 @@ const appStore = useAppStore();
 const settingsStepUp = useStepUp();
 const adminSettingsStore = useAdminSettingsStore();
 const isZhLocale = computed(() => locale.value.startsWith("zh"));
-const PLATFORM_QUOTA_PLATFORMS = ALLOWED_QUOTA_PLATFORMS;
 
 function localText(zh: string, en: string): string {
   return isZhLocale.value ? zh : en;
@@ -9816,9 +9818,18 @@ type SettingsForm = Omit<
   openai_advanced_scheduler_weight_upstream_cost: string;
   openai_advanced_scheduler_weight_previous_response: string;
   openai_advanced_scheduler_weight_session_sticky: string;
-  // 系统全局平台限额 map；form 内始终归一化为全 4 平台对象（模板非空绑定依赖此不变量）
+  account_scheduling_thresholds: ReturnType<typeof normalizeAccountSchedulingThresholdsMap>;
+  // 系统全局平台限额 map；form 内始终归一化为所有受支持平台（模板绑定依赖此不变量）
   default_platform_quotas: DefaultPlatformQuotasMap;
 };
+
+const schedulingThresholdPlatforms = SCHEDULING_THRESHOLD_PLATFORMS;
+
+// 平台限额表格的行：当前 catalog 与 fork 兼容平台中、已在归一化 map 里的平台（清单晚于设置加载时
+// 不渲染尚未归一化的平台，保持模板非空绑定）。
+function platformQuotaRows(map: DefaultPlatformQuotasMap | undefined): string[] {
+  return platformQuotaPlatforms().filter((platform) => !!map?.[platform]);
+}
 
 const form = reactive<SettingsForm>({
   registration_enabled: true,
@@ -10119,6 +10130,7 @@ const form = reactive<SettingsForm>({
     zhipu: 100,
     minimax: 100,
     opencode_go: 100,
+    command_code: 100,
   },
   // Affiliate (邀请返利) feature switch
   affiliate_enabled: false,
@@ -11167,6 +11179,9 @@ async function loadSettings() {
     }
     form.affiliate_enabled = false;
     form.affiliate_admin_recharge_enabled = false;
+    form.account_scheduling_thresholds = normalizeAccountSchedulingThresholdsMap(
+      settings.account_scheduling_thresholds,
+    );
     syncCaptchaProviderSelection();
     if (!form.claude_oauth_system_prompt_blocks?.trim()) {
       form.claude_oauth_system_prompt_blocks =
@@ -11759,12 +11774,7 @@ async function saveSettings() {
       min_claude_code_version: form.min_claude_code_version,
       max_claude_code_version: form.max_claude_code_version,
       allow_ungrouped_key_scheduling: form.allow_ungrouped_key_scheduling,
-      account_scheduling_thresholds: Object.fromEntries(
-        Object.entries(form.account_scheduling_thresholds).map(([key, value]) => [
-          key,
-          Math.max(1, Math.min(100, Math.round(Number(value) || 100))),
-        ]),
-      ),
+      account_scheduling_thresholds: sanitizeAccountSchedulingThresholdsMap(form.account_scheduling_thresholds),
       openai_ttft_mode: form.openai_ttft_mode,
       grok_default_text_model: form.grok_default_text_model?.trim() || "grok-4.6",
       grok_cross_client_model_map_enabled: form.grok_cross_client_model_map_enabled,
@@ -11955,6 +11965,7 @@ async function saveSettings() {
     }
     Object.assign(authSourceDefaults, buildAuthSourceDefaultsState(updated));
     form.default_platform_quotas = normalizePlatformQuotasMap(updated.default_platform_quotas);
+    form.account_scheduling_thresholds = normalizeAccountSchedulingThresholdsMap(updated.account_scheduling_thresholds);
     registrationEmailSuffixWhitelistTags.value =
       normalizeRegistrationEmailSuffixDomains(
         updated.registration_email_suffix_whitelist,

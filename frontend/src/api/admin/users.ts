@@ -4,7 +4,9 @@
  */
 
 import { apiClient } from '../client'
-import type { AdminUser, UpdateUserRequest, PaginatedResponse, ApiKey } from '@/types'
+import { listPlatformIds } from '@/constants/platformCatalog'
+import { CUSTOM_PLATFORM_IDS } from '@/constants/platforms'
+import type { AccountPlatform, AdminUser, UpdateUserRequest, PaginatedResponse, ApiKey } from '@/types'
 
 export interface AdminBindAuthIdentityChannelRequest {
   channel: string
@@ -332,30 +334,12 @@ export async function bindUserAuthIdentity(
 /**
  * Platform quota types
  */
-export const ALLOWED_QUOTA_PLATFORMS = [
-  'anthropic',
-  'openai',
-  'gemini',
-  'antigravity',
-  'grok',
-  'kimi',
-  'zhipu',
-  'deepseek',
-  'minimax',
-  'opencode_go',
-  'volcengine',
-  'ali',
-  'moonshot',
-  'perplexity',
-  'mistral',
-  'siliconflow',
-  'openrouter',
-  'suno',
-  'kling',
-  'midjourney',
-] as const
-
-export type PlatformQuotaPlatform = (typeof ALLOWED_QUOTA_PLATFORMS)[number]
+// Catalog platforms plus the custom fork's legacy compatible platforms.
+export function platformQuotaPlatforms(): PlatformQuotaPlatform[] {
+  return [...new Set([...listPlatformIds(), ...CUSTOM_PLATFORM_IDS])]
+}
+export type PlatformQuotaPlatform = AccountPlatform
+export const ALLOWED_QUOTA_PLATFORMS: PlatformQuotaPlatform[] = platformQuotaPlatforms()
 export type PlatformQuotaWindow = 'daily' | 'weekly' | 'monthly'
 
 export interface PlatformQuotaItem {

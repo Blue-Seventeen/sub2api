@@ -812,6 +812,7 @@ describe("admin SettingsView main settings save contract", () => {
         zhipu: 82,
         minimax: 79,
         opencode_go: 88,
+        command_code: 77,
       },
     });
 
@@ -825,6 +826,7 @@ describe("admin SettingsView main settings save contract", () => {
     expect(wrapper.get('[data-testid="grok-default-text-model"]').element).toMatchObject({ value: "grok-4.6" });
     expect(wrapper.get('[data-testid="grok-default-base-url-mode"]').element).toMatchObject({ value: "cli" });
     expect(wrapper.get('[data-testid="account-scheduling-threshold-openai"]').element).toMatchObject({ value: "86" });
+    expect(wrapper.get('[data-testid="account-scheduling-threshold-command_code"]').element).toMatchObject({ value: "77" });
 
     await wrapper.get('[data-testid="registration-domain-quota-enabled"]').setValue(false);
     await wrapper.get('[data-testid="tencent-captcha-region"]').setValue("cn");
@@ -862,10 +864,24 @@ describe("admin SettingsView main settings save contract", () => {
           zhipu: 82,
           minimax: 79,
           opencode_go: 88,
+          command_code: 77,
         },
       }),
     );
     expect(wrapper.get('[data-testid="account-scheduling-threshold-openai"]').element).toMatchObject({ value: "75" });
+    wrapper.unmount();
+  });
+
+  it("sanitizes scheduling thresholds with the shared platform defaults", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.get('[data-testid="account-scheduling-threshold-openai"]').setValue(75.8);
+    await wrapper.get('[data-testid="account-scheduling-threshold-anthropic"]').setValue(0);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).toHaveBeenCalledTimes(1);
+    expect(updateSettings.mock.calls[0]?.[0]?.account_scheduling_thresholds).toMatchObject({ openai: 75, anthropic: 1 });
     wrapper.unmount();
   });
 

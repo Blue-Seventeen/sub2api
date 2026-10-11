@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -106,6 +107,21 @@ func writeOpenCodeUnsupportedModelError(c *gin.Context, isAnthropic bool, model 
 type ProtocolRule struct {
 	Pattern  string `json:"pattern"`
 	Protocol string `json:"protocol"`
+	// Protocols 是命中模型支持的全部原生协议，首项即 Protocol（首选）；为空表示只支持
+	// Protocol。入站协议在其中时同协议直通，否则走首选协议（见 resolveModelRoutedProtocolFor）。
+	Protocols []string `json:"protocols,omitempty"`
+}
+
+// normalizeProtocolSet 返回以 preferred 开头、去重且只含原生协议的协议集合。
+func normalizeProtocolSet(preferred string, protocols []string) []string {
+	set := []string{preferred}
+	for _, protocol := range protocols {
+		if !isNativeUpstreamProtocol(protocol) || slices.Contains(set, protocol) {
+			continue
+		}
+		set = append(set, protocol)
+	}
+	return set
 }
 
 // DefaultOpenCodeGoProtocolRules is the built-in adaptive routing table for Go.
@@ -157,16 +173,25 @@ func protocolRulePatternMatches(pattern, model string) bool {
 	return model == pattern
 }
 
+// matchProtocolRules 返回首条命中规则的首选协议；未命中时为 Chat Completions。
 func matchProtocolRules(model string, rules []ProtocolRule) string {
+	if set, ok := matchProtocolRuleSet(model, rules); ok {
+		return set[0]
+	}
+	return APIProtocolChatCompletions
+}
+
+// matchProtocolRuleSet 返回首条命中规则支持的协议集合（首项为首选）；未命中时 ok=false。
+func matchProtocolRuleSet(model string, rules []ProtocolRule) ([]string, bool) {
 	for _, rule := range rules {
 		if !isNativeUpstreamProtocol(rule.Protocol) {
 			continue
 		}
 		if protocolRulePatternMatches(rule.Pattern, model) {
-			return rule.Protocol
+			return normalizeProtocolSet(rule.Protocol, rule.Protocols), true
 		}
 	}
-	return APIProtocolChatCompletions
+	return nil, false
 }
 
 // OpenCodeGoModelProtocol 返回内置默认表下模型对应的原生上游协议。
@@ -211,13 +236,52 @@ func parseProtocolRules(raw any) ([]ProtocolRule, error) {
 		if err != nil {
 			return nil, fmt.Errorf("protocol_rules[%d]: %w", i, err)
 		}
+		protocols, err := protocolRuleProtocols(entry["protocols"])
+		if err != nil {
+			return nil, fmt.Errorf("protocol_rules[%d]: %w", i, err)
+		}
 		protocol = strings.TrimSpace(protocol)
+		if protocol == "" && len(protocols) > 0 {
+			protocol = protocols[0]
+		}
 		if !isNativeUpstreamProtocol(protocol) {
 			return nil, fmt.Errorf("protocol_rules[%d]: protocol must be chat_completions, anthropic, or responses", i)
 		}
-		rules = append(rules, ProtocolRule{Pattern: pattern, Protocol: protocol})
+		rule := ProtocolRule{Pattern: pattern, Protocol: protocol}
+		if set := normalizeProtocolSet(protocol, protocols); len(set) > 1 {
+			rule.Protocols = set
+		}
+		rules = append(rules, rule)
 	}
 	return rules, nil
+}
+
+// protocolRuleProtocols 解析规则的 protocols 列表（可缺省）；其中每一项都须为原生协议。
+func protocolRuleProtocols(raw any) ([]string, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	var items []any
+	switch values := raw.(type) {
+	case []any:
+		items = values
+	case []string:
+		for _, value := range values {
+			items = append(items, value)
+		}
+	default:
+		return nil, fmt.Errorf("protocols must be an array")
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		protocol, _ := item.(string)
+		protocol = strings.TrimSpace(protocol)
+		if !isNativeUpstreamProtocol(protocol) {
+			return nil, fmt.Errorf("protocols must only contain chat_completions, anthropic, or responses")
+		}
+		out = append(out, protocol)
+	}
+	return out, nil
 }
 
 func protocolRuleItems(raw any) ([]any, error) {
@@ -269,10 +333,18 @@ func NormalizeProtocolRulesCredentials(credentials map[string]any) error {
 	}
 	encoded := make([]any, 0, len(rules))
 	for _, rule := range rules {
-		encoded = append(encoded, map[string]any{
+		item := map[string]any{
 			"pattern":  rule.Pattern,
 			"protocol": rule.Protocol,
-		})
+		}
+		if len(rule.Protocols) > 1 {
+			protocols := make([]any, 0, len(rule.Protocols))
+			for _, protocol := range rule.Protocols {
+				protocols = append(protocols, protocol)
+			}
+			item["protocols"] = protocols
+		}
+		encoded = append(encoded, item)
 	}
 	credentials[protocolRulesCredentialKey] = encoded
 	return nil

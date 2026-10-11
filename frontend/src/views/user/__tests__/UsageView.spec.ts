@@ -154,11 +154,12 @@ function mountUsageView() {
         DateRangePicker: true,
         Icon: true,
         UsageStatsCards: namedStub('UsageStatsCards', ['costDisplayMode']),
-        UsageTable: namedStub('UsageTable', ['costDisplayMode']),
+        UsageTable: namedStub('UsageTable', ['columns', 'costDisplayMode']),
         ModelDistributionChart: namedStub('ModelDistributionChart', ['costDisplayMode']),
         GroupDistributionChart: namedStub('GroupDistributionChart', ['costDisplayMode']),
         EndpointDistributionChart: namedStub('EndpointDistributionChart', ['costDisplayMode']),
         TokenUsageTrend: namedStub('TokenUsageTrend', ['costDisplayMode']),
+        UserErrorRequestsTable: namedStub('UserErrorRequestsTable'),
       },
     },
   })
@@ -235,9 +236,10 @@ describe('user UsageView', () => {
   })
 
   it('loads logs, stats, model stats, and snapshot on first render', async () => {
-    mountUsageView()
+    const wrapper = mountUsageView()
     await flushPromises()
 
+    expect(wrapper.findComponent(UsageTable).props('columns').map((column: { key: string }) => column.key)).toContain('latency')
     expect(query).toHaveBeenCalled()
     expect(getStats).toHaveBeenCalled()
     expect(getDashboardModels).toHaveBeenCalled()

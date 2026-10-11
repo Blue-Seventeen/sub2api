@@ -39,6 +39,27 @@ type ProviderProfile struct {
 	// ResponsesPath 覆盖 Responses 端点路径（按 buildOpenAIEndpointURL 的版本感知
 	// 规则拼接），空值为 /v1/responses。对自定义 base_url 的账号同样生效。
 	ResponsesPath string
+	// DefaultTestModel 是管理端连接测试未指定模型时使用的模型；空值时按各协议的
+	// 通用默认模型。
+	DefaultTestModel string
+	// ModelCatalog 表示上游 {Chat Completions 基址}/models 为每个模型给出
+	// supported_endpoints；按模型分流时据此判断模型支持哪些协议（见 model_protocol_catalog.go）。
+	ModelCatalog bool
+}
+
+// providerDefaultTestModel 返回账号连接测试未指定模型时的默认模型；非多协议供应商或
+// 未设置时为空。
+func (a *Account) providerDefaultTestModel() string {
+	profile := a.providerProfile()
+	if profile == nil {
+		return ""
+	}
+	// Cline 订阅了 ClinePass 的账号用订阅模型测试，不消耗积分；ClinePass 钱包冷却中
+	// （窗口用满等）时改用按量模型，否则测试必然失败，而积分模型照常可用。
+	if a.IsCline() && a.clinePassSubscribed() && !a.isRateLimitActiveForKey(clinePassRateLimitKey) {
+		return DefaultClinePassTestModel
+	}
+	return profile.DefaultTestModel
 }
 
 // Endpoints 返回指定接入模式的端点；未知模式回落 DefaultMode。
@@ -147,9 +168,10 @@ var providerProfiles = map[string]*ProviderProfile{
 		},
 	},
 	PlatformOpenCodeGo: {
-		Platform:    PlatformOpenCodeGo,
-		DefaultMode: AccountModeGo,
-		Routing:     ProviderRoutingByModel,
+		Platform:         PlatformOpenCodeGo,
+		DefaultMode:      AccountModeGo,
+		Routing:          ProviderRoutingByModel,
+		DefaultTestModel: DefaultOpenCodeGoTestModel,
 		Modes: map[string]ProviderEndpoints{
 			AccountModeGo: {
 				BaseURLs: map[string]string{
@@ -166,6 +188,36 @@ var providerProfiles = map[string]*ProviderProfile{
 					APIProtocolAnthropic:       DefaultOpenCodeZenAnthropicBaseURL,
 				},
 				ProtocolRules: DefaultOpenCodeZenProtocolRules(),
+			},
+		},
+	},
+	PlatformCommandCode: {
+		Platform:         PlatformCommandCode,
+		DefaultMode:      AccountModePayG,
+		Routing:          ProviderRoutingByModel,
+		DefaultTestModel: DefaultCommandCodeTestModel,
+		ModelCatalog:     true,
+		// 订阅套餐与 Provider 按量计费共用同一个 API Key 与端点，只有一个接入模式。
+		Modes: map[string]ProviderEndpoints{
+			AccountModePayG: {
+				BaseURLs: map[string]string{
+					APIProtocolChatCompletions: DefaultCommandCodeBaseURL,
+					APIProtocolResponses:       DefaultCommandCodeBaseURL,
+					APIProtocolAnthropic:       DefaultCommandCodeAnthropicBaseURL,
+				},
+				ProtocolRules: DefaultCommandCodeProtocolRules(),
+			},
+		},
+	},
+	PlatformCline: {
+		Platform:         PlatformCline,
+		DefaultMode:      AccountModePayG,
+		DefaultTestModel: DefaultClineTestModel,
+		// 按量积分与 ClinePass 订阅共用同一个 API Key 与端点，由模型名决定扣哪一边
+		// （cline-pass/* 走订阅），只有一个接入模式；两边的超限分别冷却（见 cline.go）。
+		Modes: map[string]ProviderEndpoints{
+			AccountModePayG: {
+				BaseURLs: map[string]string{APIProtocolChatCompletions: DefaultClineBaseURL},
 			},
 		},
 	},
@@ -203,4 +255,13 @@ func (a *Account) providerSupportsProtocol(protocol string) bool {
 func (a *Account) routesByModel() bool {
 	profile := a.providerProfile()
 	return profile != nil && profile.Routing == ProviderRoutingByModel
+}
+
+// RoutesProtocolByInbound 报告账号是否为按入站协议分流的多协议 API Key 供应商
+// （单一厂商型，目前即国产厂商）。这类账号共享"显式协议优先、adaptive 选同协议
+// 原生端点"的转发、Responses 能力标记与本地 token 估算逻辑；按模型分流的聚合
+// 平台由 protocol_rules 决定协议，走 routesByModel 分支。
+func (a *Account) RoutesProtocolByInbound() bool {
+	profile := a.providerProfile()
+	return profile != nil && profile.Routing != ProviderRoutingByModel
 }

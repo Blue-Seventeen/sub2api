@@ -310,6 +310,8 @@ func TestParseUsageAndEnrichCoverage(t *testing.T) {
 	require.Equal(t, 0, state.usage.CacheReadInputTokens)
 
 	parseUsageAndAccumulate(state, []byte(`{"type":"response.completed","response":{"usage":{"input_tokens":2,"output_tokens":1,"input_tokens_details":{"cached_tokens":1},"cache_creation":{"ephemeral_5m_input_tokens":4,"ephemeral_1h_input_tokens":5},"output_tokens_details":{"image_tokens":3}}}}`), "response.completed", nil)
+	require.Equal(t, Usage{}, state.usage, "usage is billed only when the turn settles")
+	finalizeRelayTurnUsage(state)
 	require.Equal(t, 2, state.usage.InputTokens)
 	require.Equal(t, 1, state.usage.OutputTokens)
 	require.Equal(t, 1, state.usage.CacheReadInputTokens)
@@ -320,6 +322,7 @@ func TestParseUsageAndEnrichCoverage(t *testing.T) {
 
 	cacheWriteState := &relayState{}
 	parseUsageAndAccumulate(cacheWriteState, []byte(`{"type":"response.completed","response":{"usage":{"input_tokens":2,"output_tokens":1,"input_tokens_details":{"cached_tokens":1,"cache_write_tokens":4},"output_tokens_details":{"image_tokens":3}}}}`), "response.completed", nil)
+	finalizeRelayTurnUsage(cacheWriteState)
 	require.Equal(t, 4, cacheWriteState.usage.CacheCreationInputTokens)
 	require.Equal(t, 0, cacheWriteState.usage.CacheCreation5mTokens)
 	require.Equal(t, 0, cacheWriteState.usage.CacheCreation1hTokens)
@@ -354,6 +357,10 @@ func TestParseUsageAndAccumulateAcceptsChatUsageAliases(t *testing.T) {
 	require.Equal(t, 3, got.CacheCreation5mTokens)
 	require.Equal(t, 4, got.CacheCreation1hTokens)
 	require.Equal(t, 2, got.ImageOutputTokens)
+	require.Equal(t, Usage{}, state.usage, "parsing does not settle the turn")
+	require.Equal(t, got, finalizeRelayTurnUsage(state))
+	require.Equal(t, got, state.usage)
+	require.Equal(t, Usage{}, finalizeRelayTurnUsage(state), "a settled turn is not billed twice")
 	require.Equal(t, got, state.usage)
 }
 
