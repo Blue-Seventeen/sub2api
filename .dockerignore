@@ -30,6 +30,7 @@ Thumbs.db
 
 # Build artifacts
 dist/
+backend/internal/web/dist/
 build/
 artifacts/
 release-artifacts/
