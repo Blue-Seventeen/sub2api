@@ -131,7 +131,12 @@
             :server-side-sort="true"
             :default-sort-key="'created_at'"
             :default-sort-order="'desc'"
+            :selected-i-ps="selectedIPs"
+            :ip-options-loader="loadIPOptions"
+            :ip-refresh-version="ipRefreshVersion"
+            :ip-reset-version="ipResetVersion"
             @sort="handleSort"
+            @ip-filter-change="applyIPFilter"
             @userClick="handleUserClick"
             @ipGeoBatchFailed="handleIpGeoBatchFailed"
           />
@@ -250,6 +255,7 @@ const breakdownFilters = computed(() => {
   if (filters.value.request_type != null) f.request_type = filters.value.request_type
   if (filters.value.native_compaction_v2 != null) f.native_compaction_v2 = filters.value.native_compaction_v2
   if (filters.value.billing_type != null) f.billing_type = filters.value.billing_type
+  if (filters.value.ip_addresses) f.ip_addresses = filters.value.ip_addresses
   return f
 })
 
@@ -312,6 +318,9 @@ const filters = ref<AdminUsageQueryParams>({
   start_date: startDate.value,
   end_date: endDate.value
 })
+const selectedIPs = ref<string[]>([])
+const ipRefreshVersion = ref(0)
+const ipResetVersion = ref(0)
 const pagination = reactive({ page: 1, page_size: getPersistedPageSize(), total: 0 })
 const sortState = reactive({
   sort_by: 'created_at',
@@ -471,6 +480,7 @@ const loadModelStats = async (source: ModelDistributionSource, force = false) =>
           ? false
           : undefined,
       billing_type: filters.value.billing_type,
+      ip_addresses: serializeIPs(selectedIPs.value),
       upstream_model_mismatch: filters.value.upstream_model_mismatch ?? undefined,
     }
 
@@ -522,6 +532,7 @@ const loadChartData = async () => {
       stream: legacyStream === null ? undefined : legacyStream,
       native_compaction_v2: filters.value.native_compaction_v2 ?? undefined,
       billing_type: filters.value.billing_type,
+      ip_addresses: serializeIPs(selectedIPs.value),
       upstream_model_mismatch: filters.value.upstream_model_mismatch,
       include_stats: false,
       include_trend: true,
@@ -548,7 +559,29 @@ const applyFilters = () => {
     errRows.value = []
   }
 }
+const serializeIPs = (ips: string[]) => ips.length ? ips.join(',') : undefined
+const loadIPOptions = (search: string, offset: number, signal: AbortSignal) => adminUsageAPI.getIPOptions({
+  ...filters.value,
+  ip_addresses: undefined,
+  start_date: startDate.value,
+  end_date: endDate.value,
+  search,
+  offset,
+  limit: 50,
+}, { signal })
+const applyIPFilter = (ips: string[]) => {
+  selectedIPs.value = [...ips]
+  filters.value.ip_addresses = serializeIPs(ips)
+  pagination.page = 1
+  invalidateModelStatsCache()
+  loadLogs()
+  loadStats()
+  loadModelStats(modelDistributionSource.value, true)
+  loadChartData()
+}
+watch(() => JSON.stringify({ ...filters.value, ip_addresses: undefined }), () => { ipRefreshVersion.value++ })
 const refreshData = () => {
+  ipRefreshVersion.value++
   invalidateModelStatsCache()
   loadLogs()
   loadStats(true)
@@ -570,6 +603,8 @@ const resetFilters = () => {
     billing_mode: undefined,
     upstream_model_mismatch: undefined
   }
+  selectedIPs.value = []
+  ipResetVersion.value++
   granularity.value = getGranularityForRange(startDate.value, endDate.value)
   applyFilters()
 }
@@ -586,7 +621,13 @@ const handleIpGeoBatchFailed = () => {
   appStore.showError(t('usage.ipGeo.batchFailed'))
 }
 const cancelExport = () => exportAbortController?.abort()
-const openCleanupDialog = () => { cleanupDialogVisible.value = true }
+const openCleanupDialog = () => {
+  if (selectedIPs.value.length) {
+    appStore.showWarning(t('admin.usage.cleanup.ipFilterUnsupported'))
+    return
+  }
+  cleanupDialogVisible.value = true
+}
 const getRequestTypeLabel = (log: AdminUsageLog): string => {
   const requestType = resolveUsageRequestType(log)
   if (requestType === 'cyber') return t('usage.cyber')
@@ -620,6 +661,7 @@ const accountBilledExportCost = (log: AdminUsageLog): string => {
 const exportToExcel = async () => {
   if (exporting.value) return; exporting.value = true; exportProgress.show = true
   const c = new AbortController(); exportAbortController = c
+  const exportParams = buildUsageListParams(1, 100, true)
   try {
     let p = 1; let total = pagination.total; let exportedCount = 0
     const headers = [
@@ -638,7 +680,7 @@ const exportToExcel = async () => {
     const csvRows = [csvRow(headers)]
     while (true) {
       const res = await adminUsageAPI.list(
-        buildUsageListParams(p, 100, p === 1),
+        { ...exportParams, page: p, exact_total: p === 1 },
         { signal: c.signal }
       )
       if (c.signal.aborted) break; if (p === 1) { total = res.total; exportProgress.total = total }
@@ -663,7 +705,7 @@ const exportToExcel = async () => {
       if (exportedCount >= total || res.items.length < 100) break; p++
     }
     if(!c.signal.aborted) {
-      saveAs(new Blob([`\ufeff${csvRows.join('\r\n')}`], { type: 'text/csv;charset=utf-8' }), `usage_${filters.value.start_date}_to_${filters.value.end_date}.csv`)
+      saveAs(new Blob([`\ufeff${csvRows.join('\r\n')}`], { type: 'text/csv;charset=utf-8' }), `usage_${exportParams.start_date}_to_${exportParams.end_date}.csv`)
       appStore.showSuccess(t('usage.exportSuccess'))
     }
   } catch (error) { console.error('Failed to export:', error); appStore.showError('Export Failed') }

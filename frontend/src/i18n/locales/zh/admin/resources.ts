@@ -573,6 +573,7 @@ export default {
       },
       cleanup: {
         button: '清理',
+        ipFilterUnsupported: '清理暂不支持 IP 条件，请先清除 IP 筛选。',
         title: '清理使用记录',
         warning: '清理不可恢复，且会影响历史统计回看。',
         submit: '提交清理',

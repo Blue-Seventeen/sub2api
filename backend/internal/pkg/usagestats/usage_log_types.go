@@ -199,6 +199,7 @@ type UserBreakdownItem struct {
 
 // UserBreakdownDimension specifies the dimension to filter for user breakdown.
 type UserBreakdownDimension struct {
+	IPAddresses  []string
 	GroupID      int64  // filter by group_id (>0 to enable)
 	Model        string // filter by model name (non-empty to enable)
 	ModelType    string // "requested", "upstream", or "mapping"
@@ -288,12 +289,13 @@ type PlatformDashboardStats struct {
 
 // UsageLogFilters represents filters for usage log queries
 type UsageLogFilters struct {
-	UserID    int64
-	APIKeyID  int64
-	AccountID int64
-	GroupID   int64
-	RequestID string
-	Model     string
+	IPAddresses []string
+	UserID      int64
+	APIKeyID    int64
+	AccountID   int64
+	GroupID     int64
+	RequestID   string
+	Model       string
 	// ModelFilterSource controls how Model is matched. Empty preserves raw usage_logs.model semantics.
 	ModelFilterSource     string
 	RequestType           *int16

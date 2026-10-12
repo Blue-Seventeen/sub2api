@@ -451,6 +451,10 @@ export default {
     exportExcelFailed: '使用数据导出失败',
     imageUnit: '张',
     userAgent: 'User-Agent',
+    ipFilter: {
+      title: '筛选 IP', active: '已选择 {count} 个 IP', search: '搜索 IP 地址', scope: '按当前筛选条件查找全部记录',
+      apply: '应用', clear: '清除', more: '加载更多', empty: '暂无匹配 IP', failed: 'IP 加载失败', retry: '重试', limit: '最多选择 100 个 IP'
+    },
     ipGeo: {
       fetch: '获取地区',
       fetching: '获取中...',

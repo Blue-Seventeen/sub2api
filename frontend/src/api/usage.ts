@@ -7,6 +7,7 @@ import { apiClient } from './client'
 import type {
   UsageLog,
   UsageQueryParams,
+  UsageIPOptions,
   UsageStatsResponse,
   PaginatedResponse,
   TrendDataPoint,
@@ -65,6 +66,7 @@ export interface UserDashboardStats {
 }
 
 export interface TrendParams {
+  ip_addresses?: string
   start_date?: string
   end_date?: string
   granularity?: 'day' | 'hour'
@@ -287,6 +289,7 @@ export async function getDashboardTrend(params?: TrendParams): Promise<TrendResp
  * @returns Model usage statistics for current user
  */
 export async function getDashboardModels(params?: {
+  ip_addresses?: string
   start_date?: string
   end_date?: string
   api_key_id?: number
@@ -381,7 +384,18 @@ export async function getMyErrorDetail(id: number): Promise<UserErrorRequestDeta
   return data
 }
 
+export async function getIPOptions(
+  params: UsageQueryParams & { search?: string; offset?: number; limit?: number },
+  options?: { signal?: AbortSignal }
+): Promise<UsageIPOptions> {
+  const candidateParams = { ...params }
+  delete candidateParams.ip_addresses
+  const { data } = await apiClient.get<UsageIPOptions>('/usage/ip-options', { params: candidateParams, signal: options?.signal })
+  return data
+}
+
 export const usageAPI = {
+  getIPOptions,
   list,
   query,
   getStats,

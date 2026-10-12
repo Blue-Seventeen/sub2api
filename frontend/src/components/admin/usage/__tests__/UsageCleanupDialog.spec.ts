@@ -3,9 +3,9 @@ import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import UsageCleanupDialog from '../UsageCleanupDialog.vue'
 import Pagination from '@/components/common/Pagination.vue'
 
-const { listCleanupTasks, showError } = vi.hoisted(() => ({ listCleanupTasks: vi.fn(), showError: vi.fn() }))
+const { listCleanupTasks, createCleanupTask, showError } = vi.hoisted(() => ({ listCleanupTasks: vi.fn(), createCleanupTask: vi.fn(), showError: vi.fn() }))
 vi.mock('@/components/admin/usage/UsageFilters.vue', () => ({ default: { template: '<div />' } }))
-vi.mock('@/api/admin/usage', () => ({ adminUsageAPI: { listCleanupTasks } }))
+vi.mock('@/api/admin/usage', () => ({ adminUsageAPI: { listCleanupTasks, createCleanupTask } }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 enableAutoUnmount(afterEach)
@@ -24,6 +24,16 @@ async function openDialog() {
 }
 
 describe('cleanup task pagination', () => {
+  it('rejects an IP-scoped cleanup payload instead of silently widening the deletion scope', async () => {
+    const wrapper = await openDialog()
+    await wrapper.setProps({ show: false, filters: { ip_addresses: '192.0.2.1' } })
+    listCleanupTasks.mockResolvedValueOnce(page(1))
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    await (wrapper.vm as any).submitCleanup()
+    expect(createCleanupTask).not.toHaveBeenCalled()
+    expect(showError).toHaveBeenCalledWith('admin.usage.cleanup.ipFilterUnsupported')
+  })
   it.each(['success', 'failure'])('ignores an older page request that completes with %s', async (outcome) => {
     const wrapper = await openDialog()
     let resolve!: (value: object) => void

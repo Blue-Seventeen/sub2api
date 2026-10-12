@@ -1,5 +1,9 @@
 <template>
   <div :class="flat ? '' : 'card overflow-hidden'">
+    <div v-if="showIpGeoToolbar && ipOptionsLoader" class="flex items-center gap-1 px-4 py-2 md:hidden">
+      <span class="text-xs font-medium text-gray-500 dark:text-dark-400">{{ t('admin.usage.ipAddress') }}</span>
+      <UsageIPFilter :model-value="selectedIPs" :load-options="ipOptionsLoader" :refresh-version="ipRefreshVersion" :reset-version="ipResetVersion" @apply="emit('ipFilterChange', $event)" />
+    </div>
     <div
       v-if="showIpGeoToolbar"
       class="flex items-center justify-end gap-2 border-b border-gray-200 px-4 py-2 dark:border-dark-700"
@@ -26,6 +30,10 @@
         :default-sort-order="defaultSortOrder"
         @sort="(key, order) => $emit('sort', key, order)"
       >
+        <template #header-ip_address="{ column }">
+          <span>{{ column.label }}</span>
+          <UsageIPFilter v-if="ipOptionsLoader" :model-value="selectedIPs" :load-options="ipOptionsLoader" :refresh-version="ipRefreshVersion" :reset-version="ipResetVersion" @apply="emit('ipFilterChange', $event)" />
+        </template>
         <template #cell-user="{ row }">
           <div class="text-sm">
             <button
@@ -674,10 +682,15 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import IpGeoCell from '@/components/common/IpGeoCell.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { fetchBatch, getEntry } from '@/utils/ipGeoLookup'
-import type { AdminUsageLog } from '@/types'
+import type { AdminUsageLog, UsageIPOptions } from '@/types'
+import UsageIPFilter from './UsageIPFilter.vue'
 import type { Column } from '@/components/common/types'
 
 interface Props {
+  selectedIPs?: string[]
+  ipOptionsLoader?: (search: string, offset: number, signal: AbortSignal) => Promise<UsageIPOptions>
+  ipRefreshVersion?: number
+  ipResetVersion?: number
   data: AdminUsageLog[]
   loading?: boolean
   columns: Column[]
@@ -692,6 +705,9 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  selectedIPs: () => [],
+  ipRefreshVersion: 0,
+  ipResetVersion: 0,
   loading: false,
   serverSideSort: false,
   defaultSortKey: '',
@@ -702,6 +718,7 @@ const props = withDefaults(defineProps<Props>(), {
   flat: false
 })
 const emit = defineEmits<{
+  ipFilterChange: [ips: string[]]
   userClick: [userID: number, email?: string]
   sort: [key: string, order: 'asc' | 'desc']
   ipGeoBatchFailed: []

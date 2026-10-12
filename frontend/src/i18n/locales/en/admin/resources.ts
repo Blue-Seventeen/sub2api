@@ -576,6 +576,7 @@ export default {
       },
       cleanup: {
         button: 'Cleanup',
+        ipFilterUnsupported: 'Cleanup does not support IP filters. Clear the IP selection first.',
         title: 'Cleanup Usage Records',
         warning: 'Cleanup is irreversible and will affect historical stats.',
         submit: 'Submit Cleanup',

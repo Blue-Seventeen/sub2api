@@ -219,7 +219,7 @@ func TestUserUsageListKeepsUserBillingWithoutAdminOnlyFields(t *testing.T) {
 	require.Contains(t, body, `"total_cost":0.1`)
 	require.Contains(t, body, `"actual_cost":0.08`)
 	require.Contains(t, body, `"rate_multiplier":0.8`)
-	require.NotContains(t, body, `"ip_address"`)
+	require.Contains(t, body, `"ip_address":"203.0.113.10"`)
 	require.NotContains(t, body, "upstream_endpoint")
 	require.NotContains(t, body, "account_rate_multiplier")
 	require.NotContains(t, body, "account_stats_cost")

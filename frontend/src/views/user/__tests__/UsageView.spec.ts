@@ -11,6 +11,7 @@ const {
   getStats,
   getDashboardModels,
   getDashboardSnapshotV2,
+  getIPOptions,
   list,
   getAvailable,
   showError,
@@ -22,6 +23,7 @@ const {
   getStats: vi.fn(),
   getDashboardModels: vi.fn(),
   getDashboardSnapshotV2: vi.fn(),
+  getIPOptions: vi.fn(),
   list: vi.fn(),
   getAvailable: vi.fn(),
   showError: vi.fn(),
@@ -76,6 +78,7 @@ vi.mock('@/api', () => ({
     getStats,
     getDashboardModels,
     getDashboardSnapshotV2,
+    getIPOptions,
   },
   keysAPI: {
     list,
@@ -155,7 +158,7 @@ function mountUsageView() {
         DateRangePicker: true,
         Icon: true,
         UsageStatsCards: namedStub('UsageStatsCards', ['costDisplayMode']),
-        UsageTable: namedStub('UsageTable', ['columns', 'costDisplayMode']),
+        UsageTable: namedStub('UsageTable', ['columns', 'costDisplayMode', 'selectedIPs', 'ipOptionsLoader', 'ipRefreshVersion', 'ipResetVersion']),
         ModelDistributionChart: namedStub('ModelDistributionChart', ['costDisplayMode']),
         GroupDistributionChart: namedStub('GroupDistributionChart', ['costDisplayMode']),
         EndpointDistributionChart: namedStub('EndpointDistributionChart', ['costDisplayMode']),
@@ -192,11 +195,20 @@ function stubCsvDownload() {
 }
 
 describe('user UsageView', () => {
+  it('offers the request IP column through user column settings', async () => {
+    const wrapper = mountUsageView()
+    await flushPromises()
+    expect(wrapper.findComponent(UsageTable).props('columns').map((column: { key: string }) => column.key)).toContain('ip_address')
+    await wrapper.get('[data-testid="usage-column-settings"]').trigger('click')
+    expect(wrapper.text()).toContain('admin.usage.ipAddress')
+    wrapper.unmount()
+  })
   beforeEach(() => {
     query.mockReset()
     getStats.mockReset()
     getDashboardModels.mockReset()
     getDashboardSnapshotV2.mockReset()
+    getIPOptions.mockReset().mockResolvedValue({ ips: ['192.0.2.1'], has_more: false })
     list.mockReset()
     getAvailable.mockReset()
     showError.mockReset()
@@ -251,6 +263,43 @@ describe('user UsageView', () => {
     }))
     expect(list).toHaveBeenCalledWith(1, 100)
     expect(getAvailable).toHaveBeenCalled()
+  })
+
+  it('applies IP selection to rows, statistics, charts and export, retains it on refresh and clears it on reset', async () => {
+    const wrapper = mountUsageView()
+    await flushPromises()
+    const table = wrapper.findComponent(UsageTable)
+    table.vm.$emit('ipFilterChange', ['192.0.2.1', '2001:db8::1'])
+    await flushPromises()
+    const selected = { ip_addresses: '192.0.2.1,2001:db8::1' }
+    expect(query).toHaveBeenLastCalledWith(expect.objectContaining({ ...selected, page: 1 }), expect.any(Object))
+    for (const request of [getStats, getDashboardModels, getDashboardSnapshotV2]) {
+      expect(request).toHaveBeenLastCalledWith(expect.objectContaining(selected))
+    }
+    const signal = new AbortController().signal
+    await table.props('ipOptionsLoader')('192', 0, signal)
+    expect(getIPOptions).toHaveBeenLastCalledWith(expect.objectContaining({ search: '192', offset: 0, ip_addresses: undefined }), { signal })
+
+    const csv = stubCsvDownload()
+    try {
+      await (wrapper.vm as any).exportToCSV()
+      expect(query).toHaveBeenLastCalledWith(expect.objectContaining(selected))
+    } finally { csv.restore() }
+
+    const refresh = wrapper.findAll('button').find(button => button.text() === 'Refresh')!
+    const version = table.props('ipRefreshVersion')
+    await refresh.trigger('click')
+    await flushPromises()
+    expect(table.props('selectedIPs')).toEqual(['192.0.2.1', '2001:db8::1'])
+    expect(table.props('ipRefreshVersion')).toBeGreaterThan(version)
+    expect(query).toHaveBeenLastCalledWith(expect.objectContaining(selected), expect.any(Object))
+
+    await wrapper.findAll('button').find(button => button.text() === 'Reset')!.trigger('click')
+    await flushPromises()
+    expect(table.props('selectedIPs')).toEqual([])
+    expect(table.props('ipResetVersion')).toBe(1)
+    expect(query).toHaveBeenLastCalledWith(expect.not.objectContaining({ ip_addresses: expect.any(String) }), expect.any(Object))
+    wrapper.unmount()
   })
 
   it('requests video usage with the unchanged video filter value', async () => {

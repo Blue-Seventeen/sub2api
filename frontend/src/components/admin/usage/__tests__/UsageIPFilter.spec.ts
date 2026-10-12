@@ -1,0 +1,125 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
+import UsageIPFilter from '../UsageIPFilter.vue'
+
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+
+const mountFilter = (loadOptions = vi.fn().mockResolvedValue({ ips: ['192.0.2.1', '2001:db8::1'], has_more: false }), modelValue: string[] = []) =>
+  mount(UsageIPFilter, { props: { loadOptions, modelValue, refreshVersion: 0, resetVersion: 0 }, global: { stubs: { Teleport: true } } })
+
+afterEach(() => { vi.useRealTimers(); document.body.innerHTML = '' })
+
+describe('usage IP header filter', () => {
+  it('aborts a pending request on close and rejects its late response', async () => {
+    let resolve!: (value: { ips: string[]; has_more: boolean }) => void
+    const load = vi.fn().mockImplementation(() => new Promise(res => { resolve = res }))
+    const wrapper = mountFilter(load)
+    await wrapper.get('[data-testid="usage-ip-filter-trigger"]').trigger('click')
+    const signal = load.mock.calls[0][2] as AbortSignal
+    await wrapper.get('[data-testid="usage-ip-filter-panel"]').trigger('keydown', { key: 'Escape' })
+    expect(signal.aborted).toBe(true)
+    resolve({ ips: ['198.51.100.9'], has_more: false })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="usage-ip-filter-panel"]').exists()).toBe(false)
+    expect(wrapper.emitted('apply')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('limits selection to 100 addresses while still allowing an address to be unchecked', async () => {
+    const selected = Array.from({ length: 100 }, (_, index) => `192.0.2.${index + 1}`)
+    const wrapper = mountFilter(vi.fn().mockResolvedValue({ ips: ['2001:db8::1'], has_more: false }), selected)
+    await wrapper.get('[data-testid="usage-ip-filter-trigger"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('input[data-ip="2001:db8::1"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('input[data-ip="192.0.2.1"]').setValue(false)
+    expect(wrapper.get('input[data-ip="2001:db8::1"]').attributes('disabled')).toBeUndefined()
+    await wrapper.get('input[data-ip="2001:db8::1"]').setValue(true)
+    await wrapper.get('[data-testid="usage-ip-filter-apply"]').trigger('click')
+    expect((wrapper.emitted('apply')![0][0] as string[])).toHaveLength(100)
+    wrapper.unmount()
+  })
+  it('loads server candidates only when opened and applies draft selection explicitly', async () => {
+    const load = vi.fn().mockResolvedValue({ ips: ['192.0.2.1', '2001:db8::1'], has_more: false })
+    const wrapper = mountFilter(load)
+    expect(load).not.toHaveBeenCalled()
+    await wrapper.get('[data-testid="usage-ip-filter-trigger"]').trigger('click')
+    await flushPromises()
+    expect(load).toHaveBeenCalledWith('', 0, expect.any(AbortSignal))
+    await wrapper.get('input[data-ip="192.0.2.1"]').setValue(true)
+    await wrapper.get('input[data-ip="2001:db8::1"]').setValue(true)
+    expect(wrapper.emitted('apply')).toBeUndefined()
+    await wrapper.get('[data-testid="usage-ip-filter-apply"]').trigger('click')
+    expect(wrapper.emitted('apply')).toEqual([[['192.0.2.1', '2001:db8::1']]])
+    expect(wrapper.find('[data-testid="usage-ip-filter-panel"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('keeps selected values while searching and ignores an older search response', async () => {
+    vi.useFakeTimers()
+    let finishOld!: (value: { ips: string[]; has_more: boolean }) => void
+    const load = vi.fn()
+      .mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve }))
+      .mockResolvedValue({ ips: ['2001:db8::2'], has_more: false })
+    const wrapper = mountFilter(load, ['192.0.2.1'])
+    await wrapper.get('[data-testid="usage-ip-filter-trigger"]').trigger('click')
+    await wrapper.get('[data-testid="usage-ip-filter-search"]').setValue('db8')
+    await vi.advanceTimersByTimeAsync(250)
+    await flushPromises()
+    expect(load).toHaveBeenLastCalledWith('db8', 0, expect.any(AbortSignal))
+    finishOld({ ips: ['198.51.100.3'], has_more: false })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('198.51.100.3')
+    expect(wrapper.get('input[data-ip="192.0.2.1"]').element).toHaveProperty('checked', true)
+    expect(wrapper.find('input[data-ip="2001:db8::2"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('loads another candidate page without losing checked values', async () => {
+    const load = vi.fn().mockResolvedValueOnce({ ips: ['192.0.2.1'], has_more: true })
+      .mockResolvedValueOnce({ ips: ['2001:db8::1'], has_more: false })
+    const wrapper = mountFilter(load)
+    await wrapper.get('[data-testid="usage-ip-filter-trigger"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('input[data-ip="192.0.2.1"]').setValue(true)
+    await wrapper.get('[data-testid="usage-ip-filter-more"]').trigger('click')
+    await flushPromises()
+    expect(load).toHaveBeenLastCalledWith('', 1, expect.any(AbortSignal))
+    expect(wrapper.get('input[data-ip="192.0.2.1"]').element).toHaveProperty('checked', true)
+    expect(wrapper.find('input[data-ip="2001:db8::1"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('refreshes options while retaining selection, and reset clears search and draft', async () => {
+    const load = vi.fn().mockResolvedValue({ ips: ['192.0.2.1'], has_more: false })
+    const wrapper = mountFilter(load, ['192.0.2.1'])
+    await wrapper.get('[data-testid="usage-ip-filter-trigger"]').trigger('click')
+    await flushPromises()
+    await wrapper.setProps({ refreshVersion: 1 })
+    await flushPromises()
+    expect(load).toHaveBeenCalledTimes(2)
+    expect(wrapper.get('input[data-ip="192.0.2.1"]').element).toHaveProperty('checked', true)
+    await wrapper.setProps({ modelValue: [], resetVersion: 1 })
+    expect(wrapper.find('[data-testid="usage-ip-filter-panel"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="usage-ip-filter-trigger"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="usage-ip-filter-search"]').element).toHaveProperty('value', '')
+    expect(wrapper.get('input[data-ip="192.0.2.1"]').element).toHaveProperty('checked', false)
+    await wrapper.get('[data-testid="usage-ip-filter-clear"]').trigger('click')
+    expect(wrapper.emitted('apply')).toEqual([[[]]])
+    wrapper.unmount()
+  })
+
+  it('allows retry after failure and closes with Escape while aborting a pending request', async () => {
+    const load = vi.fn().mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce({ ips: ['192.0.2.1'], has_more: false })
+    const wrapper = mountFilter(load)
+    await wrapper.get('[data-testid="usage-ip-filter-trigger"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="usage-ip-filter-error"]').exists()).toBe(true)
+    await wrapper.get('[data-testid="usage-ip-filter-retry"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="usage-ip-filter-panel"]').trigger('keydown', { key: 'Escape' })
+    expect(wrapper.find('[data-testid="usage-ip-filter-panel"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+})

@@ -712,6 +712,7 @@ func usageLogFromServiceUser(l *service.UsageLog) UsageLog {
 		reasoningEffort = &requested
 	}
 	return UsageLog{
+		IPAddress:                 l.IPAddress,
 		ID:                        l.ID,
 		UserID:                    l.UserID,
 		APIKeyID:                  l.APIKeyID,

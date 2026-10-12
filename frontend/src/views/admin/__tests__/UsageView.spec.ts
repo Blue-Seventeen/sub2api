@@ -3,8 +3,11 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, ref } from 'vue'
 
 import UsageView from '../UsageView.vue'
+import UsageTable from '@/components/admin/usage/UsageTable.vue'
+import UsageFilters from '@/components/admin/usage/UsageFilters.vue'
+import UsageCleanupDialog from '@/components/admin/usage/UsageCleanupDialog.vue'
 
-const { list, getStats, getSnapshotV2, getById, getModelStats, adminUsageList, saveAsMock, listErrorLogs, routeQuery } = vi.hoisted(() => {
+const { list, getStats, getSnapshotV2, getById, getModelStats, getIPOptions, adminUsageList, saveAsMock, listErrorLogs, routeQuery } = vi.hoisted(() => {
   vi.stubGlobal('localStorage', {
     getItem: vi.fn(() => null),
     setItem: vi.fn(),
@@ -16,6 +19,7 @@ const { list, getStats, getSnapshotV2, getById, getModelStats, adminUsageList, s
     getStats: vi.fn(),
     getSnapshotV2: vi.fn(),
     getModelStats: vi.fn(),
+    getIPOptions: vi.fn(),
     getById: vi.fn(),
     adminUsageList: vi.fn(),
     saveAsMock: vi.fn(),
@@ -64,6 +68,7 @@ vi.mock('@/api/admin', () => ({
 vi.mock('@/api/admin/usage', () => ({
   adminUsageAPI: {
     list: adminUsageList,
+    getIPOptions,
   },
 }))
 
@@ -127,6 +132,8 @@ const UsageTableStub = {
   template: '<div data-test="usage-table"><button class="user-click" @click="$emit(\'userClick\', 2)">user</button></div>',
 }
 const UserTokenRankingStub = {
+  name: 'UserTokenRanking',
+  props: ['filters'],
   emits: ['select-user'],
   template: '<div data-test="ranking"><button class="pick-user" @click="$emit(\'select-user\', 5, \'rank@test.com\')">pick</button></div>',
 }
@@ -179,6 +186,7 @@ describe('admin UsageView route filters', () => {
     })
     getSnapshotV2.mockReset().mockResolvedValue({ trend: [], models: [], groups: [] })
     getModelStats.mockReset().mockResolvedValue({ models: [] })
+    getIPOptions.mockReset().mockResolvedValue({ ips: ['192.0.2.1'], has_more: false })
     getById.mockReset()
   })
 
@@ -197,6 +205,38 @@ describe('admin UsageView route filters', () => {
     expect(getById).toHaveBeenCalledWith(42, true)
     expect(list).toHaveBeenCalledWith(expect.objectContaining({ user_id: 42 }), expect.anything())
     expect(wrapper.find('[data-test="user-filter-label"]').text()).toBe('route-user@test.com')
+  })
+
+  it('synchronizes IP filtering with rows, stats, charts, candidates, refresh and reset', async () => {
+    const wrapper = mountRouteFilteredUsageView()
+    await flushPromises()
+    const table = wrapper.findComponent(UsageTable)
+    table.vm.$emit('ipFilterChange', ['192.0.2.1'])
+    await flushPromises()
+    const selected = { ip_addresses: '192.0.2.1' }
+    expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ ...selected, page: 1 }), expect.any(Object))
+    for (const request of [getStats, getModelStats, getSnapshotV2]) {
+      expect(request).toHaveBeenLastCalledWith(expect.objectContaining(selected))
+    }
+    const signal = new AbortController().signal
+    await table.props('ipOptionsLoader')('192', 0, signal)
+    expect(getIPOptions).toHaveBeenLastCalledWith(expect.objectContaining({ search: '192', ip_addresses: undefined }), { signal })
+    const controls = wrapper.findComponent(UsageFilters)
+    controls.vm.$emit('cleanup')
+    await flushPromises()
+    expect(wrapper.findComponent(UsageCleanupDialog).props('show')).toBe(false)
+    const version = table.props('ipRefreshVersion')
+    controls.vm.$emit('refresh')
+    await flushPromises()
+    expect(table.props('selectedIPs')).toEqual(['192.0.2.1'])
+    expect(table.props('ipRefreshVersion')).toBeGreaterThan(version)
+    expect(getStats).toHaveBeenLastCalledWith(expect.objectContaining({ ...selected, nocache: 1 }))
+    controls.vm.$emit('reset')
+    await flushPromises()
+    expect(table.props('selectedIPs')).toEqual([])
+    expect(table.props('ipResetVersion')).toBe(1)
+    expect(list).toHaveBeenLastCalledWith(expect.not.objectContaining({ ip_addresses: expect.any(String) }), expect.any(Object))
+    wrapper.unmount()
   })
 
   it('does not apply a stale routed user label after user_id changes', async () => {
@@ -418,12 +458,9 @@ describe('admin UsageView distribution metric toggles', () => {
       duration_ms: 10,
     })
 
+    let finishFirstPage!: (value: object) => void
     adminUsageList
-      .mockResolvedValueOnce({
-        items: Array.from({ length: 100 }, (_, idx) => makeLog(idx + 1)),
-        total: 101,
-        pages: 2,
-      })
+      .mockImplementationOnce(() => new Promise(resolve => { finishFirstPage = resolve }))
       .mockResolvedValueOnce({
         items: [makeLog(101)],
         total: 101,
@@ -431,7 +468,7 @@ describe('admin UsageView distribution metric toggles', () => {
       })
 
     const ExportUsageFiltersStub = {
-      emits: ['export'],
+      emits: ['export', 'reset'],
       template: '<button class="export-usage" @click="$emit(\'export\')">export</button>',
     }
 
@@ -459,9 +496,16 @@ describe('admin UsageView distribution metric toggles', () => {
 
     vi.advanceTimersByTime(120)
     await flushPromises()
+    wrapper.findComponent(UsageTable).vm.$emit('ipFilterChange', ['192.0.2.1'])
+    await flushPromises()
 
     await wrapper.find('.export-usage').trigger('click')
     await flushPromises()
+    const exportParams = { ...adminUsageList.mock.calls[0][0] }
+    wrapper.findComponent(UsageTable).vm.$emit('ipFilterChange', ['2001:db8::1'])
+    wrapper.findComponent(UsageFilters).vm.$emit('reset')
+    await flushPromises()
+    finishFirstPage({ items: Array.from({ length: 100 }, (_, idx) => makeLog(idx + 1)), total: 101, pages: 2 })
     await flushPromises()
 
     expect(adminUsageList).toHaveBeenCalledTimes(2)
@@ -471,12 +515,13 @@ describe('admin UsageView distribution metric toggles', () => {
       exact_total: true,
     }))
     expect(adminUsageList.mock.calls[1][0]).toEqual(expect.objectContaining({
+      ...exportParams,
       page: 2,
       page_size: 100,
       exact_total: false,
     }))
     expect(saveAsMock).toHaveBeenCalledTimes(1)
-    expect(saveAsMock.mock.calls[0][1]).toMatch(/\.csv$/)
+    expect(saveAsMock.mock.calls[0][1]).toBe(`usage_${exportParams.start_date}_to_${exportParams.end_date}.csv`)
     expect(saveAsMock.mock.calls[0][0]).toBeInstanceOf(Blob)
     vi.useRealTimers()
     const csvText = await readBlobText(saveAsMock.mock.calls[0][0])
@@ -641,12 +686,15 @@ describe('admin UsageView ranking tab', () => {
 
     // 懒挂载:切到排行 tab 前不渲染
     expect(wrapper.find('[data-test="ranking"]').exists()).toBe(false)
+    wrapper.findComponent(UsageTable).vm.$emit('ipFilterChange', ['192.0.2.1'])
+    await flushPromises()
 
     const tabs = wrapper.findAll('[data-testid="usage-detail-tab"]')
     expect(tabs).toHaveLength(3)
     await tabs[2].trigger('click')
     await flushPromises()
     expect(wrapper.find('[data-test="ranking"]').exists()).toBe(true)
+    expect(wrapper.findComponent({ name: 'UserTokenRanking' }).props('filters')).toEqual(expect.objectContaining({ ip_addresses: '192.0.2.1' }))
 
     // 下钻:设置 user_id、切回用量明细 tab 并按新筛选重新拉取列表
     list.mockClear()

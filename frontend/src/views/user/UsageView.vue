@@ -193,9 +193,14 @@
           :show-account-billing="false"
           :show-upstream-endpoint="false"
           cost-display-mode="display"
+          :selected-i-ps="selectedIPs"
+          :ip-options-loader="loadIPOptions"
+          :ip-refresh-version="ipRefreshVersion"
+          :ip-reset-version="ipResetVersion"
           default-sort-key="created_at"
           default-sort-order="desc"
           @sort="handleSort"
+          @ip-filter-change="applyIPFilter"
         />
 
         <Pagination
@@ -382,6 +387,9 @@ const filters = ref<UsageQueryParams>({
   billing_type: null,
   billing_mode: null,
 })
+const selectedIPs = ref<string[]>([])
+const ipRefreshVersion = ref(0)
+const ipResetVersion = ref(0)
 
 const pagination = reactive({
   page: 1,
@@ -510,6 +518,7 @@ const loadModelStats = async () => {
   try {
     const response = await usageAPI.getDashboardModels({
       ...normalizedFilters.value,
+      ip_addresses: serializeIPs(selectedIPs.value),
       model_source: 'requested',
     })
     if (seq !== modelStatsReqSeq) return
@@ -530,6 +539,7 @@ const loadChartData = async () => {
   try {
     const snapshot = await usageAPI.getDashboardSnapshotV2({
       ...normalizedFilters.value,
+      ip_addresses: serializeIPs(selectedIPs.value),
       granularity: granularity.value,
       include_trend: true,
       include_model_stats: false,
@@ -567,7 +577,27 @@ const applyFilters = () => {
   resetErrorRows()
 }
 
+const serializeIPs = (ips: string[]) => ips.length ? ips.join(',') : undefined
+const loadIPOptions = (search: string, offset: number, signal: AbortSignal) => usageAPI.getIPOptions({
+  ...normalizedFilters.value,
+  ip_addresses: undefined,
+  search,
+  offset,
+  limit: 50,
+}, { signal })
+const applyIPFilter = (ips: string[]) => {
+  selectedIPs.value = [...ips]
+  filters.value.ip_addresses = serializeIPs(ips)
+  pagination.page = 1
+  void loadLogs()
+  void loadStats()
+  void loadModelStats()
+  void loadChartData()
+}
+watch(() => JSON.stringify({ ...filters.value, ip_addresses: undefined }), () => { ipRefreshVersion.value++ })
+
 const refreshData = () => {
+  ipRefreshVersion.value++
   void loadLogs()
   void loadStats()
   void loadModelStats()
@@ -587,6 +617,8 @@ const resetFilters = () => {
     billing_type: null,
     billing_mode: null,
   }
+  selectedIPs.value = []
+  ipResetVersion.value++
   granularity.value = getGranularityForRange(range.start, range.end)
   applyFilters()
   if (activeTab.value === 'errors') {
@@ -747,6 +779,7 @@ const allColumns = computed<Column[]>(() => [
   { key: 'latency', label: t('usage.latency'), sortable: false },
   { key: 'created_at', label: t('usage.time'), sortable: true },
   { key: 'user_agent', label: t('usage.userAgent'), sortable: false },
+  { key: 'ip_address', label: t('admin.usage.ipAddress'), sortable: false },
 ])
 
 const hiddenColumns = reactive<Set<string>>(new Set())

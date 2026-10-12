@@ -143,6 +143,9 @@ func (s *DashboardService) GetUsageTrendWithUsageFilters(ctx context.Context, st
 		}
 		return trend, nil
 	}
+	if len(filters.IPAddresses) > 0 {
+		return nil, fmt.Errorf("usage IP filtering is not supported by this repository")
+	}
 	return s.GetUsageTrendWithFilters(ctx, startTime, endTime, granularity, filters.UserID, filters.APIKeyID, filters.AccountID, filters.GroupID, filters.Model, filters.RequestType, filters.Stream, filters.BillingType)
 }
 
@@ -187,6 +190,9 @@ func (s *DashboardService) GetModelStatsWithUsageFiltersBySource(ctx context.Con
 		}
 		return stats, nil
 	}
+	if len(filters.IPAddresses) > 0 {
+		return nil, fmt.Errorf("usage IP filtering is not supported by this repository")
+	}
 	return s.GetModelStatsWithFiltersBySource(ctx, startTime, endTime, filters.UserID, filters.APIKeyID, filters.AccountID, filters.GroupID, filters.RequestType, filters.Stream, filters.BillingType, normalizedSource)
 }
 
@@ -208,6 +214,9 @@ func (s *DashboardService) GetGroupStatsWithUsageFilters(ctx context.Context, st
 			return nil, fmt.Errorf("get group stats with usage filters: %w", err)
 		}
 		return stats, nil
+	}
+	if len(filters.IPAddresses) > 0 {
+		return nil, fmt.Errorf("usage IP filtering is not supported by this repository")
 	}
 	return s.GetGroupStatsWithFilters(ctx, startTime, endTime, filters.UserID, filters.APIKeyID, filters.AccountID, filters.GroupID, filters.RequestType, filters.Stream, filters.BillingType)
 }

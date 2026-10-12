@@ -74,6 +74,12 @@ func (h *UsageHandler) parseUserUsageFilters(c *gin.Context, requireRange bool) 
 		return nil, false
 	}
 
+	ipAddresses, err := usagestats.ParseIPAddresses(c.Query("ip_addresses"))
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return nil, false
+	}
+
 	var apiKeyID int64
 	if apiKeyIDStr := strings.TrimSpace(c.Query("api_key_id")); apiKeyIDStr != "" {
 		id, err := strconv.ParseInt(apiKeyIDStr, 10, 64)
@@ -205,6 +211,7 @@ func (h *UsageHandler) parseUserUsageFilters(c *gin.Context, requireRange bool) 
 
 	return &userUsageFilters{
 		Filters: usagestats.UsageLogFilters{
+			IPAddresses:        ipAddresses,
 			UserID:             subject.UserID,
 			APIKeyID:           apiKeyID,
 			GroupID:            groupID,
@@ -721,4 +728,23 @@ func (h *UsageHandler) GetMyAPIKeyDailyUsage(c *gin.Context) {
 		"start_date": startTime.Format("2006-01-02"),
 		"end_date":   endTime.AddDate(0, 0, -1).Format("2006-01-02"),
 	})
+}
+
+// IPOptions returns candidates from the authenticated user's complete filtered range.
+func (h *UsageHandler) IPOptions(c *gin.Context) {
+	parsed, ok := h.parseUserUsageFilters(c, false)
+	if !ok {
+		return
+	}
+	offset, limit, err := usagestats.ParseIPOptionsPagination(c.Query("offset"), c.Query("limit"))
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	options, err := h.usageService.GetIPOptionsWithFilters(c.Request.Context(), parsed.Filters, c.Query("search"), offset, limit)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, options)
 }

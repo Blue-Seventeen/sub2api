@@ -180,9 +180,10 @@
         </button>
         <slot name="after-reset" />
         <template v-if="mode === 'usage'">
-          <button type="button" @click="$emit('cleanup')" class="btn btn-danger">
+          <button type="button" :disabled="!!filters.ip_addresses" :title="filters.ip_addresses ? t('admin.usage.cleanup.ipFilterUnsupported') : undefined" @click="!filters.ip_addresses && $emit('cleanup')" class="btn btn-danger">
             {{ t('admin.usage.cleanup.button') }}
           </button>
+          <span v-if="filters.ip_addresses" class="text-xs text-amber-600 dark:text-amber-400">{{ t('admin.usage.cleanup.ipFilterUnsupported') }}</span>
           <button type="button" @click="$emit('export')" :disabled="exporting" class="btn btn-primary">
             {{ t('usage.exportExcel') }}
           </button>

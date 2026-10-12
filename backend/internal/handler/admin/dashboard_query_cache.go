@@ -18,34 +18,36 @@ var (
 )
 
 type dashboardTrendCacheKey struct {
-	StartTime             string `json:"start_time"`
-	EndTime               string `json:"end_time"`
-	Granularity           string `json:"granularity"`
-	UserID                int64  `json:"user_id"`
-	APIKeyID              int64  `json:"api_key_id"`
-	AccountID             int64  `json:"account_id"`
-	GroupID               int64  `json:"group_id"`
-	Model                 string `json:"model"`
-	RequestType           *int16 `json:"request_type"`
-	Stream                *bool  `json:"stream"`
-	NativeCompactionV2    *bool  `json:"native_compaction_v2"`
-	BillingType           *int8  `json:"billing_type"`
-	UpstreamModelMismatch *bool  `json:"upstream_model_mismatch"`
+	IPAddresses           []string `json:"ip_addresses"`
+	StartTime             string   `json:"start_time"`
+	EndTime               string   `json:"end_time"`
+	Granularity           string   `json:"granularity"`
+	UserID                int64    `json:"user_id"`
+	APIKeyID              int64    `json:"api_key_id"`
+	AccountID             int64    `json:"account_id"`
+	GroupID               int64    `json:"group_id"`
+	Model                 string   `json:"model"`
+	RequestType           *int16   `json:"request_type"`
+	Stream                *bool    `json:"stream"`
+	NativeCompactionV2    *bool    `json:"native_compaction_v2"`
+	BillingType           *int8    `json:"billing_type"`
+	UpstreamModelMismatch *bool    `json:"upstream_model_mismatch"`
 }
 
 type dashboardModelGroupCacheKey struct {
-	StartTime             string `json:"start_time"`
-	EndTime               string `json:"end_time"`
-	UserID                int64  `json:"user_id"`
-	APIKeyID              int64  `json:"api_key_id"`
-	AccountID             int64  `json:"account_id"`
-	GroupID               int64  `json:"group_id"`
-	ModelSource           string `json:"model_source,omitempty"`
-	RequestType           *int16 `json:"request_type"`
-	Stream                *bool  `json:"stream"`
-	NativeCompactionV2    *bool  `json:"native_compaction_v2"`
-	BillingType           *int8  `json:"billing_type"`
-	UpstreamModelMismatch *bool  `json:"upstream_model_mismatch"`
+	IPAddresses           []string `json:"ip_addresses"`
+	StartTime             string   `json:"start_time"`
+	EndTime               string   `json:"end_time"`
+	UserID                int64    `json:"user_id"`
+	APIKeyID              int64    `json:"api_key_id"`
+	AccountID             int64    `json:"account_id"`
+	GroupID               int64    `json:"group_id"`
+	ModelSource           string   `json:"model_source,omitempty"`
+	RequestType           *int16   `json:"request_type"`
+	Stream                *bool    `json:"stream"`
+	NativeCompactionV2    *bool    `json:"native_compaction_v2"`
+	BillingType           *int8    `json:"billing_type"`
+	UpstreamModelMismatch *bool    `json:"upstream_model_mismatch"`
 }
 
 type dashboardEntityTrendCacheKey struct {
@@ -91,8 +93,11 @@ func (h *DashboardHandler) getUsageTrendCached(
 	nativeCompactionV2 *bool,
 	billingType *int8,
 	upstreamModelMismatch *bool,
+	ipSets ...[]string,
 ) ([]usagestats.TrendDataPoint, bool, error) {
+	ipAddresses := optionalIPCacheSet(ipSets)
 	key := mustMarshalDashboardCacheKey(dashboardTrendCacheKey{
+		IPAddresses:           usagestats.IPAddressCacheKey(ipAddresses),
 		StartTime:             startTime.UTC().Format(time.RFC3339),
 		EndTime:               endTime.UTC().Format(time.RFC3339),
 		Granularity:           granularity,
@@ -109,7 +114,8 @@ func (h *DashboardHandler) getUsageTrendCached(
 	})
 	entry, hit, err := dashboardTrendCache.GetOrLoad(key, func() (any, error) {
 		return h.dashboardService.GetUsageTrendWithUsageFilters(ctx, startTime, endTime, granularity, usagestats.UsageLogFilters{
-			UserID: userID, APIKeyID: apiKeyID, AccountID: accountID, GroupID: groupID,
+			IPAddresses: ipAddresses,
+			UserID:      userID, APIKeyID: apiKeyID, AccountID: accountID, GroupID: groupID,
 			Model: model, RequestType: requestType, Stream: stream, NativeCompactionV2: nativeCompactionV2, BillingType: billingType,
 			UpstreamModelMismatch: upstreamModelMismatch,
 		})
@@ -131,8 +137,11 @@ func (h *DashboardHandler) getModelStatsCached(
 	nativeCompactionV2 *bool,
 	billingType *int8,
 	upstreamModelMismatch *bool,
+	ipSets ...[]string,
 ) ([]usagestats.ModelStat, bool, error) {
+	ipAddresses := optionalIPCacheSet(ipSets)
 	key := mustMarshalDashboardCacheKey(dashboardModelGroupCacheKey{
+		IPAddresses:           usagestats.IPAddressCacheKey(ipAddresses),
 		StartTime:             startTime.UTC().Format(time.RFC3339),
 		EndTime:               endTime.UTC().Format(time.RFC3339),
 		UserID:                userID,
@@ -148,7 +157,8 @@ func (h *DashboardHandler) getModelStatsCached(
 	})
 	entry, hit, err := dashboardModelStatsCache.GetOrLoad(key, func() (any, error) {
 		return h.dashboardService.GetModelStatsWithUsageFiltersBySource(ctx, startTime, endTime, usagestats.UsageLogFilters{
-			UserID: userID, APIKeyID: apiKeyID, AccountID: accountID, GroupID: groupID,
+			IPAddresses: ipAddresses,
+			UserID:      userID, APIKeyID: apiKeyID, AccountID: accountID, GroupID: groupID,
 			RequestType: requestType, Stream: stream, NativeCompactionV2: nativeCompactionV2, BillingType: billingType,
 			UpstreamModelMismatch: upstreamModelMismatch,
 		}, modelSource)
@@ -169,8 +179,11 @@ func (h *DashboardHandler) getGroupStatsCached(
 	nativeCompactionV2 *bool,
 	billingType *int8,
 	upstreamModelMismatch *bool,
+	ipSets ...[]string,
 ) ([]usagestats.GroupStat, bool, error) {
+	ipAddresses := optionalIPCacheSet(ipSets)
 	key := mustMarshalDashboardCacheKey(dashboardModelGroupCacheKey{
+		IPAddresses:           usagestats.IPAddressCacheKey(ipAddresses),
 		StartTime:             startTime.UTC().Format(time.RFC3339),
 		EndTime:               endTime.UTC().Format(time.RFC3339),
 		UserID:                userID,
@@ -185,7 +198,8 @@ func (h *DashboardHandler) getGroupStatsCached(
 	})
 	entry, hit, err := dashboardGroupStatsCache.GetOrLoad(key, func() (any, error) {
 		return h.dashboardService.GetGroupStatsWithUsageFilters(ctx, startTime, endTime, usagestats.UsageLogFilters{
-			UserID: userID, APIKeyID: apiKeyID, AccountID: accountID, GroupID: groupID,
+			IPAddresses: ipAddresses,
+			UserID:      userID, APIKeyID: apiKeyID, AccountID: accountID, GroupID: groupID,
 			RequestType: requestType, Stream: stream, NativeCompactionV2: nativeCompactionV2, BillingType: billingType,
 			UpstreamModelMismatch: upstreamModelMismatch,
 		})
@@ -230,4 +244,11 @@ func (h *DashboardHandler) getUserUsageTrendCached(ctx context.Context, startTim
 	}
 	trend, err := snapshotPayloadAs[[]usagestats.UserUsageTrendPoint](entry.Payload)
 	return trend, hit, err
+}
+
+func optionalIPCacheSet(sets [][]string) []string {
+	if len(sets) == 0 {
+		return nil
+	}
+	return sets[0]
 }

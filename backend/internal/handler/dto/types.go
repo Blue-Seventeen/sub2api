@@ -637,7 +637,7 @@ type UsageLog struct {
 
 	// User-Agent
 	UserAgent *string `json:"user_agent"`
-	// IPAddress is populated only for administrator usage views.
+	// IPAddress is the authenticated user's own request IP.
 	IPAddress *string `json:"ip_address,omitempty"`
 	// SessionID is populated only for administrator usage views.
 	SessionID *string `json:"session_id,omitempty"`

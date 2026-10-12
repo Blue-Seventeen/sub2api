@@ -119,6 +119,18 @@ function deferred<T>() {
 }
 
 describe('UsageFilters — user search dropdown', () => {
+  it('blocks cleanup when an IP selection would be ignored by cleanup tasks', async () => {
+    const wrapper = mountFilters({ ...defaultFilters(), ip_addresses: '192.0.2.1' } as ReturnType<typeof defaultFilters>)
+    await wrapper.setProps({ showActions: true })
+    const cleanup = wrapper.findAll('button').find(button => button.text() === 'Cleanup')!
+    expect(cleanup.attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('admin.usage.cleanup.ipFilterUnsupported')
+    await cleanup.trigger('click')
+    expect(wrapper.emitted('cleanup')).toBeUndefined()
+    await wrapper.setProps({ modelValue: defaultFilters() })
+    expect(cleanup.attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
   beforeEach(() => {
     vi.useFakeTimers()
     mockSearchUsers.mockReset()

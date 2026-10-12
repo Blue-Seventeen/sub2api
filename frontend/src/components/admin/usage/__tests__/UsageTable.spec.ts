@@ -7,13 +7,37 @@ const ipGeoMocks = vi.hoisted(() => ({
 vi.mock('@/utils/ipGeoLookup', () => ipGeoMocks)
 
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 
 import en from '@/i18n/locales/en/admin/resources'
 import zh from '@/i18n/locales/zh/admin/resources'
 import UsageTable from '../UsageTable.vue'
+
+describe('usage IP filter with the actual desktop table', () => {
+  it('renders the filter after the IP label and applies selection without sorting', async () => {
+    const media = vi.spyOn(window, 'matchMedia').mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() } as unknown as MediaQueryList)
+    const wrapper = mount(UsageTable, {
+      props: { data: [], columns: [{ key: 'ip_address', label: 'IP' }], ipOptionsLoader: vi.fn().mockResolvedValue({ ips: ['192.0.2.1'], has_more: false }) },
+      global: { stubs: { Icon: true } },
+    })
+    try {
+      const header = wrapper.findAll('th').find(cell => cell.text() === 'IP')!
+      await header.get('[data-testid="usage-ip-filter-trigger"]').trigger('click')
+      await flushPromises()
+      const option = document.querySelector('input[data-ip="192.0.2.1"]') as HTMLInputElement
+      expect(option).not.toBeNull()
+      option.checked = true
+      option.dispatchEvent(new Event('change', { bubbles: true }))
+      await nextTick()
+      ;(document.querySelector('[data-testid="usage-ip-filter-apply"]') as HTMLButtonElement).click()
+      await nextTick()
+      expect(wrapper.emitted('ipFilterChange')).toEqual([[['192.0.2.1']]])
+      expect(wrapper.emitted('sort')).toBeUndefined()
+    } finally { wrapper.unmount(); media.mockRestore() }
+  })
+})
 
 beforeEach(() => setActivePinia(createPinia()))
 

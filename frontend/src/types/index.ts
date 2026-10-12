@@ -1901,6 +1901,8 @@ export interface UsageLog {
 
   // User-Agent
   user_agent: string | null
+  // Client IP of this user's own request.
+  ip_address?: string | null
   // Cache TTL Override
   cache_ttl_overridden: boolean
 
@@ -1943,9 +1945,6 @@ export interface AdminUsageLog extends UsageLog {
   channel_id?: number | null
   billing_tier?: string | null
 
-
-  // 用户请求 IP（仅管理员可见）
-  ip_address?: string | null
 
   // 最小账号信息（仅管理员接口返回�?
   account?: UsageLogAccountSummary
@@ -2363,6 +2362,7 @@ export interface UserErrorListParams {
 }
 
 export interface UsageQueryParams {
+  ip_addresses?: string
   native_compaction_v2?: boolean | null
   page?: number
   page_size?: number
@@ -2380,6 +2380,11 @@ export interface UsageQueryParams {
   timezone?: string
   sort_by?: string
   sort_order?: 'asc' | 'desc'
+}
+
+export interface UsageIPOptions {
+  ips: string[]
+  has_more: boolean
 }
 
 // ==================== Account Usage Statistics ====================

@@ -446,6 +446,10 @@ export default {
     exportExcelFailed: 'Failed to export usage data',
     imageUnit: ' images',
     userAgent: 'User-Agent',
+    ipFilter: {
+      title: 'Filter IP', active: '{count} IPs selected', search: 'Search IP address', scope: 'Search all records matching current filters',
+      apply: 'Apply', clear: 'Clear', more: 'Load more', empty: 'No matching IPs', failed: 'Failed to load IPs', retry: 'Retry', limit: 'Up to 100 IPs'
+    },
     ipGeo: {
       fetch: 'Fetch region',
       fetching: 'Fetching...',

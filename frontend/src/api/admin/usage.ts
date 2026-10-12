@@ -4,7 +4,7 @@
  */
 
 import { apiClient } from '../client'
-import type { AdminUsageLog, UsageQueryParams, PaginatedResponse, UsageRequestType } from '@/types'
+import type { AdminUsageLog, UsageQueryParams, UsageIPOptions, PaginatedResponse, UsageRequestType } from '@/types'
 import type { EndpointStat } from '@/types'
 
 // ==================== Types ====================
@@ -207,7 +207,18 @@ export async function cancelCleanupTask(taskId: number): Promise<{ id: number; s
   return data
 }
 
+export async function getIPOptions(
+  params: AdminUsageQueryParams & { search?: string; offset?: number; limit?: number },
+  options?: { signal?: AbortSignal }
+): Promise<UsageIPOptions> {
+  const candidateParams = { ...params }
+  delete candidateParams.ip_addresses
+  const { data } = await apiClient.get<UsageIPOptions>('/admin/usage/ip-options', { params: candidateParams, signal: options?.signal })
+  return data
+}
+
 export const adminUsageAPI = {
+  getIPOptions,
   list,
   getStats,
   searchUsers,

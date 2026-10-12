@@ -45,6 +45,7 @@ export async function getRealtimeMetrics(): Promise<{
 }
 
 export interface TrendParams {
+  ip_addresses?: string
   native_compaction_v2?: boolean
   start_date?: string
   end_date?: string
@@ -78,6 +79,7 @@ export async function getUsageTrend(params?: TrendParams): Promise<TrendResponse
 }
 
 export interface ModelStatsParams {
+  ip_addresses?: string
   start_date?: string
   end_date?: string
   user_id?: number
@@ -109,6 +111,7 @@ export async function getModelStats(params?: ModelStatsParams): Promise<ModelSta
 }
 
 export interface GroupStatsParams {
+  ip_addresses?: string
   start_date?: string
   end_date?: string
   user_id?: number
@@ -162,6 +165,7 @@ export async function getGroupStats(params?: GroupStatsParams): Promise<GroupSta
 }
 
 export interface UserBreakdownParams {
+  ip_addresses?: string
   start_date?: string
   end_date?: string
   group_id?: number
