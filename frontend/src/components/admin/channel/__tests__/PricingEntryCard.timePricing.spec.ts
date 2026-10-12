@@ -37,6 +37,29 @@ function createEntry(billingMode: PricingFormEntry['billing_mode'] = 'token'): P
 }
 
 describe('PricingEntryCard time pricing visibility', () => {
+  it('labels the video default price per second while preserving the saved price', async () => {
+    const entry = { ...createEntry('video'), per_request_price: '0.05' }
+    const wrapper = shallowMount(PricingEntryCard, { props: { entry } })
+    expect(wrapper.text()).toContain('admin.channels.form.defaultVideoPrice')
+    expect(wrapper.text()).toContain('$/s')
+    expect(wrapper.text()).not.toContain('admin.channels.form.defaultPerRequestPrice')
+    const price = wrapper.findAll('input[type="number"]').find(input => (input.element as HTMLInputElement).value === '0.05')!
+    await price.setValue('0.12')
+    expect(wrapper.emitted('update')?.at(-1)?.[0]).toMatchObject({
+      billing_mode: 'video', per_request_price: '0.12'
+    })
+    expect(entry.per_request_price).toBe('0.05')
+    wrapper.unmount()
+  })
+
+  it('keeps generic per-request defaults separate from video per-second prices', () => {
+    const wrapper = shallowMount(PricingEntryCard, { props: { entry: createEntry('per_request') } })
+    expect(wrapper.text()).toContain('admin.channels.form.defaultPerRequestPrice')
+    expect(wrapper.text()).not.toContain('admin.channels.form.defaultVideoPrice')
+    expect(wrapper.text()).not.toContain('$/s')
+    wrapper.unmount()
+  })
+
   it('is hidden by default', () => {
     const wrapper = shallowMount(PricingEntryCard, {
       props: { entry: createEntry() },

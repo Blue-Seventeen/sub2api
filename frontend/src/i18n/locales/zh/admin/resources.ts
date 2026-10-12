@@ -547,7 +547,7 @@ export default {
       billingModeImage: '图片（按张/规格）',
       billingModeDuration: 'ASR（按秒）',
       billingModeCharacter: 'TTS（按字符）',
-      billingModeVideo: '按次(视频)',
+      billingModeVideo: '视频',
       allBillingModes: '全部计费模式',
       upstreamModelAudit: '上游模型审计',
       allUpstreamModelAudit: '全部响应模型状态',

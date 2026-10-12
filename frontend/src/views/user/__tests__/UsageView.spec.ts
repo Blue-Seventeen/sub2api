@@ -49,6 +49,7 @@ const messages: Record<string, string> = {
   'admin.usage.billingModeImage': 'Image',
   'admin.usage.billingModeDuration': 'Duration',
   'admin.usage.billingModeCharacter': 'Character',
+  'admin.usage.billingModeVideo': 'Video',
   'admin.usage.allGroups': 'All groups',
   'admin.usage.allModels': 'All models',
   'usage.allApiKeys': 'All API Keys',
@@ -250,6 +251,27 @@ describe('user UsageView', () => {
     }))
     expect(list).toHaveBeenCalledWith(1, 100)
     expect(getAvailable).toHaveBeenCalled()
+  })
+
+  it('requests video usage with the unchanged video filter value', async () => {
+    const wrapper = mountUsageView()
+    await flushPromises()
+    const mode = wrapper.findAllComponents(Select).find(select =>
+      select.props('options').some((option: SelectOption) => option.value === 'video')
+    )!
+    expect(mode.props('options')).toEqual(expect.arrayContaining([
+      { value: 'video', label: 'Video' },
+      { value: 'per_request', label: 'Per request' },
+    ]))
+    query.mockClear()
+    mode.vm.$emit('update:modelValue', 'video')
+    mode.vm.$emit('change', 'video')
+    await flushPromises()
+    expect(query).toHaveBeenCalledWith(
+      expect.objectContaining({ billing_mode: 'video' }),
+      expect.anything(),
+    )
+    wrapper.unmount()
   })
 
   it('passes display cost mode to user usage widgets', async () => {

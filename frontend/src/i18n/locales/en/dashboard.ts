@@ -584,7 +584,7 @@ export default {
       billingModeToken: 'Per Token',
       billingModePerRequest: 'Per Request',
       billingModeImage: 'Per Image',
-      billingModeVideo: 'Per Video',
+      billingModeVideo: 'Video (Per Second)',
       videoPrice: 'Video Price',
       unitPerSecond: '/ second',
       inputPrice: 'Input',
@@ -639,6 +639,8 @@ export default {
       unitPerMillion: '$ / 1M tokens',
       perUnitRequest: '/ request',
       perUnitImage: '/ image',
+      perUnitSecond: '/s',
+      videoPerSecond: 'Video (Per Second)',
       perRequest: 'Per request',
       perImage: 'Per image'
     },

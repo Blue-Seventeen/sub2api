@@ -26,7 +26,7 @@ export default {
         billingModeToken: 'Per Token',
         billingModePerRequest: 'Per Request',
         billingModeImage: 'Per Image',
-        billingModeVideo: 'Per Video',
+        billingModeVideo: 'Video (Per Second)',
         videoPrice: 'Video Price',
         unitPerSecond: '/ second',
         inputPrice: 'Input',

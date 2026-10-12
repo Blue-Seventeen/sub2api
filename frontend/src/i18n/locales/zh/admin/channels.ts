@@ -26,7 +26,7 @@ export default {
         billingModeToken: '按 Token',
         billingModePerRequest: '按次',
         billingModeImage: '按图片',
-        billingModeVideo: '按视频',
+        billingModeVideo: '视频（按秒）',
         videoPrice: '视频单价',
         unitPerSecond: '/ 秒',
         inputPrice: '输入',

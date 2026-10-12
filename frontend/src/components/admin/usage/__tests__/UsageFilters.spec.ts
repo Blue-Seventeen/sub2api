@@ -30,6 +30,7 @@ const messages: Record<string, string> = {
   'admin.usage.billingModeImage': 'Image',
   'admin.usage.billingModeDuration': 'Duration',
   'admin.usage.billingModeCharacter': 'Character',
+  'admin.usage.billingModeVideo': 'Video',
   'admin.usage.upstreamModelAudit': 'Upstream model audit',
   'admin.usage.allUpstreamModelAudit': 'All response model states',
   'admin.usage.upstreamModelMismatchOnly': 'Mismatched only',
@@ -126,6 +127,23 @@ describe('UsageFilters — user search dropdown', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  it('keeps video filtering distinct from generic per-request billing', async () => {
+    const wrapper = mountFilters()
+    const mode = wrapper.findAllComponents({ name: 'Select' }).find(select =>
+      select.props('options')?.some((option: { value: unknown }) => option.value === 'video')
+    )!
+    expect(mode.props('options')).toEqual(expect.arrayContaining([
+      { value: 'video', label: 'Video' },
+      { value: 'per_request', label: 'Per Request' },
+    ]))
+    mode.vm.$emit('update:modelValue', 'video')
+    mode.vm.$emit('change', 'video')
+    await flushPromises()
+    expect(wrapper.props('modelValue').billing_mode).toBe('video')
+    expect(wrapper.emitted('change')).toBeTruthy()
+    wrapper.unmount()
   })
 
   it('(a) labels deleted users with the i18n badge and (b) sorts active users before deleted ones, (c) selection sets user_id', async () => {

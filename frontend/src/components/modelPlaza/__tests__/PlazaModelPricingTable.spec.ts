@@ -59,6 +59,44 @@ function mountTable(
 }
 
 describe('PlazaModelPricingTable', () => {
+  it('labels the video default price per second rather than per request', () => {
+    const model = tokenModel({ name: 'video-default', official_pricing: null })
+    model.pricing!.billing_mode = 'video'
+    model.pricing!.per_request_price = 0.05
+    const wrapper = mountTable([model], 1)
+    try {
+      expect(wrapper.text()).toContain('modelPlaza.table.videoPerSecond')
+      expect(wrapper.text()).toContain('$0.05')
+      expect(wrapper.text()).toContain('modelPlaza.table.perUnitSecond')
+      expect(wrapper.text()).not.toContain('modelPlaza.table.perRequest')
+      expect(wrapper.text()).not.toContain('modelPlaza.table.perUnitRequest')
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('shows per-second units for every video resolution price including zero', () => {
+    const model = tokenModel({ name: 'video-tiers', official_pricing: null })
+    model.pricing!.billing_mode = 'video'
+    model.pricing!.intervals = [
+      { min_tokens: 0, max_tokens: null, tier_label: '480p', input_price: null, output_price: null, cache_write_price: null, cache_read_price: null, per_request_price: 0 },
+      { min_tokens: 0, max_tokens: null, tier_label: '720p', input_price: null, output_price: null, cache_write_price: null, cache_read_price: null, per_request_price: 0.12 },
+    ]
+    const wrapper = mountTable([model], 1)
+    try {
+      expect(wrapper.text()).toContain('modelPlaza.table.videoPerSecond')
+      for (const resolution of ['480p', '720p']) {
+        const tier = wrapper.findAll('tbody span').find(span => span.text().startsWith(resolution))!
+        expect(tier.text()).toContain('modelPlaza.table.perUnitSecond')
+      }
+      expect(wrapper.text()).toContain('$0.00')
+      expect(wrapper.text()).toContain('$0.12')
+      expect(wrapper.text()).not.toContain('modelPlaza.table.perUnitRequest')
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
   it.each([
     { enabled: true, multiplier: 1, userRate: 0.05, expected: 1 },
     { enabled: true, multiplier: 0.5, userRate: null, expected: 0.5 },
