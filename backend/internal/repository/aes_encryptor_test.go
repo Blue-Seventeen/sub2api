@@ -37,7 +37,9 @@ func aesEncryptor(t *testing.T) *AESEncryptor {
 	enc, err := NewAESEncryptor(aesTestCfg(aesHexKey(32, 0x42)))
 	require.NoError(t, err)
 	require.NotNil(t, enc)
-	return enc.(*AESEncryptor)
+	aes, ok := enc.(*AESEncryptor)
+	require.True(t, ok, "encryptor must be an AESEncryptor")
+	return aes
 }
 
 // ── NewAESEncryptor ──────────────────────────────────────────────────────────

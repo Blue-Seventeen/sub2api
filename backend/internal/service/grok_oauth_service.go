@@ -316,7 +316,14 @@ func (s *GrokOAuthService) RefreshAccountToken(ctx context.Context, account *Acc
 		return nil, infraerrors.New(http.StatusBadRequest, "GROK_OAUTH_INVALID_ACCOUNT_TYPE", "account is not an OAuth account")
 	}
 
-	proxyURL, err := s.proxyURL(ctx, account.ProxyID)
+	var proxyURL string
+	var err error
+	if account.IsAutoSelectProxyEnabled() {
+		proxyURL, err = resolveAccountAuthorizationProxyURL(ctx, account, s.proxyRepo)
+	} else {
+		// Preserve fixed-proxy lookup reasons used by credential failure classification.
+		proxyURL, err = s.proxyURL(ctx, account.ProxyID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -449,7 +456,7 @@ func (s *GrokOAuthService) proxyURL(ctx context.Context, proxyID *int64) (string
 	if proxy == nil {
 		return "", infraerrors.New(http.StatusBadRequest, "GROK_OAUTH_PROXY_NOT_FOUND", "configured proxy was not found")
 	}
-	return proxy.URL(), nil
+	return ResolveProxyURL(ctx, proxy), nil
 }
 
 func applyGrokTokenClaims(info *GrokTokenInfo, token string, includeTier bool) {

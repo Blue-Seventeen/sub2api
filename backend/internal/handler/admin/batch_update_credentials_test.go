@@ -45,14 +45,16 @@ func TestBatchUpdateCredentials_AllSuccess(t *testing.T) {
 	svc := &failingAdminService{stubAdminService: newStubAdminService()}
 	router, _ := setupAccountHandlerWithService(svc)
 
-	body, _ := json.Marshal(BatchUpdateCredentialsRequest{
+	body, err := json.Marshal(BatchUpdateCredentialsRequest{
 		AccountIDs: []int64{1, 2, 3},
 		Field:      "account_uuid",
 		Value:      "test-uuid",
 	})
+	require.NoError(t, err)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/v1/admin/accounts/batch-update-credentials", bytes.NewReader(body))
+	req, err := http.NewRequest("POST", "/api/v1/admin/accounts/batch-update-credentials", bytes.NewReader(body))
+	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
@@ -68,14 +70,16 @@ func TestBatchUpdateCredentials_PartialFailure(t *testing.T) {
 	}
 	router, _ := setupAccountHandlerWithService(svc)
 
-	body, _ := json.Marshal(BatchUpdateCredentialsRequest{
+	body, err := json.Marshal(BatchUpdateCredentialsRequest{
 		AccountIDs: []int64{1, 2, 3},
 		Field:      "org_uuid",
 		Value:      "test-org",
 	})
+	require.NoError(t, err)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/v1/admin/accounts/batch-update-credentials", bytes.NewReader(body))
+	req, err := http.NewRequest("POST", "/api/v1/admin/accounts/batch-update-credentials", bytes.NewReader(body))
+	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
@@ -84,7 +88,8 @@ func TestBatchUpdateCredentials_PartialFailure(t *testing.T) {
 
 	var resp map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	data := resp["data"].(map[string]any)
+	data, ok := resp["data"].(map[string]any)
+	require.True(t, ok, "response data must be an object")
 	require.Equal(t, float64(2), data["success"], "应有 2 个成功")
 	require.Equal(t, float64(1), data["failed"], "应有 1 个失败")
 
@@ -101,14 +106,16 @@ func TestBatchUpdateCredentials_FirstAccountNotFound(t *testing.T) {
 	}
 	router, _ := setupAccountHandlerWithService(svc)
 
-	body, _ := json.Marshal(BatchUpdateCredentialsRequest{
+	body, err := json.Marshal(BatchUpdateCredentialsRequest{
 		AccountIDs: []int64{1, 2, 3},
 		Field:      "account_uuid",
 		Value:      "test",
 	})
+	require.NoError(t, err)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/v1/admin/accounts/batch-update-credentials", bytes.NewReader(body))
+	req, err := http.NewRequest("POST", "/api/v1/admin/accounts/batch-update-credentials", bytes.NewReader(body))
+	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
@@ -133,14 +140,16 @@ func TestBatchUpdateCredentials_InterceptWarmupRequests_NonBool(t *testing.T) {
 	router, _ := setupAccountHandlerWithService(svc)
 
 	// intercept_warmup_requests 传入非 bool 类型（string），应返回 400
-	body, _ := json.Marshal(map[string]any{
+	body, err := json.Marshal(map[string]any{
 		"account_ids": []int64{1},
 		"field":       "intercept_warmup_requests",
 		"value":       "not-a-bool",
 	})
+	require.NoError(t, err)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/v1/admin/accounts/batch-update-credentials", bytes.NewReader(body))
+	req, err := http.NewRequest("POST", "/api/v1/admin/accounts/batch-update-credentials", bytes.NewReader(body))
+	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
@@ -152,14 +161,16 @@ func TestBatchUpdateCredentials_InterceptWarmupRequests_ValidBool(t *testing.T) 
 	svc := &failingAdminService{stubAdminService: newStubAdminService()}
 	router, _ := setupAccountHandlerWithService(svc)
 
-	body, _ := json.Marshal(map[string]any{
+	body, err := json.Marshal(map[string]any{
 		"account_ids": []int64{1},
 		"field":       "intercept_warmup_requests",
 		"value":       true,
 	})
+	require.NoError(t, err)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/v1/admin/accounts/batch-update-credentials", bytes.NewReader(body))
+	req, err := http.NewRequest("POST", "/api/v1/admin/accounts/batch-update-credentials", bytes.NewReader(body))
+	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
@@ -172,14 +183,16 @@ func TestBatchUpdateCredentials_AccountUUID_NonString(t *testing.T) {
 	router, _ := setupAccountHandlerWithService(svc)
 
 	// account_uuid 传入非 string 类型（number），应返回 400
-	body, _ := json.Marshal(map[string]any{
+	body, err := json.Marshal(map[string]any{
 		"account_ids": []int64{1},
 		"field":       "account_uuid",
 		"value":       12345,
 	})
+	require.NoError(t, err)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/v1/admin/accounts/batch-update-credentials", bytes.NewReader(body))
+	req, err := http.NewRequest("POST", "/api/v1/admin/accounts/batch-update-credentials", bytes.NewReader(body))
+	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
@@ -192,14 +205,16 @@ func TestBatchUpdateCredentials_AccountUUID_NullValue(t *testing.T) {
 	router, _ := setupAccountHandlerWithService(svc)
 
 	// account_uuid 传入 null（设置为空），应正常通过
-	body, _ := json.Marshal(map[string]any{
+	body, err := json.Marshal(map[string]any{
 		"account_ids": []int64{1},
 		"field":       "account_uuid",
 		"value":       nil,
 	})
+	require.NoError(t, err)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/v1/admin/accounts/batch-update-credentials", bytes.NewReader(body))
+	req, err := http.NewRequest("POST", "/api/v1/admin/accounts/batch-update-credentials", bytes.NewReader(body))
+	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 

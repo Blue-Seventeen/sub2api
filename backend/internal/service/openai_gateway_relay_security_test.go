@@ -16,6 +16,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func (s *OpenAIGatewayService) cacheResponsesStreamReasoning(ctx context.Context, c *gin.Context, state *apicompat.ChatCompletionsToResponsesStreamState) {
+	cache, userID, apiKeyID := s.responsesReasoningCache(c)
+	if cache == nil || state == nil {
+		return
+	}
+	itemID := strings.TrimSpace(state.ReasoningItemID)
+	content := strings.TrimSpace(state.Reasoning.String())
+	if itemID != "" && content != "" {
+		_ = cache.SetScopedReasoningContent(ctx, userID, apiKeyID, itemID, content, responsesReasoningCacheTTL)
+	}
+}
+
 func TestResponsesChatFallbackTerminalErrorNeverCompletes(t *testing.T) {
 	for name, payload := range map[string]string{
 		"error":   `{"type":"error","error":{"message":"Authorization: Bearer sk-private upstream.internal","code":"private-code"}}`,
@@ -136,7 +148,8 @@ func TestResponsesReasoningStreamCacheRequiresIdentity(t *testing.T) {
 	svc := &OpenAIGatewayService{cache: cache}
 	state := apicompat.NewChatCompletionsToResponsesStreamState("model")
 	state.ReasoningItemID = "stream-id"
-	state.Reasoning.WriteString("private stream reasoning")
+	_, err := state.Reasoning.WriteString("private stream reasoning")
+	require.NoError(t, err)
 	for _, key := range []*APIKey{nil, {}, {UserID: 1}, {ID: 11}} {
 		c, _ := gin.CreateTestContext(httptest.NewRecorder())
 		c.Set("api_key", key)

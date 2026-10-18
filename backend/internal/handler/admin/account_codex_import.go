@@ -121,6 +121,10 @@ func (h *AccountHandler) ImportCodexSession(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
+	if err := service.ValidateAccountCreateProxyConfig(req.ProxyID, req.Extra); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	if err := service.ValidateOpenAILongContextBillingExtra(service.PlatformOpenAI, req.Extra); err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -276,6 +280,9 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 			}
 			mergedCredentials := mergeCodexImportCredentials(existing.Credentials, credentials, item)
 			mergedExtra := mergeCodexImportMap(existing.Extra, extra)
+			if req.ProxyID != nil {
+				mergedExtra["auto_select_proxy"] = false
+			}
 			updateInput := &service.UpdateAccountInput{
 				Credentials:        mergedCredentials,
 				Extra:              mergedExtra,
@@ -288,6 +295,9 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 			}
 			if req.ProxyID != nil {
 				updateInput.ProxyID = req.ProxyID
+			} else if auto, _ := req.Extra["auto_select_proxy"].(bool); auto {
+				clearProxyID := int64(0)
+				updateInput.ProxyID = &clearProxyID
 			}
 			if len(req.GroupIDs) > 0 {
 				groupIDs := append([]int64(nil), req.GroupIDs...)

@@ -373,41 +373,8 @@ func (a *Account) IsOpenCodeGoPlan() bool {
 	return a.GetOpenCodeAccountMode() == AccountModeGo
 }
 
-// openCodeDefaultChatBaseURL returns the account-mode-specific default for
-// Chat Completions and Responses traffic. Explicit credentials continue to be
-// resolved by Account.GetOpenAIBaseURL; this helper is only the fallback.
-func (a *Account) openCodeDefaultChatBaseURL() string {
-	if a.IsOpenCodeZen() {
-		return DefaultOpenCodeZenBaseURL
-	}
-	return DefaultOpenCodeGoBaseURL
-}
-
-// openCodeDefaultAnthropicBaseURL returns the account-mode-specific default
-// for native Anthropic traffic.
-func (a *Account) openCodeDefaultAnthropicBaseURL() string {
-	if a.IsOpenCodeZen() {
-		return DefaultOpenCodeZenAnthropicBaseURL
-	}
-	return DefaultOpenCodeGoAnthropicBaseURL
-}
-
 func (a *Account) IsMultiProtocolAPIKey() bool {
 	return a != nil && IsMultiProtocolAPIKeyProvider(a.Platform)
-}
-
-// openCodeGoNativeProtocol 返回 OpenCode Go 实际上游协议。
-// 规则未命中、空值或未知协议一律兜底 Chat Completions，避免落入 Responses 转换链。
-func openCodeGoNativeProtocol(account *Account, model string) string {
-	if account == nil {
-		return APIProtocolChatCompletions
-	}
-	switch proto := account.ResolveOpenCodeGoUpstreamProtocol(model); proto {
-	case APIProtocolAnthropic, APIProtocolResponses:
-		return proto
-	default:
-		return APIProtocolChatCompletions
-	}
 }
 
 // ResolveOpenCodeGoUpstreamProtocol 按账号协议配置与模型规则决定上游协议。

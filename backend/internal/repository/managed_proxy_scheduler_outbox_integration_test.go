@@ -13,6 +13,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 	"github.com/stretchr/testify/require"
 )
 
@@ -45,6 +46,34 @@ func createManagedSchedulerFixture(t *testing.T, legacy bool) managedSchedulerFi
 	sub, proxies, err := repo.CreateWithNodes(ctx, &service.ProxySubscription{Name: "managed-cache", SubscriptionURL: "https://example.com/sub", RefreshIntervalSec: 3600}, nodes)
 	require.NoError(t, err)
 	f := managedSchedulerFixture{sub: sub, nodes: nodes, proxyID: proxies[0].ID, repo: repo, insertedAccountExtras: make(map[int64]json.RawMessage)}
+	// These cases need committed writes and independent connections. Register
+	// cleanup before inserting accounts so even a partially built fixture is
+	// removed without clearing any other test's rows. Later cleanup callbacks
+	// stop the scheduler and release failure constraints before this runs.
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		tx, err := integrationDB.BeginTx(cleanupCtx, nil)
+		require.NoError(t, err)
+		defer tx.Rollback()
+		ids := make([]int64, 0, len(f.insertedAccountExtras))
+		for id := range f.insertedAccountExtras {
+			ids = append(ids, id)
+		}
+		_, err = tx.ExecContext(cleanupCtx, `DELETE FROM accounts WHERE id=ANY($1::bigint[])`, pq.Array(ids))
+		require.NoError(t, err)
+		_, err = tx.ExecContext(cleanupCtx, `DELETE FROM proxies WHERE subscription_id=$1`, f.sub.ID)
+		require.NoError(t, err)
+		// Subscription nodes cascade from their parent subscription.
+		_, err = tx.ExecContext(cleanupCtx, `DELETE FROM proxy_subscriptions WHERE id=$1`, f.sub.ID)
+		require.NoError(t, err)
+		_, err = tx.ExecContext(cleanupCtx, `DELETE FROM scheduler_outbox WHERE account_id=ANY($1::bigint[]) OR EXISTS (
+			SELECT 1 FROM unnest($1::bigint[]) AS owned(id)
+			WHERE payload->'account_ids' @> jsonb_build_array(owned.id)
+		)`, pq.Array(ids))
+		require.NoError(t, err)
+		require.NoError(t, tx.Commit())
+	})
 	f.admin = reviewProxyAdmin(newProxyRepositoryWithSQL(integrationEntClient, integrationDB), repo, &reviewReloadResolver{})
 	insert := func(name, accountType, extra string, proxyID any, deleted bool) int64 {
 		var id int64
@@ -417,4 +446,37 @@ func TestManagedProxySchedulerOutbox_ReplaysDisableAndReenableWithoutPeriodicReb
 			}
 		})
 	}
+}
+
+func TestManagedProxySchedulerOutbox_FixtureCleanupPreservesOtherFixtures(t *testing.T) {
+	ctx := context.Background()
+	kept := newManagedSchedulerFixture(t)
+	var owned managedSchedulerFixture
+	t.Run("owned fixture", func(t *testing.T) {
+		owned = newManagedSchedulerFixture(t)
+		_, err := owned.admin.UpdateProxy(ctx, owned.proxyID, &service.UpdateProxyInput{Status: "inactive"})
+		require.NoError(t, err)
+	})
+
+	var count int
+	for _, query := range []string{
+		`SELECT count(*) FROM proxy_subscriptions WHERE id=$1`,
+		`SELECT count(*) FROM proxies WHERE subscription_id=$1`,
+		`SELECT count(*) FROM proxy_subscription_nodes WHERE subscription_id=$1`,
+	} {
+		require.NoError(t, integrationDB.QueryRowContext(ctx, query, owned.sub.ID).Scan(&count))
+		require.Zero(t, count, "completed fixture must not leave managed proxies or subscriptions")
+	}
+	for id := range owned.insertedAccountExtras {
+		require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM accounts WHERE id=$1`, id).Scan(&count))
+		require.Zero(t, count, "completed fixture must remove its live, deleted and unrelated accounts")
+		require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM scheduler_outbox WHERE account_id=$1 OR payload->'account_ids' @> jsonb_build_array($1::bigint)`, id).Scan(&count))
+		require.Zero(t, count, "completed fixture must not leave scheduler events for its accounts")
+	}
+
+	_, err := kept.repo.Get(ctx, kept.sub.ID)
+	require.NoError(t, err, "cleanup must preserve another fixture's subscription")
+	_, err = kept.repo.GetNodeByProxyID(ctx, kept.proxyID)
+	require.NoError(t, err, "cleanup must preserve another fixture's proxy nodes")
+	requireManagedSchedulerAccountState(t, kept, false)
 }

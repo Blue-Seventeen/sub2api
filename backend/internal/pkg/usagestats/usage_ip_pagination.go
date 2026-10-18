@@ -10,14 +10,14 @@ func ParseIPOptionsPagination(offsetRaw, limitRaw string) (int, int, error) {
 	if offsetRaw != "" {
 		v, err := strconv.Atoi(offsetRaw)
 		if err != nil || v < 0 {
-			return 0, 0, fmt.Errorf("Invalid offset")
+			return 0, 0, fmt.Errorf("Invalid offset") //nolint:staticcheck // ST1005: Preserve the public API validation message for compatibility.
 		}
 		offset = v
 	}
 	if limitRaw != "" {
 		v, err := strconv.Atoi(limitRaw)
 		if err != nil || v <= 0 {
-			return 0, 0, fmt.Errorf("Invalid limit")
+			return 0, 0, fmt.Errorf("Invalid limit") //nolint:staticcheck // ST1005: Preserve the public API validation message for compatibility.
 		}
 		limit = v
 	}

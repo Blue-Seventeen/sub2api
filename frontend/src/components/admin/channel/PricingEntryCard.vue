@@ -124,7 +124,7 @@
             </div>
           </div>
 
-          <div class="mt-3">
+          <div v-if="!props.hideTokenIntervals" class="mt-3">
             <div class="flex items-center justify-between">
               <label class="text-xs font-medium text-gray-500 dark:text-gray-400">
                 {{ t('admin.channels.form.intervals') }}
@@ -309,7 +309,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -330,6 +330,7 @@ const props = defineProps<{
   platform?: string
   enableTimePricing?: boolean
   enableTierMultipliers?: boolean
+  hideTokenIntervals?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -384,6 +385,7 @@ function updateReasoningEffortMultiplier(effort: ReasoningEffortLevel, value: st
 }
 
 function emitField(field: keyof PricingFormEntry, value: string) {
+  defaultPricingRevision++
   emit('update', { ...props.entry, [field]: value === '' ? null : value })
 }
 
@@ -424,7 +426,17 @@ function removeInterval(idx: number) {
   emit('update', { ...props.entry, intervals })
 }
 
+let defaultPricingRevision = 0
+onBeforeUnmount(() => { defaultPricingRevision++ })
+
+function hasDefaultPrice(entry: PricingFormEntry): boolean {
+  return [entry.input_price, entry.output_price, entry.cache_write_price,
+    entry.cache_write_1h_price, entry.cache_read_price, entry.image_input_price,
+    entry.image_output_price, entry.per_request_price].some(value => value != null && value !== '')
+}
+
 async function onModelsUpdate(newModels: string[]) {
+  const revision = ++defaultPricingRevision
   const oldModels = props.entry.models
   emit('update', { ...props.entry, models: newModels })
 
@@ -435,12 +447,14 @@ async function onModelsUpdate(newModels: string[]) {
   if (oldModels.length !== 0 || addedModels.length !== 1) return
 
   const e = props.entry
-  const hasPrice = e.input_price != null || e.output_price != null ||
-                   e.cache_write_price != null || e.cache_read_price != null
-  if (hasPrice) return
+  if (hasDefaultPrice(e)) return
 
   try {
     const result = await channelsAPI.getModelDefaultPricing(addedModels[0])
+    if (revision !== defaultPricingRevision || props.entry.billing_mode !== e.billing_mode ||
+        props.entry.models.length !== newModels.length ||
+        props.entry.models.some((model, index) => model !== newModels[index]) ||
+        hasDefaultPrice(props.entry)) return
     if (result.found) {
       emit('update', {
         ...props.entry,

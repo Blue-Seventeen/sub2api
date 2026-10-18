@@ -37,10 +37,7 @@ func (s *GatewayService) DoGrokNativeResponsesJSON(ctx context.Context, account 
 	req.Header.Set("User-Agent", defaultGrokUpstreamUserAgent())
 	applyGrokCLIHeaders(req.Header)
 	account.ApplyHeaderOverrides(req.Header)
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
-	}
+	proxyURL := resolveAccountProxyURL(ctx, account, nil)
 	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
 		return nil, err

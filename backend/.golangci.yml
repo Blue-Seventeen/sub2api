@@ -126,6 +126,16 @@ linters:
 
   exclusions:
     rules:
+      # Keep the independently verified custom probe implementation byte-for-byte.
+      # This legacy queue helper is retained but no longer called by the scheduler.
+      - path: '^internal/service/proxy_auto_probe_service\.go$'
+        linters: [ unused ]
+        text: '^func \(\*ProxyAutoProbeService\)\.isProxyInSuccessQueue is unused$'
+      # Existing health fixtures intentionally ignore response-body cleanup errors.
+      # Scope this exception to their two Close calls, preserving the fixture source.
+      - path: '^internal/service/proxy_auto_probe_health_test\.go$'
+        linters: [ errcheck ]
+        text: '^Error return value of `\(io\.Closer\)\.Close` is not checked$'
       # x/net v0.60 deprecated the HTTP/2 compatibility adapters. Keep their
       # existing per-protocol idle timeout and PING configuration in this CI fix.
       - path: 'internal/(repository/http_upstream(_http2_keepalive_test)?|server/http)\.go$'

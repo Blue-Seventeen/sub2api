@@ -15,6 +15,10 @@ const {
   importCodexSessionMock,
   createOpenAICodexPATMock,
   authIsSimpleMode,
+  selectAutoProxyMock,
+  grokRefreshMock,
+  grokPasswordMock,
+  grokSSOImportMock,
 } = vi.hoisted(() => ({
   createAccountMock: vi.fn(),
   probeUpstreamBillingMock: vi.fn(),
@@ -23,6 +27,10 @@ const {
   importCodexSessionMock: vi.fn(),
   createOpenAICodexPATMock: vi.fn(),
   authIsSimpleMode: { value: true },
+  selectAutoProxyMock: vi.fn(),
+  grokRefreshMock: vi.fn(),
+  grokPasswordMock: vi.fn(),
+  grokSSOImportMock: vi.fn(),
 }))
 
 vi.mock('@/stores/app', () => ({
@@ -43,6 +51,12 @@ vi.mock('@/stores/auth', () => ({
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
+    proxies: { selectAutoProxy: selectAutoProxyMock },
+    grok: {
+      refreshGrokToken: grokRefreshMock,
+      authorizePassword: grokPasswordMock,
+      createFromSSO: grokSSOImportMock,
+    },
     accounts: {
       create: createAccountMock,
       probeUpstreamBilling: probeUpstreamBillingMock,
@@ -91,7 +105,7 @@ const OAuthAuthorizationFlowStub = defineComponent({
     initialInputMethod: String,
   },
   data: () => ({ inputMethod: 'manual' }),
-  emits: ['import-codex-session', 'import-codex-pat'],
+  emits: ['import-codex-session', 'import-codex-pat', 'validate-refresh-token', 'authorize-password', 'import-sso'],
   template: `
     <div>
       <button data-testid="import-codex-session" @click="$emit('import-codex-session', 'session-json')">session</button>
@@ -220,6 +234,112 @@ async function openCodexImportStep(toggleClicks = 0) {
   await wrapper.get('form#create-account-form').trigger('submit.prevent')
   return wrapper
 }
+
+describe('CreateAccountModal proxy selection', () => {
+  beforeEach(() => {
+    resetPlatformCatalog()
+    createAccountMock.mockReset().mockResolvedValue({ id: 42, platform: 'openai', type: 'apikey' })
+    probeUpstreamBillingMock.mockReset().mockResolvedValue({})
+    syncUpstreamModelsMock.mockReset().mockResolvedValue({ models: [], metadata: {} })
+    importCodexSessionMock.mockReset().mockResolvedValue({ created: 1, updated: 0, skipped: 0, failed: 0, errors: [], warnings: [] })
+    createOpenAICodexPATMock.mockReset().mockResolvedValue({})
+    selectAutoProxyMock.mockReset().mockResolvedValue({ proxy_id: 17 })
+    const token = { access_token: 'fixture-access', refresh_token: 'fixture-refresh', email: 'fixture@example.test', expires_at: '2030-01-01T00:00:00Z' }
+    grokRefreshMock.mockReset().mockResolvedValue(token)
+    grokPasswordMock.mockReset().mockResolvedValue(token)
+    grokSSOImportMock.mockReset().mockResolvedValue({ created: [{ account: { id: 42 } }], failed: [] })
+  })
+
+  it.each(['openai', 'anthropic', 'deepseek', 'grok', 'gemini'])('creates %s API-key accounts with automatic proxy configuration', async (platform) => {
+    const wrapper = mountModal()
+    if (platform !== 'anthropic') await wrapper.get(`[data-testid="account-platform-${platform}"]`).trigger('click')
+    if (platform === 'openai') await wrapper.get('[data-testid="openai-account-type-apikey"]').trigger('click')
+    if (platform === 'anthropic') await selectButtonByText(wrapper, 'admin.accounts.claudeConsole')
+    if (platform === 'grok') await wrapper.get('[data-testid="grok-account-type-api-key"]').trigger('click')
+    if (platform === 'gemini') await selectButtonByText(wrapper, 'admin.accounts.gemini.accountType.apiKeyTitle')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('auto fixture')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('fixture-key')
+    wrapper.getComponent({ name: 'ProxySelector' }).vm.$emit('update:modelValue', -1)
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    expect(createAccountMock.mock.calls[0][0]).toMatchObject({ proxy_id: null, extra: { auto_select_proxy: true } })
+    expect(wrapper.emitted('created')).toHaveLength(1)
+    expect(selectAutoProxyMock).not.toHaveBeenCalled() // Saving configuration does not require a warm probe queue.
+    wrapper.unmount()
+  })
+
+  it.each([null, 17])('preserves nonautomatic proxy choice %s', async (proxyId) => {
+    const wrapper = mountModal()
+    await wrapper.get('[data-testid="account-platform-openai"]').trigger('click')
+    await wrapper.get('[data-testid="openai-account-type-apikey"]').trigger('click')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('manual fixture')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('fixture-key')
+    wrapper.getComponent({ name: 'ProxySelector' }).vm.$emit('update:modelValue', proxyId)
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const payload = createAccountMock.mock.calls[0][0]
+    expect(payload.proxy_id).toBe(proxyId)
+    expect(payload.extra?.auto_select_proxy).toBeUndefined()
+    expect(payload.extra.openai_long_context_billing_enabled).toBe(false)
+    wrapper.unmount()
+  })
+
+  it.each(['import-codex-session', 'import-codex-pat'])('keeps automatic mode in %s', async (event) => {
+    const wrapper = mountModal()
+    await selectPlatform(wrapper, 'openai')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Codex fixture')
+    wrapper.getComponent({ name: 'ProxySelector' }).vm.$emit('update:modelValue', -1)
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    wrapper.getComponent({ name: 'OAuthAuthorizationFlow' }).vm.$emit(event, 'fixture-token')
+    await flushPromises()
+    const boundary = event === 'import-codex-session' ? importCodexSessionMock : createOpenAICodexPATMock
+    expect(boundary).toHaveBeenCalledTimes(1)
+    expect(boundary.mock.calls[0][0]).toMatchObject({ proxy_id: null, extra: { auto_select_proxy: true } })
+    expect(wrapper.emitted('created')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  async function grokStep() {
+    const wrapper = mountModal()
+    await wrapper.get('[data-testid="account-platform-grok"]').trigger('click')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('grok fixture')
+    wrapper.getComponent({ name: 'ProxySelector' }).vm.$emit('update:modelValue', -1)
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    return wrapper
+  }
+
+  it.each(['validate-refresh-token', 'authorize-password'])('uses a healthy proxy before Grok %s and saves automatic mode', async (event) => {
+    const wrapper = await grokStep()
+    wrapper.getComponent({ name: 'OAuthAuthorizationFlow' }).vm.$emit(event, event === 'authorize-password' ? 'fixture@example.test----fixture-password' : 'fixture-refresh')
+    await flushPromises()
+    expect(selectAutoProxyMock).toHaveBeenCalledTimes(1)
+    const boundary = event === 'authorize-password' ? grokPasswordMock : grokRefreshMock
+    expect(boundary.mock.calls[0][1]).toBe(17)
+    expect(createAccountMock.mock.calls[0][0]).toMatchObject({ proxy_id: null, extra: { auto_select_proxy: true } })
+    wrapper.unmount()
+  })
+
+  it('preserves automatic mode in the server-side Grok SSO import', async () => {
+    const wrapper = await grokStep()
+    wrapper.getComponent({ name: 'OAuthAuthorizationFlow' }).vm.$emit('import-sso', 'fixture-sso')
+    await flushPromises()
+    expect(grokSSOImportMock.mock.calls[0][0]).toMatchObject({ proxy_id: null, extra: { auto_select_proxy: true } })
+    wrapper.unmount()
+  })
+
+  it('does not authorize or create through a direct connection when no automatic proxy is healthy', async () => {
+    selectAutoProxyMock.mockRejectedValue({ response: { data: { message: 'No healthy proxy available' } } })
+    const wrapper = await grokStep()
+    wrapper.getComponent({ name: 'OAuthAuthorizationFlow' }).vm.$emit('authorize-password', 'fixture@example.test----fixture-password')
+    await flushPromises()
+    expect(selectAutoProxyMock).toHaveBeenCalledTimes(1)
+    expect(grokPasswordMock).not.toHaveBeenCalled()
+    expect(createAccountMock).not.toHaveBeenCalled()
+    expect(wrapper.emitted('created')).toBeUndefined()
+    wrapper.unmount()
+  })
+})
 
 describe('CreateAccountModal OpenAI long-context billing', () => {
   beforeEach(() => {
@@ -970,5 +1090,151 @@ describe('CreateAccountModal platform selector', () => {
     await wrapper.get('[data-testid="account-platform-typesafe"]').trigger('click')
     expect(wrapper.get('form#create-account-form input[type="password"]').attributes('placeholder')).toBe('ts-...')
     wrapper.unmount()
+  })
+})
+
+describe('CreateAccountModal gemini explicit cache upstream switch', () => {
+  beforeEach(() => {
+    authIsSimpleMode.value = true
+    createAccountMock.mockReset().mockResolvedValue({ id: 43, platform: 'gemini', type: 'apikey' })
+    probeUpstreamBillingMock.mockReset().mockResolvedValue({})
+    syncUpstreamModelsMock.mockReset().mockResolvedValue({ models: [], metadata: {} })
+  })
+
+  it('only offers the switch for a custom base url and sends it on create', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'Gemini')
+    await selectButtonByText(wrapper, 'admin.accounts.gemini.accountType.apiKeyTitle')
+    expect(wrapper.find('[data-testid="explicit-cache-upstream-section"]').exists()).toBe(false)
+
+    const baseUrlInput = wrapper
+      .findAll('form#create-account-form input[type="text"]')
+      .find((input) => (input.element as HTMLInputElement).value === 'https://generativelanguage.googleapis.com')
+    expect(baseUrlInput).toBeDefined()
+    await baseUrlInput!.setValue('https://upstream.example.com')
+    expect(wrapper.find('[data-testid="explicit-cache-upstream-section"]').exists()).toBe(true)
+
+    await wrapper.get('[data-testid="explicit-cache-upstream-toggle"]').trigger('click')
+    await wrapper.get('[data-testid="explicit-cache-upstream-max-ttl"]').setValue('1800')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('gemini upstream gateway')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('sk-upstream')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    expect(createAccountMock.mock.calls[0]?.[0]?.credentials).toMatchObject({
+      base_url: 'https://upstream.example.com',
+      explicit_cache_upstream: true,
+      explicit_cache_upstream_max_ttl_seconds: 1800
+    })
+  })
+
+  it('only offers the AI Studio tier for the official base url', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'Gemini')
+    await selectButtonByText(wrapper, 'admin.accounts.gemini.accountType.apiKeyTitle')
+    expect(wrapper.find('[data-testid="gemini-oauth-tier"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="gemini-apikey-note"]').exists()).toBe(true)
+    await wrapper.get('[data-testid="gemini-apikey-tier"]').setValue('aistudio_paid')
+
+    const baseUrlInput = wrapper
+      .findAll('form#create-account-form input[type="text"]')
+      .find((input) => (input.element as HTMLInputElement).value === 'https://generativelanguage.googleapis.com')
+    expect(baseUrlInput).toBeDefined()
+    await baseUrlInput!.setValue('https://upstream.example.com')
+    expect(wrapper.find('[data-testid="gemini-apikey-tier"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="gemini-apikey-note"]').exists()).toBe(false)
+
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('gemini relay')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('sk-upstream')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    const credentials = createAccountMock.mock.calls[0]?.[0]?.credentials
+    expect(credentials).toMatchObject({ base_url: 'https://upstream.example.com' })
+    expect(credentials).not.toHaveProperty('tier_id')
+  })
+
+  it('shows the OAuth tier fallback only on the OAuth form', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'Gemini')
+    await selectButtonByText(wrapper, 'admin.accounts.gemini.accountType.oauthTitle')
+    expect(wrapper.find('[data-testid="gemini-oauth-tier"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="gemini-apikey-note"]').exists()).toBe(false)
+  })
+
+  it('keeps the selected AI Studio tier for the official base url', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'Gemini')
+    await selectButtonByText(wrapper, 'admin.accounts.gemini.accountType.apiKeyTitle')
+    await wrapper.get('[data-testid="gemini-apikey-tier"]').setValue('aistudio_paid')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('gemini official')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('AIza-official')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    expect(createAccountMock.mock.calls[0]?.[0]?.credentials).toMatchObject({
+      base_url: 'https://generativelanguage.googleapis.com',
+      tier_id: 'aistudio_paid'
+    })
+  })
+})
+
+describe('CreateAccountModal Vertex API key auth', () => {
+  beforeEach(() => {
+    authIsSimpleMode.value = true
+    createAccountMock.mockReset().mockResolvedValue({ id: 44, platform: 'gemini', type: 'service_account' })
+    probeUpstreamBillingMock.mockReset().mockResolvedValue({})
+    syncUpstreamModelsMock.mockReset().mockResolvedValue({ models: [], metadata: {} })
+  })
+
+  async function openGeminiVertexApiKeyForm() {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'Gemini')
+    await selectButtonByText(wrapper, 'admin.accounts.vertexLabel')
+    await wrapper.get('[data-testid="vertex-auth-mode-apikey"]').setValue(true)
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('vertex api key account')
+    await wrapper.get('[data-testid="vertex-api-key-input"]').setValue(' vertex-key ')
+    return wrapper
+  }
+
+  it('creates a Gemini Vertex account with API key auth and no project for the express endpoint', async () => {
+    const wrapper = await openGeminiVertexApiKeyForm()
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    const payload = createAccountMock.mock.calls[0]?.[0]
+    expect(payload?.platform).toBe('gemini')
+    expect(payload?.type).toBe('service_account')
+    expect(payload?.credentials).toEqual({
+      auth_mode: 'apikey',
+      api_key: 'vertex-key',
+      location: 'global',
+      tier_id: 'vertex'
+    })
+  })
+
+  it('sends the project id when an API key account targets a project endpoint', async () => {
+    const wrapper = await openGeminiVertexApiKeyForm()
+    await wrapper.get('[data-testid="vertex-api-key-project-id-input"]').setValue(' my-project ')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock.mock.calls[0]?.[0]?.credentials).toMatchObject({
+      auth_mode: 'apikey',
+      api_key: 'vertex-key',
+      project_id: 'my-project',
+      location: 'global'
+    })
+  })
+
+  it('keeps Anthropic Vertex accounts on Service Account JSON only', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'admin.accounts.vertexLabel')
+    expect(wrapper.find('[data-testid="vertex-auth-mode-apikey"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="vertex-api-key-input"]').exists()).toBe(false)
   })
 })

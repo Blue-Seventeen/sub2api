@@ -20,6 +20,8 @@ SELECT COALESCE(json_agg(t), '[]'::json) FROM (
   WHERE g.deleted_at IS NULL AND k.deleted_at IS NULL AND a.deleted_at IS NULL
     AND g.status='active' AND k.status='active' AND a.status='active'
     AND a.platform=g.platform
+    AND a.name NOT LIKE 'v0215-%' AND g.name NOT LIKE 'v0215-%'
+    AND COALESCE(a.credentials->>'api_key','') NOT LIKE 'sk-fixture-%'
   ORDER BY g.platform, k.id, a.id
 ) t;
 '@

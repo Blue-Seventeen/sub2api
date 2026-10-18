@@ -116,7 +116,7 @@ func TestCompatibleImagesForwardGemini(t *testing.T) {
 				require.Equal(t, "preserved", r.FormValue("custom_field"))
 				file, _, err := r.FormFile("image")
 				require.NoError(t, err)
-				defer file.Close()
+				defer func() { require.NoError(t, file.Close()) }()
 				data, err := io.ReadAll(file)
 				require.NoError(t, err)
 				require.Equal(t, "original-image-bytes", string(data))

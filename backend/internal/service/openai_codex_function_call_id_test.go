@@ -74,8 +74,12 @@ func TestFilterCodexInput_PreservesNativeCustomAndToolSearchIDs(t *testing.T) {
 
 	filtered := filterCodexInputWithOptions(input, codexInputFilterOptions{PreserveReferences: true})
 
-	require.Equal(t, "ctc_valid", filtered[0].(map[string]any)["id"])
-	require.Equal(t, "tsc_valid", filtered[1].(map[string]any)["id"])
+	customCall, ok := filtered[0].(map[string]any)
+	require.True(t, ok)
+	searchCall, ok := filtered[1].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "ctc_valid", customCall["id"])
+	require.Equal(t, "tsc_valid", searchCall["id"])
 }
 
 func TestFilterCodexInput_StripsWrongCustomAndToolSearchIDs(t *testing.T) {
@@ -86,8 +90,12 @@ func TestFilterCodexInput_StripsWrongCustomAndToolSearchIDs(t *testing.T) {
 
 	filtered := filterCodexInputWithOptions(input, codexInputFilterOptions{PreserveReferences: true})
 
-	require.NotContains(t, filtered[0].(map[string]any), "id")
-	require.NotContains(t, filtered[1].(map[string]any), "id")
+	customCall, ok := filtered[0].(map[string]any)
+	require.True(t, ok)
+	searchCall, ok := filtered[1].(map[string]any)
+	require.True(t, ok)
+	require.NotContains(t, customCall, "id")
+	require.NotContains(t, searchCall, "id")
 }
 
 func TestFilterCodexInput_MapsItemReferencesToNativeToolCallPair(t *testing.T) {
@@ -102,12 +110,24 @@ func TestFilterCodexInput_MapsItemReferencesToNativeToolCallPair(t *testing.T) {
 
 	filtered := filterCodexInputWithOptions(input, codexInputFilterOptions{PreserveReferences: true})
 
-	require.Equal(t, "ctc_custom", filtered[0].(map[string]any)["call_id"])
-	require.Equal(t, "ctc_custom", filtered[1].(map[string]any)["call_id"])
-	require.Equal(t, "ctc_custom", filtered[2].(map[string]any)["id"])
-	require.Equal(t, "tsc_search", filtered[3].(map[string]any)["call_id"])
-	require.Equal(t, "tsc_search", filtered[4].(map[string]any)["call_id"])
-	require.Equal(t, "tsc_search", filtered[5].(map[string]any)["id"])
+	customCall, ok := filtered[0].(map[string]any)
+	require.True(t, ok)
+	customOutput, ok := filtered[1].(map[string]any)
+	require.True(t, ok)
+	customReference, ok := filtered[2].(map[string]any)
+	require.True(t, ok)
+	searchCall, ok := filtered[3].(map[string]any)
+	require.True(t, ok)
+	searchOutput, ok := filtered[4].(map[string]any)
+	require.True(t, ok)
+	searchReference, ok := filtered[5].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "ctc_custom", customCall["call_id"])
+	require.Equal(t, "ctc_custom", customOutput["call_id"])
+	require.Equal(t, "ctc_custom", customReference["id"])
+	require.Equal(t, "tsc_search", searchCall["call_id"])
+	require.Equal(t, "tsc_search", searchOutput["call_id"])
+	require.Equal(t, "tsc_search", searchReference["id"])
 }
 
 func TestFilterCodexInput_PreservesAmbiguousItemReference(t *testing.T) {
@@ -119,9 +139,15 @@ func TestFilterCodexInput_PreservesAmbiguousItemReference(t *testing.T) {
 
 	filtered := filterCodexInputWithOptions(input, codexInputFilterOptions{PreserveReferences: true})
 
-	require.Equal(t, "ctc_shared", filtered[0].(map[string]any)["call_id"])
-	require.Equal(t, "tsc_shared", filtered[1].(map[string]any)["call_id"])
-	require.Equal(t, "call_shared", filtered[2].(map[string]any)["id"])
+	customCall, ok := filtered[0].(map[string]any)
+	require.True(t, ok)
+	searchCall, ok := filtered[1].(map[string]any)
+	require.True(t, ok)
+	reference, ok := filtered[2].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "ctc_shared", customCall["call_id"])
+	require.Equal(t, "tsc_shared", searchCall["call_id"])
+	require.Equal(t, "call_shared", reference["id"])
 }
 
 func TestFilterCodexInput_PreservesNativeItemIDReferenceIndependentlyFromCallID(t *testing.T) {
@@ -132,9 +158,13 @@ func TestFilterCodexInput_PreservesNativeItemIDReferenceIndependentlyFromCallID(
 
 	filtered := filterCodexInputWithOptions(input, codexInputFilterOptions{PreserveReferences: true})
 
-	require.Equal(t, "ctc_item", filtered[0].(map[string]any)["id"])
-	require.Equal(t, "ctc_custom", filtered[0].(map[string]any)["call_id"])
-	require.Equal(t, "ctc_item", filtered[1].(map[string]any)["id"])
+	customCall, ok := filtered[0].(map[string]any)
+	require.True(t, ok)
+	reference, ok := filtered[1].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "ctc_item", customCall["id"])
+	require.Equal(t, "ctc_custom", customCall["call_id"])
+	require.Equal(t, "ctc_item", reference["id"])
 }
 
 func TestFilterCodexInput_ExistingItemIDWinsOverLegacyCallIDMapping(t *testing.T) {
@@ -146,9 +176,15 @@ func TestFilterCodexInput_ExistingItemIDWinsOverLegacyCallIDMapping(t *testing.T
 
 	filtered := filterCodexInputWithOptions(input, codexInputFilterOptions{PreserveReferences: true})
 
-	require.Equal(t, "ctc_shared", filtered[0].(map[string]any)["call_id"])
-	require.Equal(t, "call_shared", filtered[1].(map[string]any)["id"])
-	require.Equal(t, "call_shared", filtered[2].(map[string]any)["id"])
+	customCall, ok := filtered[0].(map[string]any)
+	require.True(t, ok)
+	output, ok := filtered[1].(map[string]any)
+	require.True(t, ok)
+	reference, ok := filtered[2].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "ctc_shared", customCall["call_id"])
+	require.Equal(t, "call_shared", output["id"])
+	require.Equal(t, "call_shared", reference["id"])
 }
 
 func TestFilterCodexInput_NormalizesCrossTurnLegacyCallReference(t *testing.T) {
@@ -158,7 +194,9 @@ func TestFilterCodexInput_NormalizesCrossTurnLegacyCallReference(t *testing.T) {
 
 	filtered := filterCodexInputWithOptions(input, codexInputFilterOptions{PreserveReferences: true})
 
-	require.Equal(t, "fc_previous_turn", filtered[0].(map[string]any)["id"])
+	reference, ok := filtered[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "fc_previous_turn", reference["id"])
 }
 
 func TestFilterCodexInput_PreservesNativeRemoteItemReferences(t *testing.T) {
@@ -168,7 +206,9 @@ func TestFilterCodexInput_PreservesNativeRemoteItemReferences(t *testing.T) {
 
 			filtered := filterCodexInputWithOptions(input, codexInputFilterOptions{PreserveReferences: true})
 
-			require.Equal(t, id, filtered[0].(map[string]any)["id"])
+			reference, ok := filtered[0].(map[string]any)
+			require.True(t, ok)
+			require.Equal(t, id, reference["id"])
 		})
 	}
 }

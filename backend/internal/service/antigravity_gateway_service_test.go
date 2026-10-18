@@ -1288,8 +1288,8 @@ func TestHandleGeminiStreamToNonStreaming_TimeoutPreservesUsage(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
 	reader, writer := io.Pipe()
-	defer reader.Close()
-	defer writer.Close()
+	defer func() { _ = reader.Close() }()
+	defer func() { _ = writer.Close() }()
 	go func() {
 		_, _ = io.WriteString(writer, "data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"partial\"}]}}],\"usageMetadata\":{\"promptTokenCount\":7,\"candidatesTokenCount\":2}}}\n\n")
 	}()
@@ -1309,8 +1309,8 @@ func TestCollectClaudeStreamResponse_TimeoutPreservesUsage(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 	reader, writer := io.Pipe()
-	defer reader.Close()
-	defer writer.Close()
+	defer func() { _ = reader.Close() }()
+	defer func() { _ = writer.Close() }()
 	go func() {
 		_, _ = io.WriteString(writer, "data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"partial\"}]}}],\"usageMetadata\":{\"promptTokenCount\":7,\"candidatesTokenCount\":2}}}\n\n")
 	}()

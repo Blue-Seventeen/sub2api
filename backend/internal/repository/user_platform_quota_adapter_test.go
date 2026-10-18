@@ -74,10 +74,23 @@ func TestGenericAdapter_ResetExpiredWindow_ForwardsAllParams(t *testing.T) {
 	if err := adapter.ResetExpiredWindow(context.Background(), 7, "openai", "weekly", now); err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if fake.resetCalledWith[0].(int64) != 7 ||
-		fake.resetCalledWith[1].(string) != "openai" ||
-		fake.resetCalledWith[2].(string) != "weekly" ||
-		!fake.resetCalledWith[3].(time.Time).Equal(now) {
+	userID, ok := fake.resetCalledWith[0].(int64)
+	if !ok {
+		t.Fatalf("userID must be int64, got %T", fake.resetCalledWith[0])
+	}
+	platform, ok := fake.resetCalledWith[1].(string)
+	if !ok {
+		t.Fatalf("platform must be string, got %T", fake.resetCalledWith[1])
+	}
+	window, ok := fake.resetCalledWith[2].(string)
+	if !ok {
+		t.Fatalf("window must be string, got %T", fake.resetCalledWith[2])
+	}
+	newStart, ok := fake.resetCalledWith[3].(time.Time)
+	if !ok {
+		t.Fatalf("newStart must be time.Time, got %T", fake.resetCalledWith[3])
+	}
+	if userID != 7 || platform != "openai" || window != "weekly" || !newStart.Equal(now) {
 		t.Errorf("forwarded params mismatch: %+v", fake.resetCalledWith)
 	}
 }

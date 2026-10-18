@@ -224,6 +224,11 @@ export async function getAutoProbeConfig(): Promise<ProxyAutoProbeStatus> {
   return data
 }
 
+export async function selectAutoProxy(): Promise<{ proxy_id: number }> {
+  const { data } = await apiClient.get<{ proxy_id: number }>('/admin/proxies/auto-probe/select')
+  return data
+}
+
 export async function updateAutoProbeConfig(payload: ProxyAutoProbeConfig): Promise<ProxyAutoProbeStatus> {
   const { data } = await apiClient.put<ProxyAutoProbeStatus>('/admin/proxies/auto-probe/config', payload)
   return data
@@ -350,6 +355,7 @@ export const proxiesAPI = {
   getProxyAccounts,
   getActiveUsage,
   getAutoProbeConfig,
+  selectAutoProxy,
   updateAutoProbeConfig,
   listClashSubscriptions,
   createClashSubscription,

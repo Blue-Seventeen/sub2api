@@ -205,7 +205,7 @@ func TestAuthLoginSameEmailAndPerIPBuckets(t *testing.T) {
 	require.Equal(t, http.StatusTooManyRequests, w.Code)
 
 	server.FlushAll()
-	for i := 1; i <= 500; i++ {
+	for i := 1; i <= 60; i++ {
 		w = postAuthLogin(router, "203.0.113.30:12345", "user"+strconv.Itoa(i)+"@example.com")
 		require.Equal(t, http.StatusBadRequest, w.Code, "per-IP request %d should pass", i)
 	}

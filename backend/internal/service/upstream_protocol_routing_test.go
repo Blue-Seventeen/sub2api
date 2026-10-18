@@ -122,6 +122,7 @@ func TestUpstreamRoutingModelOnlyForModelRoutedAccounts(t *testing.T) {
 	require.Equal(t, "glm-5.3", upstreamRoutingModel(openCode, body, ""))
 	require.Empty(t, upstreamRoutingModel(routingTestAccount(PlatformKimi, AccountTypeAPIKey, nil, nil), body, ""))
 }
+
 // /v1/responses 转 Anthropic 上游时，计费模型名与上游模型名都应是去除首尾空白的
 // 请求模型；按模型分流（OpenCode）与显式 anthropic 协议（Kimi）账号行为一致。
 func TestResponsesToNativeAnthropicTrimsBillingModel(t *testing.T) {

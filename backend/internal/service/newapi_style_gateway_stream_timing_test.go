@@ -55,14 +55,19 @@ func TestNewAPIStyleStreamingRelayEmitsBeforeUpstreamCompletes(t *testing.T) {
 		`data: {"type":"response.completed","response":{"id":"resp_timing","usage":{"input_tokens":3,"output_tokens":1,"total_tokens":4}}}` + "\n\n"
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Error("upstream test server does not support HTTP flushing")
+			return
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, firstEvent)
-		w.(http.Flusher).Flush()
+		flusher.Flush()
 		close(firstUpstreamEvent)
 		<-releaseTerminalEvent
 		_, _ = io.WriteString(w, terminalEvent)
-		w.(http.Flusher).Flush()
+		flusher.Flush()
 	}))
 	defer upstream.Close()
 
@@ -104,7 +109,7 @@ func TestNewAPIStyleStreamingRelayEmitsBeforeUpstreamCompletes(t *testing.T) {
 			clientResult <- timedRelayResponse{err: err}
 			return
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		reader := bufio.NewReader(resp.Body)
 		var first bytes.Buffer
 		for {

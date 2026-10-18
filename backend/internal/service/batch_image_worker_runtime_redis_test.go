@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
-	"github.com/Wei-Shaw/sub2api/internal/repository"
+	"github.com/Wei-Shaw/sub2api/internal/repository" //nolint:depguard // External-package startup contract verifies the real queue's Redis side effects.
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/alicebob/miniredis/v2"
-	"github.com/redis/go-redis/v9"
+	"github.com/redis/go-redis/v9" //nolint:depguard // Client connects only to this test's isolated miniredis fixture.
 	"github.com/stretchr/testify/require"
 )
 

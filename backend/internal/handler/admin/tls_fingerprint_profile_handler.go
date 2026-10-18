@@ -1,8 +1,10 @@
 package admin
 
 import (
+	"net/http"
 	"strconv"
 
+	"github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/model"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -117,6 +119,10 @@ func (h *TLSFingerprintProfileHandler) Create(c *gin.Context) {
 			response.BadRequest(c, err.Error())
 			return
 		}
+		if ent.IsConstraintError(err) {
+			response.Error(c, http.StatusConflict, "TLS fingerprint profile name already exists")
+			return
+		}
 		response.ErrorFrom(c, err)
 		return
 	}
@@ -207,6 +213,10 @@ func (h *TLSFingerprintProfileHandler) Update(c *gin.Context) {
 	if err != nil {
 		if _, ok := err.(*model.ValidationError); ok {
 			response.BadRequest(c, err.Error())
+			return
+		}
+		if ent.IsConstraintError(err) {
+			response.Error(c, http.StatusConflict, "TLS fingerprint profile name already exists")
 			return
 		}
 		response.ErrorFrom(c, err)

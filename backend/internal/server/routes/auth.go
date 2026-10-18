@@ -42,7 +42,9 @@ func RegisterAuthRoutes(
 	{
 		auth.POST("/register", rateLimiter.LimitWithOptions("auth-register", 5, time.Minute, authRateLimitOptions), h.Auth.Register)
 		auth.POST("/login",
-			rateLimiter.LimitWithOptions("auth-login-ip", 500, time.Minute, authRateLimitOptions),
+			// Limit total login attempts per client IP to protect the password verifier
+			// when attackers rotate email addresses.
+			rateLimiter.LimitWithOptions("auth-login-ip", 60, time.Minute, authRateLimitOptions),
 			rateLimiter.LimitWithOptions("auth-login", 20, time.Minute, loginRateLimitOptions),
 			h.Auth.Login,
 		)

@@ -159,10 +159,6 @@ func proxyProbeIdentityFromService(proxyIn *service.Proxy) proxyProbeIdentity {
 	}
 }
 
-func updateProxyAndInvalidateProbeSnapshots(ctx context.Context, client *dbent.Client, proxyIn *service.Proxy) (*dbent.Proxy, error) {
-	return updateProxyWithNodeStatusAndInvalidateProbeSnapshots(ctx, client, proxyIn, nil, false)
-}
-
 func updateProxyWithNodeStatusAndInvalidateProbeSnapshots(ctx context.Context, client *dbent.Client, proxyIn *service.Proxy, nodeStatus *string, preserveOmittedStatus bool) (*dbent.Proxy, error) {
 	if proxyIn.IsManagedMihomoSubscription() {
 		var subscriptionID int64

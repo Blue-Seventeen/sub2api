@@ -226,9 +226,10 @@ func TestOpenAIGatewayProxyWebsocketNonTransportOutcomesPreserveSticky(t *testin
 			defer cancel()
 			first := &gatewayProxyIOConn{}
 			first.events = gatewayProxyCompletedWSConn().events
-			if outcome == "application error" {
+			switch outcome {
+			case "application error":
 				first.events = [][]byte{[]byte(`{"type":"error","error":{"code":"invalid_request_error","type":"invalid_request_error","message":"invalid test request"}}`)}
-			} else if outcome == "client cancellation with EOF" {
+			case "client cancellation with EOF":
 				first.readErr, first.beforeRead = io.EOF, cancel
 			}
 			dialer := &gatewayProxyCaptureDialer{conn: first}
@@ -264,7 +265,10 @@ func gatewayProxyRunIngress(t *testing.T, svc *OpenAIGatewayService, account *Ac
 			done <- err
 			return
 		}
-		defer conn.CloseNow()
+		defer func() {
+			// Best-effort teardown: the session may have closed the socket already.
+			_ = conn.CloseNow()
+		}()
 		c, _ := gin.CreateTestContext(httptest.NewRecorder())
 		c.Request = r
 		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
@@ -281,7 +285,10 @@ func gatewayProxyRunIngress(t *testing.T, svc *OpenAIGatewayService, account *Ac
 	defer cancel()
 	client, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
 	require.NoError(t, err)
-	defer client.CloseNow()
+	defer func() {
+		// Best-effort cleanup also covers assertion failures before the explicit close.
+		_ = client.CloseNow()
+	}()
 	require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.4","input":"hello","stream":true}`)))
 	_, _, err = client.Read(ctx)
 	require.NoError(t, err)

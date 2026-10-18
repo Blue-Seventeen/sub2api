@@ -551,6 +551,7 @@ func registerProxyRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth
 		proxies.GET("", h.Admin.Proxy.List)
 		proxies.GET("/all", h.Admin.Proxy.GetAll)
 		proxies.GET("/auto-probe/config", h.Admin.Proxy.GetAutoProbeConfig)
+		proxies.GET("/auto-probe/select", h.Admin.Proxy.SelectAutoProxy)
 		proxies.PUT("/auto-probe/config", h.Admin.Proxy.UpdateAutoProbeConfig)
 		proxies.GET("/clash-subscriptions", h.Admin.Proxy.ListClashSubscriptions)
 		proxies.POST("/clash-subscriptions", h.Admin.Proxy.CreateClashSubscription)

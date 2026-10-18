@@ -125,7 +125,8 @@ func TestManagedProxyNodeAdminRejectsEpochNotInstalledInRunningProcess(t *testin
 	require.NoError(t, runtime.startEntry(context.Background(), sub))
 	t.Cleanup(runtime.Stop)
 	svc, states := managedProxyNodeAdminFixture()
-	repo := svc.proxyRepo.(*managedProxyNodeAdminRepo)
+	repo, ok := svc.proxyRepo.(*managedProxyNodeAdminRepo)
+	require.True(t, ok, "fixture must use the managed proxy node admin repository")
 	repo.proxies[0].Username, repo.proxies[0].Password = "mpu_hk", "mpp_hk"
 	states.states[1] = ProxySubscriptionNode{Status: ProxySubscriptionNodeStatusActive, UpdatedAt: time.Now()}
 	svc.managedProxyResolver = runtime

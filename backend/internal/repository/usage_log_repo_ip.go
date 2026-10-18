@@ -45,7 +45,7 @@ func (r *usageLogRepository) GetIPOptionsWithFilters(ctx context.Context, filter
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	result := &usagestats.UsageIPOptions{IPs: make([]string, 0, limit)}
 	for rows.Next() {
 		var ip string

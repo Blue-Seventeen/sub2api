@@ -72,6 +72,8 @@ var (
 	reAIza                = regexp.MustCompile(`AIza[0-9A-Za-z_-]{35}`)
 	reAuthorizationHeader = regexp.MustCompile(`(?i)\b((?:authorization|proxy-authorization)\s*[:=]\s*)(?:(?:bearer|basic)\s+)?[^,\s";]+`)
 	reCookieHeader        = regexp.MustCompile(`(?im)\b((?:cookie|set-cookie)\s*[:=]\s*)[^\r\n]+`)
+	// New Gemini AQ auth keys require redaction alongside all custom patterns.
+	reGeminiAuthKey = regexp.MustCompile(`AQ\.Ab[0-9A-Za-z_-]{40,}`)
 
 	defaultTextRedactPatterns = compileTextRedactPatterns(nil)
 	extraTextPatternCache     sync.Map // map[string]*textRedactPatterns
@@ -131,6 +133,7 @@ func RedactText(input string, extraKeys ...string) string {
 	out = reAIza.ReplaceAllString(out, "AIza***")
 	out = reCookieHeader.ReplaceAllString(out, `$1***`)
 	out = reAuthorizationHeader.ReplaceAllString(out, `$1***`)
+	out = reGeminiAuthKey.ReplaceAllString(out, "AQ.***")
 	out = patterns.reJSONLike.ReplaceAllString(out, `$1***$3`)
 	out = patterns.reQueryLike.ReplaceAllString(out, `$1=***`)
 	out = patterns.rePlain.ReplaceAllString(out, `$1$2***`)

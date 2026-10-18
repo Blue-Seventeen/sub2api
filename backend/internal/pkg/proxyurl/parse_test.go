@@ -5,6 +5,27 @@ import (
 	"testing"
 )
 
+func TestParseAutomaticProxyUnavailable(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "disabled", raw: "auto-proxy://disabled", want: "proxy auto-probe is disabled"},
+		{name: "no healthy candidate", raw: "  auto-proxy://unavailable  ", want: "no healthy proxy is available"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			trimmed, parsed, err := Parse(tc.raw)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want actionable automatic proxy error containing %q, got %v", tc.want, err)
+			}
+			if trimmed != "" || parsed != nil {
+				t.Fatal("unavailable automatic proxy must not produce a usable transport URL")
+			}
+		})
+	}
+}
+
 func TestParse_空字符串直连(t *testing.T) {
 	trimmed, parsed, err := Parse("")
 	if err != nil {

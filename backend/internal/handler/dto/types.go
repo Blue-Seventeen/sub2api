@@ -113,6 +113,8 @@ type Group struct {
 	IsExclusive    bool    `json:"is_exclusive"`
 	Status         string  `json:"status"`
 
+	I18n domain.GroupI18n `json:"i18n,omitempty"`
+
 	SubscriptionType string   `json:"subscription_type"`
 	DailyLimitUSD    *float64 `json:"daily_limit_usd"`
 	WeeklyLimitUSD   *float64 `json:"weekly_limit_usd"`

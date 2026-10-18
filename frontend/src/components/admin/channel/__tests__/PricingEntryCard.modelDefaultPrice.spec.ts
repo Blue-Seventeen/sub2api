@@ -1,5 +1,5 @@
-import { flushPromises, shallowMount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, shallowMount, type VueWrapper } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import PricingEntryCard from '../PricingEntryCard.vue'
 import type { PricingFormEntry } from '../types'
 import channelsAPI from '@/api/admin/channels'
@@ -38,8 +38,14 @@ function createEntry(models: string[] = []): PricingFormEntry {
   }
 }
 
+const wrappers: VueWrapper[] = []
+
 function addModels(entry: PricingFormEntry, models: string[]) {
-  const wrapper = shallowMount(PricingEntryCard, { props: { entry } })
+  const wrapper: VueWrapper = shallowMount(PricingEntryCard, { props: {
+    entry,
+    onUpdate: (updated: PricingFormEntry) => { void wrapper.setProps({ entry: updated }) },
+  } })
+  wrappers.push(wrapper)
   wrapper.findComponent({ name: 'ModelTagInput' }).vm.$emit('update:models', models)
   return wrapper
 }
@@ -51,6 +57,9 @@ describe('PricingEntryCard default price auto-fill', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     getModelDefaultPricing.mockResolvedValue({ found: true, input_price: 3e-6, output_price: 15e-6 })
+  })
+  afterEach(() => {
+    for (const wrapper of wrappers.splice(0)) wrapper.unmount()
   })
 
   it('auto-fills the default price when a model is added to an empty entry', async () => {

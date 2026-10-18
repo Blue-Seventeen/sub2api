@@ -518,19 +518,19 @@ func (s *GrokQuotaService) prepareProbe(ctx context.Context, accountID int64) (*
 }
 
 func (s *GrokQuotaService) resolveProxyURL(ctx context.Context, account *Account) string {
-	if account == nil || account.ProxyID == nil {
-		return ""
+	if s == nil {
+		return resolveAccountProxyURL(ctx, account, nil)
 	}
-	switch {
-	case account.Proxy != nil:
-		return account.Proxy.URL()
-	case s != nil && s.proxyRepo != nil:
-		if proxy, err := s.proxyRepo.GetByID(ctx, *account.ProxyID); err == nil && proxy != nil {
-			account.Proxy = proxy
-			return proxy.URL()
+	// The token provider validates fixed bindings before acquiring credentials.
+	// Hydrate a missing edge first, preserving the existing probe contract.
+	if account != nil && !account.IsAutoSelectProxyEnabled() && account.ProxyID != nil && account.Proxy == nil && s.proxyRepo != nil {
+		proxy, err := s.proxyRepo.GetByID(ctx, *account.ProxyID)
+		if err != nil || proxy == nil {
+			return ""
 		}
+		account.Proxy = proxy
 	}
-	return ""
+	return resolveAccountProxyURL(ctx, account, s.proxyRepo)
 }
 
 func (s *GrokQuotaService) loadGrokOAuthAccount(ctx context.Context, accountID int64) (*Account, error) {

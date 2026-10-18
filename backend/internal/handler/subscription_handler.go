@@ -62,7 +62,7 @@ func (h *SubscriptionHandler) List(c *gin.Context) {
 
 	out := make([]dto.UserSubscription, 0, len(subscriptions))
 	for i := range subscriptions {
-		out = append(out, *dto.UserSubscriptionFromService(&subscriptions[i]))
+		out = append(out, *dto.UserSubscriptionFromService(&subscriptions[i]).Localized(c.GetHeader("Accept-Language")))
 	}
 	response.Success(c, out)
 }
@@ -84,7 +84,7 @@ func (h *SubscriptionHandler) GetActive(c *gin.Context) {
 
 	out := make([]dto.UserSubscription, 0, len(subscriptions))
 	for i := range subscriptions {
-		out = append(out, *dto.UserSubscriptionFromService(&subscriptions[i]))
+		out = append(out, *dto.UserSubscriptionFromService(&subscriptions[i]).Localized(c.GetHeader("Accept-Language")))
 	}
 	response.Success(c, out)
 }
@@ -115,8 +115,12 @@ func (h *SubscriptionHandler) GetProgress(c *gin.Context) {
 		if i >= len(subscriptions) {
 			break
 		}
+		sub := &subscriptions[i]
+		if sub.Group != nil {
+			progress.GroupName = sub.Group.I18n.LocalizeName(c.GetHeader("Accept-Language"), progress.GroupName)
+		}
 		result = append(result, SubscriptionProgressInfo{
-			Subscription: dto.UserSubscriptionFromService(&subscriptions[i]),
+			Subscription: dto.UserSubscriptionFromService(sub).Localized(c.GetHeader("Accept-Language")),
 			Progress:     progress,
 		})
 	}
@@ -171,7 +175,7 @@ func (h *SubscriptionHandler) GetSummary(c *gin.Context) {
 
 		// Add effective group info if preloaded or snapshotted
 		if effectiveGroup := sub.EffectiveGroup(sub.Group); effectiveGroup != nil {
-			item.GroupName = effectiveGroup.Name
+			item.GroupName = effectiveGroup.I18n.LocalizeName(c.GetHeader("Accept-Language"), effectiveGroup.Name)
 			if effectiveGroup.DailyLimitUSD != nil {
 				item.DailyLimitUSD = *effectiveGroup.DailyLimitUSD
 			}

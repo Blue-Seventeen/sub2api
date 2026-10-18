@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
 )
 
 type transportTempUnschedRepoStub struct {
@@ -104,7 +105,8 @@ func TestHandleUpstreamTransportError_AttributesEventTimeProxy(t *testing.T) {
 			if !ok {
 				t.Fatal("no upstream events recorded")
 			}
-			events := raw.([]*OpsUpstreamErrorEvent)
+			events, ok := raw.([]*OpsUpstreamErrorEvent)
+			require.True(t, ok)
 			if len(events) != 1 {
 				t.Fatalf("events = %d, want 1", len(events))
 			}

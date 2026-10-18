@@ -476,6 +476,9 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 }
 
 func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error) {
+	if err := ValidateAccountCreateProxyConfig(input.ProxyID, input.Extra); err != nil {
+		return nil, err
+	}
 	accountExtra, err := normalizeOpenAILongContextBillingExtra(input.Platform, input.Extra)
 	if err != nil {
 		return nil, err
@@ -1670,11 +1673,9 @@ func (s *adminServiceImpl) EnsureOpenAIPrivacy(ctx context.Context, account *Acc
 		return ""
 	}
 
-	var proxyURL string
-	if account.ProxyID != nil {
-		if p, err := s.proxyRepo.GetByID(ctx, *account.ProxyID); err == nil && p != nil {
-			proxyURL = p.URL()
-		}
+	proxyURL, err := resolveAccountAuthorizationProxyURL(ctx, account, s.proxyRepo)
+	if err != nil {
+		return ""
 	}
 
 	mode := disableOpenAITraining(ctx, s.privacyClientFactory, token, proxyURL)
@@ -1704,11 +1705,9 @@ func (s *adminServiceImpl) ForceOpenAIPrivacy(ctx context.Context, account *Acco
 		return ""
 	}
 
-	var proxyURL string
-	if account.ProxyID != nil {
-		if p, err := s.proxyRepo.GetByID(ctx, *account.ProxyID); err == nil && p != nil {
-			proxyURL = p.URL()
-		}
+	proxyURL, err := resolveAccountAuthorizationProxyURL(ctx, account, s.proxyRepo)
+	if err != nil {
+		return ""
 	}
 
 	mode := disableOpenAITraining(ctx, s.privacyClientFactory, token, proxyURL)
@@ -1747,11 +1746,9 @@ func (s *adminServiceImpl) EnsureAntigravityPrivacy(ctx context.Context, account
 
 	projectID, _ := account.Credentials["project_id"].(string)
 
-	var proxyURL string
-	if account.ProxyID != nil {
-		if p, err := s.proxyRepo.GetByID(ctx, *account.ProxyID); err == nil && p != nil {
-			proxyURL = p.URL()
-		}
+	proxyURL, err := resolveAccountAuthorizationProxyURL(ctx, account, s.proxyRepo)
+	if err != nil {
+		return ""
 	}
 
 	mode := setAntigravityPrivacy(ctx, token, projectID, proxyURL)
@@ -1780,11 +1777,9 @@ func (s *adminServiceImpl) ForceAntigravityPrivacy(ctx context.Context, account 
 
 	projectID, _ := account.Credentials["project_id"].(string)
 
-	var proxyURL string
-	if account.ProxyID != nil {
-		if p, err := s.proxyRepo.GetByID(ctx, *account.ProxyID); err == nil && p != nil {
-			proxyURL = p.URL()
-		}
+	proxyURL, err := resolveAccountAuthorizationProxyURL(ctx, account, s.proxyRepo)
+	if err != nil {
+		return ""
 	}
 
 	mode := setAntigravityPrivacy(ctx, token, projectID, proxyURL)

@@ -287,6 +287,7 @@ func TestAccountTestService_AnthropicProtocol401MarksAccountError(t *testing.T) 
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "Anthropic endpoint returned 401")
-	repo := svc.accountRepo.(*openAIAccountTestRepo)
+	repo, ok := svc.accountRepo.(*openAIAccountTestRepo)
+	require.True(t, ok)
 	require.Equal(t, account.ID, repo.setErrorID)
 }

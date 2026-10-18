@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"encoding/json/jsontext"
 	"errors"
+	"fmt"
 	"math"
 	"testing"
 
@@ -92,7 +93,11 @@ func captureGroupMutation(t *testing.T, input *service.Group, update bool) *dben
 	var captured *dbent.GroupMutation
 	client.Group.Use(func(next dbent.Mutator) dbent.Mutator {
 		return dbent.MutateFunc(func(ctx context.Context, m dbent.Mutation) (dbent.Value, error) {
-			captured = m.(*dbent.GroupMutation)
+			mutation, ok := m.(*dbent.GroupMutation)
+			if !ok {
+				return nil, fmt.Errorf("unexpected group mutation type %T", m)
+			}
+			captured = mutation
 			return nil, stop
 		})
 	})
@@ -159,7 +164,9 @@ func TestGroupPersistenceContractClears(t *testing.T) {
 	}
 	pricing, ok := m.Field(group.FieldModelPricing)
 	require.True(t, ok)
-	require.JSONEq(t, "null", string(pricing.(jsontext.Value)))
+	encodedPricing, ok := pricing.(jsontext.Value)
+	require.True(t, ok, "model pricing must be a JSON value")
+	require.JSONEq(t, "null", string(encodedPricing))
 }
 
 func TestGroupPersistenceContractRejectsInvalidPricing(t *testing.T) {

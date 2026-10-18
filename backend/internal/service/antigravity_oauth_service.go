@@ -48,9 +48,10 @@ func (s *AntigravityOAuthService) GenerateAuthURL(ctx context.Context, proxyID *
 
 	var proxyURL string
 	if proxyID != nil {
-		proxy, err := s.proxyRepo.GetByID(ctx, *proxyID)
-		if err == nil && proxy != nil {
-			proxyURL = ResolveProxyURL(ctx, proxy)
+		var err error
+		proxyURL, err = resolveAuthorizationProxyURL(ctx, s.proxyRepo, proxyID)
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -108,9 +109,10 @@ func (s *AntigravityOAuthService) ExchangeCode(ctx context.Context, input *Antig
 	// 确定代理 URL
 	proxyURL := session.ProxyURL
 	if input.ProxyID != nil {
-		proxy, err := s.proxyRepo.GetByID(ctx, *input.ProxyID)
-		if err == nil && proxy != nil {
-			proxyURL = ResolveProxyURL(ctx, proxy)
+		var err error
+		proxyURL, err = resolveAuthorizationProxyURL(ctx, s.proxyRepo, input.ProxyID)
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -215,9 +217,10 @@ func (s *AntigravityOAuthService) RefreshToken(ctx context.Context, refreshToken
 func (s *AntigravityOAuthService) ValidateRefreshToken(ctx context.Context, refreshToken string, proxyID *int64) (*AntigravityTokenInfo, error) {
 	var proxyURL string
 	if proxyID != nil {
-		proxy, err := s.proxyRepo.GetByID(ctx, *proxyID)
-		if err == nil && proxy != nil {
-			proxyURL = ResolveProxyURL(ctx, proxy)
+		var err error
+		proxyURL, err = resolveAuthorizationProxyURL(ctx, s.proxyRepo, proxyID)
+		if err != nil {
+			return nil, err
 		}
 	}
 

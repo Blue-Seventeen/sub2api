@@ -326,7 +326,11 @@ type grokCredentialHandlerUpstream struct {
 func (u *grokCredentialHandlerUpstream) Do(req *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
 	var requestBody []byte
 	if req.Body != nil {
-		requestBody, _ = io.ReadAll(req.Body)
+		var err error
+		requestBody, err = io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
 	}
 	u.mu.Lock()
 	u.hits = append(u.hits, accountID)
@@ -465,7 +469,7 @@ func TestResponsesCredentialFailoverLoop(t *testing.T) {
 		select {
 		case <-time.After(2 * time.Second):
 			t.Fatal("credential refresh did not start")
-		case <-findHandlerRefresherStarted(router):
+		case <-findHandlerRefresherStarted(t, router):
 			cancel()
 		}
 		select {
@@ -805,6 +809,7 @@ func TestResponsesWebSocketCredentialFailoverLoop(t *testing.T) {
 		cancel()
 		require.NoError(t, err)
 		return conn, func() {
+			// Peer failover may already have closed the socket; cleanup is best-effort.
 			_ = conn.CloseNow()
 			server.Close()
 		}
@@ -856,7 +861,7 @@ func TestResponsesWebSocketCredentialFailoverLoop(t *testing.T) {
 		conn, closeConn := dial(t, router)
 		writeFirst(t, conn)
 		select {
-		case <-findHandlerRefresherStarted(router):
+		case <-findHandlerRefresherStarted(t, router):
 		case <-time.After(2 * time.Second):
 			t.Fatal("credential refresh did not start")
 		}
@@ -870,9 +875,13 @@ func TestResponsesWebSocketCredentialFailoverLoop(t *testing.T) {
 
 var handlerRefresherStarted sync.Map
 
-func findHandlerRefresherStarted(router *gin.Engine) <-chan struct{} {
-	value, _ := handlerRefresherStarted.Load(router)
-	return value.(chan struct{})
+func findHandlerRefresherStarted(t *testing.T, router *gin.Engine) <-chan struct{} {
+	t.Helper()
+	value, loaded := handlerRefresherStarted.Load(router)
+	require.True(t, loaded, "router must have a registered refresher")
+	started, ok := value.(chan struct{})
+	require.True(t, ok, "refresher notification must be a channel")
+	return started
 }
 
 func newGrokCredentialFailoverHandler(t *testing.T, mode string) (*OpenAIGatewayHandler, *grokCredentialHandlerRepo, *grokCredentialHandlerUpstream, *gin.Engine, func()) {

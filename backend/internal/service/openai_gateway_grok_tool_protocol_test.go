@@ -442,7 +442,10 @@ func TestGrokResponsesClientToolStreamBodyFlushesFrameBeforeEOF(t *testing.T) {
 				read <- readResult{err: err}
 				return
 			}
-			frame.WriteString(line)
+			if _, err := frame.WriteString(line); err != nil {
+				read <- readResult{err: err}
+				return
+			}
 			if strings.TrimSpace(line) == "" {
 				read <- readResult{frame: frame.String()}
 				return

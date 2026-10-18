@@ -344,6 +344,17 @@ func (h *ProxyHandler) GetAutoProbeConfig(c *gin.Context) {
 	response.Success(c, h.autoProbe.GetStatus())
 }
 
+// SelectAutoProxy resolves a healthy proxy for authorization before an account exists.
+// Only the ID is returned; proxy credentials never cross this boundary.
+func (h *ProxyHandler) SelectAutoProxy(c *gin.Context) {
+	proxyID, err := service.ResolveAccountCreationAuthProxyID(c.Request.Context(), nil, map[string]any{"auto_select_proxy": true})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"proxy_id": *proxyID})
+}
+
 // UpdateAutoProbeConfig handles updating proxy auto probe config.
 // PUT /api/v1/admin/proxies/auto-probe/config
 func (h *ProxyHandler) UpdateAutoProbeConfig(c *gin.Context) {

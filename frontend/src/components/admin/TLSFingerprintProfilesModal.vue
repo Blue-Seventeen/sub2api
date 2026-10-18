@@ -379,13 +379,6 @@ const form = reactive({
   enable_grease: false
 })
 
-// Load profiles when dialog opens
-watch(() => props.show, (newVal) => {
-  if (newVal) {
-    loadProfiles()
-  }
-})
-
 const loadProfiles = async () => {
   loading.value = true
   try {
@@ -397,6 +390,13 @@ const loadProfiles = async () => {
     loading.value = false
   }
 }
+
+// Load profiles on initial mount and whenever the dialog is reopened.
+watch(() => props.show, (newVal) => {
+  if (newVal) {
+    loadProfiles()
+  }
+}, { immediate: true })
 
 const resetForm = () => {
   form.name = ''
@@ -545,6 +545,17 @@ const formatNumericArray = (arr: number[] | null | undefined): string => (arr ??
 // For point_formats and psk_modes (uint8), show as plain numbers (null-safe)
 const formatPlainNumericArray = (arr: number[] | null | undefined): string => (arr ?? []).join(', ')
 
+const getErrorMessage = (error: unknown, fallback: string): string => {
+  if (!error || typeof error !== 'object') return fallback
+
+  const apiError = error as {
+    message?: unknown
+    response?: { data?: { detail?: unknown; message?: unknown } }
+  }
+  const message = apiError.response?.data?.message ?? apiError.response?.data?.detail ?? apiError.message
+  return typeof message === 'string' && message.trim() ? message : fallback
+}
+
 const handleEdit = (profile: TLSFingerprintProfile) => {
   editingProfile.value = profile
   form.name = profile.name
@@ -601,7 +612,7 @@ const handleSubmit = async () => {
     closeFormModal()
     loadProfiles()
   } catch (error: any) {
-    appStore.showError(error.response?.data?.detail || t('admin.tlsFingerprintProfiles.saveFailed'))
+    appStore.showError(getErrorMessage(error, t('admin.tlsFingerprintProfiles.saveFailed')))
     console.error('Error saving TLS fingerprint profile:', error)
   } finally {
     submitting.value = false
@@ -618,7 +629,7 @@ const confirmDelete = async () => {
     deletingProfile.value = null
     loadProfiles()
   } catch (error: any) {
-    appStore.showError(error.response?.data?.detail || t('admin.tlsFingerprintProfiles.deleteFailed'))
+    appStore.showError(getErrorMessage(error, t('admin.tlsFingerprintProfiles.deleteFailed')))
     console.error('Error deleting TLS fingerprint profile:', error)
   }
 }

@@ -333,7 +333,7 @@ func TestAcquireOpenAIWSIngressLease(t *testing.T) {
 
 	t.Run("disabled", func(t *testing.T) {
 		cache := &ingressLeaseCacheForTest{}
-		lease, acquired, err := NewConcurrencyService(cache).AcquireOpenAIWSIngressLease(nil, 1, 0)
+		lease, acquired, err := NewConcurrencyService(cache).AcquireOpenAIWSIngressLease(nil, 1, 0) //nolint:staticcheck // Intentionally exercise the disabled path with a nil context (SA1012).
 		require.NoError(t, err)
 		require.True(t, acquired)
 		require.Nil(t, lease)
@@ -357,7 +357,7 @@ func TestAcquireOpenAIWSIngressLease(t *testing.T) {
 
 	t.Run("release returns capacity", func(t *testing.T) {
 		cache := &ingressLeaseCacheForTest{acquireIngressResult: true, refreshIngressResult: true}
-		lease, acquired, err := NewConcurrencyService(cache).AcquireOpenAIWSIngressLease(nil, 1, 1)
+		lease, acquired, err := NewConcurrencyService(cache).AcquireOpenAIWSIngressLease(nil, 1, 1) //nolint:staticcheck // Intentionally exercise the lease's nil-context fallback (SA1012).
 		require.NoError(t, err)
 		require.True(t, acquired)
 		require.NotNil(t, lease)

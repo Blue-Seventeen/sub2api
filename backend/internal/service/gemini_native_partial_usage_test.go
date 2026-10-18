@@ -23,7 +23,9 @@ func TestGeminiForwardNative_PartialStreamPreservesUsage(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			svc := newGeminiSignalService("text/event-stream", partial)
 			if readErr != nil {
-				svc.httpUpstream.(*geminiCompatHTTPUpstreamStub).response.Body = io.NopCloser(io.MultiReader(strings.NewReader(partial), iotest.ErrReader(readErr)))
+				upstream, ok := svc.httpUpstream.(*geminiCompatHTTPUpstreamStub)
+				require.True(t, ok)
+				upstream.response.Body = io.NopCloser(io.MultiReader(strings.NewReader(partial), iotest.ErrReader(readErr)))
 			}
 			c, rec := newGeminiNativeTestContext(t)
 			result, err := svc.ForwardNative(context.Background(), c, geminiSignalTestAccount(), "gemini-3.7-flash", "streamGenerateContent", true, geminiSignalTestRequest())
@@ -48,7 +50,9 @@ func TestGeminiForwardNative_TerminalThenReadErrorKeepsSuccess(t *testing.T) {
 		t.Run(terminal, func(t *testing.T) {
 			body := `data: {"candidates":[{"content":{"parts":[{"text":"complete"}]}}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":2}}` + "\n\ndata: " + terminal + "\n\n"
 			svc := newGeminiSignalService("text/event-stream", body)
-			svc.httpUpstream.(*geminiCompatHTTPUpstreamStub).response.Body = io.NopCloser(io.MultiReader(strings.NewReader(body), iotest.ErrReader(errors.New("connection reset after terminal"))))
+			upstream, ok := svc.httpUpstream.(*geminiCompatHTTPUpstreamStub)
+			require.True(t, ok)
+			upstream.response.Body = io.NopCloser(io.MultiReader(strings.NewReader(body), iotest.ErrReader(errors.New("connection reset after terminal"))))
 			c, rec := newGeminiNativeTestContext(t)
 			result, err := svc.ForwardNative(context.Background(), c, geminiSignalTestAccount(), "gemini-3.7-flash", "streamGenerateContent", true, geminiSignalTestRequest())
 			require.NoError(t, err)

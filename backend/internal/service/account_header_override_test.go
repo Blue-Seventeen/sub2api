@@ -138,9 +138,11 @@ func TestApplyHeaderOverrides(t *testing.T) {
 	})
 
 	h := http.Header{}
+	// Inspect raw map keys deliberately: this contract preserves wire casing.
+	rawHeaders := map[string][]string(h)
 	// 模拟转发链路：canonical key 与 wire casing 原样 key 混合存在
 	h.Set("User-Agent", "claude-cli/2.1.161 (external, cli)")
-	h["anthropic-beta"] = []string{"claude-code-20250219,oauth-2025-04-20"} // 非 canonical 原样 key
+	rawHeaders["anthropic-beta"] = []string{"claude-code-20250219,oauth-2025-04-20"} // 非 canonical 原样 key
 	h.Set("Content-Type", "application/json")
 
 	acc.ApplyHeaderOverrides(h)
@@ -148,10 +150,10 @@ func TestApplyHeaderOverrides(t *testing.T) {
 	// user-agent 覆盖且只有一个值（已知头恢复 wire casing）
 	require.Equal(t, []string{"override-agent/2.0"}, h["User-Agent"])
 	// anthropic-beta：非 canonical 旧值被清除，写入 wire casing（小写）
-	require.Equal(t, []string{"custom-beta-1"}, h["anthropic-beta"])
+	require.Equal(t, []string{"custom-beta-1"}, rawHeaders["anthropic-beta"])
 	require.Empty(t, h["Anthropic-Beta"])
 	// 新增头（未知头以小写原样键写入，与转发链路 wire casing 约定一致）
-	require.Equal(t, []string{"custom-value"}, h["x-custom"])
+	require.Equal(t, []string{"custom-value"}, rawHeaders["x-custom"])
 	require.Equal(t, "custom-value", getHeaderRaw(h, "x-custom"))
 	// 未覆写的头不受影响
 	require.Equal(t, "application/json", h.Get("Content-Type"))

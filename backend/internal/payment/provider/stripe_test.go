@@ -5,6 +5,7 @@ package provider
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/payment"
@@ -17,8 +18,15 @@ type stripeRefundBackend struct {
 }
 
 func (b *stripeRefundBackend) Call(_ string, _ string, _ string, params stripe.ParamsContainer, v stripe.LastResponseSetter) error {
-	b.params = append(b.params, params.(*stripe.RefundCreateParams))
-	refund := v.(*stripe.Refund)
+	refundParams, ok := params.(*stripe.RefundCreateParams)
+	if !ok {
+		return fmt.Errorf("unexpected refund params type %T", params)
+	}
+	refund, ok := v.(*stripe.Refund)
+	if !ok {
+		return fmt.Errorf("unexpected refund response type %T", v)
+	}
+	b.params = append(b.params, refundParams)
 	refund.ID = "re_123"
 	refund.Status = stripe.RefundStatusSucceeded
 	return nil

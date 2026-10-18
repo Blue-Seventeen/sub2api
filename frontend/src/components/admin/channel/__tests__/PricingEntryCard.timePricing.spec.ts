@@ -1,4 +1,4 @@
-import { flushPromises, shallowMount } from '@vue/test-utils'
+import { flushPromises, shallowMount, type VueWrapper } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 import PricingEntryCard from '../PricingEntryCard.vue'
 import type { PricingFormEntry } from '../types'
@@ -171,8 +171,11 @@ describe('PricingEntryCard request multipliers', () => {
     vi.mocked(channelsAPI.getModelDefaultPricing).mockResolvedValue({
       found: true, input_price: 3e-6, output_price: 15e-6,
     })
-    const wrapper = shallowMount(PricingEntryCard, {
-      props: { entry: { ...createEntry(), reasoning_effort_multipliers: { high: 0.5 } } },
+    const wrapper: VueWrapper = shallowMount(PricingEntryCard, {
+      props: {
+        entry: { ...createEntry(), reasoning_effort_multipliers: { high: 0.5 } },
+        onUpdate: (updated: PricingFormEntry) => { void wrapper.setProps({ entry: updated }) },
+      },
     })
     wrapper.findComponent({ name: 'ModelTagInput' }).vm.$emit('update:models', ['example-model'])
     await flushPromises()
@@ -180,5 +183,6 @@ describe('PricingEntryCard request multipliers', () => {
       models: ['example-model'], input_price: 3, output_price: 15,
       reasoning_effort_multipliers: { high: 0.5 },
     })
+    wrapper.unmount()
   })
 })

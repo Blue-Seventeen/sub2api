@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type inflightUnifiedRateContextKey struct{}
+
 func TestReserveInflightBalance_ZeroChargeUnifiedRateBypassesStrictPricingAndOverlap(t *testing.T) {
 	for _, balance := range []float64{0, -1} {
 		for _, priced := range []bool{false, true} {
@@ -23,7 +25,7 @@ func TestReserveInflightBalance_ZeroChargeUnifiedRateBypassesStrictPricingAndOve
 			key := &service.APIKey{User: &service.User{ID: 1, Balance: balance, UnifiedRateEnabled: true, UnifiedRateMultiplier: 0}}
 			est := &countingEstimator{cost: 10, priced: priced}
 			for _, kind := range []service.InflightEstimateKind{service.InflightEstimateToken, service.InflightEstimateImage, service.InflightEstimatePerRequest, service.InflightEstimateVideo, service.InflightEstimateAudio} {
-				ctx := context.WithValue(context.Background(), struct{}{}, "retained")
+				ctx := context.WithValue(context.Background(), inflightUnifiedRateContextKey{}, "retained")
 				newCtx, done, err := reserveInflightBalanceCtx(ctx, billing, est, key, nil, service.InflightEstimateRequest{Model: "unknown", Kind: kind, AudioUnits: 1})
 				require.NoError(t, err)
 				require.Same(t, ctx, newCtx)

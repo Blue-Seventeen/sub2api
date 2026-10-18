@@ -23,6 +23,20 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+// openCodeGoNativeProtocol 返回 OpenCode Go 实际上游协议。
+// 规则未命中、空值或未知协议一律兜底 Chat Completions，避免落入 Responses 转换链。
+func openCodeGoNativeProtocol(account *Account, model string) string {
+	if account == nil {
+		return APIProtocolChatCompletions
+	}
+	switch proto := account.ResolveOpenCodeGoUpstreamProtocol(model); proto {
+	case APIProtocolAnthropic, APIProtocolResponses:
+		return proto
+	default:
+		return APIProtocolChatCompletions
+	}
+}
+
 // The fixture is captured through the real gateway entry points on this main
 // revision, before provider profiles and resolveUpstreamProtocol were added.
 // Expected results never call routing helpers from the implementation under test.
@@ -432,28 +446,11 @@ type routingMatrixGolden struct {
 func routingMatrixCaseDigest(cases []routingMatrixCase) string {
 	var keys strings.Builder
 	for _, tc := range cases {
-		keys.WriteString(tc.key())
-		keys.WriteByte('\n')
+		// strings.Builder writes cannot fail; preserve the exact golden digest input.
+		_, _ = keys.WriteString(tc.key())
+		_ = keys.WriteByte('\n')
 	}
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(keys.String())))
-}
-
-func captureRoutingMatrixGolden() routingMatrixGolden {
-	cases := routingMatrixMainCases()
-	golden := routingMatrixGolden{SourceRevision: routingMatrixMainRevision, CaseCount: len(cases), CaseKeysSHA256: routingMatrixCaseDigest(cases)}
-	indexByObservation := make(map[string]int)
-	for _, tc := range cases {
-		obs := observeRouting(tc)
-		key := obs.String()
-		index, ok := indexByObservation[key]
-		if !ok {
-			index = len(golden.Observations)
-			golden.Observations = append(golden.Observations, obs)
-			indexByObservation[key] = index
-		}
-		golden.Results = append(golden.Results, index)
-	}
-	return golden
 }
 
 // Zhipu has no Responses endpoint. The refactor routes adaptive /responses to

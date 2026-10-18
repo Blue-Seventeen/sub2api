@@ -26,8 +26,8 @@ func TestAntigravityTerminal_IdleAfterFinishKeepsSuccess(t *testing.T) {
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
 			reader, writer := io.Pipe()
-			defer reader.Close()
-			defer writer.Close()
+			defer func() { _ = reader.Close() }()
+			defer func() { _ = writer.Close() }()
 			written := make(chan struct{})
 			go func() {
 				_, _ = io.WriteString(writer, terminal)
@@ -79,8 +79,8 @@ func TestHandleBedrockStreamingResponse_AfterTerminalFailureKeepsSuccess(t *test
 			reader := io.Reader(io.MultiReader(bytes.NewReader(body), iotest.ErrReader(errors.New("upstream reset"))))
 			if mode == "idle" {
 				pipeReader, pipeWriter := io.Pipe()
-				defer pipeReader.Close()
-				defer pipeWriter.Close()
+				defer func() { _ = pipeReader.Close() }()
+				defer func() { _ = pipeWriter.Close() }()
 				go func() { _, _ = pipeWriter.Write(body) }()
 				reader = pipeReader
 			}

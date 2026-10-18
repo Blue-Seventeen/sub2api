@@ -627,7 +627,7 @@ func lockSubscriptionProxyStatuses(ctx context.Context, q sqlExecutor, subscript
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	statuses := make(map[int64]string)
 	for rows.Next() {
 		var id int64
@@ -771,7 +771,7 @@ func (r *proxySubscriptionRepository) GetNodeStatesByProxyIDs(ctx context.Contex
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var node service.ProxySubscriptionNode
 		var proxyID int64

@@ -137,7 +137,8 @@ func TestHandleCCStreamingFromAnthropic_PingFlushesImmediately(t *testing.T) {
 		require.Equal(t, "chat.completion.chunk", chunk.Object)
 		for _, choice := range chunk.Choices {
 			if choice.Delta.Content != nil {
-				content.WriteString(*choice.Delta.Content)
+				_, err := content.WriteString(*choice.Delta.Content)
+				require.NoError(t, err)
 			}
 			if choice.FinishReason != nil {
 				require.Equal(t, "stop", *choice.FinishReason)

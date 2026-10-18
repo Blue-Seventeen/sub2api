@@ -58,6 +58,7 @@ func TestEveryGatewayPOSTRouteIsClassifiedForPromptAuditCoverage(t *testing.T) {
 		"/video/generations":                   {"newapi_style_gateway_handler.go"},
 		"/video/generations/*subpath":          {"newapi_style_gateway_handler.go"},
 		"/compatible-mode/v1/chat/completions": {"compatible_gateway_handler.go"},
+		"/cachedContents":                      {"gemini_cached_contents_handler.go"},
 	}
 	excluded := map[string]string{
 		"/stt":                       "audio transcription upload; no text prompt is executed",

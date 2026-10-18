@@ -188,13 +188,14 @@ func TestProxyAutoProbeUnavailableDoesNotConnectDirectly(t *testing.T) {
 	previous := GetDefaultProxyAutoProbeService()
 	t.Cleanup(func() { SetDefaultProxyAutoProbeService(previous) })
 	for _, tc := range []struct {
-		name  string
-		svc   *ProxyAutoProbeService
-		proxy *Proxy
+		name      string
+		svc       *ProxyAutoProbeService
+		proxy     *Proxy
+		wantError string
 	}{
-		{name: "service absent"},
-		{name: "cold unknown", svc: NewProxyAutoProbeService(nil, nil, nil, nil)},
-		{name: "disabled with stale hydrated proxy", svc: NewProxyAutoProbeService(nil, nil, nil, nil), proxy: &Proxy{ID: 1, Status: StatusActive, Protocol: "http", Host: proxyAddress.Hostname(), Port: proxyPort}},
+		{name: "service absent", wantError: "no healthy proxy is available"},
+		{name: "cold unknown", svc: NewProxyAutoProbeService(nil, nil, nil, nil), wantError: "no healthy proxy is available"},
+		{name: "disabled with stale hydrated proxy", svc: NewProxyAutoProbeService(nil, nil, nil, nil), proxy: &Proxy{ID: 1, Status: StatusActive, Protocol: "http", Host: proxyAddress.Hostname(), Port: proxyPort}, wantError: "proxy auto-probe is disabled"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			hits.Store(0)
@@ -212,6 +213,7 @@ func TestProxyAutoProbeUnavailableDoesNotConnectDirectly(t *testing.T) {
 				err = requestErr
 			}
 			require.Error(t, err, "an unavailable automatic proxy must fail before making a direct request")
+			require.Contains(t, err.Error(), tc.wantError, "report the automatic routing state rather than an unsupported protocol")
 			require.Equal(t, int64(0), hits.Load())
 		})
 	}

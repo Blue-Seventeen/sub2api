@@ -34,14 +34,18 @@ func TestAdaptResponsesClientToolsForAnthropic_FlattensNamespace(t *testing.T) {
 
 	var request map[string]any
 	require.NoError(t, json.Unmarshal(adapted, &request))
-	tools := request["tools"].([]any)
+	tools, ok := request["tools"].([]any)
+	require.True(t, ok)
 	require.Len(t, tools, 1)
-	tool := tools[0].(map[string]any)
+	tool, ok := tools[0].(map[string]any)
+	require.True(t, ok)
 	require.Equal(t, "function", tool["type"])
 	require.Equal(t, "codex_app__read_thread", tool["name"])
 
-	input := request["input"].([]any)
-	call := input[0].(map[string]any)
+	input, ok := request["input"].([]any)
+	require.True(t, ok)
+	call, ok := input[0].(map[string]any)
+	require.True(t, ok)
 	require.Equal(t, "codex_app__read_thread", call["name"])
 	require.NotContains(t, call, "namespace")
 }
@@ -67,14 +71,22 @@ func TestAdaptResponsesClientToolsForAnthropic_LiftsAdditionalTools(t *testing.T
 
 	var request map[string]any
 	require.NoError(t, json.Unmarshal(adapted, &request))
-	tools := request["tools"].([]any)
+	tools, ok := request["tools"].([]any)
+	require.True(t, ok)
 	require.Len(t, tools, 2)
-	require.Equal(t, "function", tools[0].(map[string]any)["type"])
-	require.Equal(t, "codex_app__read_thread", tools[1].(map[string]any)["name"])
+	functionTool, ok := tools[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "function", functionTool["type"])
+	namespaceTool, ok := tools[1].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "codex_app__read_thread", namespaceTool["name"])
 
-	input := request["input"].([]any)
+	input, ok := request["input"].([]any)
+	require.True(t, ok)
 	require.Len(t, input, 1)
-	require.Equal(t, "message", input[0].(map[string]any)["type"])
+	message, ok := input[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "message", message["type"])
 }
 
 // Codex 的 codex_app 工具（如 automation_update）把 parameters 根节点声明成对象

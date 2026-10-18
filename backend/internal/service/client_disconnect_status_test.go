@@ -60,7 +60,9 @@ func TestTransportErrorHandlers_ClientDisconnectRecordsNoOpsEvent(t *testing.T) 
 			require.ErrorIs(t, err, context.Canceled)
 			raw, recorded := c.Get(OpsUpstreamErrorsKey)
 			require.True(t, recorded)
-			require.Len(t, raw.([]*OpsUpstreamErrorEvent), 1)
+			events, ok := raw.([]*OpsUpstreamErrorEvent)
+			require.True(t, ok)
+			require.Len(t, events, 1)
 		})
 	}
 }

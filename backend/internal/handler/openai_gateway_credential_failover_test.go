@@ -472,7 +472,10 @@ func TestOpsWebSocketCredentialFailoverExhaustedIsRecorded(t *testing.T) {
 			serverErr <- err
 			return
 		}
-		defer conn.CloseNow()
+		defer func() {
+			// The failover close path already closes the connection; cleanup is best-effort.
+			_ = conn.CloseNow()
+		}()
 		c.Set(service.OpsUpstreamErrorsKey, []*service.OpsUpstreamErrorEvent{{
 			Stage: string(service.GatewayFailureStageAccountAuth), Scope: string(service.GatewayFailureScopeAccount),
 			Reason: string(service.GrokCredentialReasonRevoked), Message: "Grok OAuth credentials require account action",
@@ -495,7 +498,10 @@ func TestOpsWebSocketCredentialFailoverExhaustedIsRecorded(t *testing.T) {
 	defer cancel()
 	conn, response, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/openai/v1/responses", nil)
 	require.NoError(t, err)
-	defer conn.CloseNow()
+	defer func() {
+		// Reading the server close frame already closes the connection.
+		_ = conn.CloseNow()
+	}()
 	require.Equal(t, http.StatusSwitchingProtocols, response.StatusCode)
 	_, _, err = conn.Read(ctx)
 	require.Equal(t, coderws.StatusTryAgainLater, coderws.CloseStatus(err))
@@ -522,7 +528,10 @@ func TestCredentialFailoverExhaustionClosesWebSocketWithSafeRetry(t *testing.T) 
 			serverErr <- err
 			return
 		}
-		defer conn.CloseNow()
+		defer func() {
+			// The failover close path already closes the connection; cleanup is best-effort.
+			_ = conn.CloseNow()
+		}()
 		closeOpenAIWSFailoverExhausted(nil, conn, &service.UpstreamFailoverError{
 			Stage:             service.GatewayFailureStageAccountAuth,
 			Scope:             service.GatewayFailureScopeAccount,
@@ -538,7 +547,10 @@ func TestCredentialFailoverExhaustionClosesWebSocketWithSafeRetry(t *testing.T) 
 	defer cancel()
 	conn, response, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
 	require.NoError(t, err)
-	defer conn.CloseNow()
+	defer func() {
+		// Reading the server close frame already closes the connection.
+		_ = conn.CloseNow()
+	}()
 	require.Equal(t, http.StatusSwitchingProtocols, response.StatusCode)
 	_, _, err = conn.Read(ctx)
 	var closeErr coderws.CloseError

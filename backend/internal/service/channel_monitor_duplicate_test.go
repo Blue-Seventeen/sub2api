@@ -167,11 +167,15 @@ func TestDuplicateChannelMonitorCopiesConfigurationAndResetsRuntimeState(t *test
 
 	duplicate.ExtraModels[0] = "changed"
 	duplicate.ExtraHeaders["User-Agent"] = "changed"
-	duplicate.BodyOverride["metadata"].(map[string]any)["source"] = "changed"
+	duplicateMetadata, ok := duplicate.BodyOverride["metadata"].(map[string]any)
+	require.True(t, ok)
+	duplicateMetadata["source"] = "changed"
 	*duplicate.TemplateID = 10
 	require.Equal(t, []string{"gpt-5.4", "gpt-5.3"}, source.ExtraModels)
 	require.Equal(t, "Codex", source.ExtraHeaders["User-Agent"])
-	require.Equal(t, "original", source.BodyOverride["metadata"].(map[string]any)["source"])
+	sourceMetadata, ok := source.BodyOverride["metadata"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "original", sourceMetadata["source"])
 	require.Equal(t, int64(9), *source.TemplateID)
 	require.Equal(t, "OLD:top-secret", source.APIKey)
 	require.True(t, source.Enabled)

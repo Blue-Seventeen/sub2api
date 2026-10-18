@@ -53,7 +53,7 @@ func (s *duplicateAccountRepoStub) CreateWithAccountGroups(ctx context.Context, 
 	}
 	stored := *account
 	s.accounts[account.ID] = &stored
-	s.mockAccountRepoForGemini.accountsByID[account.ID] = &stored
+	s.accountsByID[account.ID] = &stored
 	return nil
 }
 
@@ -190,14 +190,32 @@ func TestDuplicateAccountCopiesConfigurationAndResetsRuntimeState(t *testing.T) 
 	require.Nil(t, duplicate.SessionWindowEnd)
 	require.Empty(t, duplicate.SessionWindowStatus)
 
-	duplicate.Credentials["nested"].(map[string]any)["token"] = "changed"
-	duplicate.Extra["config"].(map[string]any)["region"] = "changed"
-	duplicate.Extra["items"].([]any)[0].(map[string]any)["enabled"] = false
+	duplicateNested, ok := duplicate.Credentials["nested"].(map[string]any)
+	require.True(t, ok)
+	duplicateNested["token"] = "changed"
+	duplicateConfig, ok := duplicate.Extra["config"].(map[string]any)
+	require.True(t, ok)
+	duplicateConfig["region"] = "changed"
+	duplicateItems, ok := duplicate.Extra["items"].([]any)
+	require.True(t, ok)
+	require.NotEmpty(t, duplicateItems)
+	duplicateItem, ok := duplicateItems[0].(map[string]any)
+	require.True(t, ok)
+	duplicateItem["enabled"] = false
 	storedSource, getErr := repo.GetByID(ctx, source.ID)
 	require.NoError(t, getErr)
-	require.Equal(t, "source-token", storedSource.Credentials["nested"].(map[string]any)["token"])
-	require.Equal(t, "us-east-1", storedSource.Extra["config"].(map[string]any)["region"])
-	require.Equal(t, true, storedSource.Extra["items"].([]any)[0].(map[string]any)["enabled"])
+	sourceNested, ok := storedSource.Credentials["nested"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "source-token", sourceNested["token"])
+	sourceConfig, ok := storedSource.Extra["config"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "us-east-1", sourceConfig["region"])
+	sourceItems, ok := storedSource.Extra["items"].([]any)
+	require.True(t, ok)
+	require.NotEmpty(t, sourceItems)
+	sourceItem, ok := sourceItems[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, true, sourceItem["enabled"])
 	require.Equal(t, "remote-42", storedSource.Extra["crs_account_id"])
 }
 

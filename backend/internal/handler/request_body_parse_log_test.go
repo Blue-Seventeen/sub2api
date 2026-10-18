@@ -27,7 +27,9 @@ func loggedFields(t *testing.T, logs *observer.ObservedLogs) map[string]any {
 		case "body_len":
 			fields[f.Key] = int(f.Integer)
 		case "error":
-			fields[f.Key] = f.Interface.(error).Error()
+			err, ok := f.Interface.(error)
+			require.True(t, ok, "error field must contain an error")
+			fields[f.Key] = err.Error()
 		default:
 			fields[f.Key] = f.String
 		}
@@ -56,7 +58,9 @@ func TestLogRequestBodyParseFailure_ShortBodyHasNoTail(t *testing.T) {
 	fields := loggedFields(t, logs)
 	require.Contains(t, fields, "body_head")
 	require.NotContains(t, fields, "body_tail")
-	require.Contains(t, fields["body_head"].(string), `{\"broken\":`)
+	head, ok := fields["body_head"].(string)
+	require.True(t, ok, "body_head must be a string")
+	require.Contains(t, head, `{\"broken\":`)
 }
 
 func TestLogRequestBodyParseFailure_LargeBodyBoundedSnippets(t *testing.T) {
@@ -69,8 +73,10 @@ func TestLogRequestBodyParseFailure_LargeBodyBoundedSnippets(t *testing.T) {
 
 	fields := loggedFields(t, logs)
 	require.Equal(t, len(body), fields["body_len"])
-	head := fields["body_head"].(string)
-	tail := fields["body_tail"].(string)
+	head, ok := fields["body_head"].(string)
+	require.True(t, ok, "body_head must be a string")
+	tail, ok := fields["body_tail"].(string)
+	require.True(t, ok, "body_tail must be a string")
 	require.Contains(t, head, "claude-sonnet-4-6")
 	require.Contains(t, tail, "AAA")
 	require.NotContains(t, tail, "claude-sonnet-4-6")
@@ -86,7 +92,8 @@ func TestLogRequestBodyParseFailure_EscapesControlCharacters(t *testing.T) {
 	logRequestBodyParseFailure(log, body, nil)
 
 	fields := loggedFields(t, logs)
-	head := fields["body_head"].(string)
+	head, ok := fields["body_head"].(string)
+	require.True(t, ok, "body_head must be a string")
 	require.NotContains(t, head, "\n")
 	require.NotContains(t, head, "\x01")
 	require.Contains(t, head, `\n`)
@@ -100,7 +107,8 @@ func TestLogRequestBodyParseFailure_RedactsSensitiveSnippetFields(t *testing.T) 
 	logRequestBodyParseFailure(log, body, nil)
 
 	fields := loggedFields(t, logs)
-	head := fields["body_head"].(string)
+	head, ok := fields["body_head"].(string)
+	require.True(t, ok, "body_head must be a string")
 	require.NotContains(t, head, "sk-secret")
 	require.NotContains(t, head, "tok-secret")
 	require.NotContains(t, head, "bearer-secret")

@@ -38,7 +38,7 @@ func newGeminiTransportErrorService(upstreamErr error) (*GeminiMessagesCompatSer
 	return svc, httpStub, repo
 }
 
-func requireGeminiTransportFailover(t *testing.T, err error) *UpstreamFailoverError {
+func requireGeminiTransportFailover(t *testing.T, err error) {
 	t.Helper()
 	var failoverErr *UpstreamFailoverError
 	require.True(t, errors.As(err, &failoverErr), "传输层错误应换号，got %T: %v", err, err)
@@ -46,7 +46,6 @@ func requireGeminiTransportFailover(t *testing.T, err error) *UpstreamFailoverEr
 	require.Equal(t, string(geminiTransportFailoverBody), string(failoverErr.ResponseBody))
 	require.True(t, failoverErr.ShouldRetryNextAccount())
 	require.False(t, failoverErr.RetryableOnSameAccount, "传输层错误不做同账号重试")
-	return failoverErr
 }
 
 func TestGeminiForwardNative_TransientTransportErrorFailsOverWithoutRetry(t *testing.T) {
@@ -68,7 +67,8 @@ func TestGeminiForwardNative_TransientTransportErrorFailsOverWithoutRetry(t *tes
 
 	raw, ok := c.Get(OpsUpstreamErrorsKey)
 	require.True(t, ok, "应记录 ops 上游错误事件")
-	events := raw.([]*OpsUpstreamErrorEvent)
+	events, ok := raw.([]*OpsUpstreamErrorEvent)
+	require.True(t, ok)
 	require.Len(t, events, 1)
 	require.Equal(t, "request_error", events[0].Kind)
 	require.Equal(t, int64(700), events[0].AccountID)

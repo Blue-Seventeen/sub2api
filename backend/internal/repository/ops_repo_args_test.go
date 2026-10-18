@@ -22,16 +22,19 @@ func TestOpsInsertErrorLogArgsPreservesExplicitZeroUpstreamStatus(t *testing.T) 
 }
 
 func TestOpsNullableIntPointerDistinguishesNilZeroAndStatus(t *testing.T) {
-	missing := opsNullableIntPointer(nil).(sql.NullInt64)
+	missing, ok := opsNullableIntPointer(nil).(sql.NullInt64)
+	require.True(t, ok)
 	require.False(t, missing.Valid)
 
 	zeroValue := 0
-	zero := opsNullableIntPointer(&zeroValue).(sql.NullInt64)
+	zero, ok := opsNullableIntPointer(&zeroValue).(sql.NullInt64)
+	require.True(t, ok)
 	require.True(t, zero.Valid)
 	require.Zero(t, zero.Int64)
 
 	statusValue := 503
-	status := opsNullableIntPointer(&statusValue).(sql.NullInt64)
+	status, ok := opsNullableIntPointer(&statusValue).(sql.NullInt64)
+	require.True(t, ok)
 	require.True(t, status.Valid)
 	require.EqualValues(t, 503, status.Int64)
 }

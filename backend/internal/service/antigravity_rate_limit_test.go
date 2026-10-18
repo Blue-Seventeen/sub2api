@@ -844,6 +844,28 @@ func TestSetAntigravityModelRateLimits_GeminiWritesFamilyScope(t *testing.T) {
 	require.Equal(t, antigravityGeminiModelRateLimitKey, repo.modelRateLimitCalls[1].modelKey)
 }
 
+func TestSetAntigravityModelRateLimits_ImageDoesNotWriteFamilyScope(t *testing.T) {
+	repo := &stubAntigravityAccountRepo{}
+	svc := &AntigravityGatewayService{}
+	account := &Account{ID: 789, Platform: PlatformAntigravity}
+	resetAt := time.Now().Add(30 * time.Second)
+
+	success := svc.setAntigravityModelRateLimits(
+		context.Background(),
+		repo,
+		account,
+		"gemini-3.1-flash-image-preview",
+		"[test]",
+		429,
+		resetAt,
+		false,
+	)
+
+	require.True(t, success)
+	require.Len(t, repo.modelRateLimitCalls, 1)
+	require.Equal(t, "gemini-3.1-flash-image-preview", repo.modelRateLimitCalls[0].modelKey)
+}
+
 func TestSetAntigravityModelRateLimits_DoesNotDoubleMapCustomChain(t *testing.T) {
 	repo := &stubAntigravityAccountRepo{}
 	svc := &AntigravityGatewayService{}
@@ -1194,7 +1216,8 @@ func TestUpdateAccountModelRateLimitInCache_PreservesExistingExtra(t *testing.T)
 
 	// 验证已有数据被保留
 	require.Equal(t, "existing_value", account.Extra["existing_key"])
-	limits := account.Extra["model_rate_limits"].(map[string]any)
+	limits, ok := account.Extra["model_rate_limits"].(map[string]any)
+	require.True(t, ok)
 	require.NotNil(t, limits["gemini-3-flash"])
 	require.NotNil(t, limits["claude-sonnet-4-5"])
 }

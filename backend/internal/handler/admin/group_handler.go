@@ -128,17 +128,19 @@ func (h *GroupHandler) rejectUnsupportedSimpleModeOperation(c *gin.Context, oper
 }
 
 type simpleModeGroupResponse struct {
-	ID                      int64     `json:"id"`
-	Name                    string    `json:"name"`
-	Description             string    `json:"description"`
-	Platform                string    `json:"platform"`
-	Status                  string    `json:"status"`
-	AccountCount            int64     `json:"account_count,omitempty"`
-	ActiveAccountCount      int64     `json:"active_account_count,omitempty"`
-	RateLimitedAccountCount int64     `json:"rate_limited_account_count,omitempty"`
-	SortOrder               int       `json:"sort_order"`
-	CreatedAt               time.Time `json:"created_at"`
-	UpdatedAt               time.Time `json:"updated_at"`
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Platform    string `json:"platform"`
+	Status      string `json:"status"`
+
+	I18n                    service.GroupI18n `json:"i18n,omitempty"`
+	AccountCount            int64             `json:"account_count,omitempty"`
+	ActiveAccountCount      int64             `json:"active_account_count,omitempty"`
+	RateLimitedAccountCount int64             `json:"rate_limited_account_count,omitempty"`
+	SortOrder               int               `json:"sort_order"`
+	CreatedAt               time.Time         `json:"created_at"`
+	UpdatedAt               time.Time         `json:"updated_at"`
 }
 
 func groupForSimpleMode(group *service.Group) *simpleModeGroupResponse {
@@ -150,6 +152,7 @@ func groupForSimpleMode(group *service.Group) *simpleModeGroupResponse {
 		Status: group.Status, AccountCount: group.AccountCount, ActiveAccountCount: group.ActiveAccountCount,
 		RateLimitedAccountCount: group.RateLimitedAccountCount, SortOrder: group.SortOrder,
 		CreatedAt: group.CreatedAt, UpdatedAt: group.UpdatedAt,
+		I18n: group.I18n,
 	}
 }
 
@@ -157,7 +160,7 @@ func sanitizeCreateGroupRequestForSimpleMode(req *CreateGroupRequest) {
 	if req == nil {
 		return
 	}
-	allowed := CreateGroupRequest{Name: req.Name, Description: req.Description, Platform: req.Platform}
+	allowed := CreateGroupRequest{Name: req.Name, Description: req.Description, I18n: req.I18n, Platform: req.Platform}
 	rate := 1.0
 	allowed.RateMultiplier = &rate
 	allowed.SubscriptionType = service.SubscriptionTypeStandard
@@ -168,7 +171,7 @@ func sanitizeUpdateGroupRequestForSimpleMode(req *UpdateGroupRequest) {
 	if req == nil {
 		return
 	}
-	*req = UpdateGroupRequest{Name: req.Name, Description: req.Description}
+	*req = UpdateGroupRequest{Name: req.Name, Description: req.Description, I18n: req.I18n}
 }
 
 func valueOrZeroGroupModelsListConfig(value *service.GroupModelsListConfig) service.GroupModelsListConfig {
@@ -182,6 +185,7 @@ func valueOrZeroGroupModelsListConfig(value *service.GroupModelsListConfig) serv
 type CreateGroupRequest struct {
 	Name                      string                        `json:"name" binding:"required"`
 	Description               string                        `json:"description"`
+	I18n                      service.GroupI18n             `json:"i18n"` // 名称与描述的界面语言译文
 	Platform                  string                        `json:"platform" binding:"omitempty,group_platform"`
 	RateMultiplier            *float64                      `json:"rate_multiplier"`
 	IsExclusive               bool                          `json:"is_exclusive"`
@@ -260,6 +264,7 @@ type CreateGroupRequest struct {
 type UpdateGroupRequest struct {
 	Name                      string                         `json:"name"`
 	Description               *string                        `json:"description"`
+	I18n                      *service.GroupI18n             `json:"i18n"` // 缺省不修改，传入则整体替换
 	Platform                  string                         `json:"platform" binding:"omitempty,group_platform"`
 	RateMultiplier            *float64                       `json:"rate_multiplier"`
 	IsExclusive               *bool                          `json:"is_exclusive"`
@@ -699,6 +704,7 @@ func (h *GroupHandler) Create(c *gin.Context) {
 	group, err := h.adminService.CreateGroup(c.Request.Context(), &service.CreateGroupInput{
 		Name:                            req.Name,
 		Description:                     req.Description,
+		I18n:                            req.I18n,
 		Platform:                        req.Platform,
 		RateMultiplier:                  rateMultiplier,
 		IsExclusive:                     req.IsExclusive,
@@ -856,6 +862,7 @@ func (h *GroupHandler) Update(c *gin.Context) {
 	group, err := h.adminService.UpdateGroup(c.Request.Context(), groupID, &service.UpdateGroupInput{
 		Name:                            req.Name,
 		Description:                     req.Description,
+		I18n:                            req.I18n,
 		Platform:                        req.Platform,
 		RateMultiplier:                  req.RateMultiplier,
 		IsExclusive:                     req.IsExclusive,

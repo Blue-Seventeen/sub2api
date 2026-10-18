@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import GroupsView from '../GroupsView.vue'
 import ModelListScopeDialog from '@/components/admin/group/ModelListScopeDialog.vue'
+import GroupI18nField from '@/components/admin/group/GroupI18nField.vue'
 import type { AdminGroup } from '@/types'
 
 const { groups, showSuccess, showError, showWarning } = vi.hoisted(() => ({
@@ -188,6 +189,53 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks())
 
 describe.each<Mode>(['create', 'edit'])('GroupsView %s model-list workflow', mode => {
+  it('saves translated labels alongside multiple peak windows and global model operations', async () => {
+    const wrapper = mountView()
+    await openForm(wrapper, mode)
+    const fields = form(wrapper, mode).findAllComponents(GroupI18nField)
+    for (const [index, translated] of ['English group', 'English description'].entries()) {
+      const field = fields[index]
+      await field.get('[data-testid="group-i18n-menu"]').trigger('click')
+      await field.get('[data-locale="en"]').trigger('click')
+      await field.get(index === 0 ? 'input' : 'textarea').setValue(translated)
+    }
+
+    const peakLabel = form(wrapper, mode).findAll('label')
+      .find(node => node.text() === 'admin.groups.peakRate.enable')!
+    await peakLabel.get('input[type="checkbox"]').setValue(true)
+    await button(form(wrapper, mode), '+ admin.groups.peakRate.addWindow').trigger('click')
+    const times = form(wrapper, mode).findAll('input[type="time"]')
+    for (const [index, time] of ['09:00', '10:00', '14:00', '15:00'].entries()) {
+      await times[index].setValue(time)
+    }
+    for (const [index, timeInput] of times.entries()) {
+      if (index % 2 === 0) {
+        const row = new DOMWrapper(timeInput.element.parentElement!.parentElement!)
+        await row.get('input[type="number"]').setValue(index === 0 ? '1.5' : '0')
+      }
+    }
+    await addModel(wrapper, mode, 'global')
+    await form(wrapper, mode).trigger('submit')
+    await flushPromises()
+
+    expect(mutation(mode)).toHaveBeenCalledTimes(1)
+    expect(lastPayload(mode)).toMatchObject({
+      name: 'Scoped group',
+      description: 'Unsaved description',
+      i18n: { en: { name: 'English group', description: 'English description' } },
+      peak_rate_enabled: true,
+      peak_rate_windows: [
+        { start: '09:00', end: '10:00', multiplier: 1.5 },
+        { start: '14:00', end: '15:00', multiplier: 0 },
+      ],
+      peak_start: '09:00',
+      peak_end: '10:00',
+      peak_rate_multiplier: 1.5,
+      global_model_operations: [{ operation: 'add', model: 'custom-model' }],
+    })
+    expect(showError).not.toHaveBeenCalled()
+  })
+
   it.each<Scope>(['group', 'global'])('submits %s add and row delete with the selected scope', async scope => {
     const wrapper = mountView()
     await openForm(wrapper, mode)

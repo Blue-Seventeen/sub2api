@@ -117,17 +117,22 @@ func TestToModelPlazaGroupDTO_UserRateAndFieldWhitelist(t *testing.T) {
 		_, exists := decoded[key]
 		require.Truef(t, exists, "plaza group DTO must expose %q", key)
 	}
-	require.InDelta(t, 0.5, decoded["user_rate_multiplier"].(float64), 1e-9)
+	userRateMultiplier, ok := decoded["user_rate_multiplier"].(float64)
+	require.True(t, ok, "user_rate_multiplier must be a number")
+	require.InDelta(t, 0.5, userRateMultiplier, 1e-9)
 	require.Equal(t, true, decoded["video_rate_independent"])
 	require.Equal(t, 0.7, decoded["video_rate_multiplier"])
 
 	// 模型条目:pricing + official_pricing 并存;official 缺失字段输出 null 而非省略
-	models := decoded["models"].([]any)
+	models, ok := decoded["models"].([]any)
+	require.True(t, ok, "models must be an array")
 	require.Len(t, models, 1)
-	model := models[0].(map[string]any)
+	model, ok := models[0].(map[string]any)
+	require.True(t, ok, "model must be an object")
 	require.Contains(t, model, "pricing")
 	require.Contains(t, model, "official_pricing")
-	official := model["official_pricing"].(map[string]any)
+	official, ok := model["official_pricing"].(map[string]any)
+	require.True(t, ok, "official_pricing must be an object")
 	require.Contains(t, official, "input_price")
 	require.Contains(t, official, "cache_read_price")
 	_, has1h := official["cache_write_1h_price"]
@@ -186,20 +191,33 @@ func TestToModelPlazaGroupDTO_LongContextTiersAndBasis(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &decoded))
 	require.Equal(t, true, decoded["long_context_pricing_enabled"])
 
-	model := decoded["models"].([]any)[0].(map[string]any)
+	models, ok := decoded["models"].([]any)
+	require.True(t, ok, "models must be an array")
+	require.NotEmpty(t, models)
+	model, ok := models[0].(map[string]any)
+	require.True(t, ok, "model must be an object")
 	require.Equal(t, "whole_request", model["long_context_basis"])
 
-	pricing := model["pricing"].(map[string]any)
-	paidTiers := pricing["intervals"].([]any)
+	pricing, ok := model["pricing"].(map[string]any)
+	require.True(t, ok, "pricing must be an object")
+	paidTiers, ok := pricing["intervals"].([]any)
+	require.True(t, ok, "pricing intervals must be an array")
 	require.Len(t, paidTiers, 2)
-	require.Equal(t, ">272K", paidTiers[1].(map[string]any)["tier_label"])
+	secondPaidTier, ok := paidTiers[1].(map[string]any)
+	require.True(t, ok, "pricing interval must be an object")
+	require.Equal(t, ">272K", secondPaidTier["tier_label"])
 
-	official := model["official_pricing"].(map[string]any)
-	officialTiers := official["intervals"].([]any)
+	official, ok := model["official_pricing"].(map[string]any)
+	require.True(t, ok, "official_pricing must be an object")
+	officialTiers, ok := official["intervals"].([]any)
+	require.True(t, ok, "official intervals must be an array")
 	require.Len(t, officialTiers, 2)
-	first := officialTiers[0].(map[string]any)
+	first, ok := officialTiers[0].(map[string]any)
+	require.True(t, ok, "official interval must be an object")
 	require.Equal(t, "≤272K", first["tier_label"])
-	require.InDelta(t, 272000, first["max_tokens"].(float64), 0)
+	maxTokensNumber, ok := first["max_tokens"].(float64)
+	require.True(t, ok, "max_tokens must be a number")
+	require.InDelta(t, 272000, maxTokensNumber, 0)
 	require.Contains(t, first, "cache_write_price", "区间 DTO 字段齐全（nil 输出 null）")
 }
 
@@ -228,21 +246,32 @@ func TestToModelPlazaGroupDTO_TimePricing(t *testing.T) {
 	require.NoError(t, err)
 	var decoded map[string]any
 	require.NoError(t, json.Unmarshal(raw, &decoded))
-	model := decoded["models"].([]any)[0].(map[string]any)
+	models, ok := decoded["models"].([]any)
+	require.True(t, ok, "models must be an array")
+	require.NotEmpty(t, models)
+	model, ok := models[0].(map[string]any)
+	require.True(t, ok, "model must be an object")
 	tp, ok := model["time_pricing"].(map[string]any)
 	require.True(t, ok, "configured time_pricing must be an object")
 	require.Equal(t, "Asia/Shanghai", tp["timezone"])
 	_, hasWeekdaysOnly := tp["weekdays_only"]
 	require.False(t, hasWeekdaysOnly, "未开启仅工作日时字段省略")
-	periods := tp["periods"].([]any)
+	periods, ok := tp["periods"].([]any)
+	require.True(t, ok, "time_pricing periods must be an array")
 	require.Len(t, periods, 1)
-	first := periods[0].(map[string]any)
+	first, ok := periods[0].(map[string]any)
+	require.True(t, ok, "time_pricing period must be an object")
 	require.Equal(t, "00:30", first["start_time"])
 	require.Equal(t, "08:30", first["end_time"])
-	require.InDelta(t, 0.5, first["multiplier"].(float64), 1e-12)
+	multiplier, ok := first["multiplier"].(float64)
+	require.True(t, ok, "time_pricing multiplier must be a number")
+	require.InDelta(t, 0.5, multiplier, 1e-12)
 
-	weekdaysModel := decoded["models"].([]any)[1].(map[string]any)
-	weekdaysTP := weekdaysModel["time_pricing"].(map[string]any)
+	require.GreaterOrEqual(t, len(models), 2)
+	weekdaysModel, ok := models[1].(map[string]any)
+	require.True(t, ok, "weekdays model must be an object")
+	weekdaysTP, ok := weekdaysModel["time_pricing"].(map[string]any)
+	require.True(t, ok, "weekdays time_pricing must be an object")
 	require.Equal(t, true, weekdaysTP["weekdays_only"])
 }
 
@@ -345,4 +374,44 @@ func modelPlazaVisibleIDs(t *testing.T, user *service.User, groups []service.Pla
 		ids = append(ids, group.ID)
 	}
 	return ids
+}
+
+type plazaVarySettingRepo struct{ service.SettingRepository }
+
+func (plazaVarySettingRepo) GetMultiple(context.Context, []string) (map[string]string, error) {
+	return map[string]string{service.SettingKeyModelPlazaEnabled: "true"}, nil
+}
+
+type plazaVaryChannelRepo struct{ service.ChannelRepository }
+
+func (plazaVaryChannelRepo) ListAll(context.Context) ([]service.Channel, error) { return nil, nil }
+
+type plazaVaryGroupRepo struct{ service.GroupRepository }
+
+func (plazaVaryGroupRepo) ListActive(context.Context) ([]service.Group, error) { return nil, nil }
+
+func TestModelPlazaHandler_VaryKeepsCORSOrigin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewModelPlazaHandler(
+		service.NewModelPlazaService(plazaVaryChannelRepo{}, plazaVaryGroupRepo{}, nil, nil, nil),
+		nil,
+		service.NewSettingService(plazaVarySettingRepo{}, &config.Config{}),
+	)
+	r := gin.New()
+	r.Use(middleware.CORS(config.CORSConfig{AllowedOrigins: []string{"https://a.example", "https://b.example"}}))
+	r.GET("/api/v1/model-plaza", h.Get)
+
+	for _, origin := range []string{"https://a.example", "https://b.example"} {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/model-plaza", nil)
+		req.Header.Set("Origin", origin)
+		req.Header.Set("Accept-Language", "en")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		require.Equal(t, origin, w.Header().Get("Access-Control-Allow-Origin"))
+		// 共享缓存需同时按来源与语言区分，否则 A 来源的响应可能被复用给 B。
+		require.Equal(t, []string{"Origin", "Accept-Language"}, w.Header().Values("Vary"))
+	}
 }

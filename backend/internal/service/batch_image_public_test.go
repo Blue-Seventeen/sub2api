@@ -70,12 +70,14 @@ func TestBatchImagePublicService_Submit(t *testing.T) {
 		require.Len(t, repo.jobs, 1)
 		require.Len(t, gemini.submits, 1)
 		require.Equal(t, []string{got.ID}, queue.enqueued)
-		billing := svc.BillingRepo.(*fakeBatchImageBillingRepo)
+		billing, ok := svc.BillingRepo.(*fakeBatchImageBillingRepo)
+		require.True(t, ok)
 		require.Len(t, billing.reserves, 1)
 		require.Equal(t, BatchImageHoldRequestID(got.ID), billing.reserves[0].RequestID)
 		require.InDelta(t, 0.3, billing.reserves[0].HoldAmount, 1e-12)
 		require.Empty(t, billing.releases)
-		authCache := svc.AuthCache.(*fakeBatchImageAuthCacheInvalidator)
+		authCache, ok := svc.AuthCache.(*fakeBatchImageAuthCacheInvalidator)
+		require.True(t, ok)
 		require.Equal(t, []int64{11}, authCache.userIDs)
 
 		job := repo.jobs[got.ID]
@@ -100,7 +102,8 @@ func TestBatchImagePublicService_Submit(t *testing.T) {
 		svc, repo, _, _, _ := newTestBatchImagePublicService(true)
 		groupID := int64(7)
 		accountMultiplier := 1.25
-		accountRepo := svc.AccountRepo.(*publicBatchImageAccountRepo)
+		accountRepo, ok := svc.AccountRepo.(*publicBatchImageAccountRepo)
+		require.True(t, ok)
 		accountRepo.accounts[0].RateMultiplier = &accountMultiplier
 		svc.GroupRepo = &publicBatchImageGroupRepo{groups: map[int64]*Group{
 			groupID: {
@@ -537,7 +540,8 @@ func TestBatchImagePublicService_Submit(t *testing.T) {
 	t.Run("provider failure marks failed and does not enqueue", func(t *testing.T) {
 		svc, repo, queue, gemini, _ := newTestBatchImagePublicService(true)
 		gemini.submitErr = errors.New("projects/secret-provider-job failed")
-		billing := svc.BillingRepo.(*fakeBatchImageBillingRepo)
+		billing, ok := svc.BillingRepo.(*fakeBatchImageBillingRepo)
+		require.True(t, ok)
 
 		_, err := svc.Submit(ctx, testBatchImageOwner(), validBatchImageSubmitRequest(), "")
 		require.ErrorIs(t, err, ErrBatchImageProviderSubmitFailed)
@@ -557,7 +561,8 @@ func TestBatchImagePublicService_Submit(t *testing.T) {
 	t.Run("provider failure with release failure enqueues billing retry", func(t *testing.T) {
 		svc, repo, queue, gemini, _ := newTestBatchImagePublicService(true)
 		gemini.submitErr = errors.New("projects/secret-provider-job failed")
-		billing := svc.BillingRepo.(*fakeBatchImageBillingRepo)
+		billing, ok := svc.BillingRepo.(*fakeBatchImageBillingRepo)
+		require.True(t, ok)
 		billing.releaseErr = errors.New("billing database timeout")
 
 		_, err := svc.Submit(ctx, testBatchImageOwner(), validBatchImageSubmitRequest(), "")
@@ -575,7 +580,8 @@ func TestBatchImagePublicService_Submit(t *testing.T) {
 	t.Run("queue failure is recorded after provider submit", func(t *testing.T) {
 		svc, repo, queue, _, _ := newTestBatchImagePublicService(true)
 		queue.err = errors.New("redis unavailable")
-		billing := svc.BillingRepo.(*fakeBatchImageBillingRepo)
+		billing, ok := svc.BillingRepo.(*fakeBatchImageBillingRepo)
+		require.True(t, ok)
 
 		_, err := svc.Submit(ctx, testBatchImageOwner(), validBatchImageSubmitRequest(), "")
 		require.ErrorIs(t, err, ErrBatchImageQueueFailed)
@@ -691,7 +697,8 @@ func TestBatchImagePublicService_ListModels(t *testing.T) {
 				BatchImageHoldMultiplier:     0.6,
 			},
 		}}
-		accountRepo := svc.AccountRepo.(*publicBatchImageAccountRepo)
+		accountRepo, ok := svc.AccountRepo.(*publicBatchImageAccountRepo)
+		require.True(t, ok)
 		accountRepo.accounts = []Account{testBatchImageMappedAccount(303, AccountTypeAPIKey, map[string]any{
 			"gemini-2.5-flash-image": "gemini-2.5-flash-image",
 		})}
@@ -711,7 +718,8 @@ func TestBatchImagePublicService_ListModels(t *testing.T) {
 
 	t.Run("expands wildcard mappings against batch image candidates", func(t *testing.T) {
 		svc, _, _, _, _ := newTestBatchImagePublicService(true)
-		accountRepo := svc.AccountRepo.(*publicBatchImageAccountRepo)
+		accountRepo, ok := svc.AccountRepo.(*publicBatchImageAccountRepo)
+		require.True(t, ok)
 		accountRepo.accounts = []Account{testBatchImageMappedAccount(303, AccountTypeAPIKey, map[string]any{
 			"gemini-3.1-*": "gemini-3.1-flash-lite-image",
 		})}
@@ -734,7 +742,8 @@ func TestBatchImagePublicService_ListModels(t *testing.T) {
 			unitPrice:     0.25,
 			missingModels: map[string]bool{"gemini-3.1-flash-lite-image": true},
 		}
-		accountRepo := svc.AccountRepo.(*publicBatchImageAccountRepo)
+		accountRepo, ok := svc.AccountRepo.(*publicBatchImageAccountRepo)
+		require.True(t, ok)
 		accountRepo.accounts = []Account{testBatchImageMappedAccount(303, AccountTypeAPIKey, map[string]any{
 			"gemini-2.5-flash-image":      "gemini-2.5-flash-image",
 			"gemini-3.1-flash-lite-image": "gemini-3.1-flash-lite-image",
@@ -863,7 +872,8 @@ func TestBatchImagePublicService_StatusItemsAndCancel(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "queued", got.Status)
 		require.Equal(t, 1, gemini.cancelCount)
-		billing := svc.BillingRepo.(*fakeBatchImageBillingRepo)
+		billing, ok := svc.BillingRepo.(*fakeBatchImageBillingRepo)
+		require.True(t, ok)
 		require.Empty(t, billing.releases)
 		require.Equal(t, []string{"imgbatch_cancel"}, queue.enqueued)
 		require.Equal(t, BatchImageJobStatusSubmitted, repo.jobs["imgbatch_cancel"].Status)

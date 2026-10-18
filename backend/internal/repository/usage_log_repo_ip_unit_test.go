@@ -15,7 +15,10 @@ import (
 func TestUsageIPListExactCount(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() {
+		// sqlmock has no Close expectation; cleanup is best-effort after query checks.
+		_ = db.Close()
+	}()
 	repo := &usageLogRepository{sql: db}
 	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM usage_logs WHERE ip_address IN \(\$1, \$2\)`).WithArgs("192.0.2.1", "::1").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectQuery(`SELECT .* FROM usage_logs WHERE ip_address IN \(\$1, \$2\).*LIMIT \$3 OFFSET \$4`).WithArgs("192.0.2.1", "::1", 20, 0).WillReturnRows(sqlmock.NewRows([]string{"id"}))

@@ -17,12 +17,12 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
-	"github.com/Wei-Shaw/sub2api/internal/repository"
+	"github.com/Wei-Shaw/sub2api/internal/repository" //nolint:depguard // Test-only billing/cache contract uses the real Redis-backed repository.
 	middleware "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
+	"github.com/redis/go-redis/v9" //nolint:depguard // Client connects only to this test's isolated miniredis fixture.
 	"github.com/stretchr/testify/require"
 )
 

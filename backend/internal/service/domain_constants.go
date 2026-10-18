@@ -83,7 +83,6 @@ const (
 	DefaultClineBaseURL = "https://api.cline.bot/api/v1"
 )
 
-
 const (
 	DefaultKimiPayGAnthropicBaseURL   = "https://api.moonshot.cn/anthropic"
 	DefaultKimiCodingAnthropicBaseURL = "https://api.kimi.com/coding"

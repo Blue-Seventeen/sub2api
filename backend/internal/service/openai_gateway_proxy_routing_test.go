@@ -170,9 +170,10 @@ func TestOpenAIGatewayProxyHTTPBoundaries(t *testing.T) {
 				require.NoError(t, err)
 				require.NotNil(t, result)
 				expectedPath := "/v1/responses"
-				if tc.protocol == APIProtocolChatCompletions {
+				switch tc.protocol {
+				case APIProtocolChatCompletions:
 					expectedPath = "/v1/chat/completions"
-				} else if tc.protocol == APIProtocolAnthropic {
+				case APIProtocolAnthropic:
 					expectedPath = "/v1/messages"
 				}
 				require.NotNil(t, upstream.lastReq)
@@ -404,7 +405,10 @@ func TestOpenAIGatewayProxyWebsocketIngressBoundary(t *testing.T) {
 					done <- err
 					return
 				}
-				defer conn.CloseNow()
+				defer func() {
+					// Best-effort teardown: the session may have closed the socket already.
+					_ = conn.CloseNow()
+				}()
 				rec := httptest.NewRecorder()
 				c, _ := gin.CreateTestContext(rec)
 				c.Request = r
@@ -422,7 +426,10 @@ func TestOpenAIGatewayProxyWebsocketIngressBoundary(t *testing.T) {
 			defer cancel()
 			client, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(wsServer.URL, "http"), nil)
 			require.NoError(t, err)
-			defer client.CloseNow()
+			defer func() {
+				// Best-effort cleanup also covers assertion failures before the explicit close.
+				_ = client.CloseNow()
+			}()
 			require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.4","input":"hello","stream":true}`)))
 			_, _, _ = client.Read(ctx)
 			_ = client.CloseNow()

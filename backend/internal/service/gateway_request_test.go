@@ -485,12 +485,17 @@ func TestFilterThinkingBlocksForRetry_DropsThinkingBlockWithEmptyContent(t *test
 	_, hasThinking := req["thinking"]
 	require.False(t, hasThinking, "top-level thinking should be removed")
 
-	msgs := req["messages"].([]any)
-	assistant := msgs[1].(map[string]any)
-	content := assistant["content"].([]any)
+	msgs, ok := req["messages"].([]any)
+	require.True(t, ok)
+	assistant, ok := msgs[1].(map[string]any)
+	require.True(t, ok)
+	content, ok := assistant["content"].([]any)
+	require.True(t, ok)
 	require.Len(t, content, 1, "empty thinking block should be dropped, only text remains")
-	require.Equal(t, "text", content[0].(map[string]any)["type"])
-	require.Equal(t, "Answer", content[0].(map[string]any)["text"])
+	textBlock, ok := content[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "text", textBlock["type"])
+	require.Equal(t, "Answer", textBlock["text"])
 }
 
 func TestFilterThinkingBlocksForRetry_EmptyContentGetsPlaceholder(t *testing.T) {
@@ -535,16 +540,23 @@ func TestFilterThinkingBlocksForRetry_StripsEmptyTextBlocks(t *testing.T) {
 	require.True(t, ok)
 
 	// First message: empty text block stripped, "hello" preserved
-	msg0 := msgs[0].(map[string]any)
-	content0 := msg0["content"].([]any)
+	msg0, ok := msgs[0].(map[string]any)
+	require.True(t, ok)
+	content0, ok := msg0["content"].([]any)
+	require.True(t, ok)
 	require.Len(t, content0, 1)
-	require.Equal(t, "hello", content0[0].(map[string]any)["text"])
+	textBlock, ok := content0[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "hello", textBlock["text"])
 
 	// Second message: only had empty text block → gets placeholder
-	msg1 := msgs[1].(map[string]any)
-	content1 := msg1["content"].([]any)
+	msg1, ok := msgs[1].(map[string]any)
+	require.True(t, ok)
+	content1, ok := msg1["content"].([]any)
+	require.True(t, ok)
 	require.Len(t, content1, 1)
-	block1 := content1[0].(map[string]any)
+	block1, ok := content1[0].(map[string]any)
+	require.True(t, ok)
 	require.Equal(t, "text", block1["type"])
 	require.NotEmpty(t, block1["text"])
 }
@@ -566,15 +578,22 @@ func TestFilterThinkingBlocksForRetry_StripsNestedEmptyTextInToolResult(t *testi
 
 	var req map[string]any
 	require.NoError(t, json.Unmarshal(out, &req))
-	msgs := req["messages"].([]any)
-	msg0 := msgs[0].(map[string]any)
-	content0 := msg0["content"].([]any)
+	msgs, ok := req["messages"].([]any)
+	require.True(t, ok)
+	msg0, ok := msgs[0].(map[string]any)
+	require.True(t, ok)
+	content0, ok := msg0["content"].([]any)
+	require.True(t, ok)
 	require.Len(t, content0, 1)
-	toolResult := content0[0].(map[string]any)
+	toolResult, ok := content0[0].(map[string]any)
+	require.True(t, ok)
 	require.Equal(t, "tool_result", toolResult["type"])
-	nestedContent := toolResult["content"].([]any)
+	nestedContent, ok := toolResult["content"].([]any)
+	require.True(t, ok)
 	require.Len(t, nestedContent, 1)
-	require.Equal(t, "valid result", nestedContent[0].(map[string]any)["text"])
+	textBlock, ok := nestedContent[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "valid result", textBlock["text"])
 }
 
 func TestFilterThinkingBlocksForRetry_NestedAllEmptyGetsEmptySlice(t *testing.T) {
@@ -594,12 +613,17 @@ func TestFilterThinkingBlocksForRetry_NestedAllEmptyGetsEmptySlice(t *testing.T)
 
 	var req map[string]any
 	require.NoError(t, json.Unmarshal(out, &req))
-	msgs := req["messages"].([]any)
-	msg0 := msgs[0].(map[string]any)
-	content0 := msg0["content"].([]any)
+	msgs, ok := req["messages"].([]any)
+	require.True(t, ok)
+	msg0, ok := msgs[0].(map[string]any)
+	require.True(t, ok)
+	content0, ok := msg0["content"].([]any)
+	require.True(t, ok)
 	require.Len(t, content0, 2)
-	toolResult := content0[0].(map[string]any)
-	nestedContent := toolResult["content"].([]any)
+	toolResult, ok := content0[0].(map[string]any)
+	require.True(t, ok)
+	nestedContent, ok := toolResult["content"].([]any)
+	require.True(t, ok)
 	require.Len(t, nestedContent, 0)
 }
 
@@ -609,10 +633,16 @@ func TestStripEmptyTextBlocks(t *testing.T) {
 		out := StripEmptyTextBlocks(input)
 		var req map[string]any
 		require.NoError(t, json.Unmarshal(out, &req))
-		msgs := req["messages"].([]any)
-		content := msgs[0].(map[string]any)["content"].([]any)
+		msgs, ok := req["messages"].([]any)
+		require.True(t, ok)
+		message, ok := msgs[0].(map[string]any)
+		require.True(t, ok)
+		content, ok := message["content"].([]any)
+		require.True(t, ok)
 		require.Len(t, content, 1)
-		require.Equal(t, "hello", content[0].(map[string]any)["text"])
+		textBlock, ok := content[0].(map[string]any)
+		require.True(t, ok)
+		require.Equal(t, "hello", textBlock["text"])
 	})
 
 	t.Run("strips nested empty text in tool_result", func(t *testing.T) {
@@ -620,12 +650,20 @@ func TestStripEmptyTextBlocks(t *testing.T) {
 		out := StripEmptyTextBlocks(input)
 		var req map[string]any
 		require.NoError(t, json.Unmarshal(out, &req))
-		msgs := req["messages"].([]any)
-		content := msgs[0].(map[string]any)["content"].([]any)
-		toolResult := content[0].(map[string]any)
-		nestedContent := toolResult["content"].([]any)
+		msgs, ok := req["messages"].([]any)
+		require.True(t, ok)
+		message, ok := msgs[0].(map[string]any)
+		require.True(t, ok)
+		content, ok := message["content"].([]any)
+		require.True(t, ok)
+		toolResult, ok := content[0].(map[string]any)
+		require.True(t, ok)
+		nestedContent, ok := toolResult["content"].([]any)
+		require.True(t, ok)
 		require.Len(t, nestedContent, 1)
-		require.Equal(t, "ok", nestedContent[0].(map[string]any)["text"])
+		textBlock, ok := nestedContent[0].(map[string]any)
+		require.True(t, ok)
+		require.Equal(t, "ok", textBlock["text"])
 	})
 
 	t.Run("no-op when no empty text", func(t *testing.T) {
@@ -640,10 +678,15 @@ func TestStripEmptyTextBlocks(t *testing.T) {
 		out := StripEmptyTextBlocks(input)
 		var req map[string]any
 		require.NoError(t, json.Unmarshal(out, &req))
-		msgs := req["messages"].([]any)
-		content := msgs[0].(map[string]any)["content"].([]any)
+		msgs, ok := req["messages"].([]any)
+		require.True(t, ok)
+		message, ok := msgs[0].(map[string]any)
+		require.True(t, ok)
+		content, ok := message["content"].([]any)
+		require.True(t, ok)
 		require.Len(t, content, 1)
-		toolResult := content[0].(map[string]any)
+		toolResult, ok := content[0].(map[string]any)
+		require.True(t, ok)
 		require.Equal(t, "tool_result", toolResult["type"])
 		require.Equal(t, "string content", toolResult["content"])
 	})
@@ -654,14 +697,24 @@ func TestStripEmptyTextBlocks(t *testing.T) {
 		out := StripEmptyTextBlocks(input)
 		var req map[string]any
 		require.NoError(t, json.Unmarshal(out, &req))
-		msgs := req["messages"].([]any)
-		content := msgs[0].(map[string]any)["content"].([]any)
-		outer := content[0].(map[string]any)
-		innerContent := outer["content"].([]any)
-		inner := innerContent[0].(map[string]any)
-		deepContent := inner["content"].([]any)
+		msgs, ok := req["messages"].([]any)
+		require.True(t, ok)
+		message, ok := msgs[0].(map[string]any)
+		require.True(t, ok)
+		content, ok := message["content"].([]any)
+		require.True(t, ok)
+		outer, ok := content[0].(map[string]any)
+		require.True(t, ok)
+		innerContent, ok := outer["content"].([]any)
+		require.True(t, ok)
+		inner, ok := innerContent[0].(map[string]any)
+		require.True(t, ok)
+		deepContent, ok := inner["content"].([]any)
+		require.True(t, ok)
 		require.Len(t, deepContent, 1)
-		require.Equal(t, "deep", deepContent[0].(map[string]any)["text"])
+		textBlock, ok := deepContent[0].(map[string]any)
+		require.True(t, ok)
+		require.Equal(t, "deep", textBlock["text"])
 	})
 }
 
@@ -1183,23 +1236,28 @@ func buildSmallJSON() []byte {
 }
 
 // buildLargeJSON 构建 ~50KB 的大型测试 JSON（大量 messages）
-func buildLargeJSON() []byte {
+func buildLargeJSON(t testing.TB) []byte {
+	t.Helper()
 	var b strings.Builder
-	b.WriteString(`{"model":"claude-sonnet-4-5","stream":true,"max_tokens":8192,"metadata":{"user_id":"user-xyz789"},"system":[{"type":"text","text":"You are a detailed assistant.","cache_control":{"type":"ephemeral"}}],"messages":[`)
+	_, err := b.WriteString(`{"model":"claude-sonnet-4-5","stream":true,"max_tokens":8192,"metadata":{"user_id":"user-xyz789"},"system":[{"type":"text","text":"You are a detailed assistant.","cache_control":{"type":"ephemeral"}}],"messages":[`)
+	require.NoError(t, err)
 
 	msgCount := 200
 	for i := 0; i < msgCount; i++ {
 		if i > 0 {
-			b.WriteByte(',')
+			require.NoError(t, b.WriteByte(','))
 		}
 		if i%2 == 0 {
-			b.WriteString(fmt.Sprintf(`{"role":"user","content":"This is user message number %d with some extra padding text to make the message reasonably long for benchmarking purposes. Lorem ipsum dolor sit amet."}`, i))
+			_, err := fmt.Fprintf(&b, `{"role":"user","content":"This is user message number %d with some extra padding text to make the message reasonably long for benchmarking purposes. Lorem ipsum dolor sit amet."}`, i)
+			require.NoError(t, err)
 		} else {
-			b.WriteString(fmt.Sprintf(`{"role":"assistant","content":[{"type":"text","text":"This is assistant response number %d. I will provide a detailed answer with multiple sentences to simulate real conversation content for benchmark testing."}]}`, i))
+			_, err := fmt.Fprintf(&b, `{"role":"assistant","content":[{"type":"text","text":"This is assistant response number %d. I will provide a detailed answer with multiple sentences to simulate real conversation content for benchmark testing."}]}`, i)
+			require.NoError(t, err)
 		}
 	}
 
-	b.WriteString(`]}`)
+	_, err = b.WriteString(`]}`)
+	require.NoError(t, err)
 	return []byte(b.String())
 }
 
@@ -1222,7 +1280,7 @@ func BenchmarkParseGatewayRequest_New_Small(b *testing.B) {
 }
 
 func BenchmarkParseGatewayRequest_Old_Large(b *testing.B) {
-	data := buildLargeJSON()
+	data := buildLargeJSON(b)
 	b.SetBytes(int64(len(data)))
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -1307,7 +1365,7 @@ func TestNormalizeClaudeOutputEffort(t *testing.T) {
 }
 
 func BenchmarkParseGatewayRequest_New_Large(b *testing.B) {
-	data := buildLargeJSON()
+	data := buildLargeJSON(b)
 	b.SetBytes(int64(len(data)))
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

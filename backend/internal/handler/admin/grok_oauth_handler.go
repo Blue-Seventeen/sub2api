@@ -136,7 +136,7 @@ func (h *GrokOAuthHandler) RefreshToken(c *gin.Context) {
 			response.BadRequest(c, "GROK_OAUTH_PROXY_NOT_FOUND: proxy not found")
 			return
 		}
-		proxyURL = proxy.URL()
+		proxyURL = service.ResolveProxyURL(c.Request.Context(), proxy)
 	}
 	tokenInfo, err := h.grokOAuthService.RefreshToken(c.Request.Context(), refreshToken, proxyURL, req.ClientID)
 	if err != nil {
@@ -362,6 +362,10 @@ func (h *GrokOAuthHandler) CreateAccountsFromSSO(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
+	if err := service.ValidateAccountCreateProxyConfig(req.ProxyID, req.Extra); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	tokens := normalizeSSOImportTokens(req.SSOTokens, req.SSOToken)
 	if len(tokens) == 0 {
 		response.BadRequest(c, "sso_tokens is required")
@@ -421,7 +425,11 @@ func (h *GrokOAuthHandler) safeCreateAccountFromSSOToken(ctx context.Context, re
 }
 
 func (h *GrokOAuthHandler) createAccountFromSSOToken(ctx context.Context, req GrokSSOToOAuthRequest, token string, index, total int) grokSSOImportWorkerResult {
-	tokenInfo, err := h.grokOAuthService.ConvertFromSSO(ctx, token, req.ProxyID)
+	authProxyID, err := service.ResolveAccountCreationAuthProxyID(ctx, req.ProxyID, req.Extra)
+	if err != nil {
+		return grokSSOImportWorkerResult{item: GrokSSOToOAuthItemResult{Index: index, Error: grokSSOImportErrorMessage(err)}}
+	}
+	tokenInfo, err := h.grokOAuthService.ConvertFromSSO(ctx, token, authProxyID)
 	if err != nil {
 		return grokSSOImportWorkerResult{item: GrokSSOToOAuthItemResult{Index: index, Error: grokSSOImportErrorMessage(err)}}
 	}

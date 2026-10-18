@@ -488,26 +488,26 @@
         class="space-y-5"
       >
         <div>
-          <label class="input-label">{{ t("admin.groups.form.name") }}</label>
-          <input
+          <GroupI18nField
             v-model="createForm.name"
-            type="text"
+            v-model:i18n="createForm.i18n"
+            :label="t('admin.groups.form.name')"
+            field="name"
             required
-            class="input"
             :placeholder="t('admin.groups.enterGroupName')"
             data-tour="group-form-name"
           />
         </div>
         <div>
-          <label class="input-label">{{
-            t("admin.groups.form.description")
-          }}</label>
-          <textarea
+          <GroupI18nField
             v-model="createForm.description"
+            v-model:i18n="createForm.i18n"
+            :label="t('admin.groups.form.description')"
+            field="description"
+            multiline
             rows="3"
-            class="input"
             :placeholder="t('admin.groups.optionalDescription')"
-          ></textarea>
+          />
         </div>
         <div>
           <label class="input-label">{{
@@ -1360,6 +1360,30 @@
         </div>
 
         <!-- 鏀寔鐨勬ā鍨嬬郴鍒楋紙浠?antigravity 骞冲彴锛?-->
+        <section v-if="!authStore.isSimpleMode" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div class="min-w-0 flex-1">
+              <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.groups.modelPricing.title') }}</h4>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.groups.modelPricing.description') }}</p>
+            </div>
+            <button type="button" class="btn btn-secondary" @click="createForm.model_pricing.push(createGroupPricing())">
+              <Icon name="plus" size="sm" class="mr-1" />{{ t('admin.groups.modelPricing.add') }}
+            </button>
+          </div>
+          <label class="mt-3 flex items-start gap-2">
+            <input v-model="createForm.long_context_pricing_enabled" data-testid="create-group-long-context" type="checkbox" class="mt-0.5" />
+            <span>
+              <span class="block text-sm text-gray-700 dark:text-gray-300">{{ t('admin.groups.modelPricing.longContext') }}</span>
+              <span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.groups.modelPricing.longContextHint') }}</span>
+            </span>
+          </label>
+          <div class="mt-3 space-y-2">
+            <PricingEntryCard v-for="(entry, index) in createForm.model_pricing" :key="entry.formKey"
+              :entry="entry" :platform="entry.original?.platform || createForm.platform" hide-token-intervals
+              @update="createForm.model_pricing[index] = $event" @remove="createForm.model_pricing.splice(index, 1)" />
+          </div>
+        </section>
+
         <!-- 分组利润控制（五个平台 token 请求） -->
         <div v-if="isProfitControlPlatform(createForm.platform)" class="border-t pt-4">
           <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
@@ -2282,24 +2306,24 @@
           :account-names="editCodexManifestAccountNames"
         />
         <div>
-          <label class="input-label">{{ t("admin.groups.form.name") }}</label>
-          <input
+          <GroupI18nField
             v-model="editForm.name"
-            type="text"
+            v-model:i18n="editForm.i18n"
+            :label="t('admin.groups.form.name')"
+            field="name"
             required
-            class="input"
             data-tour="edit-group-form-name"
           />
         </div>
         <div>
-          <label class="input-label">{{
-            t("admin.groups.form.description")
-          }}</label>
-          <textarea
+          <GroupI18nField
             v-model="editForm.description"
+            v-model:i18n="editForm.i18n"
+            :label="t('admin.groups.form.description')"
+            field="description"
+            multiline
             rows="3"
-            class="input"
-          ></textarea>
+          />
         </div>
         <div>
           <label class="input-label">{{
@@ -3086,6 +3110,30 @@
 
         <!-- 鏀寔鐨勬ā鍨嬬郴鍒楋紙浠?antigravity 骞冲彴锛?-->
         <!-- 分组利润控制（五个平台 token 请求） -->
+        <section v-if="!authStore.isSimpleMode" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div class="min-w-0 flex-1">
+              <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.groups.modelPricing.title') }}</h4>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.groups.modelPricing.description') }}</p>
+            </div>
+            <button type="button" class="btn btn-secondary" @click="editForm.model_pricing.push(createGroupPricing())">
+              <Icon name="plus" size="sm" class="mr-1" />{{ t('admin.groups.modelPricing.add') }}
+            </button>
+          </div>
+          <label class="mt-3 flex items-start gap-2">
+            <input v-model="editForm.long_context_pricing_enabled" data-testid="edit-group-long-context" type="checkbox" class="mt-0.5" />
+            <span>
+              <span class="block text-sm text-gray-700 dark:text-gray-300">{{ t('admin.groups.modelPricing.longContext') }}</span>
+              <span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.groups.modelPricing.longContextHint') }}</span>
+            </span>
+          </label>
+          <div class="mt-3 space-y-2">
+            <PricingEntryCard v-for="(entry, index) in editForm.model_pricing" :key="entry.formKey"
+              :entry="entry" :platform="entry.original?.platform || editForm.platform" hide-token-intervals
+              @update="editForm.model_pricing[index] = $event" @remove="editForm.model_pricing.splice(index, 1)" />
+          </div>
+        </section>
+
         <div v-if="isProfitControlPlatform(editForm.platform)" class="border-t pt-4">
           <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
             <input
@@ -4532,6 +4580,7 @@ import type {
   CompositeRouteMatchType,
   CreateGroupRequest,
   GroupModelOperationSummary,
+  GroupI18n,
   GroupPlatform,
   SubscriptionType,
   UpdateGroupRequest,
@@ -4547,6 +4596,7 @@ import EmptyState from "@/components/common/EmptyState.vue";
 import Select from "@/components/common/Select.vue";
 import PlatformIcon from "@/components/common/PlatformIcon.vue";
 import Icon from "@/components/icons/Icon.vue";
+import GroupI18nField from "@/components/admin/group/GroupI18nField.vue";
 import GroupRateMultipliersModal from "@/components/admin/group/GroupRateMultipliersModal.vue";
 import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesModal.vue";
 import ModelListScopeDialog from "@/components/admin/group/ModelListScopeDialog.vue";
@@ -4624,6 +4674,10 @@ import {
   supportsVideoPricingPlatform,
   videoPricingI18nKey,
 } from "./groupsImagePricing";
+
+import PricingEntryCard from '@/components/admin/channel/PricingEntryCard.vue';
+import { validateReasoningEffortMultipliers } from '@/components/admin/channel/types';
+import { createGroupPricing, groupPricingFromAPI, groupPricingToAPI, type GroupPricingFormEntry } from './groupsModelPricing';
 
 const { t } = useI18n();
 const appStore = useAppStore();
@@ -5504,6 +5558,7 @@ const applyModelsListScope = (scope: ModelListOperationScope) => {
 const createForm = reactive({
   name: "",
   description: "",
+  i18n: {} as GroupI18n,
   platform: "anthropic" as GroupPlatform,
   rate_multiplier: 1.0,
   is_exclusive: false,
@@ -5532,6 +5587,8 @@ const createForm = reactive({
   // 楂樺嘲鏃舵鍊嶇巼閰嶇疆
   // Codex 网页搜索按次计费（仅 openai 平台使用）；null = 使用默认价 0.01
   web_search_price_per_call: null as number | null,
+  long_context_pricing_enabled: true,
+  model_pricing: [] as GroupPricingFormEntry[],
   // 高峰时段倍率配置
   peak_rate_enabled: false,
   peak_start: "",
@@ -5941,6 +5998,7 @@ const convertApiFormatToRoutingRules = async (
 const editForm = reactive({
   name: "",
   description: "",
+  i18n: {} as GroupI18n,
   platform: "anthropic" as GroupPlatform,
   rate_multiplier: 1.0,
   is_exclusive: false,
@@ -5970,6 +6028,8 @@ const editForm = reactive({
   // 楂樺嘲鏃舵鍊嶇巼閰嶇疆
   // Codex 网页搜索按次计费（仅 openai 平台使用）；null = 使用默认价 0.01
   web_search_price_per_call: null as number | null,
+  long_context_pricing_enabled: true,
+  model_pricing: [] as GroupPricingFormEntry[],
   // 高峰时段倍率配置
   peak_rate_enabled: false,
   peak_start: "",
@@ -6397,6 +6457,7 @@ const closeCreateModal = () => {
   clearAllAccountSearchState();
   createForm.name = "";
   createForm.description = "";
+  createForm.i18n = {};
   createForm.platform = "anthropic";
   createForm.rate_multiplier = 1.0;
   createForm.is_exclusive = false;
@@ -6421,6 +6482,8 @@ const closeCreateModal = () => {
   createForm.video_price_720p = null;
   createForm.video_price_1080p = null;
   createForm.web_search_price_per_call = null;
+  createForm.long_context_pricing_enabled = true;
+  createForm.model_pricing = [];
   createForm.peak_rate_enabled = false;
   createForm.peak_start = "";
   createForm.peak_end = "";
@@ -6506,6 +6569,14 @@ const validateProfitControlForm = (form: ProfitControlFormState): boolean => {
   return true;
 };
 
+const validateGroupPricing = (entries: GroupPricingFormEntry[]): boolean => {
+  for (const entry of entries) {
+    const error = validateReasoningEffortMultipliers(entry.reasoning_effort_multipliers, t);
+    if (error) { appStore.showError(error); return false; }
+  }
+  return true;
+};
+
 const handleCreateGroup = async () => {
   if (!createForm.name.trim()) {
     appStore.showError(t("admin.groups.nameRequired"));
@@ -6523,11 +6594,14 @@ const handleCreateGroup = async () => {
   if (!validateProfitControlForm(createForm)) {
     return;
   }
+  if (!validateGroupPricing(createForm.model_pricing)) return;
   submitting.value = true;
   try {
     const requestData = {
     // 鏋勫缓璇锋眰鏁版嵁锛屽寘鍚ā鍨嬭矾鐢遍厤缃?    const requestData = {
       ...createForm,
+      long_context_pricing_enabled: authStore.isSimpleMode ? undefined : createForm.long_context_pricing_enabled,
+      model_pricing: authStore.isSimpleMode ? undefined : groupPricingToAPI(createForm.model_pricing, createForm.platform),
       daily_limit_usd: normalizeOptionalLimit(
         createForm.daily_limit_usd as number | string | null,
       ),
@@ -6605,6 +6679,7 @@ const handleCreateGroup = async () => {
     );
     const requestPayload: CreateGroupRequest = {
       ...requestData,
+      i18n: createForm.i18n,
       ...peakPayload,
     };
     const response = await adminAPI.groups.create(requestPayload);
@@ -6632,6 +6707,12 @@ const handleEdit = async (group: AdminGroup) => {
   editingGroup.value = group;
   editForm.name = group.name;
   editForm.description = group.description || "";
+  editForm.i18n = Object.fromEntries(
+    Object.entries(group.i18n ?? {}).map(([locale, text]) => [
+      locale,
+      { ...text },
+    ]),
+  );
   editForm.platform = group.platform;
   editForm.rate_multiplier = group.rate_multiplier;
   editForm.is_exclusive = group.is_exclusive;
@@ -6642,6 +6723,8 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.monthly_limit_usd = group.monthly_limit_usd;
   editForm.custom_limit_hours = group.custom_limit_hours ?? 0;
   editForm.custom_limit_usd = group.custom_limit_usd;
+  editForm.long_context_pricing_enabled = group.long_context_pricing_enabled ?? true;
+  editForm.model_pricing = groupPricingFromAPI(group.model_pricing);
   editForm.allow_image_generation = group.allow_image_generation ?? false;
   editForm.allow_batch_image_generation =
     group.allow_batch_image_generation ?? false;
@@ -6760,6 +6843,8 @@ const closeEditModal = () => {
   editForm.video_price_720p = null;
   editForm.video_price_1080p = null;
   editForm.web_search_price_per_call = null;
+  editForm.long_context_pricing_enabled = true;
+  editForm.model_pricing = [];
   resetMessagesDispatchFormState(editForm);
   editForm.allow_live = false;
   resetModelsListState(editModelsListState);
@@ -6786,6 +6871,7 @@ const handleUpdateGroup = async () => {
   if (!validateProfitControlForm(editForm)) {
     return;
   }
+  if (!validateGroupPricing(editForm.model_pricing)) return;
   if (editForm.platform === "openai" && editCodexManifestConfig.enabled && editCodexManifestConfig.account_ids.length === 0) {
     appStore.showError(t("admin.groups.codexModelsManifest.selectAtLeastOne"));
     editCodexManifestRef.value?.validate();
@@ -6797,6 +6883,8 @@ const handleUpdateGroup = async () => {
     // 杞崲 fallback_group_id: null -> 0 (鍚庣浣跨敤 0 琛ㄧず娓呴櫎)
     const payload = {
       ...editForm,
+      long_context_pricing_enabled: authStore.isSimpleMode ? undefined : editForm.long_context_pricing_enabled,
+      model_pricing: authStore.isSimpleMode ? undefined : groupPricingToAPI(editForm.model_pricing, editForm.platform),
       daily_limit_usd: normalizeOptionalLimit(
         editForm.daily_limit_usd as number | string | null,
       ),
@@ -6881,7 +6969,11 @@ const handleUpdateGroup = async () => {
     payload.web_search_price_per_call = emptyPriceToClear(
       payload.web_search_price_per_call,
     );
-    const requestPayload: UpdateGroupRequest = { ...payload, ...peakPayload };
+    const requestPayload: UpdateGroupRequest = {
+      ...payload,
+      i18n: editForm.i18n,
+      ...peakPayload,
+    };
     const response = await adminAPI.groups.update(editingGroup.value.id, requestPayload);
     appStore.showSuccess(t("admin.groups.groupUpdated"));
     showModelsListOperationSummary(response.global_model_operation_summary);

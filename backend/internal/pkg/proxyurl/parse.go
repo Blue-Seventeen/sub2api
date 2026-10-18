@@ -7,9 +7,22 @@
 package proxyurl
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
+)
+
+// Automatic routing uses these markers to fail before opening a socket.
+// They are state markers, never supported transport protocols.
+const (
+	AutoProxyDisabledURL    = "auto-proxy://disabled"
+	AutoProxyUnavailableURL = "auto-proxy://unavailable"
+)
+
+var (
+	ErrAutoProxyDisabled    = errors.New("automatic proxy unavailable: proxy auto-probe is disabled; enable it in Proxy Management or select a specific proxy for this account")
+	ErrAutoProxyUnavailable = errors.New("automatic proxy unavailable: no healthy proxy is available; check proxy auto-probe status and node connectivity, or select a working proxy for this account")
 )
 
 // allowedSchemes 代理协议白名单
@@ -37,6 +50,13 @@ func Parse(raw string) (trimmed string, parsed *url.URL, err error) {
 	trimmed = strings.TrimSpace(raw)
 	if trimmed == "" {
 		return "", nil, nil
+	}
+
+	switch trimmed {
+	case AutoProxyDisabledURL:
+		return "", nil, ErrAutoProxyDisabled
+	case AutoProxyUnavailableURL:
+		return "", nil, ErrAutoProxyUnavailable
 	}
 
 	parsed, err = url.Parse(trimmed)

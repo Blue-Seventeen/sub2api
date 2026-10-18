@@ -13,7 +13,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
-	"github.com/redis/go-redis/v9"
+	"github.com/redis/go-redis/v9" //nolint:depguard // Cache fakes must return the real redis.Nil sentinel used by the service's miss handling.
 	"github.com/stretchr/testify/require"
 )
 

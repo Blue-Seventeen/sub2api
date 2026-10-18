@@ -202,7 +202,7 @@ try {
     balance_delta: startBalance - endBalance, real_billed: billed });
 } finally {
   const report = { checked_at: new Date().toISOString(), base_url: base, resources, results, usage: usageRows,
-    trace: await (await fetch('http://127.0.0.1:18321/trace')).json() };
+    trace: await (await fetch(`${process.env.SUB2API_FAKE_UPSTREAM_BASE || 'http://127.0.0.1:18321'}/trace`)).json() };
   const path = join(dirname(manifestPath), 'fake-upgrade-e2e.json');
   writeFileSync(path, JSON.stringify(report, null, 2));
   console.log(`FAKE_E2E_REPORT=${path}`);

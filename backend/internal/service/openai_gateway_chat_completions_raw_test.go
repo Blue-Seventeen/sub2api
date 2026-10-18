@@ -721,7 +721,8 @@ func TestForwardAsRawChatCompletions_TruncatedStreamAfterOutputFailsRequest(t *t
 
 	rawEvents, ok := c.Get(OpsUpstreamErrorsKey)
 	require.True(t, ok)
-	events := rawEvents.([]*OpsUpstreamErrorEvent)
+	events, ok := rawEvents.([]*OpsUpstreamErrorEvent)
+	require.True(t, ok)
 	require.Len(t, events, 1)
 	require.Equal(t, "http_error", events[0].Kind)
 	require.Nil(t, events[0].ProxyID)
@@ -755,7 +756,8 @@ func TestForwardAsRawChatCompletions_TruncationFailoverAttributesManagedProxy(t 
 
 	rawEvents, ok := c.Get(OpsUpstreamErrorsKey)
 	require.True(t, ok)
-	events := rawEvents.([]*OpsUpstreamErrorEvent)
+	events, ok := rawEvents.([]*OpsUpstreamErrorEvent)
+	require.True(t, ok)
 	require.Len(t, events, 1)
 	require.Equal(t, "failover", events[0].Kind)
 	require.NotNil(t, events[0].ProxyID)

@@ -116,9 +116,10 @@ func (s *GeminiOAuthService) GenerateAuthURL(ctx context.Context, proxyID *int64
 
 	var proxyURL string
 	if proxyID != nil {
-		proxy, err := s.proxyRepo.GetByID(ctx, *proxyID)
-		if err == nil && proxy != nil {
-			proxyURL = ResolveProxyURL(ctx, proxy)
+		var err error
+		proxyURL, err = resolveAuthorizationProxyURL(ctx, s.proxyRepo, proxyID)
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -459,9 +460,10 @@ func (s *GeminiOAuthService) ExchangeCode(ctx context.Context, input *GeminiExch
 
 	proxyURL := session.ProxyURL
 	if input.ProxyID != nil {
-		proxy, err := s.proxyRepo.GetByID(ctx, *input.ProxyID)
-		if err == nil && proxy != nil {
-			proxyURL = ResolveProxyURL(ctx, proxy)
+		var err error
+		proxyURL, err = resolveAuthorizationProxyURL(ctx, s.proxyRepo, input.ProxyID)
+		if err != nil {
+			return nil, err
 		}
 	}
 	logger.LegacyPrintf("service.gemini_oauth", "[GeminiOAuth] Proxy configured: %t", strings.TrimSpace(proxyURL) != "")

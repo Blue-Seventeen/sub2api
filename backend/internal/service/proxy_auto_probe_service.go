@@ -11,6 +11,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
 )
 
 const (
@@ -346,7 +347,10 @@ func resolveAccountProxyURL(ctx context.Context, account *Account, proxyRepo Pro
 			// Automatic routing must not silently expose the direct egress when
 			// probing is disabled, cold, or has no healthy candidate. Like the
 			// managed-proxy sentinel, this fails before transport opens a socket.
-			return "auto-proxy://unavailable"
+			if svc := GetDefaultProxyAutoProbeService(); svc != nil && !svc.snapshotConfig().Enabled {
+				return proxyurl.AutoProxyDisabledURL
+			}
+			return proxyurl.AutoProxyUnavailableURL
 		}
 		return ""
 	}

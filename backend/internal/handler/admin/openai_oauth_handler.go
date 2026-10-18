@@ -377,6 +377,11 @@ func (h *OpenAIOAuthHandler) CreateAccountFromCodexPAT(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
+	authProxyID, err := service.ResolveAccountCreationAuthProxyID(c.Request.Context(), req.ProxyID, req.Extra)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	if err := service.ValidateOpenAILongContextBillingExtra(service.PlatformOpenAI, req.Extra); err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -399,15 +404,17 @@ func (h *OpenAIOAuthHandler) CreateAccountFromCodexPAT(c *gin.Context) {
 	}
 
 	var proxyURL string
-	if req.ProxyID != nil {
-		proxy, err := h.adminService.GetProxy(c.Request.Context(), *req.ProxyID)
+	if authProxyID != nil {
+		proxy, err := h.adminService.GetProxy(c.Request.Context(), *authProxyID)
 		if err != nil {
 			response.ErrorFrom(c, err)
 			return
 		}
-		if proxy != nil {
-			proxyURL = proxy.URL()
+		if proxy == nil {
+			response.BadRequest(c, "The selected authorization proxy is unavailable; select another proxy")
+			return
 		}
+		proxyURL = service.ResolveProxyURL(c.Request.Context(), proxy)
 	}
 
 	tokenInfo, err := h.openaiOAuthService.ValidateCodexPersonalAccessToken(c.Request.Context(), req.AccessToken, proxyURL)

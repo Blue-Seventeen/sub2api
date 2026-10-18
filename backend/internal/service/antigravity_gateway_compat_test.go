@@ -559,7 +559,7 @@ func TestAntigravityCompatStreamIncompletePreservesUsage(t *testing.T) {
 				svc := newAntigravityCompatService(config.GatewayConfig{MaxLineSize: defaultMaxLineSize}, nil)
 				c, recorder := newAntigravityCompatContext(http.MethodPost, "/", nil)
 				body := `data: {"response":{"candidates":[{"content":{"parts":[{"text":"partial"}]}}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":3}}}` + "\n\n"
-				var reader io.ReadCloser = io.NopCloser(strings.NewReader(body))
+				reader := io.NopCloser(strings.NewReader(body))
 				if readErr != nil {
 					reader = &antigravityCompatErrorReader{data: []byte(body), err: readErr}
 				}
@@ -606,7 +606,7 @@ func TestAntigravityCompatStreamTerminalCompletes(t *testing.T) {
 					default:
 						body += `data: {"response":{"candidates":[{"finishReason":"STOP"}]}}` + "\n\n"
 					}
-					var reader io.ReadCloser = io.NopCloser(strings.NewReader(body))
+					reader := io.NopCloser(strings.NewReader(body))
 					if readErr != nil {
 						reader = &antigravityCompatErrorReader{data: []byte(body), err: readErr}
 					}

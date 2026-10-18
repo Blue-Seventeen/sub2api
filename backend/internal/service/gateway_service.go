@@ -624,6 +624,9 @@ type ForwardResult struct {
 	ImageSizeSource    string
 	ImageSizeBreakdown map[string]int
 
+	// Explicit Gemini cache storage surcharge (tokens times hours).
+	CacheStorageTokenHours float64
+
 	RequestCount            int
 	TaskCount               int
 	BillableDurationSeconds int
@@ -695,6 +698,7 @@ type UpstreamFailoverError struct {
 	NextAccountAction             NextAccountAction
 	ClientStatusCode              int
 	ClientMessage                 string
+	BoundUpstreamPassthrough      bool // Bound cache requests retain the upstream 429 / 5xx status.
 }
 
 func (e *UpstreamFailoverError) Error() string {

@@ -35,8 +35,8 @@ func TestOfficialRelayStopsAtCompleteTerminalBoundary(t *testing.T) {
 				c, _ := gin.CreateTestContext(rec)
 				c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 				pr, pw := io.Pipe()
-				defer pr.Close()
-				defer pw.Close()
+				defer func() { _ = pr.Close() }()
+				defer func() { _ = pw.Close() }()
 				resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: pr}
 				done := make(chan error, 1)
 				go func() {
@@ -164,8 +164,8 @@ func TestOfficialRelayFirstOutputDeadlineSurvivesMetadataBacklog(t *testing.T) {
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	pr, pw := io.Pipe()
-	defer pr.Close()
-	defer pw.Close()
+	defer func() { _ = pr.Close() }()
+	defer func() { _ = pw.Close() }()
 	// Keep a bounded metadata backlog ready when the one-shot deadline expires.
 	preamble := strings.Repeat("data: {\"type\":\"response.in_progress\",\"response\":{\"id\":\"resp_pending\"}}\n\n", 50000)
 	body := &firstOutputCloseTrackingBody{ReadCloser: structReadCloser{Reader: io.MultiReader(strings.NewReader(preamble), pr), Closer: pr}, closed: make(chan struct{})}

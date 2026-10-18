@@ -111,7 +111,7 @@ func (c *gatewayProxyPassthroughConn) ReadFrame(ctx context.Context) (coderws.Me
 	if c.beforeRead != nil {
 		c.beforeRead()
 	}
-	payload, err := c.openAIWSCaptureConn.ReadMessage(ctx)
+	payload, err := c.ReadMessage(ctx)
 	if err == nil {
 		return coderws.MessageText, payload, nil
 	}
@@ -130,7 +130,7 @@ func (c *gatewayProxyPassthroughConn) WriteFrame(ctx context.Context, _ coderws.
 		c.writeResetSeen.Store(true)
 		return c.writeErr
 	}
-	return c.openAIWSCaptureConn.WriteJSON(ctx, json.RawMessage(payload))
+	return c.WriteJSON(ctx, json.RawMessage(payload))
 }
 
 func TestOpenAIGatewayProxyPassthroughActiveIOFailureReselects(t *testing.T) {
@@ -162,9 +162,10 @@ func TestOpenAIGatewayProxyPassthroughActiveIOFailureReselects(t *testing.T) {
 			account.Extra["responses_websockets_v2_enabled"] = true
 			account.Extra["openai_apikey_responses_websockets_v2_mode"] = OpenAIWSIngressModePassthrough
 			followUp := ""
-			if operation == "relay write" {
+			switch operation {
+			case "relay write":
 				followUp = "response.create"
-			} else if operation == "auxiliary write" {
+			case "auxiliary write":
 				followUp = "conversation.item.create"
 			}
 			firstErr := gatewayProxyRunPassthroughSession(t, svc, account, first, followUp)
@@ -227,6 +228,13 @@ func TestOpenAIGatewayProxyPassthroughNonTransportControls(t *testing.T) {
 
 func gatewayProxyRunPassthroughSession(t *testing.T, svc *OpenAIGatewayService, account *Account, upstream *gatewayProxyPassthroughConn, followUp string) error {
 	t.Helper()
+	expectedCloseStatus := coderws.StatusNormalClosure
+	switch {
+	case upstream.cancelOnRead:
+		expectedCloseStatus = coderws.StatusGoingAway
+	case upstream.readErr != nil && len(upstream.events) == 0:
+		expectedCloseStatus = coderws.StatusInternalError
+	}
 	done := make(chan error, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := coderws.Accept(w, r, nil)
@@ -234,7 +242,10 @@ func gatewayProxyRunPassthroughSession(t *testing.T, svc *OpenAIGatewayService, 
 			done <- err
 			return
 		}
-		defer conn.CloseNow()
+		defer func() {
+			// Best-effort teardown: the session may have closed the socket already.
+			_ = conn.CloseNow()
+		}()
 		ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
 		defer cancel()
 		if upstream.cancelOnRead {
@@ -254,7 +265,10 @@ func gatewayProxyRunPassthroughSession(t *testing.T, svc *OpenAIGatewayService, 
 	defer cancel()
 	client, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
 	require.NoError(t, err)
-	defer client.CloseNow()
+	defer func() {
+		// Best-effort cleanup also covers assertion failures before the explicit close.
+		_ = client.CloseNow()
+	}()
 	payload := []byte(`{"type":"response.create","model":"gpt-5.4","input":"hello","stream":true}`)
 	require.NoError(t, client.Write(ctx, coderws.MessageText, payload))
 	_, _, readErr := client.Read(ctx)
@@ -267,6 +281,18 @@ func gatewayProxyRunPassthroughSession(t *testing.T, svc *OpenAIGatewayService, 
 		_, _, readErr = client.Read(ctx)
 	} else if readErr == nil {
 		_, _, readErr = client.Read(ctx)
+	}
+	// The fixture has no further frames: both the follow-up failure and the
+	// one-frame control session must terminate at the peer, not at our timeout.
+	require.Error(t, readErr, "session must close after the last expected frame")
+	require.NotErrorIs(t, readErr, context.DeadlineExceeded)
+	require.NotErrorIs(t, readErr, context.Canceled)
+	if upstream.writeErr != nil {
+		// Write failures return to the handler without a protocol close frame;
+		// its deferred CloseNow is the expected peer EOF, not a read timeout.
+		require.ErrorIs(t, readErr, io.EOF)
+	} else {
+		require.Equal(t, expectedCloseStatus, coderws.CloseStatus(readErr), "unexpected session close: %v", readErr)
 	}
 	_ = client.CloseNow()
 	select {

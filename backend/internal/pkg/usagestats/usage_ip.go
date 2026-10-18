@@ -24,7 +24,7 @@ func ParseIPAddresses(raw string) ([]string, error) {
 		ip := strings.TrimSpace(part)
 		addr, err := netip.ParseAddr(ip)
 		if err != nil || addr.Zone() != "" {
-			return nil, fmt.Errorf("Invalid ip_addresses: use IPv4 or IPv6 literals")
+			return nil, fmt.Errorf("Invalid ip_addresses: use IPv4 or IPv6 literals") //nolint:staticcheck // ST1005: Preserve the public API validation message for compatibility.
 		}
 		if !seen[ip] {
 			out = append(out, ip)
