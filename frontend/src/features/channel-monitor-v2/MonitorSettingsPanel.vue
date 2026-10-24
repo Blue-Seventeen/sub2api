@@ -87,49 +87,24 @@
         <div class="card-header !py-3">
           <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('channelMonitorV2.settings.platformsTitle') }}</h3>
           <p class="mt-0.5 text-xs text-gray-500 dark:text-dark-400">
-            {{ t('channelMonitorV2.settings.platformsHint') }}
+            {{ t('channelMonitorV2.settings.catalogSource') }}
           </p>
-          <div v-if="availablePlatforms.length" class="mt-3 flex flex-wrap items-center gap-2">
-            <Select
-              v-model="selectedPlatform"
-              class="min-w-48"
-              :options="availablePlatforms"
-              :aria-label="t('channelMonitorV2.settings.selectPlatform')"
-              :placeholder="t('channelMonitorV2.settings.selectPlatform')"
-              :disabled="saving"
-            />
-            <button
-              type="button"
-              class="btn btn-secondary btn-sm"
-              :disabled="saving || !selectedPlatform"
-              @click="addPlatform"
-            >
-              {{ t('channelMonitorV2.settings.addPlatform') }}
-            </button>
-          </div>
+          <p v-if="groupSelectionChanged" class="mt-2 text-xs text-amber-700 dark:text-amber-300" role="status">
+            {{ t('channelMonitorV2.settings.catalogAfterSave') }}
+          </p>
         </div>
         <div class="divide-y divide-gray-100 dark:divide-dark-700">
           <div
             v-for="platform in draft.platforms"
             :key="platform.platform"
-            class="grid grid-cols-1 items-center gap-3 px-5 py-3 sm:grid-cols-[auto_7rem_minmax(0,1fr)_auto]"
+            class="grid grid-cols-1 items-start gap-3 px-5 py-3 sm:grid-cols-[7rem_minmax(0,1fr)]"
           >
-            <Toggle v-model="platform.enabled" />
             <strong class="text-sm font-medium text-gray-900 dark:text-white">{{ platformLabel(platform.platform) }}</strong>
-            <input
-              class="input"
-              :value="platform.models.join(', ')"
-              type="text"
-              :placeholder="t('channelMonitorV2.settings.modelsPlaceholder')"
-              @change="setModels(platform, $event)"
-            />
-            <span
-              class="badge justify-self-start sm:justify-self-end"
-              :class="platform.models.length ? 'badge-gray' : 'badge badge-primary'"
-            >
-              {{ platform.models.length ? t('channelMonitorV2.settings.badgeOther') : t('channelMonitorV2.settings.badgeAllModels') }}
-            </span>
+            <div class="flex flex-wrap gap-2">
+              <span v-for="model in platform.models" :key="model" class="badge badge-gray break-all" data-testid="monitor-derived-model">{{ model }}</span>
+            </div>
           </div>
+          <p v-if="!namedModelCount" class="px-5 py-4 text-sm text-gray-500 dark:text-dark-400">{{ t('channelMonitorV2.settings.catalogEmpty') }}</p>
         </div>
       </div>
 
@@ -281,8 +256,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import Select from '@/components/common/Select.vue'
-import { CONCRETE_PLATFORM_OPTIONS } from '@/constants/platforms'
 import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useAppStore } from '@/stores/app'
@@ -304,22 +277,12 @@ const saving = ref(false)
 const draft = ref<MonitorConfig | null>(null)
 const original = ref('')
 const groups = ref<AdminGroup[]>([])
-const selectedPlatform = ref('')
-const availablePlatforms = computed(() =>
-  CONCRETE_PLATFORM_OPTIONS.filter(
-    (option) => !draft.value?.platforms.some((platform) => platform.platform === option.value)
-  )
-)
-
-function addPlatform() {
-  if (!draft.value || !availablePlatforms.value.some((option) => option.value === selectedPlatform.value)) return
-  draft.value.platforms.push({ platform: selectedPlatform.value, enabled: true, models: [] })
-  selectedPlatform.value = ''
-}
+const originalGroupIds = ref('[]')
+const groupSelectionChanged = computed(() => JSON.stringify(draft.value?.group_ids || []) !== originalGroupIds.value)
 
 const dirty = computed(() => (draft.value ? JSON.stringify(draft.value) !== original.value : false))
 const namedModelCount = computed(
-  () => draft.value?.platforms.filter((p) => p.enabled).reduce((sum, p) => sum + p.models.length, 0) || 0
+  () => draft.value?.platforms.reduce((sum, p) => sum + p.models.length, 0) || 0
 )
 const errorCategories = MONITOR_ERROR_CATEGORIES
 const countedErrorCategoryCount = computed(
@@ -374,17 +337,6 @@ const warningErrorPercent = percentModel('warning_error_rate')
 const criticalErrorPercent = percentModel('critical_error_rate')
 const warningCachePercent = percentModel('warning_cache_rate')
 const criticalCachePercent = percentModel('critical_cache_rate')
-
-function setModels(platform: MonitorConfig['platforms'][number], event: Event) {
-  platform.models = [
-    ...new Set(
-      (event.target as HTMLInputElement).value
-        .split(',')
-        .map((v) => v.trim())
-        .filter(Boolean)
-    ),
-  ].sort()
-}
 
 function toggleGroup(id: number) {
   if (!draft.value) return
@@ -448,6 +400,7 @@ async function load() {
     draft.value = structuredClone(normalized)
     groups.value = groupRows
     original.value = JSON.stringify(normalized)
+    originalGroupIds.value = JSON.stringify(normalized.group_ids)
   } catch (error) {
     appStore.showError(extractApiErrorMessage(error, t('channelMonitorV2.settings.loadFailed')))
   } finally {
@@ -464,6 +417,7 @@ async function save() {
     const normalized = normalizeConfig(value)
     draft.value = structuredClone(normalized)
     original.value = JSON.stringify(normalized)
+    originalGroupIds.value = JSON.stringify(normalized.group_ids)
     appStore.showSuccess(t('channelMonitorV2.settings.saveSuccess'))
   } catch (error) {
     appStore.showError(extractApiErrorMessage(error, t('channelMonitorV2.settings.saveFailed')))

@@ -1,8 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import Select from '@/components/common/Select.vue'
 import MonitorSettingsPanel from '../MonitorSettingsPanel.vue'
-import { CONCRETE_PLATFORM_OPTIONS } from '@/constants/platforms'
 import type { MonitorConfig } from '@/api/channelMonitorV2'
 
 const mocks = vi.hoisted(() => ({
@@ -37,7 +35,7 @@ function config(): MonitorConfig {
     enabled: true,
     refresh_interval_seconds: 60,
     platforms: [
-      { platform: 'openai', enabled: false, models: ['gpt-4'] },
+      { platform: 'openai', enabled: true, models: ['gpt-4'] },
       { platform: 'custom-provider', enabled: true, models: ['custom-model'] },
     ],
     group_ids: [42],
@@ -62,91 +60,85 @@ function button(wrapper: Awaited<ReturnType<typeof panel>>, key: string) {
   return wrapper.findAll('button').find((item) => item.text() === 'channelMonitorV2.settings.' + key)!
 }
 
-async function add(wrapper: Awaited<ReturnType<typeof panel>>, platform: string) {
-  wrapper.findComponent(Select).vm.$emit('update:modelValue', platform)
-  await flushPromises()
-  await button(wrapper, 'addPlatform').trigger('click')
-}
-
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.groups.mockResolvedValue([])
   mocks.updateConfig.mockImplementation(async (value) => JSON.parse(JSON.stringify(value)))
 })
 
-describe('MonitorSettingsPanel platform configuration', () => {
-  it('adds a missing provider and saves its models without changing existing settings', async () => {
+describe('MonitorSettingsPanel derived group catalog', () => {
+  it('renders the server-derived model catalog without manual platform/model controls', async () => {
     const original = config()
     const wrapper = await panel(original)
     expect(button(wrapper, 'save').attributes('disabled')).toBeDefined()
-    expect(wrapper.findComponent(Select).props('options')).not.toContainEqual(expect.objectContaining({ value: 'openai' }))
-
-    await wrapper.findComponent(Select).find('button').trigger('click')
-    const option = wrapper.findAll('[role="option"]').find((item) => item.text() === 'DeepSeek')!
-    await option.trigger('click')
-    await button(wrapper, 'addPlatform').trigger('click')
-    expect(button(wrapper, 'addPlatform').attributes('disabled')).toBeDefined()
-    expect(wrapper.findComponent(Select).props('options')).not.toContainEqual(
-      expect.objectContaining({ value: 'deepseek' })
-    )
-    const models = wrapper.findAll('input[type="text"]').at(-1)!
-    await models.setValue(' deepseek-chat, deepseek-reasoner, deepseek-chat ')
-    await button(wrapper, 'save').trigger('click')
-    await flushPromises()
-
-    expect(mocks.updateConfig).toHaveBeenCalledWith({
-      ...original,
-      platforms: [...original.platforms, {
-        platform: 'deepseek', enabled: true, models: ['deepseek-chat', 'deepseek-reasoner'],
-      }],
-    })
-    expect(button(wrapper, 'save').attributes('disabled')).toBeDefined()
+    expect(wrapper.findAll('input[type="text"]')).toHaveLength(0)
+    expect(button(wrapper, 'addPlatform')).toBeUndefined()
+    expect(wrapper.findAll('[data-testid="monitor-derived-model"]').map(item => item.text())).toEqual(['gpt-4', 'custom-model'])
+    expect(wrapper.text()).toContain('channelMonitorV2.settings.catalogSource')
+    expect(mocks.updateConfig).not.toHaveBeenCalled()
     expect(original.platforms).toHaveLength(2)
-
-    const persisted = mocks.updateConfig.mock.results[0].value
     wrapper.unmount()
-    const reloaded = await panel(await persisted)
-    expect((reloaded.findAll('input[type="text"]').at(-1)!.element as HTMLInputElement).value).toBe('deepseek-chat, deepseek-reasoner')
-    expect(reloaded.findComponent(Select).props('options')).not.toContainEqual(
-      expect.objectContaining({ value: 'deepseek' })
-    )
-    reloaded.unmount()
   })
 
-  it('can start with no configured platforms and rejects duplicate additions', async () => {
-    const wrapper = await panel({ ...config(), platforms: [] })
-    expect(button(wrapper, 'addPlatform').attributes('disabled')).toBeDefined()
-    await add(wrapper, 'kimi')
-    await add(wrapper, 'kimi')
+  it.each([
+    {
+      outcome: 'a different derived catalog',
+      platforms: [{ platform: 'gemini', enabled: true, models: ['gemini-returned-by-server'] }],
+      models: ['gemini-returned-by-server'],
+    },
+    { outcome: 'an empty derived catalog', platforms: [], models: [] },
+  ])('keeps the saved catalog and unsaved-scope warning until saving returns $outcome', async ({ platforms, models }) => {
+    mocks.groups.mockResolvedValue([{ id: 42, name: 'A', platform: 'openai' }, { id: 84, name: 'B', platform: 'openai' }])
+    const original = config()
+    let completeSave!: (value: MonitorConfig) => void
+    mocks.updateConfig.mockReturnValueOnce(new Promise<MonitorConfig>((resolve) => { completeSave = resolve }))
+    const wrapper = await panel(original)
+    const catalog = () => wrapper.findAll('[data-testid="monitor-derived-model"]').map(item => item.text())
+    const unsavedScope = () => wrapper.findAll('[role="status"]').some(item => item.text() === 'channelMonitorV2.settings.catalogAfterSave')
+
+    expect(catalog()).toEqual(['gpt-4', 'custom-model'])
+    expect(unsavedScope()).toBe(false)
+    await wrapper.findAll('input[type="checkbox"]')[1].setValue(true)
+    expect(catalog()).toEqual(['gpt-4', 'custom-model'])
+    expect(unsavedScope()).toBe(true)
+
     await button(wrapper, 'save').trigger('click')
+    expect(mocks.updateConfig).toHaveBeenCalledWith({ ...original, group_ids: [42, 84] })
+    expect(catalog()).toEqual(['gpt-4', 'custom-model'])
+    expect(unsavedScope()).toBe(true)
+    expect(button(wrapper, 'save').attributes('disabled')).toBeDefined()
+
+    completeSave({ ...original, group_ids: [42, 84], platforms })
     await flushPromises()
-    expect(mocks.updateConfig.mock.calls[0][0].platforms).toEqual([
-      { platform: 'kimi', enabled: true, models: [] },
-    ])
+    expect(catalog()).toEqual(models)
+    expect(unsavedScope()).toBe(false)
+    expect(wrapper.text().includes('channelMonitorV2.settings.catalogEmpty')).toBe(models.length === 0)
+    expect(button(wrapper, 'save').attributes('disabled')).toBeDefined()
+    expect(mocks.showSuccess).toHaveBeenCalledOnce()
+    expect(original.group_ids).toEqual([42])
+    expect(original.platforms.map(platform => platform.models).flat()).toEqual(['gpt-4', 'custom-model'])
     wrapper.unmount()
   })
 
-  it('restores the server config and available options when saving fails', async () => {
+  it('restores the server group selection and catalog when saving fails', async () => {
+    mocks.groups.mockResolvedValue([{ id: 42, name: 'A', platform: 'openai' }])
     const wrapper = await panel()
     mocks.updateConfig.mockRejectedValueOnce(new Error('save failed'))
-    await add(wrapper, 'minimax')
+    await wrapper.find('input[type="checkbox"]').setValue(false)
     await button(wrapper, 'save').trigger('click')
     await flushPromises()
     expect(mocks.showError).toHaveBeenCalledOnce()
-    expect(wrapper.findComponent(Select).props('options')).toContainEqual(
-      expect.objectContaining({ value: 'minimax' })
-    )
-    expect(wrapper.findAll('input[type="text"]')).toHaveLength(2)
+    expect((wrapper.find('input[type="checkbox"]').element as HTMLInputElement).checked).toBe(true)
+    expect(wrapper.findAll('[data-testid="monitor-derived-model"]')).toHaveLength(2)
+    expect(wrapper.findAll('input[type="text"]')).toHaveLength(0)
     expect(button(wrapper, 'save').attributes('disabled')).toBeDefined()
     wrapper.unmount()
   })
 
-  it('hides the add control after every supported platform is configured', async () => {
-    const wrapper = await panel({
-      ...config(),
-      platforms: CONCRETE_PLATFORM_OPTIONS.map(({ value }) => ({ platform: value, enabled: true, models: [] })),
-    })
-    expect(wrapper.findComponent(Select).exists()).toBe(false)
+  it('explains an empty catalog without falling back to all platform models', async () => {
+    const wrapper = await panel({ ...config(), platforms: [] })
+    expect(wrapper.text()).toContain('channelMonitorV2.settings.catalogEmpty')
+    expect(wrapper.findAll('[data-testid="monitor-derived-model"]')).toHaveLength(0)
     expect(button(wrapper, 'addPlatform')).toBeUndefined()
     wrapper.unmount()
   })

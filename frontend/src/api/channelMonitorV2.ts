@@ -1,4 +1,5 @@
 import { apiClient } from './client'
+import { notifyMonitorCatalogChanged } from '@/utils/channelMonitorCatalog'
 
 export type MonitorRange = '90m' | '24h' | '7d' | '30d'
 export type HealthState = 'unknown' | 'healthy' | 'warning' | 'critical'
@@ -34,6 +35,8 @@ export interface LatencyMetric {
 }
 
 export interface MonitorMetric {
+  /** Privacy-safe presence flag, evaluated before absolute counts are redacted. */
+  has_data?: boolean
   success_requests: number
   error_requests: number
   request_count: number
@@ -51,11 +54,13 @@ export interface MonitorMetric {
 }
 
 export interface MonitorHealth {
+  /** A time-bucket score based on fewer than the configured minimum samples. */
+  provisional?: boolean
   overall: HealthState
   error_rate: HealthState
   ttft: HealthState
   cache?: HealthState
-  /** 0–100 blended score when samples are sufficient. */
+  /** 0–100 blended score; low-sample time buckets are explicitly provisional. */
   score?: number | null
   error_rate_score?: number | null
   ttft_score?: number | null
@@ -267,5 +272,6 @@ export async function getConfig() {
 }
 export async function updateConfig(config: MonitorConfig) {
   const { data } = await apiClient.put<MonitorConfig>('/admin/channel-monitor-v2/config', config)
+  notifyMonitorCatalogChanged()
   return data
 }

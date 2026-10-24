@@ -238,6 +238,12 @@ WHEN ` + column + ` <= 300000 THEN 300000 WHEN ` + column + ` <= 600000 THEN 600
 ELSE 2147483647 END`
 }
 
+// Keep bounded admin samples and rollup facts on the same concrete-platform key.
+const channelMonitorV2ErrorEffectivePlatformSQL = `lower(CASE
+      WHEN g.platform = 'composite' THEN COALESCE(NULLIF(TRIM(a.platform), ''), NULLIF(NULLIF(lower(TRIM(current_error.platform)), ''), 'composite'), 'unknown')
+      ELSE COALESCE(NULLIF(TRIM(current_error.platform), ''), 'unknown')
+    END)`
+
 // Error dedup lookback: request_id branch is bounded by chunk start minus 90
 // minutes so candidate_ids never forces a full-history scan of ops_error_logs.
 const channelMonitorV2ErrorAggregationSQL = `
@@ -254,10 +260,7 @@ WITH dedup AS (
     -- error facts share the usage facts' platform key. Without this, composite
     -- group errors aggregate under platform 'composite', which is never an
     -- enabled config platform, and are filtered out of every monitor v2 query.
-    lower(CASE
-      WHEN g.platform = 'composite' THEN COALESCE(NULLIF(TRIM(a.platform), ''), NULLIF(NULLIF(lower(TRIM(current_error.platform)), ''), 'composite'), 'unknown')
-      ELSE COALESCE(NULLIF(TRIM(current_error.platform), ''), 'unknown')
-    END) AS platform,
+    ` + channelMonitorV2ErrorEffectivePlatformSQL + ` AS platform,
     COALESCE(current_error.group_id, 0) AS group_id,
     COALESCE(NULLIF(TRIM(current_error.requested_model), ''), NULLIF(TRIM(current_error.model), ''), 'unknown') AS model,
     current_error.user_id, current_error.error_type, current_error.error_owner, COALESCE(current_error.status_code, 0) AS status_code,

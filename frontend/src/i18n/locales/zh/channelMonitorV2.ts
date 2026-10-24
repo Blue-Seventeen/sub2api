@@ -22,6 +22,7 @@ export default {
     otherModels: '其他模型',
     ignored: '忽略',
     currentUser: '当前用户',
+    pendingData: '待数据',
     ranges: { '90m': '90m', '24h': '24h', '7d': '7d', '30d': '30d' },
     filters: {
       platform: '平台', allPlatforms: '全部', group: '分组', allGroups: '全部', model: '模型', allModels: '全部',
@@ -60,7 +61,9 @@ export default {
     empty: { title: '没有可展示的数据', description: '尝试调整时间范围或筛选条件' },
     bucket: { minutes: '{count} 分钟粒度', hours: '{count} 小时粒度', days: '{count} 天粒度' },
     matrix: {
-      title: '可用性趋势', description: '每行是一种渠道组合，每个色块代表一个统计区间；悬停查看明细', wheelZoom: '在色块上滚轮放大（区间变窄、色块变宽）', wheelZoomX: '在色块上滚轮放大（区间变窄、色块变宽）', dimension: '渠道维度', emptyTitle: '当前筛选窗口没有矩阵数据', legendAria: '健康分数图例', bad: '差', good: '好', healthyLegend: '健康 (≥80)', warningLegend: '需关注 (50–79)', criticalLegend: '异常 (<50)', unknownLegend: '无流量 / 样本不足', noTraffic: '该区间无流量', noTrafficAt: '{time} · 无流量', scoreLine: '健康分 {score}', resetZoom: '重置缩放'
+      provisional: '样本不足，暂定状态',
+      provisionalLegend: '虚线色块：低置信度暂定状态',
+      title: '可用性趋势', description: '每行是一种渠道组合，每个色块代表一个统计区间；悬停查看明细', wheelZoom: '在色块上滚轮放大（区间变窄、色块变宽）', wheelZoomX: '在色块上滚轮放大（区间变窄、色块变宽）', dimension: '渠道维度', emptyTitle: '当前筛选窗口没有矩阵数据', legendAria: '健康分数图例', bad: '差', good: '好', healthyLegend: '健康 (≥80)', warningLegend: '需关注 (50–79)', criticalLegend: '异常 (<50)', unknownLegend: '无流量 / 指标不适用', noTraffic: '该区间无流量', noTrafficAt: '{time} · 无流量', scoreLine: '健康分 {score}', resetZoom: '重置缩放'
     },
     chart: {
       title: '可用性趋势', description: '平滑趋势：错误率 · 首 Token P50 · 缓存率', emptyTitle: '当前筛选窗口没有趋势数据', errorLegend: '错误率（左轴 %）', cacheLegend: '缓存率（左轴 %）', ttftLegend: '首 Token P50（右轴）', errorDataset: '错误率趋势 %', cacheDataset: '缓存率趋势 %', ttftDataset: '首 Token 趋势 P50 (ms)', percentAxis: '比率 %', resetZoom: '重置缩放'
@@ -98,13 +101,16 @@ export default {
       selectPlatform: '选择平台',
       addPlatform: '添加平台',
       platformsTitle: '平台与模型',
-      platformsHint: '留空 = 展示全部真实模型名；填写后仅名单内单独成行，其余归入「其他」',
-      modelsPlaceholder: '留空=全部真实模型；或填写主流模型名单（其余归其他）',
+      platformsHint: '平台与模型由参与监控分组的 /v1/models 白名单自动推导，只读展示。',
+      catalogSource: '仅纳入有效分组已启用的非空 /v1/models 白名单。精确模型无流量也保留；通配符仅匹配已有实际模型，不发起上游探测。',
+      catalogEmpty: '暂无可展示的模型目录，请在参与监控的有效分组中启用并配置 /v1/models 白名单。',
+      catalogAfterSave: '当前展示已保存范围的目录；保存分组选择后自动更新。',
+      modelsPlaceholder: '模型由参与分组白名单自动推导',
       badgeAllModels: '全部模型',
       badgeOther: '+ 其他',
       groupsTitle: '监控分组',
       groupsSelected: '已选择 {count} 个分组',
-      groupsAll: '全部分组',
+      groupsAll: '全部符合条件的分组',
       groupsEmpty: '没有可选择的分组',
       errorsTitle: '错误分类与忽略',
       errorsHint:
@@ -122,14 +128,14 @@ export default {
         warningCache: '缓存率关注 %',
         criticalCache: '缓存率异常 %',
       },
-      namedModelsEmpty: '各平台模型列表为空：将展示全部真实模型名（不归入「其他」）。',
-      namedModelsCount: '将展示 {count} 个命名模型维度；名单外模型归入各平台「其他」。',
+      namedModelsEmpty: '当前无符合条件的模型；未启用或空白名单的分组不参与统计。',
+      namedModelsCount: '当前目录包含 {count} 个模型维度；每条记录先验证所属分组白名单再汇总。',
       userContractTitle: '用户端展示约定',
       userContract: {
         health: '健康色三指标：错误率 60% + 首 Token P50 20% + 缓存率 20%（阈值可在上方配置）',
         trend: '趋势可切换色块矩阵 / 折线图（错误率 · 缓存率 · 首 Token）',
         latency: '延迟展示 AVG · P50 · P90；不展示绝对请求数 / 错误数',
-        models: '模型列表留空时展示真实模型名，不会全部归入「其他」',
+        models: '模型统一使用参与分组的白名单；名单外请求不计入开放模型健康统计。',
       },
     },
     admin: {

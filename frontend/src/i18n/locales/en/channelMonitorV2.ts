@@ -22,6 +22,7 @@ export default {
     otherModels: 'Other models',
     ignored: 'Ignored',
     currentUser: 'Current user',
+    pendingData: 'Awaiting data',
     ranges: { '90m': '90m', '24h': '24h', '7d': '7d', '30d': '30d' },
     filters: {
       platform: 'Platform', allPlatforms: 'All', group: 'Group', allGroups: 'All', model: 'Model', allModels: 'All',
@@ -60,7 +61,9 @@ export default {
     empty: { title: 'No data to display', description: 'Try changing the time range or filters' },
     bucket: { minutes: '{count}-minute buckets', hours: '{count}-hour buckets', days: '{count}-day buckets' },
     matrix: {
-      title: 'Availability trend', description: 'Each row is a channel dimension and each block is an aggregate interval; hover for details', wheelZoom: 'Scroll over blocks to zoom in (narrower range, wider blocks)', wheelZoomX: 'Scroll over blocks to zoom in (narrower range, wider blocks)', dimension: 'Channel dimension', emptyTitle: 'No matrix data for the selected window', legendAria: 'Health score legend', bad: 'Bad', good: 'Good', healthyLegend: 'Healthy (≥80)', warningLegend: 'Watch (50–79)', criticalLegend: 'Critical (<50)', unknownLegend: 'No traffic / insufficient samples', noTraffic: 'No traffic in this interval', noTrafficAt: '{time} · no traffic', scoreLine: 'Health score {score}', resetZoom: 'Reset zoom'
+      provisional: 'Insufficient samples — provisional status',
+      provisionalLegend: 'Dashed blocks: low-confidence provisional status',
+      title: 'Availability trend', description: 'Each row is a channel dimension and each block is an aggregate interval; hover for details', wheelZoom: 'Scroll over blocks to zoom in (narrower range, wider blocks)', wheelZoomX: 'Scroll over blocks to zoom in (narrower range, wider blocks)', dimension: 'Channel dimension', emptyTitle: 'No matrix data for the selected window', legendAria: 'Health score legend', bad: 'Bad', good: 'Good', healthyLegend: 'Healthy (≥80)', warningLegend: 'Watch (50–79)', criticalLegend: 'Critical (<50)', unknownLegend: 'No traffic / metric unavailable', noTraffic: 'No traffic in this interval', noTrafficAt: '{time} · no traffic', scoreLine: 'Health score {score}', resetZoom: 'Reset zoom'
     },
     chart: {
       title: 'Availability trend', description: 'Smoothed trend: error rate · first token P50 · cache rate', emptyTitle: 'No trend data for the selected window', errorLegend: 'Error rate (left axis %)', cacheLegend: 'Cache rate (left axis %)', ttftLegend: 'First token P50 (right axis)', errorDataset: 'Error rate trend %', cacheDataset: 'Cache rate trend %', ttftDataset: 'First token trend P50 (ms)', percentAxis: 'Rate %', resetZoom: 'Reset zoom'
@@ -100,13 +103,16 @@ export default {
       addPlatform: 'Add platform',
       platformsTitle: 'Platforms and models',
       platformsHint:
-        'Leave empty = show all real model names; when filled, only listed models get their own rows and the rest roll into “Other”',
-      modelsPlaceholder: 'Empty = all real models; or list popular models (rest → Other)',
+        'Platforms and models are derived from participating groups’ /v1/models allowlists and are read-only.',
+      catalogSource: 'Only active groups with enabled, nonempty /v1/models allowlists participate. Exact models remain without traffic; wildcards match observed names only. No upstream probes are sent.',
+      catalogEmpty: 'No models available. Enable and configure /v1/models allowlists in active participating groups.',
+      catalogAfterSave: 'This catalog reflects the saved scope; save the group selection to update it.',
+      modelsPlaceholder: 'Models are derived from participating group allowlists',
       badgeAllModels: 'All models',
       badgeOther: '+ Other',
       groupsTitle: 'Monitored groups',
       groupsSelected: '{count} groups selected',
-      groupsAll: 'All groups',
+      groupsAll: 'All eligible groups',
       groupsEmpty: 'No groups available',
       errorsTitle: 'Error categories and ignores',
       errorsHint:
@@ -125,14 +131,14 @@ export default {
         warningCache: 'Cache rate watch %',
         criticalCache: 'Cache rate critical %',
       },
-      namedModelsEmpty: 'Platform model lists are empty: every real model name will be shown (not folded into “Other”).',
-      namedModelsCount: 'Showing {count} named model dimensions; unlisted models fold into per-platform “Other”.',
+      namedModelsEmpty: 'No eligible models. Groups with disabled or empty allowlists do not participate.',
+      namedModelsCount: 'The catalog contains {count} model dimensions; each record is checked against its own group allowlist before aggregation.',
       userContractTitle: 'User-facing display contract',
       userContract: {
         health: 'Health color weights: error rate 60% + first-token P50 20% + cache rate 20% (thresholds configurable above)',
         trend: 'Trend can switch between pulse matrix and line chart (error · cache · first token)',
         latency: 'Latency shows AVG · P50 · P90; absolute request / error counts are not shown',
-        models: 'Empty model lists show real names and never dump everything into “Other”',
+        models: 'Models use participating group allowlists; disallowed requests do not enter open-model health statistics.',
       },
     },
     admin: {

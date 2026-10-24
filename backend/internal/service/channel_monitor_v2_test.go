@@ -170,7 +170,7 @@ func TestChannelMonitorV2ConfigValidation(t *testing.T) {
 	}
 	require.NoError(t, normalizeChannelMonitorV2Config(&cfg))
 	require.Equal(t, 300, cfg.RefreshIntervalSeconds)
-	require.Equal(t, "anthropic", cfg.Platforms[0].Platform)
+	require.Empty(t, cfg.Platforms) // submitted legacy catalog is read-only
 	require.Equal(t, []int64{1, 3}, cfg.GroupIDs)
 
 	cfg.RefreshIntervalSeconds = 120

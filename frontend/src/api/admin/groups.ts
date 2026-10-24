@@ -4,6 +4,7 @@
  */
 
 import { apiClient } from '../client'
+import { notifyMonitorCatalogChanged } from '@/utils/channelMonitorCatalog'
 import type {
   AdminGroup,
   GroupPlatform,
@@ -131,6 +132,7 @@ export type GroupMutationResponse = AdminGroup & {
 
 export async function create(groupData: CreateGroupRequest): Promise<GroupMutationResponse> {
   const { data } = await apiClient.post<GroupMutationResponse>('/admin/groups', groupData)
+  notifyMonitorCatalogChanged()
   return data
 }
 
@@ -211,6 +213,7 @@ export async function duplicate(id: number): Promise<AdminGroup> {
     duplicateOperationKeys.delete(scope.key)
     storeDuplicateOperationKey(scope.key, null)
   }
+  notifyMonitorCatalogChanged()
   return data
 }
 
@@ -222,6 +225,7 @@ export async function duplicate(id: number): Promise<AdminGroup> {
  */
 export async function update(id: number, updates: UpdateGroupRequest): Promise<GroupMutationResponse> {
   const { data } = await apiClient.put<GroupMutationResponse>(`/admin/groups/${id}`, updates)
+  notifyMonitorCatalogChanged()
   return data
 }
 
@@ -232,6 +236,7 @@ export async function update(id: number, updates: UpdateGroupRequest): Promise<G
  */
 export async function deleteGroup(id: number): Promise<{ message: string }> {
   const { data } = await apiClient.delete<{ message: string }>(`/admin/groups/${id}`)
+  notifyMonitorCatalogChanged()
   return data
 }
 
@@ -296,6 +301,7 @@ export async function createCompositeRoute(
     `/admin/groups/${id}/composite-routes`,
     route
   )
+  notifyMonitorCatalogChanged()
   return data
 }
 
@@ -308,6 +314,7 @@ export async function updateCompositeRoute(
     `/admin/groups/${id}/composite-routes/${routeId}`,
     route
   )
+  notifyMonitorCatalogChanged()
   return data
 }
 
@@ -318,6 +325,7 @@ export async function deleteCompositeRoute(
   const { data } = await apiClient.delete<{ message: string }>(
     `/admin/groups/${id}/composite-routes/${routeId}`
   )
+  notifyMonitorCatalogChanged()
   return data
 }
 

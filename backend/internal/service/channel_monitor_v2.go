@@ -74,9 +74,11 @@ var ChannelMonitorV2ErrorCategories = []string{
 }
 
 type ChannelMonitorV2Filter struct {
-	Range     string
-	Platforms []string
-	GroupIDs  []int64
+	// CanonicalScope is repository-internal: eligibility has been batch-resolved.
+	CanonicalScope bool `json:"-"`
+	Range          string
+	Platforms      []string
+	GroupIDs       []int64
 	// AllowedGroupIDs is the authenticated viewer's server-derived group scope.
 	// RestrictGroups distinguishes an ordinary user with no allowed groups from
 	// the unrestricted admin/configured scope represented by an empty slice.
@@ -89,6 +91,8 @@ type ChannelMonitorV2Filter struct {
 }
 
 type ChannelMonitorV2Metric struct {
+	// HasData survives public volume redaction without exposing request counts.
+	HasData                  bool                    `json:"has_data"`
 	SuccessRequests          int64                   `json:"success_requests"`
 	ErrorRequests            int64                   `json:"error_requests"`
 	RequestCount             int64                   `json:"request_count"`
@@ -119,10 +123,11 @@ type ChannelMonitorV2Latency struct {
 }
 
 type ChannelMonitorV2Health struct {
-	Overall   string `json:"overall"`
-	ErrorRate string `json:"error_rate"`
-	TTFT      string `json:"ttft"`
-	Cache     string `json:"cache"`
+	Provisional bool   `json:"provisional,omitempty"`
+	Overall     string `json:"overall"`
+	ErrorRate   string `json:"error_rate"`
+	TTFT        string `json:"ttft"`
+	Cache       string `json:"cache"`
 	// Score is 0–100 when samples are sufficient; omitted/null when unknown.
 	// Overall blends error-rate, TTFT p50, and cache rate (weights in Thresholds).
 	Score          *float64                         `json:"score,omitempty"`
@@ -418,7 +423,16 @@ func (s *ChannelMonitorV2Service) hideUserRankingForViewer(ctx context.Context, 
 }
 
 func (s *ChannelMonitorV2Service) GetConfig(ctx context.Context) (*ChannelMonitorV2Config, error) {
-	return s.repo.GetConfig(ctx)
+	cfg, err := s.repo.GetConfig(ctx)
+	if err != nil || cfg == nil {
+		return cfg, err
+	}
+	if catalog, ok := s.repo.(interface {
+		GetDerivedConfig(context.Context, ChannelMonitorV2Config) (*ChannelMonitorV2Config, error)
+	}); ok {
+		return catalog.GetDerivedConfig(ctx, *cfg)
+	}
+	return cfg, nil
 }
 
 func (s *ChannelMonitorV2Service) getEnabledConfig(ctx context.Context) (*ChannelMonitorV2Config, error) {
@@ -441,7 +455,13 @@ func (s *ChannelMonitorV2Service) UpdateConfig(ctx context.Context, cfg ChannelM
 }
 
 func (s *ChannelMonitorV2Service) ParseFilter(rangeValue string, platforms, models []string, groupIDs []int64) (ChannelMonitorV2Filter, error) {
-	now := s.now().UTC()
+	return ParseChannelMonitorV2FilterAt(s.now(), rangeValue, platforms, models, groupIDs)
+}
+
+// ParseChannelMonitorV2FilterAt shares the product window/bucket alignment with
+// range-less catalog readers without introducing another timing convention.
+func ParseChannelMonitorV2FilterAt(now time.Time, rangeValue string, platforms, models []string, groupIDs []int64) (ChannelMonitorV2Filter, error) {
+	now = now.UTC()
 	var window, bucket time.Duration
 	switch strings.TrimSpace(rangeValue) {
 	case "", "90m":
@@ -761,20 +781,9 @@ func normalizeChannelMonitorV2Config(cfg *ChannelMonitorV2Config) error {
 	}
 	cfg.IgnoredErrorCategories = normalizeChannelMonitorV2IgnoredCategories(cfg.IgnoredErrorCategories)
 	cfg.HealthThresholds = NormalizeChannelMonitorV2HealthThresholds(cfg.HealthThresholds)
-	seen := make(map[string]struct{}, len(cfg.Platforms))
-	for i := range cfg.Platforms {
-		p := &cfg.Platforms[i]
-		p.Platform = strings.ToLower(strings.TrimSpace(p.Platform))
-		if p.Platform == "" {
-			return fmt.Errorf("%w: empty platform", ErrChannelMonitorV2InvalidConfig)
-		}
-		if _, ok := seen[p.Platform]; ok {
-			return fmt.Errorf("%w: duplicate platform %s", ErrChannelMonitorV2InvalidConfig, p.Platform)
-		}
-		seen[p.Platform] = struct{}{}
-		p.Models = normalizeStringSet(p.Models)
-	}
-	sort.Slice(cfg.Platforms, func(i, j int) bool { return cfg.Platforms[i].Platform < cfg.Platforms[j].Platform })
+	// Legacy clients may still send platforms, but it is now a read-only derived
+	// catalog. Ignore all submitted toggles/model names (including stale shapes).
+	cfg.Platforms = nil
 	return nil
 }
 
@@ -957,13 +966,29 @@ func ChannelMonitorV2HealthFor(metrics ChannelMonitorV2Metric) ChannelMonitorV2H
 	return ChannelMonitorV2HealthForWithThresholds(metrics, DefaultChannelMonitorV2HealthThresholds())
 }
 
+// ChannelMonitorV2BucketHealthForWithThresholds scores only available positive-
+// sample signals in a single time bucket. It does not relax summary/row health
+// and retains the real configured target so clients can explain low confidence.
+func ChannelMonitorV2BucketHealthForWithThresholds(metrics ChannelMonitorV2Metric, thresholds ChannelMonitorV2HealthThresholds) ChannelMonitorV2Health {
+	result := channelMonitorV2HealthForWithMinimum(metrics, thresholds, 1)
+	result.Provisional = (result.ErrorRateScore != nil && metrics.RequestCount < result.MinimumSample) ||
+		(result.TTFTScore != nil && metrics.TTFT.SampleCount < result.MinimumSample) ||
+		(result.CacheScore != nil && metrics.CacheRateDenominator < result.MinimumSample)
+	return result
+}
+
 func ChannelMonitorV2HealthForWithThresholds(metrics ChannelMonitorV2Metric, thresholds ChannelMonitorV2HealthThresholds) ChannelMonitorV2Health {
+	thresholds = NormalizeChannelMonitorV2HealthThresholds(thresholds)
+	return channelMonitorV2HealthForWithMinimum(metrics, thresholds, thresholds.MinimumSample)
+}
+
+func channelMonitorV2HealthForWithMinimum(metrics ChannelMonitorV2Metric, thresholds ChannelMonitorV2HealthThresholds, minimum int64) ChannelMonitorV2Health {
 	thresholds = NormalizeChannelMonitorV2HealthThresholds(thresholds)
 	result := ChannelMonitorV2Health{
 		Overall: "unknown", ErrorRate: "unknown", TTFT: "unknown", Cache: "unknown",
 		MinimumSample: thresholds.MinimumSample, Thresholds: thresholds,
 	}
-	if metrics.RequestCount < result.MinimumSample {
+	if metrics.RequestCount < minimum {
 		return result
 	}
 
@@ -974,14 +999,14 @@ func ChannelMonitorV2HealthForWithThresholds(metrics ChannelMonitorV2Metric, thr
 	}
 	parts := make([]scored, 0, 3)
 
-	if metrics.RequestCount >= result.MinimumSample {
+	if metrics.RequestCount >= minimum {
 		s := errorRateScore(metrics.ErrorRate, thresholds.CriticalErrorRate)
 		result.ErrorRateScore = &s
 		result.ErrorRate = healthBand(metrics.ErrorRate, thresholds.WarningErrorRate, thresholds.CriticalErrorRate)
 		parts = append(parts, scored{score: s, weight: thresholds.ErrorWeight, band: result.ErrorRate})
 	}
 	// Prefer p50 for TTFT scoring; fall back to p95 only if p50 is missing.
-	if metrics.TTFT.SampleCount >= result.MinimumSample {
+	if metrics.TTFT.SampleCount >= minimum {
 		var ttftMs *int64
 		if metrics.TTFT.P50Ms != nil {
 			ttftMs = metrics.TTFT.P50Ms
@@ -996,7 +1021,7 @@ func ChannelMonitorV2HealthForWithThresholds(metrics ChannelMonitorV2Metric, thr
 		}
 	}
 	// Cache: need a meaningful denominator; higher rate is better.
-	if metrics.CacheRateDenominator >= result.MinimumSample {
+	if metrics.CacheRateDenominator >= minimum {
 		s := cacheRateScore(metrics.CacheRate)
 		if thresholds.WarningCacheRate <= 0 && thresholds.CriticalCacheRate <= 0 {
 			// A zero/zero cache threshold means "do not penalize cache misses".

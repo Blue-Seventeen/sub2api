@@ -202,8 +202,8 @@
       >
         <MetricCell
           :label="t('channelMonitorV2.metrics.successRate')"
-          :value="formatPercent(1 - snapshot.metrics.error_rate)"
-          :detail="t('channelMonitorV2.metrics.errorRateValue', { value: formatPercent(snapshot.metrics.error_rate) })"
+          :value="snapshot.metrics.has_data === false ? '-' : formatPercent(1 - snapshot.metrics.error_rate)"
+          :detail="snapshot.metrics.has_data === false ? t('channelMonitorV2.pendingData') : t('channelMonitorV2.metrics.errorRateValue', { value: formatPercent(snapshot.metrics.error_rate) })"
           :state="snapshot.health.error_rate"
         />
         <MetricCell
@@ -222,7 +222,7 @@
         />
         <MetricCell
           :label="t('channelMonitorV2.metrics.cacheRate')"
-          :value="formatPercent(snapshot.metrics.cache_rate)"
+          :value="snapshot.metrics.has_data === false ? '-' : formatPercent(snapshot.metrics.cache_rate)"
           :detail="t('channelMonitorV2.metrics.cacheDetail')"
           :state="snapshot.health.cache || snapshot.health.overall"
         />
@@ -314,19 +314,20 @@
                         <strong class="font-semibold text-gray-900 dark:text-white">
                           {{ row.model === '__other__' ? t('channelMonitorV2.otherModels') : row.model }}
                         </strong>
+                        <small v-if="row.metrics.has_data === false" class="ml-2 text-xs text-gray-400">{{ t('channelMonitorV2.pendingData') }}</small>
                       </div>
                     </div>
                   </td>
                   <td>
-                    <span class="block">{{ formatPercent(1 - row.metrics.error_rate) }}</span>
-                    <small class="text-xs text-gray-400">{{ t('channelMonitorV2.metrics.errorRateValue', { value: formatPercent(row.metrics.error_rate) }) }}</small>
+                    <span class="block">{{ row.metrics.has_data === false ? '-' : formatPercent(1 - row.metrics.error_rate) }}</span>
+                    <small v-if="row.metrics.has_data !== false" class="text-xs text-gray-400">{{ t('channelMonitorV2.metrics.errorRateValue', { value: formatPercent(row.metrics.error_rate) }) }}</small>
                   </td>
                   <td>
                     <span class="block">{{ formatMs(row.metrics.ttft.p50_ms) }}</span>
                     <small class="text-xs text-gray-400">{{ latencyDetail(row.metrics.ttft) }}</small>
                   </td>
                   <td v-if="showThroughput" :title="exactTps(row.metrics.tpm)">{{ formatTps(row.metrics.tpm) }}</td>
-                  <td>{{ formatPercent(row.metrics.cache_rate) }}</td>
+                  <td>{{ row.metrics.has_data === false ? '-' : formatPercent(row.metrics.cache_rate) }}</td>
                   <td v-if="showThroughput">{{ formatRate(row.metrics.rpm) }}</td>
                 </tr>
               </tbody>
@@ -473,6 +474,7 @@ import RelayPulseMatrix from '@/features/channel-monitor-v2/RelayPulseMatrix.vue
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
+import { subscribeMonitorCatalogChanges } from '@/utils/channelMonitorCatalog'
 import { isChannelMonitorThroughputHidden, isChannelMonitorUserRankingHidden } from '@/utils/featureFlags'
 import * as api from '@/api/channelMonitorV2'
 import type {
@@ -556,6 +558,7 @@ const matrixGroupBy = ref<MonitorMatrixGroupBy>(parseMatrixGroupBy(route.query.g
 const healthMode = ref<HealthMode>(parseHealthMode(route.query.health_mode))
 const trendView = ref<TrendView>(parseTrendView(route.query.trend_view))
 const dimensions = ref<MonitorDimensions>({ platforms: [], groups: [], models: [] })
+const scopedModels = ref<MonitorDimensions['models']>([])
 const snapshot = ref<MonitorSnapshot | null>(null)
 const matrix = ref<MonitorMatrixResponse | null>(null)
 const modelRows = ref<MonitorModelRow[]>([])
@@ -567,13 +570,15 @@ const refreshing = ref(false)
 const expandedErrors = ref(new Set<string>())
 let controller: AbortController | null = null
 let sequence = 0
+let directoryPending = false
 let autoRefreshTimer: number | null = null
+let unsubscribeCatalog: (() => void) | null = null
 
 const hasDimensionFilter = computed(
   () => filter.value.platforms.length + filter.value.groupIds.length + filter.value.models.length > 0
 )
-// Full platform catalog (never pruned). Groups/models cascade by selected platforms
-// so choosing a platform narrows the other pickers without collapsing platforms.
+// Keep the authorized platform/group inventory separate from the scoped model
+// directory, so choosing a group never removes the other eligible group choices.
 const platformOptions = computed(() =>
   (dimensions.value.platforms || []).map((item) => ({
     value: item.value,
@@ -595,7 +600,7 @@ const groupOptions = computed(() =>
     }))
 )
 const modelOptions = computed(() =>
-  (dimensions.value.models || [])
+  scopedModels.value
     .filter(
       (item) =>
         selectedPlatforms.value.size === 0 ||
@@ -616,23 +621,16 @@ const selectedGroupIds = computed({
     filter.value.groupIds = value.map(Number).filter((id) => Number.isInteger(id) && id > 0)
   },
 })
-// Soft-prune group/model selections that fall outside the platform cascade.
-// Do NOT wipe when options are temporarily empty (loading); only drop invalid ids.
+// Soft-prune groups outside the platform cascade. Model selections are pruned
+// only after their scoped directory response arrives, including an empty result.
 watch(
-  [groupOptions, modelOptions],
+  groupOptions,
   () => {
     if (groupOptions.value.length > 0) {
       const allowed = new Set(groupOptions.value.map((item) => item.value))
       const next = filter.value.groupIds.filter((id) => allowed.has(String(id)))
       if (next.length !== filter.value.groupIds.length) {
         filter.value.groupIds = next
-      }
-    }
-    if (modelOptions.value.length > 0) {
-      const allowed = new Set(modelOptions.value.map((item) => item.value))
-      const next = filter.value.models.filter((model) => allowed.has(model))
-      if (next.length !== filter.value.models.length) {
-        filter.value.models = next
       }
     }
   },
@@ -703,17 +701,37 @@ function syncQuery() {
     },
   })
 }
-/** Dimensions catalog: range only — never re-filtered by platform/group/model selection. */
+/** Preserve all group choices; scope only the model directory by group/platform. */
 async function loadDimensions(signal?: AbortSignal, id = sequence) {
-  const rangeOnly: MonitorFilter = {
+  directoryPending = true
+  const inventoryFilter: MonitorFilter = {
     range: filter.value.range,
     platforms: [],
     groupIds: [],
     models: [],
   }
-  const next = await api.getDimensions(rangeOnly, isAdmin.value, signal)
-  if (id !== sequence) return
-  dimensions.value = next
+  const directoryFilter: MonitorFilter = {
+    range: filter.value.range,
+    platforms: [...filter.value.platforms],
+    groupIds: [...filter.value.groupIds],
+    // A model selection must not narrow the directory used to change it.
+    models: [],
+  }
+  try {
+    const inventory = api.getDimensions(inventoryFilter, isAdmin.value, signal)
+    const directory = directoryFilter.platforms.length || directoryFilter.groupIds.length
+      ? api.getDimensions(directoryFilter, isAdmin.value, signal)
+      : inventory
+    const [nextInventory, nextDirectory] = await Promise.all([inventory, directory])
+    if (id !== sequence) return
+    dimensions.value = nextInventory
+    scopedModels.value = nextDirectory.models || []
+    const allowed = new Set(scopedModels.value.map((item) => item.value))
+    const nextModels = filter.value.models.filter((model) => allowed.has(model))
+    if (nextModels.length !== filter.value.models.length) filter.value.models = nextModels
+  } finally {
+    if (id === sequence) directoryPending = false
+  }
 }
 
 async function loadMetrics(signal?: AbortSignal, id = sequence) {
@@ -736,7 +754,7 @@ async function reload(silent = true) {
   refreshing.value = true
   if (!silent) loading.value = true
   try {
-    // Catalog + metrics in parallel; catalog ignores dimension filters so options never shrink.
+    // Refresh inventory, scoped directory and metrics under the same cancellation/sequence guard.
     await Promise.all([
       loadDimensions(request.signal, id),
       loadMetrics(request.signal, id),
@@ -754,8 +772,10 @@ async function reload(silent = true) {
   }
 }
 
-/** When only range changes, still refresh dimensions; dimension filters only re-load metrics. */
+/** Model/grouping changes do not alter the scoped directory. */
 async function reloadMetricsOnly(silent = true) {
+  // A metric-only refresh must not cancel the only request for a new directory.
+  if (directoryPending) return reload(silent)
   controller?.abort()
   const request = new AbortController()
   controller = request
@@ -897,14 +917,18 @@ function toggleError(category: string) {
   expandedErrors.value = next
 }
 
-let lastRange: MonitorRange = filter.value.range
+function directoryScopeKey() {
+  return JSON.stringify([filter.value.range, filter.value.platforms, filter.value.groupIds])
+}
+let lastDirectoryScope = directoryScopeKey()
 watch(
   filter,
   () => {
     syncQuery()
-    const rangeChanged = filter.value.range !== lastRange
-    lastRange = filter.value.range
-    if (rangeChanged) void reload(true)
+    const scope = directoryScopeKey()
+    const directoryChanged = scope !== lastDirectoryScope
+    lastDirectoryScope = scope
+    if (directoryChanged) void reload(true)
     else void reloadMetricsOnly(true)
   },
   { deep: true }
@@ -924,8 +948,12 @@ watch(showUserRanking, (allowed) => {
     activeTab.value = 'models'
   }
 })
-onMounted(() => void reload(false))
+onMounted(() => {
+  unsubscribeCatalog = subscribeMonitorCatalogChanges(() => void reload(true))
+  void reload(false)
+})
 onBeforeUnmount(() => {
+  unsubscribeCatalog?.()
   controller?.abort()
   if (autoRefreshTimer) window.clearInterval(autoRefreshTimer)
 })

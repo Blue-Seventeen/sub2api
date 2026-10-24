@@ -59,6 +59,7 @@
             <div class="dimension-cell flex min-w-0 items-center gap-2 bg-white dark:bg-dark-800" :title="rowLabel(entry.row)">
               <span :class="['status-dot', cellClass(entry.row.health, entry.row.metrics.request_count)]"></span>
               <strong class="truncate text-xs font-semibold text-gray-800 dark:text-gray-100">{{ rowLabel(entry.row) }}</strong>
+              <small v-if="entry.row.metrics.has_data === false" class="shrink-0 text-[10px] text-gray-400">{{ t('channelMonitorV2.pendingData') }}</small>
             </div>
             <strong class="summary-value bg-white text-xs font-medium tabular-nums text-gray-600 dark:bg-dark-800 dark:text-gray-300">
               {{ successRate(entry.row.metrics) }}
@@ -79,7 +80,7 @@
             <strong
               class="summary-value bg-white text-xs font-medium tabular-nums text-gray-600 dark:bg-dark-800 dark:text-gray-300"
             >
-              {{ formatPercent(entry.row.metrics.cache_rate) }}
+              {{ entry.row.metrics.has_data === false ? '-' : formatPercent(entry.row.metrics.cache_rate) }}
             </strong>
             <div class="pulse-track grid items-stretch" :style="pulseStyle">
               <span
@@ -89,6 +90,7 @@
                 :class="[
                   slot.bucket ? cellClass(slot.bucket.health, slot.bucket.metrics.request_count) : 'health-unknown',
                   slot.bucket ? 'has-data' : 'is-empty',
+                  slot.bucket && isProvisional(slot.bucket.health) ? 'is-provisional' : '',
                 ]"
                 tabindex="0"
                 role="img"
@@ -104,6 +106,7 @@
                   <template v-if="slot.bucket">
                     <span class="pulse-tooltip-line pulse-tooltip-title">{{ formatBucketRange(slot.start) }}</span>
                     <span class="pulse-tooltip-line">{{ t('channelMonitorV2.matrix.scoreLine', { score: formatScore(slot.bucket.health) }) }}</span>
+                    <span v-if="isProvisional(slot.bucket.health)" class="pulse-tooltip-line">{{ t('channelMonitorV2.matrix.provisional') }}</span>
                     <span class="pulse-tooltip-line">{{ t('channelMonitorV2.metrics.successRateValue', { value: successRate(slot.bucket.metrics) }) }}</span>
                     <span class="pulse-tooltip-line">{{ t('channelMonitorV2.metrics.ttftValue', { value: latencyPrivacy(slot.bucket.metrics.ttft) }) }}</span>
                     <span v-if="showThroughput" class="pulse-tooltip-line">{{ t('channelMonitorV2.metrics.tpsValue', { value: formatTps(slot.bucket.metrics.tpm) }) }}</span>
@@ -140,6 +143,7 @@
           <span class="inline-flex items-center gap-1.5"><i class="status-dot health-score6"></i>{{ t('channelMonitorV2.matrix.warningLegend') }}</span>
           <span class="inline-flex items-center gap-1.5"><i class="status-dot health-score2"></i>{{ t('channelMonitorV2.matrix.criticalLegend') }}</span>
           <span class="inline-flex items-center gap-1.5"><i class="status-dot health-unknown"></i>{{ t('channelMonitorV2.matrix.unknownLegend') }}</span>
+          <span class="inline-flex items-center gap-1.5"><i class="status-dot health-score8 is-provisional"></i>{{ t('channelMonitorV2.matrix.provisionalLegend') }}</span>
         </div>
       </div>
     </div>
@@ -359,6 +363,7 @@ function rowKey(row: MonitorMatrixRow): string {
 }
 
 function successRate(metrics: MonitorMetric): string {
+  if (metrics.has_data === false) return '-'
   // Empty traffic: no request count and no throughput signal.
   // When throughput is hidden for privacy, still show success from error_rate.
   const noCount = metrics.request_count <= 0
@@ -373,6 +378,10 @@ function formatScore(health: MonitorHealth): string {
   return `${Math.round(score)}`
 }
 
+function isProvisional(health: MonitorHealth): boolean {
+  return Boolean(health.provisional && healthModeScore(health, props.healthMode) != null)
+}
+
 function bucketTooltip(bucket: MonitorMatrixBucket): string {
   return bucketTooltipLines(bucket).join('\n')
 }
@@ -382,6 +391,7 @@ function bucketTooltipLines(bucket: MonitorMatrixBucket): string[] {
   const lines = [
     formatBucketRange(bucket.bucket_start),
     t('channelMonitorV2.matrix.scoreLine', { score: formatScore(bucket.health) }),
+    ...(isProvisional(bucket.health) ? [t('channelMonitorV2.matrix.provisional')] : []),
     t('channelMonitorV2.metrics.successRateValue', { value: successRate(metrics) }),
     t('channelMonitorV2.metrics.ttftValue', { value: latencyPrivacy(metrics.ttft) }),
   ]
@@ -472,6 +482,11 @@ function formatBucketRange(value: string) {
 </script>
 
 <style scoped>
+.is-provisional {
+  outline: 1px dashed currentColor;
+  outline-offset: 1px;
+  background-image: repeating-linear-gradient(135deg, transparent, transparent 3px, rgb(255 255 255 / 25%) 3px, rgb(255 255 255 / 25%) 5px);
+}
 /* dimension | success | ttft | cache | pulse */
 .matrix-row {
   display: grid;
@@ -508,22 +523,22 @@ function formatBucketRange(value: string) {
 }
 
 /* Multi-stop green → yellow → red (score10 best … score0 worst) */
-.health-score10 { background: #16a34a; }
-.health-score9  { background: #22c55e; }
-.health-score8  { background: #4ade80; }
-.health-score7  { background: #a3e635; }
-.health-score6  { background: #facc15; }
-.health-score5  { background: #fbbf24; }
-.health-score4  { background: #f59e0b; }
-.health-score3  { background: #f97316; }
-.health-score2  { background: #fb7185; }
-.health-score1  { background: #f87171; }
-.health-score0  { background: rgb(239, 67, 67); }
+.health-score10 { background-color: #16a34a; }
+.health-score9  { background-color: #22c55e; }
+.health-score8  { background-color: #4ade80; }
+.health-score7  { background-color: #a3e635; }
+.health-score6  { background-color: #facc15; }
+.health-score5  { background-color: #fbbf24; }
+.health-score4  { background-color: #f59e0b; }
+.health-score3  { background-color: #f97316; }
+.health-score2  { background-color: #fb7185; }
+.health-score1  { background-color: #f87171; }
+.health-score0  { background-color: rgb(239, 67, 67); }
 /* Coarse fallbacks (older payloads without score) */
-.health-healthy  { background: #22c55e; }
-.health-warning  { background: #f59e0b; }
-.health-critical { background: #ef4444; }
-.health-unknown  { background: #9ca3af; }
+.health-healthy  { background-color: #22c55e; }
+.health-warning  { background-color: #f59e0b; }
+.health-critical { background-color: #ef4444; }
+.health-unknown  { background-color: #9ca3af; }
 
 .score-legend {
   background: linear-gradient(
@@ -555,6 +570,11 @@ function formatBucketRange(value: string) {
   outline: 2px solid rgb(var(--color-primary-500, 99 102 241) / 0.55);
   outline-offset: 1px;
   z-index: 5;
+}
+.pulse-cell.has-data.is-provisional:hover,
+.pulse-cell.has-data.is-provisional:focus-visible {
+  /* Retain the low-confidence cue alongside the stronger interaction ring. */
+  outline-style: dashed;
 }
 
 /* CSS-only hover tooltip — no click modal, no absolute request counts.

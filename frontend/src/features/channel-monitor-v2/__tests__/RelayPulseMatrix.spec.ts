@@ -28,6 +28,8 @@ const i18nT = (key: string, params?: Record<string, unknown>) => {
     'channelMonitorV2.matrix.warningLegend': '警告',
     'channelMonitorV2.matrix.criticalLegend': '异常',
     'channelMonitorV2.matrix.unknownLegend': '未知',
+    'channelMonitorV2.matrix.provisional': '样本不足，暂定状态',
+    'channelMonitorV2.matrix.provisionalLegend': '虚线色块：暂定状态',
   }
   const template = map[key] || key
   return template.replace(/\{(\w+)\}/g, (_, name) => String(params?.[name] ?? ''))
@@ -172,5 +174,103 @@ describe('RelayPulseMatrix axis range', () => {
     })
     // 5 minutes @ 60s buckets → 5 cells spanning the selected range
     expect(wrapper.findAll('.pulse-cell')).toHaveLength(5)
+  })
+})
+
+describe('RelayPulseMatrix provisional buckets', () => {
+  it('marks a success-only low-sample bucket provisional while overall and missing TTFT stay unknown', async () => {
+    const bucketHealth: MonitorHealth = {
+      overall: 'unknown', error_rate: 'healthy', ttft: 'unknown', cache: 'unknown',
+      score: null, error_rate_score: 100, ttft_score: null, cache_score: null,
+      minimum_sample: 50, provisional: true,
+    }
+    const bucketMetrics: MonitorMetric = {
+      ...metrics(0), has_data: true, error_rate: 0, cache_rate: 0,
+      cache_rate_numerator: 0, cache_rate_denominator: 0,
+      ttft: { sample_count: 0, p50_ms: null, p95_ms: null, avg_ms: null },
+    }
+    const wrapper = mount(RelayPulseMatrix, {
+      props: {
+        rows: [{
+          platform: 'openai', model: 'gpt-5', metrics: bucketMetrics,
+          health: { ...bucketHealth, error_rate: 'unknown', error_rate_score: null, provisional: false },
+          buckets: [{ bucket_start: '2026-08-01T00:00:00Z', metrics: bucketMetrics, health: bucketHealth }],
+        }],
+        coverage: {
+          requested_start: '2026-08-01T00:00:00Z', requested_end: '2026-08-01T00:05:00Z',
+          coverage_start: '2026-08-01T00:00:00Z', data_through: '2026-08-01T00:05:00Z',
+          computed_at: '2026-08-01T00:05:00Z', aggregation_lag_seconds: 0, coverage_complete: true, bucket_seconds: 300,
+        },
+        healthMode: 'success', showThroughput: false,
+      },
+    })
+    expect(wrapper.find('.pulse-cell').classes()).toContain('health-score10')
+    expect(wrapper.find('.pulse-cell').classes()).toContain('is-provisional')
+    expect(wrapper.find('.pulse-cell').attributes('title')).toContain('样本不足，暂定状态')
+    expect(wrapper.find('.pulse-cell').attributes('title')).not.toMatch(/RPM|TPM|请求数|最小样本/)
+    for (const healthMode of ['overall', 'ttft'] as const) {
+      await wrapper.setProps({ healthMode })
+      expect(wrapper.find('.pulse-cell').classes()).toContain('health-unknown')
+      expect(wrapper.find('.pulse-cell').classes()).not.toContain('is-provisional')
+      expect(wrapper.find('.pulse-cell').attributes('title')).not.toContain('样本不足，暂定状态')
+    }
+    wrapper.unmount()
+  })
+
+  it.each([0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100])('keeps the provisional state on a scored bucket at score %s', (score) => {
+    const wrapper = mount(RelayPulseMatrix, {
+      props: {
+        rows: [{
+          platform: 'openai', model: 'gpt-5', metrics: metrics(0), health,
+          buckets: [{ bucket_start: '2026-08-01T00:00:00Z', metrics: metrics(0), health: { ...health, score, provisional: true } }],
+        }],
+        coverage: {
+          requested_start: '2026-08-01T00:00:00Z', requested_end: '2026-08-01T00:05:00Z',
+          coverage_start: '2026-08-01T00:00:00Z', data_through: '2026-08-01T00:05:00Z',
+          computed_at: '2026-08-01T00:05:00Z', aggregation_lag_seconds: 0, coverage_complete: true, bucket_seconds: 300,
+        },
+        healthMode: 'overall', showThroughput: false,
+      },
+    })
+    const cell = wrapper.find('.pulse-cell')
+    expect(cell.classes()).toContain(`health-score${score / 10}`)
+    expect(cell.classes()).toContain('is-provisional')
+    expect(cell.attributes('title')).toContain('样本不足，暂定状态')
+    expect(wrapper.find('.status-dot').classes()).not.toContain('is-provisional')
+    wrapper.unmount()
+  })
+
+  it('colors redacted low-sample buckets with a privacy-safe provisional warning and legend', async () => {
+    const wrapper = mount(RelayPulseMatrix, {
+      props: {
+        rows: [{
+          platform: 'openai', model: 'gpt-5', metrics: metrics(0),
+          health: { ...health, overall: 'unknown', score: null },
+          buckets: [{ bucket_start: '2026-08-01T00:00:00Z', metrics: metrics(0), health: { ...health, provisional: true } }],
+        }],
+        coverage: {
+          requested_start: '2026-08-01T00:00:00Z', requested_end: '2026-08-01T00:10:00Z',
+          coverage_start: '2026-08-01T00:00:00Z', data_through: '2026-08-01T00:10:00Z',
+          computed_at: '2026-08-01T00:10:00Z', aggregation_lag_seconds: 0, coverage_complete: true, bucket_seconds: 300,
+        },
+        healthMode: 'overall', showThroughput: false,
+      },
+    })
+    const cells = wrapper.findAll('.pulse-cell')
+    expect(cells[0].classes()).toContain('health-score5')
+    expect(cells[0].classes()).toContain('is-provisional')
+    expect(cells[0].attributes('title')).toContain('样本不足，暂定状态')
+    expect(cells[0].text()).toContain('样本不足，暂定状态')
+    expect(wrapper.text()).toContain('虚线色块：暂定状态')
+    expect(cells[0].attributes('title')).not.toMatch(/RPM|TPM|请求数|最小样本|minimum_sample/)
+    expect(cells[1].classes()).toContain('health-unknown')
+    expect(cells[1].classes()).not.toContain('is-provisional')
+    await wrapper.setProps({ healthMode: 'ttft', rows: [{
+      platform: 'openai', model: 'gpt-5', metrics: metrics(0), health,
+      buckets: [{ bucket_start: '2026-08-01T00:00:00Z', metrics: metrics(0), health: { ...health, ttft: 'unknown', ttft_score: null, provisional: true } }],
+    }] })
+    expect(wrapper.find('.pulse-cell').classes()).toContain('health-unknown')
+    expect(wrapper.find('.pulse-cell').classes()).not.toContain('is-provisional')
+    wrapper.unmount()
   })
 })
