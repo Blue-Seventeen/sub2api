@@ -66,7 +66,7 @@ func TestOpsErrorProxyRoutes_ListAndDetailReadStoredSnapshot(t *testing.T) {
 			t.Run(fmt.Sprintf("detail=%v/known=%v", detail, known), func(t *testing.T) {
 				db, mock, err := sqlmock.New()
 				require.NoError(t, err)
-				defer db.Close()
+				defer func() { _ = db.Close() }()
 				var payload driver.Value
 				if known {
 					payload = `[{"kind":"proxy","proxy_id":152,"name":"name-at-request-time","host":"192.0.2.10","port":1080},{"kind":"direct"}]`

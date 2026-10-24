@@ -15,8 +15,9 @@ import (
 func TestGatewayCacheLiveProxyRoutesMergeWithoutChangingControllerOrTTL(t *testing.T) {
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
-	defer client.Close()
-	cache := NewGatewayCache(client).(*gatewayCache)
+	defer func() { _ = client.Close() }()
+	cache, ok := NewGatewayCache(client).(*gatewayCache)
+	require.True(t, ok)
 	first := service.ProxyRouteSnapshot{Kind: "proxy", ProxyID: 1, Name: "first", Host: "proxy.test", Port: 8080}
 	record := &service.LiveCallRecord{CallID: "call_routes", CallHash: "routes", Controller: service.LiveControllerProxy, ControllerOwner: "owner", ProxyRoutes: []service.ProxyRouteSnapshot{first}}
 	require.NoError(t, cache.SaveLiveCall(context.Background(), record, time.Hour))

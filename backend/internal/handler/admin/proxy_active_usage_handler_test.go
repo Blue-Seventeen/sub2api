@@ -3,25 +3,89 @@ package admin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/repository"
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
 
+type proxyActiveUsageHandlerStore struct {
+	mu      sync.Mutex
+	entries map[string]service.ProxyActiveUsageEntry
+	err     error
+}
+
+var _ service.ProxyActiveUsageStore = (*proxyActiveUsageHandlerStore)(nil)
+
+func (s *proxyActiveUsageHandlerStore) UpsertProxyActiveUsage(_ context.Context, entry service.ProxyActiveUsageEntry, _ time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.err != nil {
+		return s.err
+	}
+	s.entries[entry.Token] = entry
+	return nil
+}
+
+func (s *proxyActiveUsageHandlerStore) RemoveProxyActiveUsage(_ context.Context, entry service.ProxyActiveUsageEntry, _ time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.err != nil {
+		return s.err
+	}
+	delete(s.entries, entry.Token)
+	return nil
+}
+
+func (s *proxyActiveUsageHandlerStore) CountProxyActiveAccounts(ctx context.Context, proxyIDs []int64) (map[int64]int64, error) {
+	usage, err := s.CountProxyActiveUsage(ctx, proxyIDs)
+	if err != nil {
+		return nil, err
+	}
+	counts := make(map[int64]int64, len(usage))
+	for proxyID, count := range usage {
+		counts[proxyID] = count.AccountCount
+	}
+	return counts, nil
+}
+
+func (s *proxyActiveUsageHandlerStore) CountProxyActiveUsage(_ context.Context, proxyIDs []int64) (map[int64]service.ProxyActiveUsageCounts, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.err != nil {
+		return nil, s.err
+	}
+	counts := make(map[int64]service.ProxyActiveUsageCounts, len(proxyIDs))
+	for _, proxyID := range proxyIDs {
+		accounts := make(map[int64]struct{})
+		var requests int64
+		for _, entry := range s.entries {
+			if entry.ProxyID == proxyID {
+				accounts[entry.AccountID] = struct{}{}
+				requests++
+			}
+		}
+		counts[proxyID] = service.ProxyActiveUsageCounts{AccountCount: int64(len(accounts)), RequestCount: requests}
+	}
+	return counts, nil
+}
+
+func (s *proxyActiveUsageHandlerStore) setError(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.err = err
+}
+
 func TestProxyActiveUsageDetailsHandlerReportsLiveCountsAndUnavailable(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	server := miniredis.RunT(t)
-	client := redis.NewClient(&redis.Options{Addr: server.Addr(), MaxRetries: -1})
-	t.Cleanup(func() { _ = client.Close() })
-	tracker := service.NewProxyActiveUsageTracker(repository.NewRedisProxyActiveUsageStore(client))
+	store := &proxyActiveUsageHandlerStore{entries: make(map[string]service.ProxyActiveUsageEntry)}
+	tracker := service.NewProxyActiveUsageTracker(store)
 	defer tracker.Stop()
 	handler := NewProxyHandler(nil, nil, tracker)
 	router := gin.New()
@@ -56,7 +120,7 @@ func TestProxyActiveUsageDetailsHandlerReportsLiveCountsAndUnavailable(t *testin
 	checkData("/details?ids=10,20,10", `{"10":{"account_count":2,"request_count":3,"status":"ok"},"20":{"account_count":0,"request_count":0,"status":"ok"}}`)
 	checkData("/legacy?ids=10,20", `{"10":2,"20":0}`)
 	checkData("/details", `{}`)
-	server.Close()
+	store.setError(errors.New("active usage store unavailable"))
 	checkData("/details?ids=10", `{"10":{"account_count":null,"request_count":null,"status":"unavailable"}}`)
 	checkData("/legacy?ids=10", `{"10":0}`)
 }

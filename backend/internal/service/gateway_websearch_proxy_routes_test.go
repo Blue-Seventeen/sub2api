@@ -16,7 +16,9 @@ func TestWebSearchActualProxyRouteAndLease(t *testing.T) {
 	defer o.Close()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
-	port := listener.Addr().(*net.TCPAddr).Port
+	addr, ok := listener.Addr().(*net.TCPAddr)
+	require.True(t, ok)
+	port := addr.Port
 	require.NoError(t, listener.Close())
 	id := int64(73)
 	account := &Account{ID: 52, ProxyID: &id, Proxy: &Proxy{ID: 73, Name: "search-node", Protocol: "http", Host: "127.0.0.1", Port: port}}
@@ -34,7 +36,9 @@ func TestWebSearchProviderUsesLogicalRouteMetadata(t *testing.T) {
 	defer o.Close()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
-	port := l.Addr().(*net.TCPAddr).Port
+	addr, ok := l.Addr().(*net.TCPAddr)
+	require.True(t, ok)
+	port := addr.Port
 	require.NoError(t, l.Close())
 	listenerURL := (&Proxy{Protocol: "http", Host: "127.0.0.1", Port: port}).URL()
 	previous := getWebSearchManager()

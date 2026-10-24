@@ -78,7 +78,7 @@ func TestProxyRoutePluginResponseLifetime(t *testing.T) {
 			require.NoError(t, err)
 			resp, err := runtime.roundTrip(ctx, req, raw, &Account{ID: 52})
 			require.NoError(t, err)
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			require.Equal(t, []ProxyRouteSnapshot{{Kind: "proxy", ProxyID: 81, Name: "plugin-node", Host: "proxy.example", Port: 3128}}, ProxyRoutesFromContext(ctx))
 			require.Eventually(t, func() bool {
 				count := tracker.GetActiveUsageDetails(context.Background(), []int64{81})[81]

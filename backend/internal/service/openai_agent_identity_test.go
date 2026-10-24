@@ -138,7 +138,7 @@ func TestProxyRouteAgentIdentityRegistrationKeepsLeaseUntilResponseBody(t *testi
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"task_id":`))
-		w.(http.Flusher).Flush()
+		require.NoError(t, http.NewResponseController(w).Flush())
 		close(headersSent)
 		select {
 		case <-release:

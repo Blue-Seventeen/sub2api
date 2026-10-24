@@ -55,7 +55,7 @@ func TestPassthroughLifecycle_OpsProxyRouteLocalRejectionStartsEmptyTurn(t *test
 			})
 			defer server.Close()
 			client := dialPassthroughLifecycleClient(t, server)
-			defer client.CloseNow()
+			defer func() { _ = client.CloseNow() }()
 			requirePassthroughUpstreamWrite(t, upstream, time.Second)
 			upstream.Send(`{"type":"response.completed","response":{"id":"first","model":"gpt-5.1"}}`)
 			_, err := readPassthroughLifecycleFrame(t, client, time.Second)
@@ -103,7 +103,7 @@ func TestPassthroughLifecycle_OpsProxyRouteVisibleFailuresFreezeEachTurn(t *test
 	})
 	defer server.Close()
 	client := dialPassthroughLifecycleClient(t, server)
-	defer client.CloseNow()
+	defer func() { _ = client.CloseNow() }()
 	c := <-ginContext
 	for turn, terminal := range []string{
 		`{"type":"response.failed","response":{"id":"first","model":"gpt-5.1","error":{"code":"invalid_request_error","message":"first failed"}}}`,
@@ -156,7 +156,7 @@ func TestPassthroughLifecycle_OpsProxyRouteOverlappingCreatePreservesActiveTurn(
 	})
 	defer server.Close()
 	client := dialPassthroughLifecycleClient(t, server)
-	defer client.CloseNow()
+	defer func() { _ = client.CloseNow() }()
 	c := <-ginContext
 	requirePassthroughUpstreamWrite(t, upstream, time.Second)
 	upstream.Send(`{"type":"response.created","response":{"id":"active","model":"gpt-5.1"}}`)
@@ -208,7 +208,7 @@ func TestPassthroughLifecycle_OpsProxyRouteCyberConsumedBeforeWriteDoesNotDuplic
 	})
 	defer server.Close()
 	client := dialPassthroughLifecycleClient(t, server)
-	defer client.CloseNow()
+	defer func() { _ = client.CloseNow() }()
 	c := <-ginContext
 	for turn, terminal := range []string{
 		`{"type":"response.failed","response":{"id":"cyber","model":"gpt-5.1","error":{"code":"cyber_policy","message":"dedicated cyber failure"}}}`,

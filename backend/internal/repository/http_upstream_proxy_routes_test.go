@@ -27,7 +27,7 @@ func TestHTTPUpstreamActualProxyRoutesAndConcurrentStreams(t *testing.T) {
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = io.WriteString(w, "data: fixture\n\n")
-		w.(http.Flusher).Flush()
+		require.NoError(t, http.NewResponseController(w).Flush())
 		select {
 		case <-release:
 		case <-r.Context().Done():
@@ -45,10 +45,8 @@ func TestHTTPUpstreamActualProxyRoutesAndConcurrentStreams(t *testing.T) {
 	require.Nil(t, account.Proxy)
 	upstream := NewHTTPUpstream(nil)
 	var bodies []io.ReadCloser
-	var observations []*service.ProxyRouteObservation
 	for i := 0; i < 3; i++ {
 		ctx, observation := service.NewProxyRouteObservation(t.Context(), tracker)
-		observations = append(observations, observation)
 		t.Cleanup(observation.Close)
 		raw := service.ResolveProxyURL(ctx, node)
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://fixture.invalid/responses", nil)
@@ -107,7 +105,7 @@ func TestHTTPUpstreamProxyLeaseFollowsActualTransportLifetime(t *testing.T) {
 			proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "text/event-stream")
 				_, _ = io.WriteString(w, "data: opening\n\n")
-				w.(http.Flusher).Flush()
+				require.NoError(t, http.NewResponseController(w).Flush())
 				select {
 				case <-release:
 					_, _ = io.WriteString(w, "data: final-usage\n\n")
