@@ -126,9 +126,9 @@ func (p *GeminiTokenProvider) GetAccessToken(ctx context.Context, account *Accou
 		detected = strings.TrimSpace(detected)
 		tierID = strings.TrimSpace(tierID)
 		if detected != "" {
-			if account.Credentials == nil {
-				account.Credentials = make(map[string]any)
-			}
+			// Scheduler snapshots share credential maps; detach only this top-level
+			// map before backfilling scalar values. Model mappings stay read-only.
+			account.Credentials = shallowCopyMap(account.Credentials)
 			account.Credentials["project_id"] = detected
 			if tierID != "" {
 				account.Credentials["tier_id"] = tierID

@@ -518,18 +518,19 @@ func TestGetOpenAICodexCanonicalUserAgentOutboundIdentity(t *testing.T) {
 					SettingKeyOpenAICodexClientVersion:       version.manual,
 					SettingKeyOpenAICodexClientVersionSynced: version.synced,
 				}}, nil)
-				wantUA := buildCodexCLIUserAgent(version.want)
-				wantOriginator, _, ok := openai.PairCodexClientIdentity(wantUA)
-				require.True(t, ok)
+				wantCanonicalUA := buildCodexCLIUserAgent(version.want)
+				wantUA := wantCanonicalUA
+				wantOriginator := openai.CodexDefaultOriginator
 				if ua.client != "" {
 					wantUA = ua.client + "/" + version.want + ua.suffix
-					wantOriginator, _, ok = openai.PairCodexClientIdentity(wantUA)
-					require.True(t, ok)
+					wantCanonicalUA = wantUA
+					wantOriginator = ua.client
 				}
+				wantOriginator, wantUA, _ = openai.NormalizeCodexClientIdentityToCLI(wantOriginator, wantUA)
 				SetCodexCanonicalUserAgentResolver(func() string {
 					return svc.GetOpenAICodexCanonicalUserAgent(context.Background())
 				})
-				require.Equal(t, wantUA, svc.GetOpenAICodexCanonicalUserAgent(context.Background()))
+				require.Equal(t, wantCanonicalUA, svc.GetOpenAICodexCanonicalUserAgent(context.Background()))
 				identity := resolveCodexOutboundIdentity("")
 				require.Equal(t, wantUA, identity.userAgent)
 				require.Equal(t, wantOriginator, identity.originator)

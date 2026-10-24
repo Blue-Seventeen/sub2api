@@ -29,6 +29,18 @@ func TestUsageLogProxyRoutesPersistenceAllInsertPaths(t *testing.T) {
 	for _, mode := range []string{"single", "batch", "best_effort_batch", "billing_no_result", "historical"} {
 		t.Run(mode, func(t *testing.T) {
 			log := &service.UsageLog{UserID: user.ID, APIKeyID: key.ID, AccountID: account.ID, RequestID: uuid.NewString(), Model: "route-model", InputTokens: 3, ProxyRoutes: routes, CreatedAt: time.Now().UTC()}
+			requestID, apiKeyID := log.RequestID, log.APIKeyID
+			t.Cleanup(func() {
+				cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				// These insert paths commit outside testEntTx, including on assertion failures.
+				_, err := integrationDB.ExecContext(cleanupCtx, "DELETE FROM usage_logs WHERE request_id = $1 AND api_key_id = $2", requestID, apiKeyID)
+				require.NoError(t, err, "delete proxy route usage fixture %q", requestID)
+				var remaining int
+				err = integrationDB.QueryRowContext(cleanupCtx, "SELECT COUNT(*) FROM usage_logs WHERE request_id = $1 AND api_key_id = $2", requestID, apiKeyID).Scan(&remaining)
+				require.NoError(t, err, "verify proxy route usage fixture cleanup %q", requestID)
+				require.Zero(t, remaining, "proxy route usage fixture %q must not leak into later tests", requestID)
+			})
 			if mode == "historical" {
 				log.ProxyRoutes = nil
 			}

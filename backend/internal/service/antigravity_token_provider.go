@@ -137,6 +137,8 @@ func (p *AntigravityTokenProvider) GetAccessToken(ctx context.Context, account *
 		if p.shouldAttemptBackfill(account.ID) {
 			p.markBackfillAttempted(account.ID)
 			if projectID, err := p.antigravityOAuthService.FillProjectID(ctx, account, accessToken); err == nil && projectID != "" {
+				// Detach shared scheduler credentials before the scalar backfill.
+				account.Credentials = shallowCopyMap(account.Credentials)
 				account.Credentials["project_id"] = projectID
 				if updateErr := persistAccountCredentials(ctx, p.accountRepo, account, account.Credentials); updateErr != nil {
 					slog.Warn("antigravity_project_id_backfill_persist_failed",

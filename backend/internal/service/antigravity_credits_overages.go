@@ -84,8 +84,13 @@ func (s *AntigravityGatewayService) clearCreditsExhausted(ctx context.Context, a
 	if _, exists := rawLimits[creditsExhaustedKey]; !exists {
 		return
 	}
+	// Both map layers may belong to a shared scheduler master. Copy each layer
+	// before deleting the credit limit, retaining unrelated entries unchanged.
+	rawLimits = shallowCopyMap(rawLimits)
 	delete(rawLimits, creditsExhaustedKey)
-	account.Extra[modelRateLimitsKey] = rawLimits
+	extra := shallowCopyMap(account.Extra)
+	extra[modelRateLimitsKey] = rawLimits
+	account.Extra = extra
 	if err := s.accountRepo.UpdateExtra(ctx, account.ID, map[string]any{
 		modelRateLimitsKey: rawLimits,
 	}); err != nil {

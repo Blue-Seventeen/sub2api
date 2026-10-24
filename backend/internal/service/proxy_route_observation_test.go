@@ -90,3 +90,39 @@ func TestProxyRouteObservationSeedsResumedUsageWithoutLease(t *testing.T) {
 	require.Equal(t, "first", got[0].Name)
 	require.Equal(t, "direct", got[1].Kind)
 }
+
+func TestProxyRouteObservationCancellationKeepsOnlyDetachedAttempts(t *testing.T) {
+	store := newMemoryProxyActiveUsageStore()
+	tracker := NewProxyActiveUsageTrackerWithOptions(store, ProxyActiveUsageTrackerOptions{WorkerCount: 1, QueueSize: 32, HeartbeatInterval: 10 * time.Millisecond})
+	t.Cleanup(tracker.Stop)
+	parent, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	ctx, observation := NewProxyRouteObservation(parent, tracker)
+	t.Cleanup(observation.Close)
+	raw := ResolveProxyURL(ctx, &Proxy{ID: 17, Name: "logical-node", Host: "proxy.test", Port: 1080, Protocol: "socks5"})
+	BeginProxyRouteAttempt(ctx, 52, raw, false)
+	// Use the real streaming-context helper, including an independent deadline:
+	// detecting detached requests by a nil Done channel alone is insufficient.
+	detached, release := detachStreamUpstreamContext(ctx, true)
+	defer release()
+	detached, timeout := context.WithTimeout(detached, time.Minute)
+	defer timeout()
+	attempt := BeginProxyRouteAttempt(detached, 52, raw, false)
+	body := attempt.WrapBody(io.NopCloser(strings.NewReader("usage")))
+	requestCount := func() int64 {
+		count := tracker.GetActiveUsageDetails(context.Background(), []int64{17})[17].RequestCount
+		if count == nil {
+			return -1
+		}
+		return *count
+	}
+	require.Eventually(t, func() bool { return requestCount() == 2 }, time.Second, 10*time.Millisecond)
+	routes := ProxyRoutesFromContext(ctx)
+	cancel()
+	require.Eventually(t, func() bool { return requestCount() == 1 }, time.Second, 10*time.Millisecond)
+	require.Never(t, func() bool { return requestCount() != 1 }, 100*time.Millisecond, 10*time.Millisecond)
+	require.Equal(t, routes, ProxyRoutesFromContext(ctx))
+	require.NoError(t, body.Close())
+	require.NoError(t, body.Close())
+	waitForProxyActiveUsageCount(t, tracker, 17, 0)
+}

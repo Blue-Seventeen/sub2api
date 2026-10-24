@@ -30,9 +30,10 @@ func NewProxyRouteObservation(ctx context.Context, tracker *ProxyActiveUsageTrac
 		ctx = context.Background()
 	}
 	o := &ProxyRouteObservation{tracker: tracker, resolved: make(map[[32]byte]ProxyRouteSnapshot), seen: make(map[string]bool), active: make(map[*ProxyRouteAttempt]struct{})}
-	// An already-cancelled parent can run Close immediately.
+	// Parent cancellation is a fallback for cancelled transports, not evidence
+	// that a deliberately detached upstream body has stopped draining.
 	o.mu.Lock()
-	o.stop = context.AfterFunc(ctx, o.Close)
+	o.stop = context.AfterFunc(ctx, o.closeCancelledAttempts)
 	o.mu.Unlock()
 	return context.WithValue(ctx, proxyRouteObservationKey{}, o), o
 }
@@ -112,11 +113,16 @@ func BeginProxyRouteSnapshotAttempt(ctx context.Context, accountID int64, route 
 		return nil
 	}
 	o.appendRouteLocked(route)
-	a := &ProxyRouteAttempt{observation: o}
+	a := &ProxyRouteAttempt{observation: o, ctx: ctx}
 	if route.Kind == "proxy" {
 		a.handle = o.tracker.BeginProxy(route.ProxyID, accountID)
 	}
 	o.active[a] = struct{}{}
+	// Bind cleanup to the actual outbound context. A detached context may have
+	// its own deadline, and cancellation can propagate to child contexts after
+	// the observation's parent callback starts. End synchronizes with this
+	// assignment through o.mu even when ctx is already cancelled.
+	a.stop = context.AfterFunc(ctx, a.End)
 	o.mu.Unlock()
 	return a
 }
@@ -179,6 +185,20 @@ func (o *ProxyRouteObservation) appendRouteLocked(route ProxyRouteSnapshot) {
 	}
 }
 
+func (o *ProxyRouteObservation) closeCancelledAttempts() {
+	o.mu.Lock()
+	active := make([]*ProxyRouteAttempt, 0, len(o.active))
+	for a := range o.active {
+		if a.ctx.Err() != nil {
+			active = append(active, a)
+		}
+	}
+	o.mu.Unlock()
+	for _, a := range active {
+		a.End()
+	}
+}
+
 func (o *ProxyRouteObservation) Close() {
 	if o == nil {
 		return
@@ -207,6 +227,8 @@ type ProxyRouteAttempt struct {
 	once        sync.Once
 	observation *ProxyRouteObservation
 	handle      *ProxyActiveUsageHandle
+	ctx         context.Context
+	stop        func() bool
 }
 
 func (a *ProxyRouteAttempt) End() {
@@ -214,17 +236,23 @@ func (a *ProxyRouteAttempt) End() {
 		return
 	}
 	a.once.Do(func() {
-		a.handle.End()
+		var stop func() bool
 		if o := a.observation; o != nil {
 			o.mu.Lock()
 			delete(o.active, a)
+			stop = a.stop
 			o.mu.Unlock()
 		}
+		if stop != nil {
+			stop()
+		}
+		a.handle.End()
 	})
 }
 
 // WrapBody holds the attempt through streaming, and releases at EOF, failure,
-// explicit Close, or request cancellation (the observation's fallback).
+// explicit Close, or actual transport-context cancellation. A detached stream
+// keeps its lease while draining after the original client context is cancelled.
 func (a *ProxyRouteAttempt) WrapBody(body io.ReadCloser) io.ReadCloser {
 	if a == nil {
 		return body

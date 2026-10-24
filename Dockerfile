@@ -8,7 +8,7 @@
 # =============================================================================
 
 ARG NODE_IMAGE=node:24-alpine
-ARG GOLANG_IMAGE=golang:1.27.2-alpine
+ARG GOLANG_IMAGE=golang:1.27.3-alpine
 ARG ALPINE_IMAGE=alpine:3.21
 ARG POSTGRES_IMAGE=postgres:18-alpine
 ARG GOPROXY=https://goproxy.cn,direct
@@ -17,7 +17,7 @@ ARG MIHOMO_VERSION=1.19.24
 ARG MIHOMO_AMD64_SHA256=7c8678fc20a1d3af9bfb87ccee428112b74398f7e04b6ddb044f1e7b94539870
 ARG MIHOMO_ARM64_SHA256=6d4a278e7ace1016f23d7245f6f8911f6f7a4adfba2095704473d937e1911840
 ARG NPM_CONFIG_REGISTRY=
-ARG VERSION=0.2.17
+ARG VERSION=0.2.18
 ARG COMMIT=docker
 
 # -----------------------------------------------------------------------------

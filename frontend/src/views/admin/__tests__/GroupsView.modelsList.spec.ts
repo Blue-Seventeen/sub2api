@@ -157,8 +157,12 @@ async function openForm(wrapper: VueWrapper, mode: Mode) {
 async function chooseScope(wrapper: VueWrapper, scope: Scope) {
   const dialog = wrapper.getComponent(ModelListScopeDialog)
   expect(dialog.props('show')).toBe(true)
-  const choice = dialog.findAll('button').find(node => node.text().startsWith(`admin.groups.modelsList.${scope}Scope`))!
-  await choice.trigger('click')
+  const label = dialog.props('operation') === 'remove'
+    ? `delete${scope === 'group' ? 'Group' : 'Global'}Scope`
+    : `${scope}Scope`
+  const choice = dialog.findAll('button').find(node => node.text().startsWith(`admin.groups.modelsList.${label}`))
+  expect(choice, `scope choice ${label}`).toBeDefined()
+  await choice!.trigger('click')
   expect(dialog.props('show')).toBe(false)
 }
 

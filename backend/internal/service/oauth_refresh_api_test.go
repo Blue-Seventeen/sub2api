@@ -658,17 +658,19 @@ func TestRefreshIfNeeded_LateSuccessAfterDeadlineDoesNotPersist(t *testing.T) {
 	executor := &refreshAPIExecutorStub{
 		needsRefresh: true,
 		credentials:  map[string]any{"access_token": "late-token"},
-		delay:        30 * time.Millisecond,
 	}
 	api := NewOAuthRefreshAPI(repo, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
+	// Return successful credentials only after the deadline cancellation is observed.
+	executor.onRefresh = func() { <-ctx.Done() }
 
 	result, err := api.RefreshIfNeeded(ctx, account, executor, time.Hour)
 
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	require.Nil(t, result)
 	require.Zero(t, repo.updateCredentialsCalls, "late credentials must not cross the unified API persistence boundary")
+	require.Zero(t, repo.successCASCalls, "late credentials must not enter the Grok success CAS boundary")
 }
 
 func TestRefreshIfNeeded_NilCredentials(t *testing.T) {

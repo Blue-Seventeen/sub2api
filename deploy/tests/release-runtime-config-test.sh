@@ -9,7 +9,7 @@ fail() {
   exit 1
 }
 
-expected_version='0.2.17'
+expected_version='0.2.18'
 runtime_version=$(tr -d '\r\n' < backend/cmd/server/VERSION)
 [ "$runtime_version" = "$expected_version" ] || \
   fail "runtime VERSION is '$runtime_version', expected '$expected_version'"
