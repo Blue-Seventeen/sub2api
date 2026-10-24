@@ -95,29 +95,39 @@ func TestForwardAsAnthropic_StreamingResponseFailed_ReturnsError(t *testing.T) {
 	require.Contains(t, err.Error(), "upstream response failed")
 }
 
-func TestForwardAsAnthropic_BillableTerminalFailureKeepsOfficialFailoverClassification(t *testing.T) {
-	body := []byte(`{"model":"gpt-5.4","max_tokens":32,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
-	c.Request.Header.Set("Content-Type", "application/json")
-
-	upstream := &httpUpstreamRecorder{resp: &http.Response{
-		StatusCode: http.StatusOK,
-		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-		Body: io.NopCloser(strings.NewReader(
-			buildResponsesFailedSSEStream("server_error", "temporary upstream failure"),
-		)),
-	}}
-	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
-
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, rawChatCompletionsTestAccount(), body, "", "")
-
-	require.Error(t, err)
-	require.NotNil(t, result)
-	require.Equal(t, 10, result.Usage.InputTokens)
-	var failoverErr *UpstreamFailoverError
-	require.True(t, errors.As(err, &failoverErr), "the handler decides whether to replay or discard this attempt's usage")
+func TestForwardAsAnthropic_TerminalFailureReplayDependsOnAcceptance(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		for _, billable := range []bool{false, true} {
+			t.Run(fmt.Sprintf("stream=%v/billable=%v", stream, billable), func(t *testing.T) {
+				body := []byte(fmt.Sprintf(`{"model":"gpt-5.4","max_tokens":32,"messages":[{"role":"user","content":"hello"}],"stream":%v}`, stream))
+				rec := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rec)
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+				payload := buildResponsesFailedSSEStream("server_error", "temporary upstream failure")
+				if !billable {
+					payload = strings.ReplaceAll(payload, `"input_tokens":10`, `"input_tokens":0`)
+					payload = strings.ReplaceAll(payload, `"total_tokens":10`, `"total_tokens":0`)
+				}
+				upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(payload))}}
+				svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+				result, err := svc.ForwardAsAnthropic(context.Background(), c, rawChatCompletionsTestAccount(), body, "", "")
+				require.Error(t, err)
+				var failoverErr *UpstreamFailoverError
+				if billable {
+					require.NotErrorAs(t, err, &failoverErr)
+					require.NotNil(t, result)
+					require.Equal(t, 10, result.Usage.InputTokens)
+					require.True(t, c.Writer.Written())
+					require.Contains(t, rec.Body.String(), "error")
+					require.NotContains(t, rec.Body.String(), "message_stop")
+				} else {
+					require.ErrorAs(t, err, &failoverErr)
+					require.False(t, c.Writer.Written())
+				}
+				require.Len(t, upstream.requests, 1)
+			})
+		}
+	}
 }
 
 func TestForwardAsAnthropic_StreamingBareErrorAfterOutputIsVisible(t *testing.T) {
@@ -231,6 +241,8 @@ func TestForwardAsAnthropic_BufferedResponseFailed_Failover(t *testing.T) {
 	c.Request.Header.Set("Content-Type", "application/json")
 
 	ssePayload := buildResponsesFailedSSEStream("rate_limit_error", "Rate limit reached")
+	ssePayload = strings.ReplaceAll(ssePayload, `"input_tokens":10`, `"input_tokens":0`)
+	ssePayload = strings.ReplaceAll(ssePayload, `"total_tokens":10`, `"total_tokens":0`)
 
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,

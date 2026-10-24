@@ -1103,66 +1103,66 @@ func (s *SubscriptionService) AdjustSubscription(ctx context.Context, subscripti
 			return nil, infraerrors.BadRequest("INVALID_DAYS", "days is out of allowed range")
 		}
 	}
-	sub, err := s.userSubRepo.GetByID(ctx, subscriptionID)
-	if err != nil {
-		return nil, ErrSubscriptionNotFound
-	}
-	adjustNow := time.Now()
-	wasHistorical := sub.UsesHistoricalGroupSnapshotAt(adjustNow)
-	if wasHistorical {
-		if err := s.ensureSubscriptionCanReactivate(ctx, sub); err != nil {
-			return nil, err
+	var sub *UserSubscription
+	err := s.withSubscriptionUpdateTx(ctx, func(txCtx context.Context) error {
+		var err error
+		// Admin adjustments and pending-refund compensation must calculate
+		// expiry changes from the same locked current row.
+		sub, err = s.userSubRepo.GetByIDForUpdate(txCtx, subscriptionID)
+		if err != nil {
+			return ErrSubscriptionNotFound
 		}
-	}
-	fields := UserSubscriptionMutableFields{}
-	if input.Days != nil {
-		days := *input.Days
-		now := adjustNow
-		isExpired := !sub.ExpiresAt.After(now)
-		if isExpired && days < 0 {
-			return nil, infraerrors.BadRequest("CANNOT_SHORTEN_EXPIRED", "cannot shorten an expired subscription")
+		adjustNow := time.Now()
+		if s.now != nil {
+			adjustNow = s.now()
 		}
-		var newExpiresAt time.Time
-		if isExpired {
-			newExpiresAt = now.AddDate(0, 0, days)
-		} else {
-			newExpiresAt = sub.ExpiresAt.AddDate(0, 0, days)
+		if sub.UsesHistoricalGroupSnapshotAt(adjustNow) {
+			if err := s.ensureSubscriptionCanReactivate(txCtx, sub); err != nil {
+				return err
+			}
 		}
-		if newExpiresAt.After(MaxExpiresAt) {
-			newExpiresAt = MaxExpiresAt
+		fields := UserSubscriptionMutableFields{}
+		if input.Days != nil {
+			days := *input.Days
+			isExpired := !sub.ExpiresAt.After(adjustNow)
+			if isExpired && days < 0 {
+				return infraerrors.BadRequest("CANNOT_SHORTEN_EXPIRED", "cannot shorten an expired subscription")
+			}
+			var newExpiresAt time.Time
+			if isExpired {
+				newExpiresAt = adjustNow.AddDate(0, 0, days)
+			} else {
+				newExpiresAt = sub.ExpiresAt.AddDate(0, 0, days)
+			}
+			if newExpiresAt.After(MaxExpiresAt) {
+				newExpiresAt = MaxExpiresAt
+			}
+			if !newExpiresAt.After(adjustNow) {
+				return ErrAdjustWouldExpire
+			}
+			fields.ExpiresAt = &newExpiresAt
+			if sub.Status == SubscriptionStatusExpired {
+				status := SubscriptionStatusActive
+				fields.Status = &status
+			}
 		}
-		if !newExpiresAt.After(now) {
-			return nil, ErrAdjustWouldExpire
-		}
-		fields.ExpiresAt = &newExpiresAt
-		if sub.Status == SubscriptionStatusExpired {
-			status := SubscriptionStatusActive
-			fields.Status = &status
-		}
-	}
-	if input.DailyUsageUSD != nil {
 		fields.DailyUsageUSD = input.DailyUsageUSD
-	}
-	if input.WeeklyUsageUSD != nil {
 		fields.WeeklyUsageUSD = input.WeeklyUsageUSD
-	}
-	if input.MonthlyUsageUSD != nil {
 		fields.MonthlyUsageUSD = input.MonthlyUsageUSD
-	}
-	if input.CustomUsageUSD != nil {
 		fields.CustomUsageUSD = input.CustomUsageUSD
-	}
-	if err := s.userSubRepo.UpdateMutableFields(ctx, subscriptionID, fields); err != nil {
+		if err := s.userSubRepo.UpdateMutableFields(txCtx, subscriptionID, fields); err != nil {
+			return err
+		}
+		sub, err = s.userSubRepo.GetByID(txCtx, subscriptionID)
+		return err
+	})
+	if err != nil {
 		return nil, err
 	}
-	s.InvalidateSubCache(sub.UserID, sub.GroupID)
-	if s.subCacheL1 != nil {
-		s.subCacheL1.Wait()
+	if err := s.invalidateSubscriptionCaches(sub.UserID, sub.GroupID); err != nil {
+		log.Printf("[SubscriptionAdjust] committed subscription_id=%d cache_error=%v", subscriptionID, err)
 	}
-	if s.billingCacheService != nil {
-		_ = s.billingCacheService.InvalidateSubscription(ctx, sub.UserID, sub.GroupID)
-	}
-	return s.userSubRepo.GetByID(ctx, subscriptionID)
+	return sub, nil
 }
 
 func (s *SubscriptionService) ensureSubscriptionCanReactivate(ctx context.Context, sub *UserSubscription) error {
@@ -1185,11 +1185,24 @@ func (s *SubscriptionService) DeductSubscriptionDaysNewest(ctx context.Context, 
 }
 
 func (s *SubscriptionService) DeductSubscriptionDaysNewestWithSnapshots(ctx context.Context, userID, groupID int64, days int, note string) ([]UserSubscription, error) {
+	return s.deductSubscriptionDaysNewestWithSnapshots(ctx, userID, groupID, days, note, nil, nil)
+}
+
+// after receives the exact post-deduction terms from the same transaction.
+// Pending refunds need these to reverse only their own expiry delta later.
+func (s *SubscriptionService) deductSubscriptionDaysNewestWithSnapshots(ctx context.Context, userID, groupID int64, days int, note string, after *[]UserSubscription, record func(context.Context, []UserSubscription, []UserSubscription) error) ([]UserSubscription, error) {
 	if days <= 0 {
 		return nil, nil
 	}
 	var snapshots []UserSubscription
+	var afterSnapshots []UserSubscription
 	err := s.withSubscriptionUpdateTx(ctx, func(txCtx context.Context) error {
+		// Refunds, negative redemption adjustments and expired-card renewals
+		// must take the same group lock before acquiring card locks in their
+		// different traversal orders.
+		if err := s.lockSubscriptionAssignmentInDB(txCtx, userID, groupID); err != nil {
+			return err
+		}
 		subs, err := s.userSubRepo.ListActiveByUserIDAndGroupID(txCtx, userID, groupID)
 		if err != nil {
 			return err
@@ -1205,6 +1218,20 @@ func (s *SubscriptionService) DeductSubscriptionDaysNewestWithSnapshots(ctx cont
 		trimmedNote := strings.TrimSpace(note)
 		for i := len(subs) - 1; i >= 0 && remainingToDeduct > 0; i-- {
 			sub := subs[i]
+			if after != nil {
+				// Usage and administrative adjustments must not be lost between
+				// reading the original term and writing the deduction snapshot.
+				locked, err := s.userSubRepo.GetByIDForUpdate(txCtx, sub.ID)
+				if err != nil {
+					return err
+				}
+				if locked.UserID != userID || locked.GroupID != groupID || locked.Status != SubscriptionStatusActive || !locked.ExpiresAt.After(now) {
+					return fmt.Errorf("subscription %d changed before refund deduction", sub.ID)
+				}
+				// GetByIDForUpdate intentionally omits eager-loaded group edges.
+				locked.Group = sub.Group
+				sub = *locked
+			}
 			updated := sub
 			snapshot := cloneUserSubscription(sub)
 			remainingDuration := sub.ExpiresAt.Sub(now)
@@ -1230,6 +1257,13 @@ func (s *SubscriptionService) DeductSubscriptionDaysNewestWithSnapshots(ctx cont
 				if err := s.userSubRepo.Update(txCtx, &updated); err != nil {
 					return err
 				}
+				if after != nil {
+					persisted, err := s.userSubRepo.GetByID(txCtx, updated.ID)
+					if err != nil {
+						return err
+					}
+					afterSnapshots = append(afterSnapshots, cloneUserSubscription(*persisted))
+				}
 				remainingToDeduct -= remainingDays
 				continue
 			}
@@ -1250,12 +1284,29 @@ func (s *SubscriptionService) DeductSubscriptionDaysNewestWithSnapshots(ctx cont
 			if err := s.userSubRepo.Update(txCtx, &updated); err != nil {
 				return err
 			}
+			if after != nil {
+				// Persisted timestamps can have lower precision than Go's clock.
+				// Compensation must compare against the actual stored terms.
+				persisted, err := s.userSubRepo.GetByID(txCtx, updated.ID)
+				if err != nil {
+					return err
+				}
+				afterSnapshots = append(afterSnapshots, cloneUserSubscription(*persisted))
+			}
 			remainingToDeduct = 0
+		}
+		if record != nil {
+			// Refund deduction facts must commit before the gateway call starts.
+			// The same locked-row transaction owns both terms and their evidence.
+			return record(txCtx, snapshots, afterSnapshots)
 		}
 		return nil
 	})
 	if err != nil {
 		return nil, err
+	}
+	if after != nil {
+		*after = afterSnapshots
 	}
 	s.InvalidateSubCache(userID, groupID)
 	if s.billingCacheService != nil {

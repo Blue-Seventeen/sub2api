@@ -135,6 +135,33 @@ func TestHandleErrorResponse_Deterministic400IsNotRewrappedAs502(t *testing.T) {
 	require.False(t, errors.As(err, &failoverErr), "400 不得触发 failover")
 }
 
+func TestHandleCompatErrorResponse_PoolMode503ReturnsSameAccountFailover(t *testing.T) {
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	c, _ := newOpenAIUpstreamErrorTestContext(t)
+	account := &Account{
+		ID:       42,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Name:     "pool-account",
+		Credentials: map[string]any{
+			"pool_mode":                    true,
+			"pool_mode_retry_count":        float64(10),
+			"pool_mode_retry_status_codes": []any{float64(http.StatusServiceUnavailable)},
+		},
+	}
+	var writeCalls int
+	resp := newOpenAIUpstreamErrorResponse(http.StatusServiceUnavailable, `{"error":{"message":"upstream unavailable"}}`)
+	_, err := svc.handleCompatErrorResponse(resp, c, account, func(_ *gin.Context, _ int, _, _ string) {
+		writeCalls++
+	})
+
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusServiceUnavailable, failoverErr.StatusCode)
+	require.True(t, failoverErr.RetryableOnSameAccount)
+	require.Zero(t, writeCalls, "pool-mode retryable 503 must remain eligible for handler retry")
+}
+
 // 不变式：同一份上游错误体，原生 Responses 与 ChatCompletions/Anthropic 兼容路径
 // 必须给出同样的状态码和同样的 message。这两条路径在同一个 service 上，之前一条对
 // 一条错，正是本次修复的根因；锁死对称性避免将来只改一边。

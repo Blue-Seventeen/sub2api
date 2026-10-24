@@ -368,7 +368,13 @@ func TestOpenAINativeFirstOutputTimeoutWaitsForCompleteSemanticEvent(t *testing.
 	suffix := `"}`
 	line := prefix + strings.Repeat("x", lineSize-len(prefix)-len(suffix)) + suffix
 	require.Len(t, line, lineSize)
-	assertOpenAINativeLargeOpenEventTimesOutWithoutLeak(t, line)
+	assertOpenAINativeLargeOpenEventTimesOutWithoutLeak(t, line, true, OpenAIUsage{})
+}
+
+func TestOpenAINativeFirstOutputAcceptedUsageTimeoutDoesNotLeakOpenEvent(t *testing.T) {
+	line := "data: {\"type\":\"response.in_progress\",\"response\":{\"usage\":{\"input_tokens\":9,\"output_tokens\":1}}}\n\n" +
+		`data: {"type":"response.output_text.delta","delta":"accepted but not a complete SSE frame"}`
+	assertOpenAINativeLargeOpenEventTimesOutWithoutLeak(t, line, true, OpenAIUsage{InputTokens: 9, OutputTokens: 1})
 }
 
 func TestOpenAINativeFirstOutputTimeoutDoesNotLeakLargePreambleEvent(t *testing.T) {
@@ -377,10 +383,10 @@ func TestOpenAINativeFirstOutputTimeoutDoesNotLeakLargePreambleEvent(t *testing.
 	suffix := `"}}`
 	line := prefix + strings.Repeat("x", lineSize-len(prefix)-len(suffix)) + suffix
 	require.Len(t, line, lineSize)
-	assertOpenAINativeLargeOpenEventTimesOutWithoutLeak(t, line)
+	assertOpenAINativeLargeOpenEventTimesOutWithoutLeak(t, line, false, OpenAIUsage{})
 }
 
-func assertOpenAINativeLargeOpenEventTimesOutWithoutLeak(t *testing.T, line string) {
+func assertOpenAINativeLargeOpenEventTimesOutWithoutLeak(t *testing.T, line string, accepted bool, wantUsage OpenAIUsage) {
 	t.Helper()
 	cfg := &config.Config{Gateway: config.GatewayConfig{
 		OpenAIFirstOutputTimeoutSeconds: 1,
@@ -390,6 +396,7 @@ func assertOpenAINativeLargeOpenEventTimesOutWithoutLeak(t *testing.T, line stri
 	svc := &OpenAIGatewayService{cfg: cfg, responseHeaderFilter: compileResponseHeaderFilter(cfg)}
 	pr, pw := io.Pipe()
 	body := &firstOutputCloseTrackingBody{ReadCloser: pr, closed: make(chan struct{})}
+	t.Cleanup(func() { _ = body.Close() })
 	writerDone := make(chan struct{})
 	go func() {
 		defer close(writerDone)
@@ -408,22 +415,42 @@ func assertOpenAINativeLargeOpenEventTimesOutWithoutLeak(t *testing.T, line stri
 		"X-Ratelimit-Remaining-Requests": []string{"1"},
 	}, Body: body}
 
-	_, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, &Account{ID: 1, Platform: PlatformOpenAI}, time.Now(), "model", "model")
+	result, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, &Account{ID: 1, Platform: PlatformOpenAI}, time.Now(), "model", "model")
 
 	var failoverErr *UpstreamFailoverError
-	require.ErrorAs(t, err, &failoverErr)
-	require.Equal(t, http.StatusGatewayTimeout, failoverErr.StatusCode)
-	require.Contains(t, string(failoverErr.ResponseBody), "first_output_timeout")
-	require.True(t, failoverErr.SafeToFailoverAfterWrite)
-	require.NotContains(t, rec.Body.String(), "data:", "attempt JSON must remain private before the SSE boundary")
-	require.NotContains(t, rec.Body.String(), `"type"`, "attempt JSON must remain private before the SSE boundary")
-	for _, outputLine := range strings.Split(strings.TrimSpace(rec.Body.String()), "\n") {
-		if outputLine != "" {
-			require.True(t, strings.HasPrefix(outputLine, ":"), "only keepalive comments may precede failover: %q", outputLine)
+	require.Error(t, err)
+	if accepted {
+		require.NotErrorAs(t, err, &failoverErr, "valid upstream semantic data forbids replay before downstream dispatch too")
+		require.NotNil(t, result)
+		require.True(t, result.accepted)
+		require.Equal(t, wantUsage, *result.usage)
+		require.Nil(t, result.firstTokenMs, "an unfinished SSE frame must not become visible output")
+		if strings.Contains(rec.Body.String(), "response.output_text.delta") || strings.Contains(rec.Body.String(), "response.in_progress") {
+			t.Error("unclosed staged upstream data leaked before the gateway timeout error")
+		}
+		require.Contains(t, rec.Body.String(), "stream_timeout")
+		require.NotContains(t, rec.Body.String(), "response.completed")
+	} else {
+		require.ErrorAs(t, err, &failoverErr)
+		require.Equal(t, http.StatusGatewayTimeout, failoverErr.StatusCode)
+		require.Contains(t, string(failoverErr.ResponseBody), "first_output_timeout")
+		require.True(t, failoverErr.SafeToFailoverAfterWrite)
+		require.NotContains(t, rec.Body.String(), "data:", "attempt JSON must remain private before the SSE boundary")
+		require.NotContains(t, rec.Body.String(), `"type"`, "attempt JSON must remain private before the SSE boundary")
+		for _, outputLine := range strings.Split(strings.TrimSpace(rec.Body.String()), "\n") {
+			if outputLine != "" {
+				require.True(t, strings.HasPrefix(outputLine, ":"), "only keepalive comments may precede failover: %q", outputLine)
+			}
 		}
 	}
 	require.Empty(t, rec.Header().Values("X-Request-Id"))
 	require.Empty(t, rec.Header().Values("X-Ratelimit-Remaining-Requests"))
+	select {
+	case <-body.closed:
+	default:
+		t.Error("timeout returned without closing the upstream body")
+		_ = body.Close()
+	}
 	select {
 	case <-writerDone:
 	case <-time.After(time.Second):
@@ -476,7 +503,16 @@ func TestOpenAINativeFirstOutputEOFDispatchesTerminalEventWithoutBlankLine(t *te
 	require.Equal(t, "17", rec.Result().Header.Get("X-Ratelimit-Remaining-Requests"))
 }
 
-func TestOpenAINativeFirstOutputStageOverflowFailsOverWithoutAttemptBytes(t *testing.T) {
+func TestOpenAINativeFirstOutputAcceptedStageOverflowDoesNotReplayOrLeak(t *testing.T) {
+	assertOpenAINativeFirstOutputStageOverflowBoundary(t, true)
+}
+
+func TestOpenAINativeFirstOutputMetadataStageOverflowFailsOverWithoutAttemptBytes(t *testing.T) {
+	assertOpenAINativeFirstOutputStageOverflowBoundary(t, false)
+}
+
+func assertOpenAINativeFirstOutputStageOverflowBoundary(t *testing.T, accepted bool) {
+	t.Helper()
 	cfg := &config.Config{Gateway: config.GatewayConfig{
 		OpenAIFirstOutputTimeoutSeconds: 30,
 		MaxLineSize:                     2 * 1024 * 1024,
@@ -484,6 +520,9 @@ func TestOpenAINativeFirstOutputStageOverflowFailsOverWithoutAttemptBytes(t *tes
 	svc := &OpenAIGatewayService{cfg: cfg, responseHeaderFilter: compileResponseHeaderFilter(cfg)}
 	const lineSize = 1024*1024 - 256
 	prefix := `data: {"type":"response.output_text.delta","delta":"`
+	if !accepted {
+		prefix = `data: {"type":"response.created","padding":"`
+	}
 	suffix := `"}`
 	line := prefix + strings.Repeat("x", lineSize-len(prefix)-len(suffix)) + suffix
 	body := strings.Repeat(line+"\n", 9)
@@ -499,13 +538,23 @@ func TestOpenAINativeFirstOutputStageOverflowFailsOverWithoutAttemptBytes(t *tes
 		Body: io.NopCloser(strings.NewReader(body)),
 	}
 
-	_, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, &Account{ID: 1, Platform: PlatformOpenAI}, time.Now(), "model", "model")
+	result, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, &Account{ID: 1, Platform: PlatformOpenAI}, time.Now(), "model", "model")
 
 	var failoverErr *UpstreamFailoverError
-	require.ErrorAs(t, err, &failoverErr)
-	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
-	require.True(t, failoverErr.SafeToFailoverAfterWrite)
-	require.Contains(t, string(failoverErr.ResponseBody), "staging limit exceeded")
+	require.Error(t, err)
+	if accepted {
+		require.NotErrorAs(t, err, &failoverErr)
+		require.NotNil(t, result)
+		require.True(t, result.accepted)
+		require.Equal(t, OpenAIUsage{}, *result.usage)
+		require.Nil(t, result.firstTokenMs)
+		require.Contains(t, err.Error(), "staging limit exceeded")
+	} else {
+		require.ErrorAs(t, err, &failoverErr)
+		require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
+		require.True(t, failoverErr.SafeToFailoverAfterWrite)
+		require.Contains(t, string(failoverErr.ResponseBody), "staging limit exceeded")
+	}
 	require.Empty(t, rec.Body.String())
 	require.Empty(t, rec.Header().Values("X-Request-Id"))
 	require.Empty(t, rec.Header().Values("X-Ratelimit-Remaining-Requests"))

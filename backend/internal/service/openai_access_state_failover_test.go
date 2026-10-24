@@ -276,12 +276,12 @@ func TestOpenAIStreamCredentialFailureHonorsErrorStatusAlias(t *testing.T) {
 	require.False(t, openAIStreamCredentialAuthFailure([]byte(`{"type":"response.failed","response":{"error":{"code":"server_error","status":500,"message":"transient upstream failure"}}}`)))
 }
 
-// 上游把 status 报成 5xx 时仍然是通用上游故障：既不改账号状态，也不冒充认证/限流。
+// 数字 5xx 状态保留给池重试码匹配，但仍是通用上游故障，不能冒充认证/限流。
 func TestOpenAIStreamErrorStatusAliasKeepsGeneric5xxUnclassified(t *testing.T) {
 	payload := []byte(`{"type":"response.failed","response":{"error":{"code":"server_error","status":500,"type":"server_error","message":"rv_shape_invalid: temporary response validation failure after partial output; retry your request if your client can recover partial output."},"id":"resp_0","object":"response","status":"failed"},"sequence_number":80}`)
 	message := extractOpenAISSEErrorMessage(payload)
 
-	require.Equal(t, http.StatusBadGateway, openAIStreamFailureStatus(payload, message))
+	require.Equal(t, http.StatusInternalServerError, openAIStreamFailureStatus(payload, message))
 	require.False(t, openAIStreamCredentialAuthFailure(payload))
 	require.True(t, openAIStreamFailedEventShouldFailover(payload, message))
 }

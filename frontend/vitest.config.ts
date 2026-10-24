@@ -12,6 +12,8 @@ export default defineConfig({
   },
   test: {
     pool: 'threads',
+    // Node worker threads do not apply runtime TZ changes to Date.
+    poolMatchGlobs: [['**/OpsDashboardHeader.timezone.spec.ts', 'forks']],
     globals: true,
     environment: 'jsdom',
     setupFiles: ['src/__tests__/setup.ts'],

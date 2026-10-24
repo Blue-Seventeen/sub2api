@@ -214,6 +214,9 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 	profitVetoCount := 0
 	failedAccountIDs := make(map[int64]struct{})
 	sameAccountRetryCount := make(map[int64]int)
+	var pendingRetryAccountID int64
+	requestCtx = service.NewGatewayRequestAttemptContext(requestCtx)
+	c.Request = c.Request.WithContext(service.NewGatewayRequestAttemptContext(c.Request.Context()))
 	var lastFailoverErr *service.UpstreamFailoverError
 	var oauth429FailoverState service.OpenAIOAuth429FailoverState
 	mediaEligibilityRejected := false
@@ -250,7 +253,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			)
 		} else {
 			selection, scheduleDecision, err = h.gatewayService.SelectAccountWithSchedulerForCapability(
-				requestCtx,
+				service.WithGatewayRetryAccount(requestCtx, pendingRetryAccountID),
 				apiKey.GroupID,
 				"",
 				sessionHash,
@@ -263,6 +266,11 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 				false,
 				platform,
 			)
+			if pendingRetryAccountID != 0 && errors.Is(err, service.ErrSameAccountRetryUnavailable) && c.Request.Context().Err() == nil {
+				failedAccountIDs[pendingRetryAccountID] = struct{}{}
+				pendingRetryAccountID = 0
+				continue
+			}
 		}
 		// Own an eagerly acquired slot before any rejection or eligibility probe.
 		// Forwarding takes over the same once-only release after admission.
@@ -344,13 +352,14 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			if !eligible {
 				releaseAccount()
 				mediaEligibilityRejected = true
+				pendingRetryAccountID = 0
 				failedAccountIDs[account.ID] = struct{}{}
 				reqLog.Warn("grok_media.account_eligibility_rejected",
 					zap.Int64("account_id", account.ID),
 					zap.String("reason", eligibilityReason),
 					zap.Bool("probe_failed", eligibilityErr != nil),
 				)
-				if switchCount >= maxAccountSwitches {
+				if maxAccountSwitches == 0 {
 					markOpsRoutingCapacityLimited(c)
 					h.errorResponse(c, http.StatusServiceUnavailable, "grok_media_no_eligible_account", "No eligible Grok media accounts")
 					return
@@ -381,9 +390,19 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			}
 			continue
 		}
+		if slotResult == openAISlotAcquireUnavailable {
+			if boundLookupAccountID > 0 || maxAccountSwitches == 0 {
+				h.errorResponse(c, http.StatusTooManyRequests, "rate_limit_error", "Account concurrency limit exceeded")
+				return
+			}
+			failedAccountIDs[account.ID] = struct{}{}
+			pendingRetryAccountID = 0
+			continue
+		}
 		if slotResult != openAISlotAcquireOK {
 			return
 		}
+		account = selection.Account
 
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		forwardStart := time.Now()
@@ -435,8 +454,10 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 				}
 				if failoverErr.RetryableOnSameAccount {
 					retryLimit := account.GetPoolModeRetryCount()
-					if sameAccountRetryCount[account.ID] < retryLimit {
+					if sameAccountRetryAllowed(failoverErr, sameAccountRetryCount[account.ID], retryLimit) {
 						sameAccountRetryCount[account.ID]++
+						pendingRetryAccountID = account.ID
+						lastFailoverErr = failoverErr
 						reqLog.Warn("grok_media.pool_mode_same_account_retry",
 							zap.Int64("account_id", account.ID),
 							zap.Int("upstream_status", failoverErr.StatusCode),
@@ -452,9 +473,10 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 					}
 				}
 				h.gatewayService.RecordOpenAIAccountSwitch()
+				pendingRetryAccountID = 0
 				failedAccountIDs[account.ID] = struct{}{}
 				lastFailoverErr = failoverErr
-				if switchCount >= maxAccountSwitches {
+				if maxAccountSwitches == 0 {
 					h.handleFailoverExhausted(c, failoverErr, false)
 					return
 				}

@@ -56,6 +56,44 @@ func (r *grokCredentialHandlerRepo) ListSchedulableByGroupIDAndPlatform(ctx cont
 	return r.ListSchedulableByPlatform(ctx, platform)
 }
 
+func (r *grokCredentialHandlerRepo) ListSchedulableByGroupIDAndPlatforms(_ context.Context, groupID int64, platforms []string) ([]service.Account, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.selectionCalls++
+	platformSet := make(map[string]struct{}, len(platforms))
+	for _, platform := range platforms {
+		platformSet[platform] = struct{}{}
+	}
+	out := make([]service.Account, 0, len(r.accounts))
+	for _, account := range r.accounts {
+		if !account.IsSchedulable() {
+			continue
+		}
+		if _, ok := platformSet[account.Platform]; !ok {
+			continue
+		}
+		belongsToGroup := false
+		for _, id := range account.GroupIDs {
+			if id == groupID {
+				belongsToGroup = true
+				break
+			}
+		}
+		if !belongsToGroup {
+			for _, membership := range account.AccountGroups {
+				if membership.GroupID == groupID {
+					belongsToGroup = true
+					break
+				}
+			}
+		}
+		if belongsToGroup {
+			out = append(out, account)
+		}
+	}
+	return out, nil
+}
+
 func (r *grokCredentialHandlerRepo) ListSchedulableUngroupedByPlatform(ctx context.Context, platform string) ([]service.Account, error) {
 	return r.ListSchedulableByPlatform(ctx, platform)
 }
@@ -447,7 +485,7 @@ func TestResponsesCredentialFailoverLoop(t *testing.T) {
 		require.Contains(t, recorder.Body.String(), service.GrokCredentialUnavailableClientMessage)
 		require.Empty(t, repo.errorIDs())
 		require.Empty(t, upstream.accountHits())
-		require.Equal(t, 1, repo.selectorCalls())
+		require.Equal(t, 2, repo.selectorCalls(), "initial candidate snapshot plus the initial selection; no reselection")
 		require.Zero(t, h.gatewayService.SnapshotOpenAIAccountSchedulerMetrics().RuntimeStatsAccountCount,
 			"provider-scoped auth failure must not penalize the selected account")
 	})
@@ -498,7 +536,7 @@ func TestResponsesCredentialFailoverLoop(t *testing.T) {
 
 		require.Equal(t, []int64{801}, upstream.accountHits())
 		require.Empty(t, repo.errorIDs())
-		require.Equal(t, 1, repo.selectorCalls())
+		require.Equal(t, 2, repo.selectorCalls(), "initial candidate snapshot plus the initial selection; no reselection")
 		require.Zero(t, h.gatewayService.SnapshotOpenAIAccountSchedulerMetrics().RuntimeStatsAccountCount)
 	})
 
@@ -546,7 +584,7 @@ func TestResponsesCredentialFailoverLoop(t *testing.T) {
 				require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
 				require.Contains(t, recorder.Body.String(), service.GrokCredentialUnavailableClientMessage)
 				require.Empty(t, upstream.accountHits())
-				require.Equal(t, 1, repo.selectorCalls())
+				require.Equal(t, 2, repo.selectorCalls(), "initial candidate snapshot plus the initial selection; no reselection")
 			})
 		}
 	})
@@ -562,13 +600,13 @@ func TestResponsesCredentialFailoverLoop(t *testing.T) {
 
 		require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
 		require.Contains(t, recorder.Body.String(), service.GrokCredentialUnavailableClientMessage)
-		require.Equal(t, 1, repo.selectorCalls())
+		require.Equal(t, 2, repo.selectorCalls(), "initial candidate snapshot plus the initial selection; no reselection")
 		require.Empty(t, upstream.accountHits())
 		require.Empty(t, repo.errorIDs())
 	})
 }
 
-func TestResponsesGrok429FailoverIsBounded(t *testing.T) {
+func TestResponsesGrok429FailoverTraversesEligiblePool(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	t.Run("first rate limited account selects healthy account", func(t *testing.T) {
@@ -586,7 +624,7 @@ func TestResponsesGrok429FailoverIsBounded(t *testing.T) {
 		require.Equal(t, []int64{801}, repo.rateLimitedAccountIDs())
 	})
 
-	t.Run("two rate limited accounts stop without sweeping the pool", func(t *testing.T) {
+	t.Run("two rate limited accounts reach the remaining healthy account", func(t *testing.T) {
 		_, repo, upstream, router, cleanup := newGrokCredentialFailoverHandler(t, "all_429")
 		defer cleanup()
 		recorder := httptest.NewRecorder()
@@ -595,8 +633,8 @@ func TestResponsesGrok429FailoverIsBounded(t *testing.T) {
 
 		router.ServeHTTP(recorder, req)
 
-		require.Equal(t, http.StatusTooManyRequests, recorder.Code, recorder.Body.String())
-		require.Equal(t, []int64{801, 802}, upstream.accountHits())
+		require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+		require.Equal(t, []int64{801, 802, 803}, upstream.accountHits())
 		require.Equal(t, []int64{801, 802}, repo.rateLimitedAccountIDs())
 		require.NotContains(t, recorder.Body.String(), "expired")
 		require.NotContains(t, recorder.Body.String(), "healthy-access")
@@ -626,14 +664,14 @@ func TestResponsesGrok402FailoverCooldown(t *testing.T) {
 	router.ServeHTTP(second, secondReq)
 
 	require.Equal(t, http.StatusOK, second.Code, second.Body.String())
-	require.Equal(t, before+1, repo.selectorCalls())
+	require.Equal(t, before+2, repo.selectorCalls(), "one new candidate snapshot and one selection on the subsequent request")
 	require.Equal(t, []int64{801, 802, 802}, upstream.accountHits(), "cooldown must exclude the 402 account from later requests")
 }
 
 func TestResponsesGrok429FailoverHandlesMixedStatuses(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	t.Run("429 then 500 stops after the bounded followup", func(t *testing.T) {
+	t.Run("429 then 500 reaches a healthy remaining account", func(t *testing.T) {
 		_, _, upstream, router, cleanup := newGrokCredentialFailoverHandler(t, "mixed_429_500")
 		defer cleanup()
 		recorder := httptest.NewRecorder()
@@ -642,8 +680,8 @@ func TestResponsesGrok429FailoverHandlesMixedStatuses(t *testing.T) {
 
 		router.ServeHTTP(recorder, req)
 
-		require.Equal(t, http.StatusBadGateway, recorder.Code, recorder.Body.String())
-		require.Equal(t, []int64{801, 802}, upstream.accountHits())
+		require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+		require.Equal(t, []int64{801, 802, 803}, upstream.accountHits())
 		require.NotContains(t, recorder.Body.String(), "upstream unavailable")
 	})
 
@@ -660,7 +698,7 @@ func TestResponsesGrok429FailoverHandlesMixedStatuses(t *testing.T) {
 		require.Equal(t, []int64{801, 802, 803}, upstream.accountHits())
 	})
 
-	t.Run("OAuth 429 then API-key failure cannot bypass the bound", func(t *testing.T) {
+	t.Run("OAuth 429 then API-key failure reaches a healthy remaining account", func(t *testing.T) {
 		_, _, upstream, router, cleanup := newGrokCredentialFailoverHandler(t, "oauth_429_apikey_500")
 		defer cleanup()
 		recorder := httptest.NewRecorder()
@@ -669,8 +707,8 @@ func TestResponsesGrok429FailoverHandlesMixedStatuses(t *testing.T) {
 
 		router.ServeHTTP(recorder, req)
 
-		require.Equal(t, http.StatusBadGateway, recorder.Code, recorder.Body.String())
-		require.Equal(t, []int64{801, 802}, upstream.accountHits())
+		require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+		require.Equal(t, []int64{801, 802, 803}, upstream.accountHits())
 	})
 }
 
@@ -704,7 +742,7 @@ func TestGrokSameAccountRetryHelpersOnResponsesAndMessages(t *testing.T) {
 	}
 }
 
-func TestGrokMedia429FailoverIsBounded(t *testing.T) {
+func TestGrokMedia429FailoverTraversesEligiblePool(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	t.Run("first 429 selects one healthy followup", func(t *testing.T) {
@@ -720,7 +758,7 @@ func TestGrokMedia429FailoverIsBounded(t *testing.T) {
 		require.Equal(t, []int64{801, 802}, upstream.accountHits())
 	})
 
-	t.Run("second 429 stops without sweeping a third account", func(t *testing.T) {
+	t.Run("second 429 reaches the healthy third account", func(t *testing.T) {
 		_, _, upstream, router, cleanup := newGrokCredentialFailoverHandler(t, "all_429")
 		defer cleanup()
 		recorder := httptest.NewRecorder()
@@ -729,8 +767,8 @@ func TestGrokMedia429FailoverIsBounded(t *testing.T) {
 
 		router.ServeHTTP(recorder, req)
 
-		require.Equal(t, http.StatusTooManyRequests, recorder.Code, recorder.Body.String())
-		require.Equal(t, []int64{801, 802}, upstream.accountHits())
+		require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+		require.Equal(t, []int64{801, 802, 803}, upstream.accountHits())
 		require.NotContains(t, recorder.Body.String(), "rate limited")
 	})
 }
@@ -834,7 +872,7 @@ func TestResponsesWebSocketCredentialFailoverLoop(t *testing.T) {
 		require.NoError(t, err)
 		require.Contains(t, string(payload), "resp_healthy")
 		require.Equal(t, []int64{801}, repo.errorIDs())
-		require.Equal(t, 2, repo.selectorCalls())
+		require.Equal(t, 4, repo.selectorCalls(), "initial snapshot and one candidate read for each selection")
 		require.Equal(t, []int64{802}, upstream.accountHits())
 	})
 
@@ -851,7 +889,7 @@ func TestResponsesWebSocketCredentialFailoverLoop(t *testing.T) {
 		var closeErr coderws.CloseError
 		require.ErrorAs(t, err, &closeErr)
 		require.Contains(t, closeErr.Reason, service.GrokCredentialUnavailableClientMessage)
-		require.Equal(t, 1, repo.selectorCalls())
+		require.Equal(t, 2, repo.selectorCalls(), "initial snapshot plus initial selection; provider error stops")
 		require.Empty(t, upstream.accountHits())
 	})
 
@@ -867,7 +905,7 @@ func TestResponsesWebSocketCredentialFailoverLoop(t *testing.T) {
 		}
 		closeConn()
 
-		require.Eventually(t, func() bool { return repo.selectorCalls() == 1 }, 2*time.Second, 20*time.Millisecond)
+		require.Eventually(t, func() bool { return repo.selectorCalls() == 2 }, 2*time.Second, 20*time.Millisecond)
 		require.Empty(t, repo.errorIDs())
 		require.Empty(t, upstream.accountHits())
 	})

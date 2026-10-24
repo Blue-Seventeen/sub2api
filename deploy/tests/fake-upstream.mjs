@@ -8,6 +8,15 @@ const usage = { input_tokens: 100, output_tokens: 20, total_tokens: 120,
   input_tokens_details: { cached_tokens: 10 } };
 const chatUsage = { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120,
   prompt_tokens_details: { cached_tokens: 10 } };
+const geminiUsage = { promptTokenCount: 100, candidatesTokenCount: 20, totalTokenCount: 120,
+  cachedContentTokenCount: 10 };
+const geminiModels = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-3-flash',
+  'gemini-3-pro-low', 'gemini-3-pro-high'];
+const geminiResult = (model, text, completed) => ({
+  candidates: [{ index: 0, content: { role: 'model', parts: [{ text }] },
+    ...(completed ? { finishReason: 'STOP' } : {}) }],
+  modelVersion: model, ...(completed ? { usageMetadata: structuredClone(geminiUsage) } : {}),
+});
 const terminal = (model, marker, id) => ({ id, object: 'response', status: 'completed', model,
   output: [{ id: `msg_${id}`, type: 'message', role: 'assistant', status: 'completed',
     content: [{ type: 'output_text', text: marker, annotations: [] }] }], usage: structuredClone(usage) });
@@ -24,7 +33,8 @@ const server = createServer(async (request, response) => {
   let body;
   try { body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); }
   catch { return json(response, 400, { error: { message: 'bad json' } }); }
-  const path = new URL(request.url, 'http://fixture').pathname;
+  const url = new URL(request.url, 'http://fixture');
+  const path = url.pathname;
   const mode = path.split('/')[1];
   const id = `resp_${randomUUID().replaceAll('-', '')}`;
   const model = mode === 'replace' ? 'gpt-5.4' : (body.model || 'gpt-5.5');
@@ -36,6 +46,23 @@ const server = createServer(async (request, response) => {
     stream: body.stream, tool_choice: body.tool_choice,
     roles: Array.isArray(body.messages || body.input) ? (body.messages || body.input).map(v => v.role) : [] });
   if (mode === 'retry' && count === 1 && !isProbe) return json(response, 503, { error: { type: 'server_error', message: 'fixture retry' } });
+  if (path === '/normal/v1beta/models') {
+    if (request.method !== 'GET') return json(response, 405, { error: { message: 'Gemini model catalog requires GET' } });
+    return json(response, 200, { models: geminiModels.map(name => ({ name: `models/${name}`,
+      displayName: name, supportedGenerationMethods: ['generateContent', 'streamGenerateContent'] })) });
+  }
+  const geminiAction = /^\/normal\/v1beta\/models\/([^/:]+):(generateContent|streamGenerateContent)$/.exec(path);
+  if (geminiAction) {
+    if (request.method !== 'POST') return json(response, 405, { error: { message: 'Gemini generation requires POST' } });
+    const [, geminiModel, action] = geminiAction;
+    if (action === 'generateContent') return json(response, 200, geminiResult(geminiModel, marker, true));
+    if (url.searchParams.get('alt') !== 'sse') return json(response, 400, { error: { message: 'Gemini streaming fixture requires alt=sse' } });
+    response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+    response.flushHeaders();
+    response.write(`data: ${JSON.stringify(geminiResult(geminiModel, 'FIXTURE_', false))}\n\n`);
+    response.write(`data: ${JSON.stringify(geminiResult(geminiModel, 'OK', true))}\n\n`);
+    return response.end();
+  }
   if (path.endsWith('/models')) return json(response, 200, { data: [
     { id: 'gpt-5.5', supported_endpoints: ['/chat/completions', '/responses'] },
     { id: 'claude-sonnet-4-6', supported_endpoints: ['/messages'] },

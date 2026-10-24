@@ -137,6 +137,9 @@ func (s *OpenAIGatewayService) forwardResponsesViaNativeAnthropic(
 		return nil, fmt.Errorf("upstream error: %d %s", resp.StatusCode, upstreamMsg)
 	}
 
+	if err := s.preflightOpenAIPoolCompatStream(c, resp, account, upstreamSSEMessages, writeResponsesError); err != nil {
+		return nil, err
+	}
 	if clientStream {
 		return s.handleResponsesStreamingFromNativeAnthropic(resp, c, originalModel, billingModel, upstreamModel, reasoningEffort, startTime, clientToolMapping)
 	}
@@ -166,6 +169,17 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 
 	var finalResp *apicompat.AnthropicResponse
 	var usage ClaudeUsage
+	completed := false
+	resultWithUsage := func() *OpenAIForwardResult {
+		return &OpenAIForwardResult{RequestID: requestID, UpstreamHeaders: resp.Header,
+			Usage: claudeUsageToOpenAIUsage(&usage), Model: originalModel, BillingModel: billingModel,
+			UpstreamModel: upstreamModel, UpstreamEndpoint: "/v1/messages", ReasoningEffort: reasoningEffort,
+			Stream: false, Duration: time.Since(startTime)}
+	}
+	failResponse := func(message string) (*OpenAIForwardResult, error) {
+		writeResponsesError(c, http.StatusBadGateway, "server_error", message)
+		return resultWithUsage(), fmt.Errorf("upstream response failed: %s", message)
+	}
 
 	// 读间隔上限：上游挂住 SSE 时中止组装（缓冲路径尚未提交响应头，可回 502）。
 	streamInterval := s.anthropicNativeStreamInterval()
@@ -187,7 +201,7 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 			zap.Duration("interval", streamInterval),
 		)
 		writeResponsesError(c, http.StatusBadGateway, "server_error", "Upstream stream data interval timeout")
-		return nil, fmt.Errorf("stream data interval timeout")
+		return resultWithUsage(), fmt.Errorf("stream data interval timeout")
 	}
 
 	for {
@@ -217,11 +231,18 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 			continue
 		}
 
+		if isCCUpstreamErrorPayload("", []byte(payload)) {
+			mergeNativeAnthropicErrorUsage(&usage, []byte(payload))
+			return failResponse(extractOpenAISSEErrorMessage([]byte(payload)))
+		}
 		var event apicompat.AnthropicStreamEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
 			continue
 		}
 
+		if event.Type == "message_stop" {
+			completed = true
+		}
 		if event.Type == "message_start" && event.Message != nil {
 			finalResp = event.Message
 			mergeAnthropicUsage(&usage, event.Message.Usage)
@@ -254,6 +275,9 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 		}
 	}
 
+	if !completed {
+		return failResponse("Upstream stream ended without a message_stop event")
+	}
 	if finalResp == nil {
 		writeResponsesError(c, http.StatusBadGateway, "server_error", "Upstream stream ended without a response")
 		return nil, fmt.Errorf("upstream stream ended without response")
@@ -333,6 +357,7 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 	clientToolRestorer := apicompat.NewResponsesClientToolStreamRestorer(clientToolMapping)
 
 	var usage ClaudeUsage
+	completed := false
 	var firstTokenMs *int
 	firstChunk := true
 	clientDisconnected := false
@@ -361,6 +386,19 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 		}
 	}
 
+	failStream := func(message string) (*OpenAIForwardResult, error) {
+		if !clientDisconnected {
+			if !c.Writer.Written() {
+				writeResponsesError(c, http.StatusBadGateway, "server_error", message)
+			} else {
+				_, _ = fmt.Fprint(c.Writer, buildOpenAIResponseFailedSSE("", originalModel, 0, nil, message))
+				c.Writer.Flush()
+			}
+			MarkResponseCommitted(c)
+		}
+		return resultWithUsage(), fmt.Errorf("upstream response failed: %s", message)
+	}
+
 	// 读间隔上限：上游挂住 SSE（不发数据也不断连）时结束转换循环。上游 ctx 为
 	// WithoutCancel 且 http.Client 无整体 Timeout，无此界限则 scanner.Scan()
 	// 永久阻塞（见 anthropic native pump 文件注释）。
@@ -382,7 +420,7 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 			zap.String("request_id", requestID),
 			zap.Duration("interval", streamInterval),
 		)
-		return resultWithUsage(), fmt.Errorf("stream data interval timeout")
+		return failStream("Upstream stream data interval timeout")
 	}
 
 	// 与 CC 姊妹路径（handleCCStreamingFromNativeAnthropic.writeChunk）同语义：
@@ -462,14 +500,24 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 			continue
 		}
 
+		if isCCUpstreamErrorPayload("", []byte(payload)) {
+			mergeNativeAnthropicErrorUsage(&usage, []byte(payload))
+			return failStream(extractOpenAISSEErrorMessage([]byte(payload)))
+		}
 		var event apicompat.AnthropicStreamEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
 			continue
 		}
 
+		if event.Type == "message_stop" {
+			completed = true
+		}
 		processAnthropicEvent(&event)
 	}
 
+	if !completed {
+		return failStream("Upstream stream ended without a message_stop event")
+	}
 	// Finalize state machine（客户端已断开时仍推进，保证 usage 汇总完整；仅在
 	// 客户端仍连接时写出）。终态帧与逐事件路径一致过工具名反转与客户端工具还原，
 	// 避免流截断时终态帧携带改写后的工具名。

@@ -198,12 +198,17 @@ jobs:
     env:
       RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
       RELEASE_DATE: ${{ needs.prepare.outputs.date }}
+      RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
           ref: ${{ needs.prepare.outputs.sha }}
           fetch-depth: 0
+      - name: Verify clean selected source
+        run: |
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          test -z "$(git status --porcelain)"
       - uses: actions/download-artifact@v8
         with:
           name: release-tooling
@@ -247,7 +252,17 @@ jobs:
         uses: goreleaser/goreleaser-action@v7
         with:
           version: '~> v2'
-          args: release --snapshot --clean --skip=validate,publish,docker,announce --config=${{ runner.temp }}/goreleaser.matrix.yaml
+          args: check --config=${{ runner.temp }}/goreleaser.matrix.yaml
+        env:
+          GITHUB_REPO_OWNER: ${{ github.repository_owner }}
+          GITHUB_REPO_OWNER_LOWER: ${{ needs.prepare.outputs.owner_lower }}
+          GITHUB_REPO_NAME: ${{ github.event.repository.name }}
+          DOCKERHUB_USERNAME: skip
+      - name: Build validated archives without publishing
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: '~> v2'
+          args: release --snapshot --clean --skip=publish,docker,announce --config=${{ runner.temp }}/goreleaser.matrix.yaml
         env:
           GITHUB_REPO_OWNER: ${{ github.repository_owner }}
           GITHUB_REPO_OWNER_LOWER: ${{ needs.prepare.outputs.owner_lower }}
@@ -295,6 +310,10 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.sha }}
           fetch-depth: 0
+      - name: Verify clean selected source
+        run: |
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          test -z "$(git status --porcelain)"
       - uses: actions/download-artifact@v8
         with:
           name: release-tooling
@@ -313,6 +332,21 @@ jobs:
           args=(--version "$RELEASE_VERSION" --sha "$RELEASE_SHA" --input release-input --output .release-context)
           if [[ "$SIMPLE_RELEASE" == true ]]; then args+=(--simple); fi
           python "$RUNNER_TEMP/release-tools/release_matrix.py" contexts "${args[@]}"
+      - name: Prepare publication-only GoReleaser config
+        run: |
+          args=(publish --output "$RUNNER_TEMP/goreleaser.publisher.yaml")
+          if [[ "$SIMPLE_RELEASE" == true ]]; then args+=(--simple); fi
+          python "$RUNNER_TEMP/release-tools/release_matrix.py" config "${args[@]}"
+      - name: Validate publication config before publishing images
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: '~> v2'
+          args: check --config=${{ runner.temp }}/goreleaser.publisher.yaml
+        env:
+          GITHUB_REPO_OWNER: ${{ github.repository_owner }}
+          GITHUB_REPO_OWNER_LOWER: ${{ needs.prepare.outputs.owner_lower }}
+          GITHUB_REPO_NAME: ${{ github.event.repository.name }}
+          DOCKERHUB_USERNAME: skip
       - uses: actions/setup-go@v6
         with:
           go-version-file: backend/go.mod
@@ -353,16 +387,11 @@ jobs:
             printf '%s\n' "$DELIMITER"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Prepare publication-only GoReleaser config
-        run: |
-          args=(publish --output "$RUNNER_TEMP/goreleaser.publisher.yaml")
-          if [[ "$SIMPLE_RELEASE" == true ]]; then args+=(--simple); fi
-          python "$RUNNER_TEMP/release-tools/release_matrix.py" config "${args[@]}"
       - name: Publish existing archives and release notes
         uses: goreleaser/goreleaser-action@v7
         with:
           version: '~> v2'
-          args: release --clean --skip=validate,before,docker ${{ env.DRY_RUN == 'true' && '--snapshot --skip=publish,announce' || '' }} --config=${{ runner.temp }}/goreleaser.publisher.yaml
+          args: release --clean --skip=before,docker ${{ env.DRY_RUN == 'true' && '--snapshot --skip=publish,announce' || '' }} --config=${{ runner.temp }}/goreleaser.publisher.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GORELEASER_CURRENT_TAG: ${{ needs.prepare.outputs.tag }}

@@ -241,6 +241,15 @@ func (s *NewAPIStyleGatewayService) Forward(
 	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsProfile(account))
 	if err != nil {
 		ClearAutoSelectedProxyStickyOnTransportError(ctx, account, err)
+		if !newAPIStyleAllowsReplay(opts) {
+			if ctx.Err() != nil {
+				return nil, upstreamEndpoint, ctx.Err()
+			}
+			// A task may have been accepted before its connection failed.
+			// Without an owner/idempotency contract, do not resubmit it.
+			setOpsUpstreamError(c, http.StatusBadGateway, "Upstream request disconnected", "")
+			return nil, upstreamEndpoint, &CompatibleClientError{StatusCode: http.StatusBadGateway, ErrorType: "upstream_error", Message: "Upstream request disconnected"}
+		}
 		if account.Platform == PlatformOpenAI && s.gatewayService != nil {
 			return nil, upstreamEndpoint, s.gatewayService.handleOpenAIUpstreamTransportError(ctx, c, account, err, false, safeUpstreamURL(upstreamReq.URL.String()), s.runtimeBlocker)
 		}
@@ -272,14 +281,24 @@ func (s *NewAPIStyleGatewayService) Forward(
 
 	if resp.StatusCode >= 400 {
 		respBody, _ := ReadUpstreamResponseBody(resp.Body, s.cfg, c, nil)
-		if s.gatewayService != nil && s.gatewayService.rateLimitService != nil {
-			s.gatewayService.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
+		var rateLimit *RateLimitService
+		if s.gatewayService != nil {
+			rateLimit = s.gatewayService.rateLimitService
+		}
+		failoverErr := poolModeHTTPFailover(ctx, rateLimit, account, resp.StatusCode, resp.Header, respBody, opts.Model)
+		if !newAPIStyleAllowsReplay(opts) && failoverErr != nil {
+			// Preserve the previous HTTP rejection handling for media/task
+			// routes, without adding configured cross-account replay statuses.
+			if !newAPIStyleShouldFailoverStatus(resp.StatusCode) || (opts.Method != http.MethodPost && opts.Method != "") || opts.Route == NewAPIStyleRouteTask {
+				failoverErr = nil
+			} else {
+				failoverErr.RetryableOnSameAccount = false
+			}
 		}
 		upstreamMsg := sanitizeUpstreamErrorMessage(ExtractUpstreamErrorMessage(respBody))
 		setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, "")
-		shouldFailover := newAPIStyleShouldFailoverStatus(resp.StatusCode)
 		eventKind := "http_error"
-		if shouldFailover {
+		if failoverErr != nil {
 			eventKind = "failover"
 		}
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -294,12 +313,8 @@ func (s *NewAPIStyleGatewayService) Forward(
 			Message:              upstreamMsg,
 		})
 		safeBody := sanitizeClientVisibleUpstreamErrorPayload(respBody)
-		if shouldFailover {
-			return nil, upstreamEndpoint, &UpstreamFailoverError{
-				StatusCode:      resp.StatusCode,
-				ResponseBody:    safeBody,
-				ResponseHeaders: resp.Header.Clone(),
-			}
+		if failoverErr != nil {
+			return nil, upstreamEndpoint, failoverErr
 		}
 		safeMessage := strings.TrimSpace(ExtractUpstreamErrorMessage(safeBody))
 		if safeMessage == "" {
@@ -309,6 +324,45 @@ func (s *NewAPIStyleGatewayService) Forward(
 			StatusCode: resp.StatusCode,
 			ErrorType:  "upstream_error",
 			Message:    safeMessage,
+		}
+	}
+	if newAPIStyleAllowsReplay(opts) && !opts.Stream && !isEventStream(resp.Header.Get("Content-Type")) {
+		if failure := inspectUpstreamJSONError(resp, s.cfg); failure != nil {
+			var rateLimit *RateLimitService
+			if s.gatewayService != nil {
+				rateLimit = s.gatewayService.rateLimitService
+			}
+			setOpsUpstreamError(c, failure.status, failure.message, "")
+			if failoverErr := failure.failover(ctx, rateLimit, account, resp.Header, opts.Model); failoverErr != nil {
+				return nil, upstreamEndpoint, failoverErr
+			}
+			return nil, upstreamEndpoint, &CompatibleClientError{StatusCode: failure.status, ErrorType: "upstream_error", Message: failure.message}
+		}
+	}
+	if newAPIStyleAllowsReplay(opts) && (isEventStream(resp.Header.Get("Content-Type")) || (opts.Stream && newAPIStyleShouldCaptureTerminal(opts, resp.Header.Get("Content-Type")))) {
+		protocol := upstreamSSEChat
+		switch opts.Route {
+		case NewAPIStyleRouteResponses:
+			protocol = upstreamSSEResponses
+		case NewAPIStyleRouteMessages:
+			protocol = upstreamSSEMessages
+		}
+		if failure := inspectUpstreamSSEPrefix(ctx, resp, protocol, upstreamSSEIdleTimeout(s.cfg)); failure != nil {
+			if ctx.Err() != nil {
+				return nil, upstreamEndpoint, ctx.Err()
+			}
+			setOpsUpstreamError(c, failure.status, failure.message, "")
+			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{Platform: account.Platform, AccountID: account.ID, AccountName: account.Name,
+				UpstreamStatusCode: failure.status, UpstreamRequestID: firstNonEmptyText(resp.Header.Get("x-request-id"), resp.Header.Get("request-id")),
+				UpstreamURL: safeUpstreamURL(upstreamReq.URL.String()), Kind: "stream_error", Message: failure.message})
+			var rateLimit *RateLimitService
+			if s.gatewayService != nil {
+				rateLimit = s.gatewayService.rateLimitService
+			}
+			if failoverErr := failure.failover(ctx, rateLimit, account, resp.Header, opts.Model); failoverErr != nil {
+				return nil, upstreamEndpoint, failoverErr
+			}
+			return nil, upstreamEndpoint, &CompatibleClientError{StatusCode: failure.status, ErrorType: "upstream_error", Message: failure.message}
 		}
 	}
 
@@ -386,12 +440,15 @@ func (s *NewAPIStyleGatewayService) Forward(
 		if copyErr != nil {
 			safeMessage := "Upstream stream disconnected"
 			setOpsUpstreamError(c, http.StatusBadGateway, safeMessage, "")
-			if copiedBytes == 0 {
+			if copiedBytes == 0 && newAPIStyleAllowsReplay(opts) && newAPIStyleRequiresTerminalEvent(opts.Route) {
 				return nil, upstreamEndpoint, &UpstreamFailoverError{
 					StatusCode:             http.StatusBadGateway,
 					ResponseBody:           []byte(`{"error":{"type":"upstream_error","message":"Upstream stream disconnected"}}`),
 					RetryableOnSameAccount: true,
 				}
+			}
+			if copiedBytes == 0 {
+				return nil, upstreamEndpoint, errors.New("upstream accepted stream disconnected before delivery")
 			}
 			terminal, successfulTerminal := streamTerminalCapture.State()
 			if terminal {
@@ -518,6 +575,33 @@ func newAPIStyleShouldFailoverStatus(statusCode int) bool {
 	}
 }
 
+// Creation/update/polling of task resources remains on its existing owner and
+// acceptance semantics. A missing client byte is not proof a task was not made.
+func newAPIStyleAllowsReplay(opts NewAPIStyleForwardOptions) bool {
+	if opts.Method != "" && opts.Method != http.MethodPost {
+		return false
+	}
+	switch opts.Route {
+	case NewAPIStyleRouteChatCompletions, NewAPIStyleRouteMessages, NewAPIStyleRouteResponses:
+	case NewAPIStyleRouteEmbeddings, NewAPIStyleRouteRerank:
+		return true
+	case NewAPIStyleRouteAudio:
+		path := strings.TrimRight(opts.InboundPath, "/")
+		return strings.HasSuffix(path, "/audio/speech") || strings.HasSuffix(path, "/audio/transcriptions") || strings.HasSuffix(path, "/audio/translations")
+	case NewAPIStyleRouteQwenTTS:
+		return true
+	default:
+		return false
+	}
+	for _, tool := range gjson.GetBytes(opts.RequestBody, "tools").Array() {
+		switch tool.Get("type").String() {
+		case "image_generation", "video_generation", "audio_generation":
+			return false
+		}
+	}
+	return true
+}
+
 func (s *NewAPIStyleGatewayService) ForwardOpenAI(
 	ctx context.Context,
 	c *gin.Context,
@@ -559,6 +643,7 @@ func OpenAIForwardResultFromForwardResult(result *ForwardResult) *OpenAIForwardR
 		RequestedReasoningEffort:      result.RequestedReasoningEffort,
 		ServiceTier:                   result.ServiceTier,
 		SearchCount:                   result.SearchCount,
+		EmulatedWebSearch:             result.EmulatedWebSearch,
 		AudioUsage:                    result.AudioUsage,
 		ReasoningEffort:               result.ReasoningEffort,
 		Stream:                        result.Stream,

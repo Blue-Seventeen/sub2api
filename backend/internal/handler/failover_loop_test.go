@@ -321,11 +321,11 @@ func TestHandleFailoverError_BasicSwitch(t *testing.T) {
 		require.Equal(t, FailoverContinue, action)
 		require.Equal(t, 2, fs.SwitchCount)
 
-		// 第三次已耗尽：SwitchCount(2) >= MaxSwitches(2)
+		// 尚未经过选号耗尽，继续尝试后续未排除候选。
 		err3 := newTestFailoverErr(503, false, false)
 		action = fs.HandleFailoverError(context.Background(), mock, 300, "openai", maxSameAccountRetries, err3)
-		require.Equal(t, FailoverExhausted, action)
-		require.Equal(t, 2, fs.SwitchCount, "耗尽时不应继续递增")
+		require.Equal(t, FailoverContinue, action)
+		require.Equal(t, 3, fs.SwitchCount)
 
 		// 验证失败账号列表
 		require.Len(t, fs.FailedAccountIDs, 3)
@@ -790,12 +790,12 @@ func TestHandleFailoverError_IntegrationScenario(t *testing.T) {
 		require.Equal(t, FailoverContinue, action)
 		require.Equal(t, 3, fs.SwitchCount)
 
-		// 5. 账号 400 → 已耗尽 (SwitchCount=3 >= MaxSwitches=3)
+		// 5. 账号 400 失败后仍可尝试尚未访问的候选
 		action = fs.HandleFailoverError(context.Background(), mock, 400, "openai", maxSameAccountRetries, switchErr)
-		require.Equal(t, FailoverExhausted, action)
+		require.Equal(t, FailoverContinue, action)
 
 		// 最终状态验证
-		require.Equal(t, 3, fs.SwitchCount, "耗尽时不再递增")
+		require.Equal(t, 4, fs.SwitchCount)
 		require.Len(t, fs.FailedAccountIDs, 4, "4个不同账号都在失败列表中")
 		require.True(t, fs.ForceCacheBilling)
 		require.Len(t, mock.calls, 1, "只有账号 100 触发了 TempUnschedule")
@@ -821,12 +821,13 @@ func TestHandleFailoverError_IntegrationScenario(t *testing.T) {
 		require.Equal(t, FailoverContinue, action)
 		require.GreaterOrEqual(t, elapsed, 800*time.Millisecond, "第二次切换延迟约 1s")
 
-		// 第三次：耗尽（无延迟，因为在检查延迟之前就返回了）
+		// 第三次：继续有限遍历，延迟封顶2s
 		start = time.Now()
 		action = fs.HandleFailoverError(context.Background(), mock, 300, service.PlatformAntigravity, maxSameAccountRetries, err)
 		elapsed = time.Since(start)
-		require.Equal(t, FailoverExhausted, action)
-		require.Less(t, elapsed, 200*time.Millisecond, "耗尽时不应有延迟")
+		require.Equal(t, FailoverContinue, action)
+		require.GreaterOrEqual(t, elapsed, 1500*time.Millisecond)
+		require.Less(t, elapsed, 4*time.Second)
 	})
 
 	t.Run("ForceCacheBilling通过错误标志设置", func(t *testing.T) {
@@ -920,7 +921,7 @@ func TestHandleSelectionExhausted(t *testing.T) {
 		require.Equal(t, FailoverExhausted, action)
 	})
 
-	t.Run("503且未耗尽_等待后返回Continue并清除失败列表", func(t *testing.T) {
+	t.Run("503候选耗尽_立即停止并保留失败列表", func(t *testing.T) {
 		fs := NewFailoverState(3, false)
 		fs.LastFailoverErr = newTestFailoverErr(503, false, false)
 		fs.FailedAccountIDs[100] = struct{}{}
@@ -930,9 +931,9 @@ func TestHandleSelectionExhausted(t *testing.T) {
 		action := fs.HandleSelectionExhausted(context.Background())
 		elapsed := time.Since(start)
 
-		require.Equal(t, FailoverContinue, action)
-		require.Empty(t, fs.FailedAccountIDs, "应清除失败账号列表")
-		require.GreaterOrEqual(t, elapsed, 1500*time.Millisecond, "应等待约 2s")
+		require.Equal(t, FailoverExhausted, action)
+		require.Contains(t, fs.FailedAccountIDs, int64(100))
+		require.Less(t, elapsed, 100*time.Millisecond)
 		require.Less(t, elapsed, 5*time.Second)
 	})
 
@@ -987,13 +988,13 @@ func TestHandleSelectionExhausted(t *testing.T) {
 		require.Equal(t, FailoverCanceled, action)
 	})
 
-	t.Run("503且SwitchCount等于MaxSwitches_仍可重试", func(t *testing.T) {
+	t.Run("503候选耗尽_旧计数不重启候选", func(t *testing.T) {
 		fs := NewFailoverState(2, false)
 		fs.LastFailoverErr = newTestFailoverErr(503, false, false)
 		fs.SwitchCount = 2 // == MaxSwitches，条件是 <=，仍可重试
 
 		action := fs.HandleSelectionExhausted(context.Background())
-		require.Equal(t, FailoverContinue, action)
+		require.Equal(t, FailoverExhausted, action)
 	})
 }
 

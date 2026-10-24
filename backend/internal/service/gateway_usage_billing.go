@@ -1227,6 +1227,9 @@ func (s *GatewayService) calculateRecordUsageBaseCost(
 	imageMultiplier float64,
 	opts *recordUsageOpts,
 ) (*CostBreakdown, error) {
+	if result != nil && result.EmulatedWebSearch {
+		return s.billingService.CalculateSearchCost(result.SearchCount, groupSearchPricePer1kFromAPIKey(apiKey), multiplier), nil
+	}
 	if cost, err := s.calculateQuantityModeCost(ctx, result, apiKey, billingModel, multiplier); cost != nil || err != nil {
 		if err != nil {
 			return nil, err

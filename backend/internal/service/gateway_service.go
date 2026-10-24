@@ -19,7 +19,9 @@ import (
 	"unsafe"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/cespare/xxhash/v2"
 	gocache "github.com/patrickmn/go-cache"
@@ -606,6 +608,7 @@ type ForwardResult struct {
 	RequestedReasoningEffort      *string
 	ServiceTier                   *string
 	SearchCount                   int
+	EmulatedWebSearch             bool // Search-only response; no model request or token charge.
 	AudioUsage                    *AudioUsage
 	BillingModel                  string
 	Stream                        bool
@@ -869,6 +872,9 @@ func NewGatewayService(
 		balanceNotifyService:  balanceNotifyService,
 		proxyStatsRepo:        proxyStatsRepo,
 		userPlatformQuotaRepo: userPlatformQuotaRepo,
+	}
+	if compositeResolver != nil {
+		compositeResolver.SetModelOwnershipResolver(svc.resolveCompositeModelOwnership)
 	}
 	svc.userGroupRateResolver = newUserGroupRateResolver(
 		userGroupRateRepo,
@@ -1341,15 +1347,33 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 	modelsListCacheMissTotal.Add(1)
 
 	var accounts []Account
+	var catalogAccounts []Account
 	var err error
 
-	if groupID != nil {
+	if groupID != nil && platform == PlatformOpenAI {
+		accounts, catalogAccounts, err = loadCodexGroupCatalogAccounts(ctx, s.accountRepo, *groupID)
+	} else if groupID != nil {
 		accounts, err = s.accountRepo.ListSchedulableByGroupID(ctx, *groupID)
 	} else {
 		accounts, err = s.accountRepo.ListSchedulable(ctx)
+		catalogAccounts = accounts
+		if err == nil && platform == PlatformOpenAI {
+			if catalog, listErr := s.accountRepo.ListModelAvailabilityCandidates(ctx, nil, []string{PlatformOpenAI}, true); listErr == nil {
+				catalogAccounts = catalog
+			}
+		}
 	}
 
-	if err != nil || len(accounts) == 0 {
+	if err != nil {
+		return nil
+	}
+	if len(accounts) == 0 {
+		if platform == PlatformOpenAI {
+			models := filterRetiredOpenAIModelIDs(catalogAccounts, openai.DefaultModelIDs())
+			if len(models) != len(openai.DefaultModels) {
+				return models
+			}
+		}
 		return nil
 	}
 
@@ -1394,6 +1418,12 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 	}
 
 	// If no account has model_mapping, return nil (use default)
+	if !hasAnyMapping && platform == PlatformOpenAI {
+		models := filterRetiredOpenAIModelIDs(catalogAccounts, openai.DefaultModelIDs())
+		if len(models) != len(openai.DefaultModels) {
+			return models
+		}
+	}
 	if !hasAnyMapping {
 		if s.modelsListCache != nil {
 			s.modelsListCache.Set(cacheKey, []string(nil), s.modelsListCacheTTL)
@@ -1411,6 +1441,12 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 
 	if platform == PlatformOpenAI {
 		models = supplementUnmappedOpenAIModels(accounts, models)
+		models = filterRetiredOpenAIModelIDs(catalogAccounts, models)
+		// nil means "use defaults" to listing callers; an empty filtered catalog
+		// must remain authoritative instead of resurrecting retired defaults.
+		if len(models) == 0 {
+			return models
+		}
 	}
 
 	if s.modelsListCache != nil {
@@ -1435,21 +1471,23 @@ func (s *GatewayService) resolveCompositeModelOwnership(ctx context.Context, gro
 		}
 	}
 
-	accounts, err := s.accountRepo.ListSchedulableByGroupID(ctx, groupID)
+	// 归属取决于配置而非运行时健康：限流/临时不可调度不应让同一模型在
+	// 「唯一归属」与「歧义」之间来回翻转，否则配置错误只会间歇暴露。
+	accounts, err := s.accountRepo.ListModelAvailabilityCandidates(ctx, &groupID, domain.ConcretePlatformIDs(), false)
 	if err != nil {
 		return CompositeModelOwnership{}, err
 	}
 
 	platforms := make(map[string]struct{})
+	ownership := CompositeModelOwnership{}
 	for _, account := range accounts {
-		platform := strings.TrimSpace(account.Platform)
-		if !isConcreteRequestPlatform(platform) || !explicitModelMappingClaims(account, model) {
-			continue
+		if explicitModelMappingClaims(account, model) {
+			platforms[account.Platform] = struct{}{}
+			ownership.OpenAIGatewayOAuthClaimed = ownership.OpenAIGatewayOAuthClaimed ||
+				(account.IsOAuth() && domain.UsesOpenAIGateway(account.Platform))
 		}
-		platforms[platform] = struct{}{}
 	}
 
-	ownership := CompositeModelOwnership{}
 	if len(platforms) == 1 {
 		for platform := range platforms {
 			ownership.TargetPlatform = platform

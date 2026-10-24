@@ -269,21 +269,36 @@ func (s *OpenAIGatewayService) SelectAccountForTokenCount(
 	requestedModel string,
 	requiredCapability OpenAIEndpointCapability,
 	platform string,
-) (*Account, error) {
+	excludedIDs ...map[int64]struct{},
+) (selected *Account, selectionErr error) {
+	defer func() { selectionErr = gatewayRetrySelectionError(ctx, selectionErr) }()
 	ctx = WithOpenAIProfitControlSuppressed(ctx)
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
-	return s.selectAccountForModelWithExclusions(
-		ctx,
-		groupID,
-		platform,
-		sessionHash,
-		requestedModel,
-		nil,
-		false,
-		0,
-		requiredCapability,
-		false,
-	)
+	ctx = s.withOpenAIGroupPrivacyRequirement(ctx, groupID)
+	platform = NormalizeOpenAICompatiblePlatform(platform)
+	ctx = withGatewayCandidateScope(ctx, fmt.Sprintf("openai-count:%d:%s:%s", derefGroupID(groupID), platform, requiredCapability))
+	if gatewayAttemptNeedsCandidateList(ctx) {
+		accounts, err := s.listSchedulableAccounts(ctx, groupID, platform)
+		if err != nil {
+			return nil, err
+		}
+		if len(accounts) == 0 {
+			return nil, ErrNoAvailableAccounts
+		}
+	}
+	var excluded map[int64]struct{}
+	if len(excludedIDs) > 0 {
+		excluded = excludedIDs[0]
+	}
+	selected, selectionErr = s.selectAccountForModelWithExclusions(ctx, groupID, platform, sessionHash, requestedModel, excluded, false, 0, requiredCapability, false)
+	if selectionErr != nil || selected == nil || GatewayRetryAccountFromContext(ctx) == 0 {
+		return selected, selectionErr
+	}
+	selection := &AccountSelectionResult{Account: selected}
+	if err := s.validateOpenAIRetrySelection(ctx, selection, OpenAIAccountScheduleRequest{GroupID: groupID, Platform: platform, RequestedModel: requestedModel, RequiredTransport: OpenAIUpstreamTransportAny, RequiredCapability: requiredCapability, RequirePrivacySet: s.openAIGroupRequiresPrivacySet(ctx, groupID)}); err != nil {
+		return nil, err
+	}
+	return selection.Account, nil
 }
 
 // NormalizeOpenAICompatiblePlatform 保留走 OpenAI 网关的平台（openai、grok 与多协议
@@ -440,7 +455,7 @@ func openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx context.Con
 			return "quota_auto_pause"
 		}
 	}
-	if requestedModel != "" && !account.IsModelSupported(requestedModel) {
+	if requestedModel != "" && !supportsOpenAIRequestModel(account, requestedModel, requireCompact) {
 		return "model_not_supported"
 	}
 	if !account.SupportsOpenAIEndpointCapability(requiredCapability) {
@@ -1159,6 +1174,9 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			return nil, err
 		}
 		result, err := s.tryAcquireAccountSlot(ctx, account.ID, account.Concurrency)
+		if err != nil && GatewayRetryAccountFromContext(ctx) > 0 {
+			return nil, err
+		}
 		if err == nil && result != nil && result.Acquired {
 			selection, selectErr := s.newAcquiredSelectionResult(ctx, account, result.ReleaseFunc)
 			return markStickySessionHit(selection, stickyHit), selectErr
@@ -1229,6 +1247,9 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 					} else {
 						result, err := s.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
+						if err != nil && GatewayRetryAccountFromContext(ctx) > 0 {
+							return nil, err
+						}
 						if err == nil && result != nil && result.Acquired {
 							selection, selectErr := s.newAcquiredSelectionResult(ctx, account, result.ReleaseFunc)
 							if selectErr != nil {
@@ -1395,6 +1416,9 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				continue
 			}
 			result, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)
+			if err != nil && GatewayRetryAccountFromContext(ctx) > 0 {
+				return nil, true, err
+			}
 			if err == nil && result != nil && result.Acquired {
 				selection, selectErr := s.newAcquiredSelectionResult(ctx, fresh, result.ReleaseFunc)
 				if selectErr != nil {
@@ -1434,6 +1458,9 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				continue
 			}
 			result, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)
+			if err != nil && GatewayRetryAccountFromContext(ctx) > 0 {
+				return nil, err
+			}
 			if err == nil && result != nil && result.Acquired {
 				selection, selectErr := s.newAcquiredSelectionResult(ctx, fresh, result.ReleaseFunc)
 				if selectErr != nil {
@@ -1497,12 +1524,29 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	return nil, ErrNoAvailableAccounts
 }
 
-func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, groupID *int64, platform string) ([]Account, error) {
+func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, groupID *int64, platform string) (selected []Account, selectionErr error) {
+	defer func() {
+		if selectionErr == nil {
+			selected, selectionErr = s.constrainOpenAIRetryCandidates(ctx, groupID, platform, selected)
+		}
+	}()
 	platform = NormalizeOpenAICompatiblePlatform(platform)
 	if s.schedulerSnapshot != nil {
 		accounts, _, err := s.schedulerSnapshot.ListSchedulableAccounts(ctx, groupID, platform, false)
 		if err != nil {
 			return accounts, err
+		}
+		if s.accountRepo != nil && gatewayAttemptNeedsAuthoritativeCandidates(ctx) {
+			if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
+				accounts, err = s.accountRepo.ListSchedulableByPlatform(ctx, platform)
+			} else if groupID != nil {
+				accounts, err = s.accountRepo.ListSchedulableByGroupIDAndPlatform(ctx, *groupID, platform)
+			} else {
+				accounts, err = s.accountRepo.ListSchedulableUngroupedByPlatform(ctx, platform)
+			}
+			if err != nil {
+				return nil, fmt.Errorf("query accounts failed: %w", err)
+			}
 		}
 		accounts = s.filterOpenAIAccountsBySchedulingThreshold(ctx, accounts)
 		if platform == PlatformGrok {
@@ -1665,11 +1709,19 @@ func (s *OpenAIGatewayService) openAIAccountMatchesSchedulingGroup(account *Acco
 }
 
 func (s *OpenAIGatewayService) getSchedulableAccount(ctx context.Context, accountID int64) (*Account, error) {
+	if !gatewayAttemptAllowsAccount(ctx, accountID) {
+		return nil, nil
+	}
 	var (
 		account *Account
 		err     error
 	)
-	if s.schedulerSnapshot != nil {
+	if GatewayRetryAccountFromContext(ctx) > 0 || gatewayAttemptUsesAuthoritativeCandidates(ctx) {
+		if s.accountRepo == nil {
+			return nil, ErrSameAccountRetryUnavailable
+		}
+		account, err = s.accountRepo.GetByID(ctx, accountID)
+	} else if s.schedulerSnapshot != nil {
 		account, err = s.schedulerSnapshot.GetAccount(ctx, accountID)
 	} else {
 		account, err = s.accountRepo.GetByID(ctx, accountID)
@@ -1721,6 +1773,16 @@ func (s *OpenAIGatewayService) isOpenAIAccountBlockedBySchedulingThreshold(ctx c
 }
 
 func (s *OpenAIGatewayService) hydrateSelectedAccount(ctx context.Context, account *Account) (*Account, error) {
+	if account != nil && (GatewayRetryAccountFromContext(ctx) > 0 || gatewayAttemptUsesAuthoritativeCandidates(ctx)) {
+		fresh, err := s.getSchedulableAccount(ctx, account.ID)
+		if err != nil {
+			return nil, err
+		}
+		if fresh == nil || !fresh.IsSchedulable() {
+			return nil, ErrSameAccountRetryUnavailable
+		}
+		return fresh, nil
+	}
 	if account == nil || s.schedulerSnapshot == nil {
 		return account, nil
 	}

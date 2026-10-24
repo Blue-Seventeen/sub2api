@@ -45,6 +45,35 @@ func newOpenAICompactFallbackSignal(c *gin.Context, payload []byte, message stri
 	}
 }
 
+// Explicit compact recovery can change models for a context-window failure;
+// ordinary account replay must still reject that same request-level error.
+// Callers additionally retain cumulative usage/output guards across SSE frames.
+func newOpenAICompactFallbackSignalForAccount(c *gin.Context, account *Account, payload []byte, message string) error {
+	if c == nil || IsResponseCommitted(c) || openAIStreamClientOutputStarted(c, false) ||
+		(c.Request != nil && c.Request.Context().Err() != nil) {
+		return nil
+	}
+	signal := newOpenAICompactFallbackSignal(c, payload, message)
+	if signal == nil || upstreamSSEPayloadHasUsage(payload) || openAIResponsesPayloadHasOutput(payload) {
+		return nil
+	}
+	if _, _, _, matched := applyOpenAIStreamFailedErrorPassthroughRule(c, accountPlatform(account), payload, message); matched {
+		return nil
+	}
+	if account != nil && !account.ShouldHandleErrorCode(openAIStreamFailedEventSemanticStatus(payload, message)) {
+		return nil
+	}
+	// A policy rejection remains terminal even if a provider also includes a
+	// context-window marker that the compact-model classifier recognizes.
+	for _, path := range []string{"error.type", "response.error.type", "type", "error.code", "response.error.code", "code"} {
+		switch strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, path).String())) {
+		case "cyber_policy", "content_policy_violation", "content_policy", "content_filter", "content_moderation":
+			return nil
+		}
+	}
+	return signal
+}
+
 func isExplicitOpenAICompactRequest(c *gin.Context, body []byte) bool {
 	return isOpenAIResponsesCompactPath(c) || HasCompactionTriggerInInput(body)
 }
@@ -57,6 +86,9 @@ func (s *OpenAIGatewayService) resolveOpenAICompactFallbackModel(account *Accoun
 	if account != nil {
 		if mapped, matched := account.ResolveCompactMappedModel(requestedModel); matched {
 			if mapped = strings.TrimSpace(mapped); mapped != "" {
+				if isRetiredOpenAISubscriptionModel(account, mapped) {
+					return ""
+				}
 				return mapped
 			}
 		}
@@ -78,7 +110,11 @@ func (s *OpenAIGatewayService) resolveOpenAICompactFallbackModel(account *Accoun
 	if fallback == "" {
 		return ""
 	}
-	return strings.TrimSpace(resolveOpenAIAccountUpstreamModelForRequest(account, fallback, false))
+	resolved := strings.TrimSpace(resolveOpenAIAccountUpstreamModelForRequest(account, fallback, false))
+	if isRetiredOpenAISubscriptionModel(account, resolved) {
+		return ""
+	}
+	return resolved
 }
 
 func isOpenAICompactModelFailure(statusCode int, upstreamMsg string, upstreamBody []byte) bool {

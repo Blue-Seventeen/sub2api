@@ -31,7 +31,8 @@ func (s *GatewayService) SelectAccountForModel(ctx context.Context, groupID *int
 }
 
 // SelectAccountForModelWithExclusions selects an account supporting the requested model while excluding specified accounts.
-func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*Account, error) {
+func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (selected *Account, selectionErr error) {
+	defer func() { selectionErr = gatewayRetrySelectionError(ctx, selectionErr) }()
 	// 优先检查 context 中的强制平台（/antigravity 路由）
 	var platform string
 	forcePlatform, hasForcePlatform := ctx.Value(ctxkey.ForcePlatform).(string)
@@ -65,6 +66,21 @@ func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context
 		platform = PlatformAnthropic
 	}
 	ctx = s.withGatewayProfitControlGate(ctx, groupID)
+	ctx = withGatewayCandidateScope(ctx, fmt.Sprintf("gateway:%d:%s:%t", derefGroupID(groupID), platform, hasForcePlatform))
+	if gatewayAttemptNeedsCandidateList(ctx) {
+		accounts, _, listErr := s.listSchedulableAccounts(ctx, groupID, platform, hasForcePlatform)
+		if listErr != nil {
+			return nil, listErr
+		}
+		if len(accounts) == 0 {
+			return nil, ErrNoAvailableAccounts
+		}
+	}
+	defer func() {
+		if selectionErr == nil && GatewayRetryAccountFromContext(ctx) > 0 {
+			selected, selectionErr = s.validateGatewayRetrySelection(ctx, selected, groupID, platform, requestedModel, sessionHash, (platform == PlatformAnthropic || platform == PlatformGemini) && !hasForcePlatform)
+		}
+	}()
 
 	// Claude Code 限制可能已将 groupID 解析为 fallback group，
 	// 渠道限制预检查必须使用解析后的分组。
@@ -97,7 +113,8 @@ func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context
 // SelectAccountWithLoadAwareness selects account with load-awareness and wait plan.
 // metadataUserID: 用于客户端亲和调度，从中提取客户端 ID
 // sub2apiUserID: 系统用户 ID，用于二维亲和调度
-func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, metadataUserID string, sub2apiUserID int64) (*AccountSelectionResult, error) {
+func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, metadataUserID string, sub2apiUserID int64) (selected *AccountSelectionResult, selectionErr error) {
+	defer func() { selectionErr = gatewayRetrySelectionError(ctx, selectionErr) }()
 	// 调试日志：记录调度入口参数
 	excludedIDsList := make([]int64, 0, len(excludedIDs))
 	for id := range excludedIDs {
@@ -118,6 +135,33 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	}
 	ctx = s.withGroupContext(ctx, group)
 	ctx = s.withGatewayProfitControlGate(ctx, groupID)
+	platform, hasForcePlatform, resolveErr := s.resolvePlatform(ctx, groupID, group, requestedModel)
+	if resolveErr != nil {
+		return nil, resolveErr
+	}
+	ctx = withGatewayCandidateScope(ctx, fmt.Sprintf("gateway:%d:%s:%t", derefGroupID(groupID), platform, hasForcePlatform))
+	if gatewayAttemptNeedsCandidateList(ctx) {
+		accounts, _, listErr := s.listSchedulableAccounts(ctx, groupID, platform, hasForcePlatform)
+		if listErr != nil {
+			return nil, listErr
+		}
+		if len(accounts) == 0 {
+			return nil, ErrNoAvailableAccounts
+		}
+	}
+	defer func() {
+		if selectionErr == nil && selected != nil && GatewayRetryAccountFromContext(ctx) > 0 {
+			fresh, retryErr := s.validateGatewayRetrySelection(ctx, selected.Account, groupID, platform, requestedModel, sessionHash, (platform == PlatformAnthropic || platform == PlatformGemini) && !hasForcePlatform)
+			if retryErr != nil {
+				if selected.ReleaseFunc != nil {
+					selected.ReleaseFunc()
+				}
+				selected, selectionErr = nil, retryErr
+				return
+			}
+			selected.Account = fresh
+		}
+	}()
 
 	// Claude Code 限制可能已将 groupID 解析为 fallback group，
 	// 渠道限制预检查必须使用解析后的分组。
@@ -175,6 +219,9 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			}
 
 			result, err := s.tryAcquireAccountSlot(ctx, account.ID, account.Concurrency)
+			if err != nil && GatewayRetryAccountFromContext(ctx) > 0 {
+				return nil, err
+			}
 			if err == nil && result.Acquired {
 				// 获取槽位后检查会话限制（使用 sessionHash 作为会话标识符）
 				if !s.checkAndRegisterSession(ctx, account, sessionHash) {
@@ -211,10 +258,6 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		}
 	}
 
-	platform, hasForcePlatform, err := s.resolvePlatform(ctx, groupID, group, requestedModel)
-	if err != nil {
-		return nil, err
-	}
 	preferOAuth := platform == PlatformGemini
 	if s.debugModelRoutingEnabled() && requestedModel != "" && modelRoutingAppliesToTargetPlatform(platform) {
 		logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] load-aware enabled: group_id=%v model=%s session=%s platform=%s", derefGroupID(groupID), requestedModel, shortSessionHash(sessionHash), platform)
@@ -367,6 +410,9 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 
 						if rpmPass { // 粘性会话窗口费用+RPM 检查
 							result, err := s.tryAcquireAccountSlot(ctx, stickyAccountID, stickyAccount.Concurrency)
+							if err != nil && GatewayRetryAccountFromContext(ctx) > 0 {
+								return nil, err
+							}
 							if err == nil && result.Acquired {
 								// 会话数量限制检查
 								if !s.checkAndRegisterSession(ctx, stickyAccount, sessionHash) {
@@ -481,6 +527,9 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 				// 4. 尝试获取槽位
 				for _, item := range routingAvailable {
 					result, err := s.tryAcquireAccountSlot(ctx, item.account.ID, item.account.Concurrency)
+					if err != nil && GatewayRetryAccountFromContext(ctx) > 0 {
+						return nil, err
+					}
 					if err == nil && result.Acquired {
 						// 会话数量限制检查
 						if !s.checkAndRegisterSession(ctx, item.account, sessionHash) {
@@ -567,6 +616,9 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 
 				if !clearSticky && platformOK && profitOK && modelSupported && channelOK && modelSchedulable && quotaOK && windowCostOK && rpmOK && schedulable {
 					result, err := s.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
+					if err != nil && GatewayRetryAccountFromContext(ctx) > 0 {
+						return nil, err
+					}
 					if err == nil && result.Acquired {
 						// 会话数量限制检查
 						if !s.checkAndRegisterSession(ctx, account, sessionHash) {
@@ -752,6 +804,9 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			}
 
 			result, err := s.tryAcquireAccountSlot(ctx, selected.account.ID, selected.account.Concurrency)
+			if err != nil && GatewayRetryAccountFromContext(ctx) > 0 {
+				return nil, err
+			}
 			if err == nil && result.Acquired {
 				// 会话数量限制检查
 				if !s.checkAndRegisterSession(ctx, selected.account, sessionHash) {
@@ -799,6 +854,9 @@ func (s *GatewayService) tryAcquireByLegacyOrder(ctx context.Context, candidates
 
 	for _, acc := range ordered {
 		result, err := s.tryAcquireAccountSlot(ctx, acc.ID, acc.Concurrency)
+		if err != nil && GatewayRetryAccountFromContext(ctx) > 0 {
+			return nil, false, err
+		}
 		if err == nil && result.Acquired {
 			// 会话数量限制检查
 			if !s.checkAndRegisterSession(ctx, acc, sessionHash) {
@@ -1011,10 +1069,21 @@ func (s *GatewayService) resolvePlatform(ctx context.Context, groupID *int64, gr
 	return PlatformAnthropic, false, nil
 }
 
-func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *int64, platform string, hasForcePlatform bool) ([]Account, bool, error) {
+func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *int64, platform string, hasForcePlatform bool) (selected []Account, mixed bool, selectionErr error) {
+	defer func() {
+		if selectionErr == nil {
+			selected, selectionErr = s.constrainGatewayRetryCandidates(ctx, groupID, platform, mixed, selected)
+		}
+	}()
 	if s.schedulerSnapshot != nil {
 		accounts, useMixed, err := s.schedulerSnapshot.ListSchedulableAccounts(ctx, groupID, platform, hasForcePlatform)
 		if err == nil {
+			if s.accountRepo != nil && gatewayAttemptNeedsAuthoritativeCandidates(ctx) {
+				accounts, useMixed, err = listSchedulableGatewayCandidatesFromRepository(ctx, s.accountRepo, s.cfg, groupID, platform, hasForcePlatform)
+				if err != nil {
+					return nil, useMixed, err
+				}
+			}
 			accounts = s.filterAccountsBySchedulingThreshold(ctx, accounts)
 			if platform == PlatformGrok || strings.EqualFold(platform, PlatformGrok) {
 				accounts = s.filterGrokFreeQuotaAccountsForGateway(ctx, accounts)
@@ -1512,11 +1581,19 @@ func (s *GatewayService) ReleaseAccountSession(ctx context.Context, account *Acc
 }
 
 func (s *GatewayService) getSchedulableAccount(ctx context.Context, accountID int64) (*Account, error) {
+	if !gatewayAttemptAllowsAccount(ctx, accountID) {
+		return nil, nil
+	}
 	var (
 		account *Account
 		err     error
 	)
-	if s.schedulerSnapshot != nil {
+	if GatewayRetryAccountFromContext(ctx) > 0 || gatewayAttemptUsesAuthoritativeCandidates(ctx) {
+		if s.accountRepo == nil {
+			return nil, ErrSameAccountRetryUnavailable
+		}
+		account, err = s.accountRepo.GetByID(ctx, accountID)
+	} else if s.schedulerSnapshot != nil {
 		account, err = s.schedulerSnapshot.GetAccount(ctx, accountID)
 	} else {
 		account, err = s.accountRepo.GetByID(ctx, accountID)
@@ -1559,6 +1636,16 @@ func (s *GatewayService) isAccountBlockedBySchedulingThreshold(ctx context.Conte
 }
 
 func (s *GatewayService) hydrateSelectedAccount(ctx context.Context, account *Account) (*Account, error) {
+	if account != nil && (GatewayRetryAccountFromContext(ctx) > 0 || gatewayAttemptUsesAuthoritativeCandidates(ctx)) {
+		fresh, err := s.getSchedulableAccount(ctx, account.ID)
+		if err != nil {
+			return nil, err
+		}
+		if fresh == nil || !fresh.IsSchedulable() {
+			return nil, ErrSameAccountRetryUnavailable
+		}
+		return fresh, nil
+	}
 	if account == nil || s.schedulerSnapshot == nil {
 		return account, nil
 	}
@@ -1575,6 +1662,9 @@ func (s *GatewayService) hydrateSelectedAccount(ctx context.Context, account *Ac
 func (s *GatewayService) newSelectionResult(ctx context.Context, account *Account, acquired bool, release func(), waitPlan *AccountWaitPlan) (*AccountSelectionResult, error) {
 	hydrated, err := s.hydrateSelectedAccount(ctx, account)
 	if err != nil {
+		if (GatewayRetryAccountFromContext(ctx) > 0 || gatewayAttemptUsesAuthoritativeCandidates(ctx)) && release != nil {
+			release()
+		}
 		return nil, err
 	}
 	return attachSelectionProfitGate(ctx, &AccountSelectionResult{

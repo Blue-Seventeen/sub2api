@@ -214,10 +214,11 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 	}
 
 	fs := NewFailoverState(h.base.maxAccountSwitches, false)
+	c.Request = c.Request.WithContext(service.NewGatewayRequestAttemptContext(c.Request.Context()))
 	unsupportedCapabilitySeen := false
 	for {
 		selection, err := h.base.gatewayService.SelectAccountWithLoadAwareness(
-			c.Request.Context(),
+			fs.SelectionContext(c.Request.Context()),
 			apiKey.GroupID,
 			sessionHash,
 			model,
@@ -225,6 +226,9 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 			"",
 			subject.UserID,
 		)
+		if fs.HandleRetrySelectionError(err) {
+			continue
+		}
 		if err != nil {
 			if unsupportedCapabilitySeen {
 				h.writeError(c, http.StatusBadRequest, "unsupported_capability", "No selected account supports this endpoint")
@@ -275,8 +279,13 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 			if err != nil {
 				reqLog.Warn("newapi.account_wait_counter_increment_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 			} else if !canWait {
-				h.writeError(c, http.StatusTooManyRequests, "rate_limit_error", "Too many pending requests, please retry later")
-				return
+				if fs.MaxSwitches == 0 {
+					h.writeError(c, http.StatusTooManyRequests, "rate_limit_error", "Account concurrency limit exceeded")
+					return
+				}
+				fs.FailedAccountIDs[account.ID] = struct{}{}
+				fs.pendingRetryAccountID = 0
+				continue
 			}
 			if err == nil && canWait {
 				accountWaitCounted = true
@@ -295,6 +304,16 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 				stream,
 				&streamStarted,
 			)
+			if fs.MaxSwitches != 0 && accountAdmissionUnavailable(c.Request.Context(), err) {
+				releaseWait()
+				if fs.MaxSwitches == 0 {
+					h.writeError(c, http.StatusTooManyRequests, "rate_limit_error", "Account concurrency limit exceeded")
+					return
+				}
+				fs.FailedAccountIDs[account.ID] = struct{}{}
+				fs.pendingRetryAccountID = 0
+				continue
+			}
 			if err != nil {
 				releaseWait()
 				h.base.handleConcurrencyError(c, err, "account", streamStarted)

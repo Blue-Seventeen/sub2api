@@ -54,7 +54,7 @@ func TestOpenAIResponsesOnlyToolOutputDoesNotAutoRetryAsChat(t *testing.T) {
 	}
 }
 
-func TestForwardResponses_NativeImageFailureDropsFailedAttemptUsage(t *testing.T) {
+func TestForwardResponses_NativeImageFailurePreservesAcceptedUsage(t *testing.T) {
 	body := []byte(`{"model":"gpt-5.4","input":"draw","stream":true,"tools":[{"type":"image_generation","model":"gpt-image-2","size":"3840x2160"}]}`)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -64,8 +64,20 @@ func TestForwardResponses_NativeImageFailureDropsFailedAttemptUsage(t *testing.T
 			"data: {\"type\":\"response.failed\",\"response\":{\"usage\":{\"input_tokens\":5,\"output_tokens\":3,\"output_tokens_details\":{\"image_tokens\":2}},\"error\":{\"code\":\"server_error\",\"message\":\"temporary failure\"}}}\n\n"))}}
 	result, err := (&OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}).Forward(context.Background(), c, rawChatCompletionsTestAccount(), body)
 	require.Error(t, err)
-	require.Nil(t, result, "failed Responses attempt usage is not billed")
+	require.NotNil(t, result, "accepted image output and usage must survive the terminal error")
+	require.Equal(t, 5, result.Usage.InputTokens)
+	require.Equal(t, 3, result.Usage.OutputTokens)
+	require.Equal(t, 2, result.Usage.ImageOutputTokens)
+	require.Equal(t, 1, result.ImageCount)
+	require.Equal(t, "gpt-image-2", result.BillingModel)
+	require.Equal(t, "4K", result.ImageSize)
+	require.Equal(t, "3840x2160", result.ImageInputSize)
+	require.Equal(t, []string{"3840x2160"}, result.ImageOutputSizes)
+	var failoverErr *UpstreamFailoverError
+	require.NotErrorAs(t, err, &failoverErr)
 	require.Len(t, upstream.requests, 1)
+	require.Contains(t, rec.Body.String(), "response.failed")
+	require.NotContains(t, rec.Body.String(), "response.completed")
 }
 
 func TestForwardResponses_BillableNativeFailureDoesNotChatFallback(t *testing.T) {
@@ -81,21 +93,23 @@ func TestForwardResponses_BillableNativeFailureDoesNotChatFallback(t *testing.T)
 	}
 	result, err := (&OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}).Forward(context.Background(), c, account, body)
 	require.Error(t, err)
-	require.Nil(t, result)
+	require.NotNil(t, result)
+	require.Equal(t, 5, result.Usage.InputTokens)
+	require.Equal(t, 1, result.Usage.OutputTokens)
 	require.Len(t, upstream.requests, 1)
 	var failoverErr *UpstreamFailoverError
-	require.True(t, errors.As(err, &failoverErr))
+	require.False(t, errors.As(err, &failoverErr))
 	require.NotContains(t, rec.Body.String(), "response.completed")
 }
 
-func TestForwardResponses_TerminalFailureDropsAttemptUsageForOfficialRetry(t *testing.T) {
+func TestForwardResponses_TerminalFailurePreservesUsageWithoutOfficialRetry(t *testing.T) {
 	body := []byte(`{"model":"gpt-5.4","input":"hello","stream":true}`)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
-		Header:     http.Header{"Content-Type": {"text/event-stream"}, "X-Request-ID": {"native-failed-1"}},
+		Header:     http.Header{"Content-Type": {"text/event-stream"}, "X-Request-Id": {"native-failed-1"}},
 		Body: io.NopCloser(strings.NewReader(
 			"data: {\"type\":\"response.failed\",\"response\":{\"usage\":{\"input_tokens\":7,\"output_tokens\":2},\"error\":{\"code\":\"server_error\",\"message\":\"temporary failure\"}}}\n\n",
 		)),
@@ -111,10 +125,14 @@ func TestForwardResponses_TerminalFailureDropsAttemptUsageForOfficialRetry(t *te
 	)
 
 	require.Error(t, err)
-	require.Nil(t, result, "failed-attempt usage is not part of the official final result")
-	require.Len(t, upstream.requests, 1, "account retry is owned by the handler, not the service")
+	require.NotNil(t, result)
+	require.Equal(t, 7, result.Usage.InputTokens)
+	require.Equal(t, 2, result.Usage.OutputTokens)
+	require.Equal(t, "native-failed-1", result.RequestID)
+	require.Len(t, upstream.requests, 1, "accepted usage forbids another upstream attempt")
 	var failoverErr *UpstreamFailoverError
-	require.True(t, errors.As(err, &failoverErr), "official retryable terminal failure must remain eligible for handler failover")
+	require.False(t, errors.As(err, &failoverErr), "accepted terminal failure must not remain eligible for handler failover")
+	require.NotContains(t, rec.Body.String(), "response.completed")
 }
 
 func TestForwardChatCompletions_BillableTerminalFailureDoesNotRemainReplayable(t *testing.T) {
@@ -124,7 +142,7 @@ func TestForwardChatCompletions_BillableTerminalFailureDoesNotRemainReplayable(t
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
-		Header:     http.Header{"Content-Type": {"text/event-stream"}, "X-Request-ID": {"chat-failed-1"}},
+		Header:     http.Header{"Content-Type": {"text/event-stream"}, "X-Request-Id": {"chat-failed-1"}},
 		Body: io.NopCloser(strings.NewReader(
 			"data: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"output\":[],\"usage\":{\"input_tokens\":9,\"output_tokens\":1},\"error\":{\"code\":\"server_error\",\"message\":\"temporary failure\"}}}\n\n",
 		)),
@@ -140,8 +158,13 @@ func TestForwardChatCompletions_BillableTerminalFailureDoesNotRemainReplayable(t
 	)
 
 	require.Error(t, err)
-	require.Nil(t, result, "buffered failed attempt usage is not billed")
-	require.Len(t, upstream.requests, 1, "account retry is owned by the handler")
+	require.NotNil(t, result)
+	require.Equal(t, 9, result.Usage.InputTokens)
+	require.Equal(t, 1, result.Usage.OutputTokens)
+	require.Equal(t, "chat-failed-1", result.RequestID)
+	require.Len(t, upstream.requests, 1, "accepted buffered usage forbids account retry")
 	var failoverErr *UpstreamFailoverError
-	require.True(t, errors.As(err, &failoverErr))
+	require.False(t, errors.As(err, &failoverErr))
+	require.Contains(t, rec.Body.String(), "error")
+	require.NotContains(t, rec.Body.String(), "[DONE]")
 }

@@ -135,7 +135,9 @@ func (h *GatewayHandler) WebSearch(c *gin.Context) {
 		return
 	}
 
-	failedAccounts := make(map[int64]struct{})
+	fs := NewFailoverState(h.maxAccountSwitches, false)
+	c.Request = c.Request.WithContext(service.NewGatewayRequestAttemptContext(c.Request.Context()))
+	failedAccounts := fs.FailedAccountIDs
 	var account *service.Account
 	var accountReleaseFunc func()
 	var nativeResp *websearch.SearchResponse
@@ -149,11 +151,17 @@ func (h *GatewayHandler) WebSearch(c *gin.Context) {
 		}
 	}()
 
-	// First attempt + up to 3 failover accounts (max 4 total).
-	for attempt := 0; attempt < 4; attempt++ {
+	// Retry each eligible account within its configured budget before exclusion.
+	for attempt := 0; ; attempt++ {
+		if failoverClientGone(c) {
+			return
+		}
 		selected, selectErr := h.gatewayService.SelectAccountWithLoadAwareness(
-			c.Request.Context(), groupID, "", searchModel, failedAccounts, "", 0,
+			fs.SelectionContext(c.Request.Context()), groupID, "", searchModel, failedAccounts, "", 0,
 		)
+		if fs.HandleRetrySelectionError(selectErr) {
+			continue
+		}
 		if selectErr != nil {
 			if attempt == 0 {
 				c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
@@ -178,9 +186,12 @@ func (h *GatewayHandler) WebSearch(c *gin.Context) {
 		release, acquireOK, acquireErr := h.acquireWebSearchAccountSlot(c, selected)
 		if !acquireOK {
 			// First hop: surface concurrency errors; later hops try another account.
-			if attempt == 0 && acquireErr != nil {
-				h.handleConcurrencyError(c, acquireErr, "account", false)
-				return
+			if acquireErr != nil {
+				var busy *ConcurrencyError
+				if c.Request.Context().Err() != nil || !errors.As(acquireErr, &busy) {
+					h.handleConcurrencyError(c, acquireErr, "account", false)
+					return
+				}
 			}
 			failedAccounts[selected.Account.ID] = struct{}{}
 			continue
@@ -200,12 +211,15 @@ func (h *GatewayHandler) WebSearch(c *gin.Context) {
 		if !errors.As(err, &failoverErr) || !failoverErr.ShouldRetryNextAccount() {
 			break
 		}
-		failedAccounts[account.ID] = struct{}{}
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
 			accountReleaseFunc = nil
 		}
+		action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, account.GetPoolModeRetryCount(), failoverErr)
 		account = nil
+		if action != FailoverContinue {
+			break
+		}
 	}
 	if err != nil || nativeResp == nil {
 		msg := "web search failed"

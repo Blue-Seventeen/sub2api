@@ -503,9 +503,36 @@ if (-not $OutputDirectory) {
 $OutputDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory)
 $backup = New-Item -ItemType Directory -Path $OutputDirectory
 if ($IsWindows) {
-    & icacls $backup.FullName /inheritance:r /grant:r "$env:USERDOMAIN\$env:USERNAME`:(OI)(CI)F" 'SYSTEM:(OI)(CI)F' 'BUILTIN\Administrators:(OI)(CI)F' | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Failed to restrict backup directory permissions.'
+    try {
+        $privateSids = @([Security.Principal.WindowsIdentity]::GetCurrent().User.Value, 'S-1-5-18', 'S-1-5-32-544')
+        $privateGrants = @($privateSids | ForEach-Object { '*' + $_ + ':(OI)(CI)F' })
+        & icacls $backup.FullName /inheritance:r /grant:r @privateGrants | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Windows permission update failed.' }
+
+        # Some filesystems report icacls success without enforcing a private DACL.
+        $acl = Get-Acl -LiteralPath $backup.FullName -ErrorAction Stop
+        if (-not $acl.AreAccessRulesProtected -or
+            $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -notin $privateSids) {
+            throw 'Windows DACL protection or owner is unsafe.'
+        }
+        $rules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+        $allowRules = @($rules | Where-Object { $_.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow })
+        if (@($allowRules | Where-Object { $_.IdentityReference.Value -notin $privateSids }).Count -gt 0) {
+            throw 'Windows DACL grants access outside the private identities.'
+        }
+        $inheritance = [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+        $fullControl = [Security.AccessControl.FileSystemRights]::FullControl
+        foreach ($sid in $privateSids) {
+            $grants = @($allowRules | Where-Object {
+                $_.IdentityReference.Value -eq $sid -and
+                ($_.FileSystemRights -band $fullControl) -eq $fullControl -and
+                ($_.InheritanceFlags -band $inheritance) -eq $inheritance -and
+                $_.PropagationFlags -eq [Security.AccessControl.PropagationFlags]::None
+            })
+            if ($grants.Count -eq 0) { throw 'Windows DACL does not protect child backup files.' }
+        }
+    } catch {
+        throw 'Failed to verify private backup directory permissions. The destination must support a protected Windows DACL owned by and limited to the current user, SYSTEM, and Administrators.'
     }
 } else {
     & chmod 700 $backup.FullName

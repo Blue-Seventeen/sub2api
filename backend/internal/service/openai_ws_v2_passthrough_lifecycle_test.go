@@ -716,35 +716,37 @@ func TestPassthroughLifecycle_RejectsOverlappingResponseCreate(t *testing.T) {
 func TestPassthroughLifecycle_ActiveTurnActivityRefreshesReadTimeout(t *testing.T) {
 	controlCtx, cancelControl := context.WithCancelCause(context.Background())
 	defer cancelControl(context.Canceled)
+	cfg := passthroughLifecycleConfig()
 	upstream := newStagedPassthroughConn()
-	upstream.Send(`{"type":"response.output_text.delta","response_id":"resp_active_refresh","delta":"one"}`)
-	go func() {
-		for _, event := range []string{
-			`{"type":"response.output_text.delta","response_id":"resp_active_refresh","delta":"two"}`,
-			`{"type":"response.output_text.delta","response_id":"resp_active_refresh","delta":"three"}`,
-			`{"type":"response.completed","response":{"id":"resp_active_refresh","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":3}}}`,
-		} {
-			timer := time.NewTimer(600 * time.Millisecond)
-			<-timer.C
-			timer.Stop()
-			upstream.Send(event)
-		}
-	}()
-	server, serverErr := startPassthroughLifecycleServer(t, controlCtx, newPassthroughLifecycleService(passthroughLifecycleConfig(), upstream), passthroughLifecycleAccount())
+	server, serverErr := startPassthroughLifecycleServer(t, controlCtx, newPassthroughLifecycleService(cfg, upstream), passthroughLifecycleAccount())
 	defer server.Close()
 	clientConn := dialPassthroughLifecycleClient(t, server)
 	defer func() { _ = clientConn.CloseNow() }()
 
-	for _, wantType := range []string{
-		"response.output_text.delta",
-		"response.output_text.delta",
-		"response.output_text.delta",
-		"response.completed",
+	require.Equal(t, "response.create", gjson.GetBytes(requirePassthroughUpstreamWrite(t, upstream, 3*time.Second), "type").String())
+	upstream.Send(`{"type":"response.output_text.delta","response_id":"resp_active_refresh","delta":"one"}`)
+	frame, err := readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
+	require.NoError(t, err)
+	require.Equal(t, "response.output_text.delta", gjson.GetBytes(frame, "type").String())
+	firstObserved := time.Now()
+	// Start pacing only after handshake and the first delivered frame. Each
+	// interval is below the timeout, but the complete turn exceeds it.
+	for _, event := range []string{
+		`{"type":"response.output_text.delta","response_id":"resp_active_refresh","delta":"two"}`,
+		`{"type":"response.output_text.delta","response_id":"resp_active_refresh","delta":"three"}`,
+		`{"type":"response.output_text.delta","response_id":"resp_active_refresh","delta":"four"}`,
+		`{"type":"response.output_text.delta","response_id":"resp_active_refresh","delta":"five"}`,
+		`{"type":"response.output_text.delta","response_id":"resp_active_refresh","delta":"six"}`,
+		`{"type":"response.completed","response":{"id":"resp_active_refresh","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":6}}}`,
 	} {
+		time.Sleep(200 * time.Millisecond)
+		t.Logf("send %s after %s", gjson.Get(event, "type").String(), time.Since(firstObserved))
+		upstream.Send(event)
 		frame, err := readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
 		require.NoError(t, err)
-		require.Equal(t, wantType, gjson.GetBytes(frame, "type").String())
+		require.JSONEq(t, event, string(frame))
 	}
+	require.Greater(t, time.Since(firstObserved), time.Second, "a turn must outlive one unrefreshed timeout")
 	require.NoError(t, clientConn.Close(coderws.StatusNormalClosure, "done"))
 	select {
 	case <-serverErr:

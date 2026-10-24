@@ -250,14 +250,48 @@ func (s *OpenAIGatewayService) shouldFailoverUpstreamError(statusCode int) bool 
 	}
 }
 
+// A request validation failure stays terminal even when its HTTP status was
+// configured for pool retries. Known account/provider availability signals keep
+// their existing treatment before the general validation predicate is applied.
+func isOpenAITerminalUpstreamRequestError(statusCode int, upstreamMsg string, upstreamBody []byte) bool {
+	if hit, _, _ := detectOpenAICyberPolicy(upstreamBody); hit {
+		return true
+	}
+	if isOpenAIContextWindowError(upstreamMsg, upstreamBody) {
+		return true
+	}
+	if isOpenAIHTTPUpstreamAccessStateError(statusCode, upstreamMsg, upstreamBody) ||
+		isOpenAICompatibleModelNotFoundBody(upstreamBody) ||
+		isOpenAITransientProcessingError(statusCode, upstreamMsg, upstreamBody) {
+		return false
+	}
+	return isDefinitiveUpstreamRequestError(statusCode, upstreamBody)
+}
+
+// Grok's body-first quota and compatibility classifier is account-scoped:
+// those typed 400 responses must remain eligible for pool retry even though
+// some providers wrap them in a generic invalid_request_error envelope.
+func isOpenAIAccountTerminalUpstreamRequestError(account *Account, statusCode int, upstreamMsg string, upstreamBody []byte) bool {
+	if hit, _, _ := detectOpenAICyberPolicy(upstreamBody); hit {
+		return true
+	}
+	if isOpenAIContextWindowError(upstreamMsg, upstreamBody) {
+		return true
+	}
+	if statusCode == http.StatusBadRequest && account != nil && account.Platform == PlatformGrok && classifyGrokUpstreamFailure(statusCode, upstreamBody, "").ShouldFailover {
+		return false
+	}
+	return isOpenAITerminalUpstreamRequestError(statusCode, upstreamMsg, upstreamBody)
+}
+
 func (s *OpenAIGatewayService) shouldFailoverOpenAIUpstreamResponse(account *Account, statusCode int, upstreamMsg string, upstreamBody []byte) bool {
+	if account != nil && !account.ShouldHandleErrorCode(statusCode) {
+		return false
+	}
 	// cyber_policy is request-scoped even when an intermediary wraps the
 	// provider response in a retryable 5xx status. Never punish or rotate the
 	// selected credential for it.
-	if hit, _, _ := detectOpenAICyberPolicy(upstreamBody); hit {
-		return false
-	}
-	if isOpenAIContextWindowError(upstreamMsg, upstreamBody) {
+	if isOpenAIAccountTerminalUpstreamRequestError(account, statusCode, upstreamMsg, upstreamBody) {
 		return false
 	}
 	if isOpenAIHTTPUpstreamAccessStateError(statusCode, upstreamMsg, upstreamBody) {
@@ -277,6 +311,9 @@ func (s *OpenAIGatewayService) shouldFailoverOpenAIUpstreamResponse(account *Acc
 	// their handler can exclude this account and actually select another one.
 	if s != nil && s.accountRepo != nil && account != nil && account.IsOpenAICompatible() && statusCode == http.StatusBadRequest &&
 		isOpenAICompatibleModelNotFound400(upstreamBody) {
+		return true
+	}
+	if account != nil && account.IsPoolMode() && account.IsPoolModeRetryableStatus(statusCode) {
 		return true
 	}
 	if s.shouldFailoverUpstreamError(statusCode) {
@@ -586,7 +623,7 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		)
 	}
 
-	if isOpenAIRequestBodyTooLargeError(resp.StatusCode, upstreamMsg, body) {
+	if account.ShouldHandleErrorCode(resp.StatusCode) && isOpenAIRequestBodyTooLargeError(resp.StatusCode, upstreamMsg, body) {
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 			ProxyID:            opsUpstreamProxyID(account),
 			ProxyName:          opsUpstreamProxyName(account),
@@ -670,7 +707,10 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		reqModel, _, _ = extractOpenAIRequestMetaFromBody(requestBody)
 		reqModel = canonicalOpenAIAccountSchedulingModel(account, reqModel)
 	}
-	shouldDisable := s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, body, reqModel)
+	shouldDisable := false
+	if !isOpenAIAccountTerminalUpstreamRequestError(account, resp.StatusCode, upstreamMsg, body) {
+		shouldDisable = s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, body, reqModel)
+	}
 	kind := "http_error"
 	if shouldDisable {
 		kind = "failover"
@@ -867,11 +907,16 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 	if len(requestedModel) > 0 {
 		modelForCooldown = requestedModel[0]
 	}
-	shouldDisable := s.handleOpenAIAccountUpstreamError(
-		c.Request.Context(), account, resp.StatusCode, resp.Header, body, modelForCooldown,
-	)
+	terminalRequestError := isOpenAIAccountTerminalUpstreamRequestError(account, resp.StatusCode, upstreamMsg, body)
+	shouldDisable := false
+	if !terminalRequestError {
+		shouldDisable = s.handleOpenAIAccountUpstreamError(
+			c.Request.Context(), account, resp.StatusCode, resp.Header, body, modelForCooldown,
+		)
+	}
+	retryableOnSameAccount := !terminalRequestError && !shouldDisable && account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode)
 	kind := "http_error"
-	if shouldDisable {
+	if shouldDisable || retryableOnSameAccount {
 		kind = "failover"
 	}
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -891,6 +936,14 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 			StatusCode:             resp.StatusCode,
 			ResponseBody:           body,
 			RetryableOnSameAccount: false,
+		}
+	}
+	if retryableOnSameAccount {
+		return nil, &UpstreamFailoverError{
+			StatusCode:             resp.StatusCode,
+			ResponseBody:           body,
+			ResponseHeaders:        resp.Header.Clone(),
+			RetryableOnSameAccount: true,
 		}
 	}
 

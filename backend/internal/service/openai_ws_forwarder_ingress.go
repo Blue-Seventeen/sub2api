@@ -252,7 +252,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			normalized = next
 		}
 		responsesLite := isOpenAIResponsesLiteWebSocketPayload(normalized)
-		if compatibilityBody, compatibilityChanged, compatibilityErr := normalizeOpenAIResponsesWebSocketCompatibilityBody(normalized, account, responsesLite); compatibilityErr != nil {
+		if compatibilityBody, compatibilityChanged, compatibilityErr := normalizeOpenAIResponsesWebSocketCompatibilityBodyWithConfig(s.cfg, normalized, account, responsesLite); compatibilityErr != nil {
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", compatibilityErr)
 		} else if compatibilityChanged {
 			normalized = compatibilityBody
@@ -846,7 +846,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		if acquireErr != nil {
 			canonicalModel := canonicalOpenAIAccountSchedulingModel(account, ingressSessionOriginalModel)
-			s.handleOpenAIWSDialTransientFailure(ctx, account, canonicalModel, acquireErr)
+			errors.As(acquireErr, &dialErr)
+			if dialErr == nil || dialErr.StatusCode == 0 || account.ShouldHandleErrorCode(dialErr.StatusCode) {
+				s.handleOpenAIWSDialTransientFailure(ctx, account, canonicalModel, acquireErr)
+			}
 			dialStatus, dialClass, dialCloseStatus, dialCloseReason, dialRespServer, dialRespVia, dialRespCFRay, dialRespReqID := summarizeOpenAIWSDialError(acquireErr)
 			logOpenAIWSModeInfo(
 				"ingress_ws_upstream_acquire_fail account_id=%d turn=%d reason=%s dial_status=%d dial_class=%s dial_close_status=%s dial_close_reason=%s dial_resp_server=%s dial_resp_via=%s dial_resp_cf_ray=%s dial_resp_x_request_id=%s cause=%s preferred_conn_id=%s force_preferred_conn=%v ws_host=%s ws_path=%s proxy_enabled=%v",
@@ -868,10 +871,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				wsPath,
 				req.ProxyURL != "",
 			)
-			var dialErr *openAIWSDialError
-			if errors.As(acquireErr, &dialErr) && dialErr != nil && dialErr.StatusCode == http.StatusTooManyRequests {
+			if dialErr != nil && dialErr.StatusCode == http.StatusTooManyRequests && account.ShouldHandleErrorCode(dialErr.StatusCode) {
 				s.persistOpenAIWSRateLimitSignal(ctx, account, dialErr.ResponseHeaders, nil, "rate_limit_exceeded", "rate_limit_error", strings.TrimSpace(acquireErr.Error()))
 				return nil, s.newOpenAIWSRateLimitFailoverError(account, dialErr.ResponseHeaders, nil, acquireErr.Error())
+			}
+			if failoverErr := s.newOpenAIWSPoolDialFailoverError(account, dialErr); failoverErr != nil {
+				return nil, failoverErr
 			}
 			if errors.Is(acquireErr, errOpenAIWSPreferredConnUnavailable) {
 				return nil, NewOpenAIWSClientCloseError(
@@ -1289,6 +1294,24 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	currentTurnReplayInput := []json.RawMessage(nil)
 	currentTurnReplayInputExists := false
 	skipBeforeTurn := false
+	currentTurnFailover := func(cause error) error {
+		var failoverErr *UpstreamFailoverError
+		if turn <= 1 || !errors.As(cause, &failoverErr) || failoverErr == nil {
+			return cause
+		}
+		retryPayload, retrySafe, payloadErr := buildOpenAIWSCurrentTurnRetryPayload(
+			currentAccountIdentitySourceRaw, currentTurnReplayInput, currentTurnReplayInputExists, currentOriginalModel,
+		)
+		if payloadErr != nil {
+			return fmt.Errorf("build websocket current-turn failover payload: %w", payloadErr)
+		}
+		if !retrySafe {
+			// Keep the wrapper even when recovery is unsafe: otherwise the
+			// handler falls back to replaying the session's first request.
+			retryPayload = nil
+		}
+		return newOpenAIWSCurrentTurnFailoverError(cause, retryPayload)
+	}
 	hasCurrentOrReplayFunctionCallOutput := func(payload []byte) bool {
 		if openAIWSRawPayloadHasToolCallOutput(payload) {
 			return true
@@ -1607,7 +1630,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if sessionLease == nil {
 			acquiredLease, acquireErr := acquireTurnLease(turn, preferredConnID, forcePreferredConn, turnRetry > 0)
 			if acquireErr != nil {
-				return fmt.Errorf("acquire upstream websocket: %w", acquireErr)
+				return currentTurnFailover(fmt.Errorf("acquire upstream websocket: %w", acquireErr))
 			}
 			sessionLease = acquiredLease
 			sessionConnID = strings.TrimSpace(sessionLease.ConnID())
@@ -1715,7 +1738,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 
 				acquiredLease, acquireErr := acquireTurnLease(turn, preferredConnID, forcePreferredConn, false)
 				if acquireErr != nil {
-					return fmt.Errorf("acquire upstream websocket after preflight ping fail: %w", acquireErr)
+					return currentTurnFailover(fmt.Errorf("acquire upstream websocket after preflight ping fail: %w", acquireErr))
 				}
 				sessionLease = acquiredLease
 				sessionConnID = strings.TrimSpace(sessionLease.ConnID())
@@ -1764,18 +1787,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			// present. The retry wrapper is consumed by the handler's account loop.
 			var failoverErr *UpstreamFailoverError
 			if turn > 1 && errors.As(relayErr, &failoverErr) && failoverErr != nil {
-				retryPayload, retrySafe, retryPayloadErr := buildOpenAIWSCurrentTurnRetryPayload(
-					currentAccountIdentitySourceRaw,
-					currentTurnReplayInput,
-					currentTurnReplayInputExists,
-					currentOriginalModel,
-				)
-				if retryPayloadErr != nil {
-					return fmt.Errorf("build websocket current-turn failover payload: %w", retryPayloadErr)
-				}
-				if retrySafe {
-					return newOpenAIWSCurrentTurnFailoverError(failoverErr, retryPayload)
-				}
+				return currentTurnFailover(relayErr)
 			}
 			if unwrapped := errors.Unwrap(relayErr); unwrapped != nil {
 				finalErr = unwrapped

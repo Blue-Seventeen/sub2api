@@ -9,7 +9,7 @@ fail() {
   exit 1
 }
 
-expected_version='0.2.4'
+expected_version='0.2.17'
 runtime_version=$(tr -d '\r\n' < backend/cmd/server/VERSION)
 [ "$runtime_version" = "$expected_version" ] || \
   fail "runtime VERSION is '$runtime_version', expected '$expected_version'"
@@ -157,7 +157,7 @@ release_override_count=$(printf '%s\n' "$release_override_images" | grep -Fxc "s
 workflow=.github/workflows/release.yml
 grep -Fq '  deployment-gate:' "$workflow" || \
   fail 'release workflow is missing the deployment-gate job'
-grep -Fq 'needs: [update-version, build-frontend, deployment-gate]' "$workflow" || \
+grep -Fq 'needs: [prepare, build-frontend, deployment-gate]' "$workflow" || \
   fail 'release job does not wait for deployment-gate'
 grep -Fq 'go test -p 1 -parallel 1 ./... -count=1' "$workflow" || \
   fail 'deployment-gate is missing the backend Go test command'

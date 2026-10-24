@@ -17,8 +17,8 @@ import (
 
 // ---------------------------------------------------------------------------
 // Gemini 原生路径带内信号契约：
-//   - 上游 2xx 里的 finishReason / promptFeedback.blockReason / 错误信封 / 空流只登记 ops，
-//     wire 状态与客户端字节原样不变，用量照常从 usageMetadata 提取（计费不受影响）；
+//   - 首输出前、无用量的可恢复错误/空流返回未提交的 failover，交由 handler 恢复；
+//   - 策略结果、已输出或已计量的响应保持原始字节与 usageMetadata 结算；
 //   - 内容策略类不归因上游账号、不计入 SLA；错误信封与空流按上游失败归因并计入 SLA。
 // ---------------------------------------------------------------------------
 
@@ -187,22 +187,22 @@ func TestGeminiForwardNative_EmptyStreamMarksUpstreamFailure(t *testing.T) {
 
 	result, err := svc.ForwardNative(context.Background(), c, geminiSignalTestAccount(),
 		"gemini-3.7-flash", "streamGenerateContent", true, geminiSignalTestRequest())
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.Equal(t, http.StatusOK, rec.Code)
+	assertGeminiNativePreoutputFailure(t, c, result, err, http.StatusBadGateway)
 	require.Zero(t, rec.Body.Len())
-	require.Nil(t, result.FirstTokenMs)
+}
 
-	streamErrs := GetOpsStreamErrors(c)
-	require.Len(t, streamErrs, 1)
-	require.Equal(t, "upstream_error", streamErrs[0].ErrType)
-	require.Equal(t, geminiSignalEmptyStreamReason, streamErrs[0].Code)
-	require.Equal(t, http.StatusBadGateway, streamErrs[0].IntendedStatus)
-	require.True(t, streamErrs[0].CountTowardsSLA)
-
+func assertGeminiNativePreoutputFailure(t *testing.T, c *gin.Context, result *ForwardResult, err error, status int) {
+	t.Helper()
+	var failure *UpstreamFailoverError
+	require.ErrorAs(t, err, &failure)
+	require.Equal(t, status, failure.StatusCode)
+	require.Nil(t, result)
+	require.False(t, c.Writer.Written(), "the failed attempt must remain recoverable by the handler")
+	require.Empty(t, GetOpsStreamErrors(c), "no client-visible stream error was emitted")
 	events := upstreamErrorEventsFromContext(t, c)
 	require.Len(t, events, 1)
-	require.Equal(t, "stream_failed", events[0].Kind)
+	require.Equal(t, "stream_error", events[0].Kind)
+	require.Equal(t, status, events[0].UpstreamStatusCode)
 	require.Equal(t, int64(703), events[0].AccountID)
 }
 
@@ -325,13 +325,9 @@ func TestGeminiForwardNative_StreamNonSSEJSONBodyIsInspected(t *testing.T) {
 		body := `{"error":{"code":429,"message":"quota","status":"RESOURCE_EXHAUSTED"}}` + "\n"
 		svc := newGeminiSignalService("application/json", body)
 		c, _ := newGeminiNativeTestContext(t)
-		_, err := svc.ForwardNative(context.Background(), c, geminiSignalTestAccount(),
+		result, err := svc.ForwardNative(context.Background(), c, geminiSignalTestAccount(),
 			"gemini-3.7-flash", "streamGenerateContent", true, geminiSignalTestRequest())
-		require.NoError(t, err)
-		streamErrs := GetOpsStreamErrors(c)
-		require.Len(t, streamErrs, 1)
-		require.Equal(t, "RESOURCE_EXHAUSTED", streamErrs[0].Code)
-		require.True(t, streamErrs[0].CountTowardsSLA)
+		assertGeminiNativePreoutputFailure(t, c, result, err, http.StatusTooManyRequests)
 	})
 	t.Run("healthy json object leaves no mark", func(t *testing.T) {
 		body := `{"candidates":[{"content":{"parts":[{"text":"hello"}],"role":"model"},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":1}}` + "\n"
@@ -370,8 +366,13 @@ func TestGeminiForwardNative_StreamNonSSEEmptyBodyIsEmpty(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			svc := newGeminiSignalService("application/json", body)
 			c, rec := newGeminiNativeTestContext(t)
-			_, err := svc.ForwardNative(context.Background(), c, geminiSignalTestAccount(),
+			result, err := svc.ForwardNative(context.Background(), c, geminiSignalTestAccount(),
 				"gemini-3.7-flash", "streamGenerateContent", true, geminiSignalTestRequest())
+			if name == "empty object" || name == "empty array" {
+				assertGeminiNativePreoutputFailure(t, c, result, err, http.StatusBadGateway)
+				require.Empty(t, rec.Body.String())
+				return
+			}
 			require.NoError(t, err)
 			require.Equal(t, body, rec.Body.String())
 			streamErrs := GetOpsStreamErrors(c)
@@ -393,8 +394,13 @@ func TestGeminiForwardNative_StreamWithoutDataEventsIsEmpty(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			svc := newGeminiSignalService("text/event-stream", body)
 			c, rec := newGeminiNativeTestContext(t)
-			_, err := svc.ForwardNative(context.Background(), c, geminiSignalTestAccount(),
+			result, err := svc.ForwardNative(context.Background(), c, geminiSignalTestAccount(),
 				"gemini-3.7-flash", "streamGenerateContent", true, geminiSignalTestRequest())
+			if name != "done marker only" {
+				assertGeminiNativePreoutputFailure(t, c, result, err, http.StatusBadGateway)
+				require.Empty(t, rec.Body.String())
+				return
+			}
 			require.NoError(t, err)
 			require.Equal(t, body, rec.Body.String())
 			streamErrs := GetOpsStreamErrors(c)

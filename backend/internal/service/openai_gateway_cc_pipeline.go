@@ -102,6 +102,12 @@ func (s *OpenAIGatewayService) failoverOpenAIUpstreamHTTPError(
 	upstreamMsg string,
 	upstreamModel string,
 ) *UpstreamFailoverError {
+	// A status explicitly excluded by account policy or a definitive request
+	// rejection must not be upgraded by the secondary cooldown policy below.
+	if (account != nil && !account.ShouldHandleErrorCode(resp.StatusCode)) ||
+		isOpenAIAccountTerminalUpstreamRequestError(account, resp.StatusCode, upstreamMsg, respBody) {
+		return nil
+	}
 	shouldFailover := s.shouldFailoverOpenAIUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody)
 	tempUnscheduled := false
 	responseNotCommitted := c == nil || !IsResponseCommitted(c)
@@ -112,7 +118,8 @@ func (s *OpenAIGatewayService) failoverOpenAIUpstreamHTTPError(
 		shouldFailover = shouldFailover || tempUnscheduled
 	}
 	if account != nil && account.Platform == PlatformGrok {
-		shouldFailover = s.shouldFailoverGrokUpstreamError(resp.StatusCode, respBody)
+		shouldFailover = !isGrokContentPolicyRejection(resp.StatusCode, respBody) &&
+			(s.shouldFailoverGrokUpstreamError(resp.StatusCode, respBody) || (account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode)))
 	}
 	if account != nil && account.Platform == PlatformGrok {
 		s.handleGrokAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
@@ -283,6 +290,9 @@ type ccStreamScanState struct {
 	// Usage 为 include_usage chunk 中最近一次出现的用量（上游可能重复发送，
 	// 总是保留最新值）；终态事件中的用量由调用方在 finalize 阶段自行覆盖。
 	Usage OpenAIUsage
+	// Provider-specific positive usage is also an acceptance boundary, even
+	// when that alias has no equivalent field in OpenAIUsage.
+	BillableUsageSeen bool
 	// FirstTokenMs 为首个实际输出 chunk（排除 usage-only chunk）的到达时延。
 	FirstTokenMs *int
 	// SawDone 表示上游发出了 [DONE] 哨兵。
@@ -334,6 +344,7 @@ func (s *OpenAIGatewayService) scanCCStream(
 			st.SawDone = true
 			break
 		}
+		st.BillableUsageSeen = st.BillableUsageSeen || upstreamSSEPayloadHasUsage([]byte(payload))
 		if isCCUpstreamErrorPayload(namedEvent, []byte(payload)) {
 			if usage, ok := extractOpenAIUsageFromJSONBytes([]byte(payload)); ok &&
 				(openAIUsageHasTokens(&usage) || !openAIUsageHasTokens(&st.Usage)) {
@@ -403,8 +414,12 @@ func (s *OpenAIGatewayService) readCCUpstreamJSONResponse(
 		return nil, OpenAIUsage{}, fmt.Errorf("read upstream body: %w", err)
 	}
 
+	usage := OpenAIUsage{}
+	if parsed, ok := extractOpenAIUsageFromJSONBytes(respBody); ok {
+		usage = parsed
+	}
 	if isCCUpstreamErrorPayload("", respBody) {
-		return nil, OpenAIUsage{}, s.handleCCUpstreamErrorPayload(c, resp, account, respBody, true, writeError)
+		return nil, usage, s.handleCCUpstreamErrorPayload(c, resp, account, respBody, true, writeError)
 	}
 	var ccResp apicompat.ChatCompletionsResponse
 	if err := json.Unmarshal(respBody, &ccResp); err != nil {
@@ -417,10 +432,6 @@ func (s *OpenAIGatewayService) readCCUpstreamJSONResponse(
 		observer.ObserveOpenAI(respBody, "")
 	}
 
-	usage := OpenAIUsage{}
-	if parsed, ok := extractOpenAIUsageFromJSONBytes(respBody); ok {
-		usage = parsed
-	}
 	return &ccResp, usage, nil
 }
 
@@ -434,6 +445,83 @@ func isCCUpstreamErrorPayload(namedEvent string, payload []byte) bool {
 		hasClientVisibleErrorValue(event.Get("error")) || hasClientVisibleErrorValue(event.Get("response.error"))
 }
 
+// Pool attempts must classify errors before protocol converters can emit role
+// or response-start metadata. The prefix reader releases bytes unchanged at the
+// first semantic/usage boundary; this does not buffer a completed response.
+func (s *OpenAIGatewayService) preflightOpenAIPoolCompatStream(c *gin.Context, resp *http.Response, account *Account, protocol upstreamSSEProtocol, writeError compatErrorWriter) error {
+	if account == nil || !account.IsPoolMode() || c == nil || c.Request == nil {
+		return nil
+	}
+	ctx := c.Request.Context()
+	failure := inspectUpstreamSSEPrefix(ctx, resp, protocol, upstreamSSEIdleTimeout(s.cfg))
+	if failure == nil {
+		return nil
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return s.handleCCUpstreamErrorPayload(c, resp, account, failure.body, true, writeError)
+}
+
+// Replay eligibility is independent of the same-account retry budget. Callers
+// additionally retain cumulative acceptance across earlier frames.
+func accountPlatform(account *Account) string {
+	if account != nil {
+		return account.Platform
+	}
+	return PlatformOpenAI
+}
+
+func openAIErrorPayloadAllowsReplay(c *gin.Context, account *Account, payload []byte, message string) bool {
+	platform := PlatformOpenAI
+	if account != nil {
+		platform = account.Platform
+	}
+	if _, _, _, matched := applyOpenAIStreamFailedErrorPassthroughRule(c, platform, payload, message); matched {
+		return false
+	}
+	status := openAIStreamFailedEventSemanticStatus(payload, message)
+	return !upstreamSSEPayloadHasUsage(payload) && !openAIResponsesPayloadHasOutput(payload) &&
+		!isDefinitiveUpstreamRequestError(status, payload) &&
+		!isOpenAIAccountTerminalUpstreamRequestError(account, status, message, payload) &&
+		(account == nil || account.ShouldHandleErrorCode(status))
+}
+
+// Unlike a terminal-success boundary, semantic/tool output and provider usage
+// remain replay-unsafe even when a later terminal omits them.
+func openAIResponsesPayloadHasOutput(payload []byte) bool {
+	// A failed terminal can contain content/tool items that were never sent as
+	// separate deltas. Nonempty output is conservative acceptance evidence.
+	return len(gjson.GetBytes(payload, "response.output").Array()) > 0
+}
+
+func openAIResponsesPayloadAccepted(payload []byte, eventType string) bool {
+	if upstreamSSEPayloadHasUsage(payload) || openAIResponsesPayloadHasOutput(payload) {
+		return true
+	}
+	if isCCUpstreamErrorPayload(eventType, payload) {
+		return false
+	}
+	if eventType == "response.output_item.added" {
+		switch gjson.GetBytes(payload, "item.type").String() {
+		case "function_call", "custom_tool_call":
+			return true
+		}
+	}
+	if isOpenAICompatResponsesTerminalEvent(eventType) {
+		return false
+	}
+	return openAIStreamDataStartsClientOutput(string(payload), eventType)
+}
+
+func openAIResponsesBodyAccepted(body string) bool {
+	accepted := false
+	forEachOpenAISSEFrame(body, func(eventType string, payload []byte) {
+		accepted = accepted || openAIResponsesPayloadAccepted(payload, eventType)
+	})
+	return accepted
+}
+
 // HTTP 200 is only the transport status: an error envelope must never enter
 // successful conversion/billing. Custom rules take precedence over retries.
 func (s *OpenAIGatewayService) handleCCUpstreamErrorPayload(
@@ -443,6 +531,7 @@ func (s *OpenAIGatewayService) handleCCUpstreamErrorPayload(
 	payload []byte,
 	allowFailover bool,
 	writeError compatErrorWriter,
+	fallbackStatus ...int,
 ) error {
 	message := extractOpenAISSEErrorMessage(payload)
 	platform := PlatformOpenAI
@@ -451,10 +540,21 @@ func (s *OpenAIGatewayService) handleCCUpstreamErrorPayload(
 	}
 	status, errType, errMsg, matched := applyOpenAIStreamFailedErrorPassthroughRule(c, platform, payload, message)
 	if !matched {
-		if allowFailover && openAIStreamErrorEventShouldFailover(payload, message) {
+		semanticStatus := openAIStreamFailedEventSemanticStatus(payload, message)
+		customCodesAllow := account == nil || account.ShouldHandleErrorCode(semanticStatus)
+		poolRetry := account != nil && account.IsPoolMode() && account.IsPoolModeRetryableStatus(semanticStatus)
+		poolSwitch := account != nil && account.IsPoolMode() && newAPIStyleShouldFailoverStatus(semanticStatus)
+		requestTerminal := isDefinitiveUpstreamRequestError(semanticStatus, payload) || isOpenAIAccountTerminalUpstreamRequestError(account, semanticStatus, message, payload)
+		if allowFailover && !upstreamSSEPayloadHasUsage(payload) && !openAIResponsesPayloadHasOutput(payload) && !requestTerminal && customCodesAllow && (poolRetry || poolSwitch || openAIStreamErrorEventShouldFailover(payload, message)) {
 			return s.newOpenAIStreamFailoverError(c, account, false, resp.Header.Get("x-request-id"), payload, message, resp.Header)
 		}
-		status = openAIStreamFailedEventSemanticStatus(payload, message)
+		status = semanticStatus
+		// Responses-to-Chat/Messages historically expose 502 for an unmapped
+		// terminal failure; retain that wire contract while classifying retries
+		// from the original semantic status and applying global rules first.
+		if len(fallbackStatus) > 0 {
+			status = fallbackStatus[0]
+		}
 		errType = firstNonEmpty(gjson.GetBytes(payload, "error.type").String(), gjson.GetBytes(payload, "response.error.type").String(), "upstream_error")
 		errMsg = message
 	}
@@ -466,6 +566,9 @@ func (s *OpenAIGatewayService) handleCCUpstreamErrorPayload(
 	errType = sanitizeUserVisibleErrorText(sanitizeUpstreamErrorMessage(errType))
 	MarkResponseCommitted(c)
 	writeError(c, status, errType, errMsg)
+	if matched {
+		return fmt.Errorf("upstream response failed (passthrough): %s", errMsg)
+	}
 	return fmt.Errorf("upstream response failed: %s", errMsg)
 }
 

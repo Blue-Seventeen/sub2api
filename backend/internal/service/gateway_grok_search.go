@@ -40,7 +40,10 @@ func (s *GatewayService) DoGrokNativeResponsesJSON(ctx context.Context, account 
 	proxyURL := resolveAccountProxyURL(ctx, account, nil)
 	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
-		return nil, err
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, &UpstreamFailoverError{StatusCode: http.StatusBadGateway, ResponseBody: []byte(`{"error":{"message":"Search upstream unavailable"}}`), RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(http.StatusBadGateway)}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	result, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
@@ -48,7 +51,10 @@ func (s *GatewayService) DoGrokNativeResponsesJSON(ctx context.Context, account 
 		return nil, err
 	}
 	if resp.StatusCode >= 400 {
-		return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: result}
+		if fe := poolModeHTTPFailover(ctx, s.rateLimitService, account, resp.StatusCode, resp.Header, result, gjson.GetBytes(body, "model").String()); fe != nil {
+			return nil, fe
+		}
+		return nil, errors.New("search upstream rejected request")
 	}
 	return result, nil
 }

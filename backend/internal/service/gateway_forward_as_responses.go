@@ -42,7 +42,7 @@ func (s *GatewayService) ForwardAsResponses(
 		AppendCompatibilityFallbackStage(c, "bridge")
 	}
 
-	normalizedBody, normalized, err := normalizeOpenAIResponsesLegacyIngress(body)
+	normalizedBody, normalized, err := normalizeOpenAIResponsesLegacyIngressWithConfig(s.cfg, body)
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +169,17 @@ func (s *GatewayService) ForwardAsResponses(
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 
-		if s.shouldFailoverUpstreamError(resp.StatusCode) {
+		if account.IsPoolMode() && !isDefinitiveUpstreamRequestError(resp.StatusCode, respBody) {
+			if failoverErr := poolModeHTTPFailover(ctx, s.rateLimitService, account, resp.StatusCode, resp.Header, respBody, mappedModel); failoverErr != nil {
+				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+					ProxyID: opsUpstreamProxyID(account), ProxyName: opsUpstreamProxyName(account),
+					Platform: account.Platform, AccountID: account.ID, AccountName: account.Name,
+					UpstreamStatusCode: resp.StatusCode, UpstreamRequestID: resp.Header.Get("x-request-id"),
+					Kind: "pool_mode_failover", Message: upstreamMsg,
+				})
+				return nil, failoverErr
+			}
+		} else if !account.IsPoolMode() && s.shouldFailoverUpstreamError(resp.StatusCode) {
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				ProxyID:            opsUpstreamProxyID(account),
 				ProxyName:          opsUpstreamProxyName(account),
@@ -181,14 +191,12 @@ func (s *GatewayService) ForwardAsResponses(
 				Kind:               "failover",
 				Message:            upstreamMsg,
 			})
-			shouldDisable := false
 			if s.rateLimitService != nil {
-				shouldDisable = s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody, mappedModel)
+				s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody, mappedModel)
 			}
 			return nil, &UpstreamFailoverError{
-				StatusCode:             resp.StatusCode,
-				ResponseBody:           respBody,
-				RetryableOnSameAccount: !shouldDisable && account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
+				StatusCode:   resp.StatusCode,
+				ResponseBody: respBody,
 			}
 		}
 
@@ -198,6 +206,9 @@ func (s *GatewayService) ForwardAsResponses(
 	}
 
 	// 13. Handle normal response (convert Anthropic → Responses)
+	if err := s.preflightAnthropicUpstream(ctx, c, account, resp, mappedModel); err != nil {
+		return nil, err
+	}
 	var result *ForwardResult
 	var handleErr error
 	if clientStream {

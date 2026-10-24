@@ -188,11 +188,18 @@ func (s *OpenAIGatewayService) OpenGrokRealtime(ctx context.Context, account *Ac
 
 // HandleGrokRealtimeUpstreamError applies the shared Grok account policy to a
 // failed pre-accept WebSocket handshake.
-func (s *OpenAIGatewayService) HandleGrokRealtimeUpstreamError(ctx context.Context, account *Account, statusCode int, body []byte) {
+func (s *OpenAIGatewayService) HandleGrokRealtimeUpstreamError(ctx context.Context, account *Account, statusCode int, body []byte) *UpstreamFailoverError {
 	if statusCode <= 0 {
 		statusCode = http.StatusBadGateway
 	}
+	if account != nil && account.IsPoolMode() {
+		return poolModeHTTPFailover(ctx, s.rateLimitService, account, statusCode, nil, body, "")
+	}
 	s.handleGrokAccountUpstreamError(ctx, account, statusCode, nil, body)
+	if !s.shouldFailoverGrokUpstreamError(statusCode, body) {
+		return nil
+	}
+	return &UpstreamFailoverError{StatusCode: statusCode, ResponseBody: body}
 }
 
 func (s *OpenAIGatewayService) ProxyGrokRealtimeConn(ctx context.Context, c *gin.Context, client *coderws.Conn, upstream *GrokRealtimeUpstream) (bool, error) {

@@ -294,9 +294,10 @@ type OpenAIForwardResult struct {
 	BillableUnitType        string
 	// WebSearchCalls 是 Codex alpha/search 网页搜索调用次数（每次成功请求为 1）。
 	// 上游不返回 usage 字段，>0 时走按次计费（分组单价 × 次数 × 倍率）。
-	WebSearchCalls int
-	SearchCount    int
-	AudioUsage     *AudioUsage
+	WebSearchCalls    int
+	SearchCount       int
+	EmulatedWebSearch bool // Search-only response; no model request or token charge.
+	AudioUsage        *AudioUsage
 
 	wsReplayInput                []json.RawMessage
 	wsReplayInputExists          bool

@@ -192,6 +192,12 @@ func (s *CompatibleGatewayService) Forward(
 		upstreamEndpoint = preparedRequests[len(preparedRequests)-1].UpstreamEndpoint
 	}
 	if lastErr != nil {
+		var upstreamErr *CompatibleUpstreamError
+		if errors.As(lastErr, &upstreamErr) && account.IsPoolMode() && account.IsPoolModeRetryableStatus(upstreamErr.StatusCode) {
+			if failoverErr := poolModeHTTPFailover(ctx, s.gatewayService.rateLimitService, account, upstreamErr.StatusCode, nil, upstreamErr.ResponseBody, ""); failoverErr != nil {
+				return nil, upstreamEndpoint, failoverErr
+			}
+		}
 		return nil, upstreamEndpoint, lastErr
 	}
 	return nil, upstreamEndpoint, &CompatibleUpstreamError{
@@ -312,7 +318,7 @@ func (s *CompatibleGatewayService) prepareRequest(account *Account, route Compat
 			if err := json.Unmarshal(body, &anthropicReq); err != nil {
 				return nil, fmt.Errorf("parse anthropic request: %w", err)
 			}
-			responsesReq, err := apicompat.AnthropicToResponses(&anthropicReq)
+			responsesReq, err := anthropicToResponses(s.cfg, &anthropicReq)
 			if err != nil {
 				return nil, err
 			}
@@ -832,7 +838,7 @@ func (s *CompatibleGatewayService) prepareMoonshotAnthropicMessagesChatFallbackR
 	if err := json.Unmarshal(body, &anthropicReq); err != nil {
 		return nil, fmt.Errorf("parse anthropic request: %w", err)
 	}
-	responsesReq, err := apicompat.AnthropicToResponses(&anthropicReq)
+	responsesReq, err := anthropicToResponses(s.cfg, &anthropicReq)
 	if err != nil {
 		return nil, err
 	}
@@ -968,7 +974,7 @@ func (s *CompatibleGatewayService) executePreparedRequest(
 			if !unsupported {
 				allUnsupported = false
 			}
-			if attempt == 0 && shouldRetryCompatibleTransientStatus(statusCode) {
+			if attempt == 0 && !account.IsPoolMode() && !account.IsCustomErrorCodesEnabled() && shouldRetryCompatibleTransientStatus(statusCode) {
 				continue
 			}
 			if idx == 0 && idx < len(urlCandidates)-1 && (shouldRetryViaRelayCompatibleEndpoint(prepared, statusCode, respBody) || moonshotChatFallback) {
@@ -979,10 +985,11 @@ func (s *CompatibleGatewayService) executePreparedRequest(
 				}
 				break
 			}
-			if s.gatewayService.shouldFailoverUpstreamError(statusCode) {
-				return nil, false, &UpstreamFailoverError{
-					StatusCode:   statusCode,
-					ResponseBody: respBody,
+			// Unsupported routes are allowed to exhaust both endpoint and
+			// protocol fallbacks before a configured status consumes retry budget.
+			if !unsupported {
+				if failoverErr := poolModeHTTPFailover(ctx, s.gatewayService.rateLimitService, account, statusCode, resp.Header, respBody, prepared.UpstreamModel); failoverErr != nil {
+					return nil, false, failoverErr
 				}
 			}
 			lastErr = &CompatibleUpstreamError{
@@ -1012,6 +1019,11 @@ func validateCompatibleSuccessResponse(resp *http.Response) (bool, error) {
 			StatusCode: http.StatusBadGateway,
 			Message:    "empty upstream response",
 		}
+	}
+	if isEventStream(resp.Header.Get("Content-Type")) {
+		// Waiting for an arbitrary 512-byte sample delays small live SSE
+		// events. The guarded stream prefix is inspected before conversion.
+		return false, nil
 	}
 	sample, err := peekCompatibleResponseSample(resp, 512)
 	if err != nil {
@@ -1123,6 +1135,29 @@ func (s *CompatibleGatewayService) forwardPreparedRequestAttempt(
 		}
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if prepared.ClientStream {
+		protocol := upstreamSSEChat
+		switch prepared.UpstreamKind {
+		case compatibleUpstreamMessages:
+			protocol = upstreamSSEMessages
+		case compatibleUpstreamResponses:
+			protocol = upstreamSSEResponses
+		}
+		if failure := inspectUpstreamSSEPrefix(ctx, resp, protocol, upstreamSSEIdleTimeout(s.cfg)); failure != nil {
+			if ctx.Err() != nil {
+				return nil, prepared.UpstreamEndpoint, false, ctx.Err()
+			}
+			if failoverErr := failure.failover(ctx, s.gatewayService.rateLimitService, account, resp.Header, prepared.UpstreamModel); failoverErr != nil {
+				return nil, prepared.UpstreamEndpoint, false, failoverErr
+			}
+			return nil, prepared.UpstreamEndpoint, false, &CompatibleClientError{StatusCode: failure.status, ErrorType: "upstream_error", Message: failure.message}
+		}
+	} else if failure := inspectUpstreamJSONError(resp, s.cfg); failure != nil {
+		if failoverErr := failure.failover(ctx, s.gatewayService.rateLimitService, account, resp.Header, prepared.UpstreamModel); failoverErr != nil {
+			return nil, prepared.UpstreamEndpoint, false, failoverErr
+		}
+		return nil, prepared.UpstreamEndpoint, false, &CompatibleClientError{StatusCode: failure.status, ErrorType: "upstream_error", Message: failure.message}
+	}
 
 	switch prepared.UpstreamKind {
 	case compatibleUpstreamMessages:

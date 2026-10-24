@@ -292,6 +292,9 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	startTime time.Time,
 	requestBodyLen int,
 ) (*OpenAIForwardResult, error) {
+	if err := s.preflightOpenAIPoolCompatStream(c, resp, account, upstreamSSEChat, writeChatCompletionsError); err != nil {
+		return nil, err
+	}
 	observer := upstreamResponseModelObserverFromContext(c)
 	if observer == nil {
 		observer = beginUpstreamResponseModelObservation(c)
@@ -301,6 +304,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	scanner := s.newUpstreamSSEScanner(resp.Body)
 
 	var usage OpenAIUsage
+	billableUsageSeen := false
 	var firstTokenMs *int
 	clientDisconnected := false
 	clientOutputStarted := false
@@ -339,6 +343,9 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 
 	for scanner.Scan() {
 		line := scanner.Text()
+		if payload, ok := extractOpenAISSEDataLine(line); ok {
+			billableUsageSeen = billableUsageSeen || upstreamSSEPayloadHasUsage([]byte(payload))
+		}
 		if line == "" {
 			namedEvent = ""
 		}
@@ -359,7 +366,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 				(openAIUsageHasTokens(&parsedUsage) || !openAIUsageHasTokens(&usage)) {
 				usage = parsedUsage
 			}
-			allowFailover := !clientOutputStarted && !clientDisconnected && !openAIUsageHasTokens(&usage)
+			allowFailover := !clientOutputStarted && !clientDisconnected && !billableUsageSeen && !openAIUsageHasTokens(&usage)
 			terminalErr = s.handleCCUpstreamErrorPayload(c, resp, account, payloadBytes, allowFailover,
 				func(c *gin.Context, status int, errType, message string) {
 					if clientDisconnected {
@@ -547,12 +554,18 @@ func (s *OpenAIGatewayService) bufferRawChatCompletions(
 		return nil, fmt.Errorf("read upstream body: %w", err)
 	}
 
-	if isCCUpstreamErrorPayload("", respBody) {
-		return nil, s.handleCCUpstreamErrorPayload(c, resp, account, respBody, true, writeChatCompletionsError)
-	}
 	var usage OpenAIUsage
 	if parsedUsage, ok := extractOpenAIUsageFromJSONBytes(respBody); ok {
 		usage = parsedUsage
+	}
+	if isCCUpstreamErrorPayload("", respBody) {
+		err := s.handleCCUpstreamErrorPayload(c, resp, account, respBody, true, writeChatCompletionsError)
+		if openAIUsageHasTokens(&usage) {
+			return &OpenAIForwardResult{RequestID: requestID, UpstreamHeaders: resp.Header, Usage: usage,
+				Model: originalModel, BillingModel: billingModel, UpstreamModel: upstreamModel,
+				ReasoningEffort: reasoningEffort, ServiceTier: serviceTier, Duration: time.Since(startTime)}, err
+		}
+		return nil, err
 	}
 	if account != nil && xai.IsGrokModelID(billingModel) && !openAIRawChatUsageHasTokens(&usage) {
 		return nil, &UpstreamFailoverError{

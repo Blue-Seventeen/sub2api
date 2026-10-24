@@ -29,22 +29,27 @@ type responsesPartialUsageUpstream struct {
 	wantOutput int
 	forceChat  bool
 	paths      []string
+	accounts   []int64
 }
 
-func (u *responsesPartialUsageUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+func (u *responsesPartialUsageUpstream) Do(req *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
 	u.paths = append(u.paths, req.URL.Path)
+	u.accounts = append(u.accounts, accountID)
 	if req.URL.Path == "/v1/chat/completions" {
 		if u.chatBody != "" {
 			return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}, "X-Request-Id": {"fallback-billed"}}, Body: io.NopCloser(strings.NewReader(u.chatBody))}, nil
 		}
-		if u.failure == "transport" {
-			return nil, errors.New("connection reset by peer")
-		}
-		status := http.StatusBadGateway
-		if u.failure == "http_400" {
-			status = http.StatusBadRequest
-		}
-		return &http.Response{StatusCode: status, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"chat fallback failed"}}`))}, nil
+		return &http.Response{StatusCode: http.StatusBadGateway, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"chat fallback failed"}}`))}, nil
+	}
+	// These failures now exercise the native route actually selected by the
+	// request, rather than an unreachable hypothetical Chat fallback branch.
+	switch u.failure {
+	case "transport":
+		return nil, errors.New("connection reset by peer")
+	case "http_400":
+		return &http.Response{StatusCode: http.StatusBadRequest, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"type":"invalid_request_error","message":"missing required parameter"}}`))}, nil
+	case "http_502":
+		return &http.Response{StatusCode: http.StatusBadGateway, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"type":"server_error","message":"temporary native failure"}}`))}, nil
 	}
 	body := "data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_native\",\"status\":\"failed\",\"usage\":{\"input_tokens\":5,\"output_tokens\":1},\"error\":{\"code\":\"server_error\",\"message\":\"temporary upstream failure\"}}}\n\n"
 	if u.nativeBody != "" {
@@ -79,16 +84,20 @@ func TestOpenAIResponses_OfficialRetryAndExplicitChatModeBilling(t *testing.T) {
 	}
 }
 
-func TestOpenAIResponses_OfficialRetriesDoNotBillFailedAttempts(t *testing.T) {
+func TestOpenAIResponses_UnacceptedNativeFailuresDoNotBillFailedAttempts(t *testing.T) {
 	for _, failure := range []string{"transport", "http_400", "http_502"} {
 		t.Run(failure, func(t *testing.T) {
+			paths := []string{"/v1/responses", "/v1/responses"}
+			if failure == "http_400" {
+				paths = paths[:1]
+			}
 			assertResponsesFailureUsageBehavior(t, &responsesPartialUsageUpstream{failure: failure},
-				`{"model":"gpt-5.4","input":"hello","stream":true}`, false, []string{"/v1/responses", "/v1/responses"}, false)
+				`{"model":"gpt-5.4","input":"hello","stream":true}`, false, paths, false)
 		})
 	}
 }
 
-func TestOpenAIResponses_NativeTerminalErrorDoesNotRecordFailedAttemptUsage(t *testing.T) {
+func TestOpenAIResponses_NativeTerminalErrorRecordsAcceptedUsageExactlyOnce(t *testing.T) {
 	for _, tc := range []struct {
 		name           string
 		requestBody    string
@@ -113,9 +122,14 @@ func TestOpenAIResponses_NativeTerminalErrorDoesNotRecordFailedAttemptUsage(t *t
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			assertResponsesFailureUsageBehavior(t, &responsesPartialUsageUpstream{nativeBody: tc.nativeBody}, tc.requestBody, tc.forceResponses, tc.wantPaths, false)
+			assertResponsesFailureUsageBehavior(t, &responsesPartialUsageUpstream{nativeBody: tc.nativeBody, wantInput: 5, wantOutput: 1}, tc.requestBody, tc.forceResponses, tc.wantPaths, true)
 		})
 	}
+}
+
+func TestOpenAIResponses_AcceptedNativeTerminalDoesNotRetry(t *testing.T) {
+	assertResponsesFailureUsageBehavior(t, &responsesPartialUsageUpstream{wantInput: 5, wantOutput: 1},
+		`{"model":"gpt-5.4","input":"hello","stream":true}`, false, []string{"/v1/responses"}, true)
 }
 
 func assertResponsesFailureUsageBehavior(t *testing.T, upstream *responsesPartialUsageUpstream, body string, forceResponses bool, wantPaths []string, wantBilling bool) {
@@ -167,13 +181,23 @@ func assertResponsesFailureUsageBehavior(t *testing.T, upstream *responsesPartia
 	h.Responses(c)
 
 	require.Equal(t, wantPaths, upstream.paths, "unexpected upstream attempts: status=%d body=%s", rec.Code, rec.Body.String())
+	wantAccounts := []int64{1001}
+	if len(wantPaths) == 2 {
+		wantAccounts = append(wantAccounts, 1002)
+	}
+	require.Equal(t, wantAccounts, upstream.accounts)
+	require.Contains(t, rec.Body.String(), "error")
+	require.NotContains(t, rec.Body.String(), "response.completed")
 	if !wantBilling {
 		require.Empty(t, logs.logs, "failed retry attempts do not enter the billing chain")
 		require.Empty(t, billing.commands, "failed retry attempts do not affect balance")
 		return
 	}
 	require.Len(t, logs.logs, 1)
-	requestID := "fallback-billed"
+	requestID := "native-billed"
+	if upstream.forceChat {
+		requestID = "fallback-billed"
+	}
 	require.Equal(t, requestID, logs.logs[0].RequestID)
 	require.Equal(t, int64(1001), logs.logs[0].AccountID)
 	require.Equal(t, upstream.wantInput, logs.logs[0].InputTokens)

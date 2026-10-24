@@ -264,9 +264,10 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 	}
 
 	fs := NewFailoverState(h.base.maxAccountSwitches, false)
+	c.Request = c.Request.WithContext(service.NewGatewayRequestAttemptContext(c.Request.Context()))
 	for {
 		selection, err := h.base.gatewayService.SelectAccountWithLoadAwareness(
-			c.Request.Context(),
+			fs.SelectionContext(c.Request.Context()),
 			apiKey.GroupID,
 			sessionHash,
 			parsed.Model,
@@ -274,6 +275,9 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 			parsed.MetadataUserID,
 			subject.UserID,
 		)
+		if fs.HandleRetrySelectionError(err) {
+			continue
+		}
 		if err != nil {
 			if len(fs.FailedAccountIDs) == 0 {
 				h.writeRouteError(c, route, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error(), streamStarted)
@@ -317,8 +321,13 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 				accountWaitCounted = true
 			}
 			if err == nil && !canWait {
-				h.writeRouteError(c, route, http.StatusTooManyRequests, "rate_limit_error", "Too many pending requests, please retry later", streamStarted)
-				return
+				if fs.MaxSwitches == 0 {
+					h.writeRouteError(c, route, http.StatusTooManyRequests, "rate_limit_error", "Account concurrency limit exceeded", streamStarted)
+					return
+				}
+				fs.FailedAccountIDs[account.ID] = struct{}{}
+				fs.pendingRetryAccountID = 0
+				continue
 			}
 			releaseWait := func() {
 				if accountWaitCounted {
@@ -335,6 +344,16 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 				parsed.Stream,
 				&streamStarted,
 			)
+			if fs.MaxSwitches != 0 && accountAdmissionUnavailable(c.Request.Context(), err) {
+				releaseWait()
+				if fs.MaxSwitches == 0 {
+					h.writeRouteError(c, route, http.StatusTooManyRequests, "rate_limit_error", "Account concurrency limit exceeded", streamStarted)
+					return
+				}
+				fs.FailedAccountIDs[account.ID] = struct{}{}
+				fs.pendingRetryAccountID = 0
+				continue
+			}
 			if err != nil {
 				releaseWait()
 				h.writeRouteError(c, route, http.StatusTooManyRequests, "rate_limit_error", "Concurrency limit exceeded for account, please retry later", streamStarted)

@@ -64,7 +64,11 @@ func TestOpenAINativeTTFTPreservesStagedPreamble(t *testing.T) {
 			resp := &http.Response{Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body))}
 			result, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, newNonStreamingFailoverAccount(), time.Now(), "model", "model")
 			require.NoError(t, err)
-			require.Contains(t, rec.Body.String(), preamble+metadata)
+			stampedBody := rec.Body.String()
+			require.Contains(t, stripOpenAIResponseCreatedAtForTest(stampedBody), preamble+metadata)
+			createdAtValues := openAIResponseCreatedAtForTestRE.FindAllStringSubmatch(stampedBody, -1)
+			require.Len(t, createdAtValues, 2)
+			require.Equal(t, createdAtValues[0][1], createdAtValues[1][1])
 			require.Equal(t, 7, result.usage.InputTokens)
 			require.Equal(t, 3, result.usage.OutputTokens)
 			require.Equal(t, "actual-model", result.upstreamResponseModel)

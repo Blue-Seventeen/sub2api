@@ -366,7 +366,7 @@ func TestGrokMediaEligibilityReleasesBeforeSwitch(t *testing.T) {
 			}
 			if scenario == "exhausted" {
 				require.Equal(t, 503, w.Code)
-				require.Equal(t, 2, slots.released)
+				require.Equal(t, 3, slots.released, "all initial candidates must be released before finite exhaustion")
 				require.Zero(t, upstream.calls)
 			}
 		})

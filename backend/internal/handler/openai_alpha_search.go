@@ -126,6 +126,8 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 	profitVetoCount := 0
 	failedAccountIDs := make(map[int64]struct{})
 	sameAccountRetryCount := make(map[int64]int)
+	var pendingRetryAccountID int64
+	c.Request = c.Request.WithContext(service.NewGatewayRequestAttemptContext(c.Request.Context()))
 	var lastFailoverErr *service.UpstreamFailoverError
 	switchCount := 0
 	var oauth429FailoverState service.OpenAIOAuth429FailoverState
@@ -138,7 +140,7 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 
 	for {
 		selection, _, err := h.gatewayService.SelectAccountWithSchedulerForCapability(
-			c.Request.Context(),
+			service.WithGatewayRetryAccount(c.Request.Context(), pendingRetryAccountID),
 			apiKey.GroupID,
 			"",
 			sessionHash,
@@ -151,12 +153,17 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 			false,
 			service.PlatformOpenAI,
 		)
+		if pendingRetryAccountID != 0 && errors.Is(err, service.ErrSameAccountRetryUnavailable) && c.Request.Context().Err() == nil {
+			failedAccountIDs[pendingRetryAccountID] = struct{}{}
+			pendingRetryAccountID = 0
+			continue
+		}
 		if err != nil || selection == nil || selection.Account == nil {
 			if failoverClientGone(c) {
 				reqLog.Info("openai_alpha_search.account_select_aborted_client_disconnected", zap.Error(err))
 				return
 			}
-			if len(failedAccountIDs) == 0 {
+			if len(failedAccountIDs) == 0 && lastFailoverErr == nil {
 				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, requestedModel, requestedModel, service.PlatformOpenAI)
 				if !cls.ModelNotFound {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
@@ -183,9 +190,19 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 			}
 			continue
 		}
+		if slotResult == openAISlotAcquireUnavailable {
+			if h.maxAccountSwitches == 0 {
+				h.errorResponse(c, http.StatusTooManyRequests, "rate_limit_error", "Account concurrency limit exceeded")
+				return
+			}
+			failedAccountIDs[account.ID] = struct{}{}
+			pendingRetryAccountID = 0
+			continue
+		}
 		if slotResult != openAISlotAcquireOK {
 			return
 		}
+		account = selection.Account
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		writerSizeBeforeForward := c.Writer.Size()
 		forwardStart := time.Now()
@@ -225,10 +242,16 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 			h.handleFailoverExhausted(c, failoverErr, true)
 			return
 		}
+		if !failoverErr.ShouldRetryNextAccount() {
+			h.handleFailoverExhausted(c, failoverErr, false)
+			return
+		}
 		if failoverErr.RetryableOnSameAccount {
-			retryLimit := account.GetPoolModeRetryCount()
-			if sameAccountRetryCount[account.ID] < retryLimit {
+			retryLimit := effectiveSameAccountRetryLimit(failoverErr, account)
+			if sameAccountRetryAllowed(failoverErr, sameAccountRetryCount[account.ID], retryLimit) {
 				sameAccountRetryCount[account.ID]++
+				pendingRetryAccountID = account.ID
+				lastFailoverErr = failoverErr
 				reqLog.Warn("openai_alpha_search.pool_mode_same_account_retry",
 					zap.Int64("account_id", account.ID),
 					zap.Int("upstream_status", failoverErr.StatusCode),
@@ -244,9 +267,10 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 			}
 		}
 		h.gatewayService.RecordOpenAIAccountSwitch()
+		pendingRetryAccountID = 0
 		failedAccountIDs[account.ID] = struct{}{}
 		lastFailoverErr = failoverErr
-		if switchCount >= h.maxAccountSwitches {
+		if h.maxAccountSwitches == 0 {
 			h.handleFailoverExhausted(c, failoverErr, false)
 			return
 		}

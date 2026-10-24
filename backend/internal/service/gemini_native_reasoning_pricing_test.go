@@ -137,7 +137,7 @@ func TestGeminiNativeReasoningPricingUsesExplicitForwardedLevel(t *testing.T) {
 	}
 }
 
-func TestGeminiChatCompatReasoningPricingIgnoresUnforwardedEffort(t *testing.T) {
+func TestGeminiChatCompatReasoningPricingUsesForwardedEffort(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, stream := range []bool{false, true} {
 		mode := "buffered"
@@ -168,8 +168,9 @@ func TestGeminiChatCompatReasoningPricingIgnoresUnforwardedEffort(t *testing.T) 
 			require.NoError(t, err)
 			require.Equal(t, http.StatusOK, recorder.Code)
 			require.Len(t, upstream.requestBodies, 1)
-			require.False(t, gjson.GetBytes(upstream.requestBodies[0], "generationConfig.thinkingConfig").Exists())
-			require.Nil(t, result.ReasoningEffort)
+			require.Equal(t, "high", gjson.GetBytes(upstream.requestBodies[0], "generationConfig.thinkingConfig.thinkingLevel").String())
+			require.Equal(t, stream, gjson.GetBytes(upstream.requestBodies[0], "generationConfig.thinkingConfig.includeThoughts").Bool())
+			require.Equal(t, "high", optionalStringValue(result.ReasoningEffort))
 
 			billing := NewBillingService(&config.Config{}, nil)
 			cost, err := billing.CalculateTokenCostForRequest(TokenCostRequest{
@@ -184,7 +185,37 @@ func TestGeminiChatCompatReasoningPricingIgnoresUnforwardedEffort(t *testing.T) 
 				Resolver: NewModelPricingResolver(nil, billing),
 			})
 			require.NoError(t, err)
-			require.InDelta(t, 1, cost.TotalCost, 1e-12)
+			require.InDelta(t, 2, cost.TotalCost, 1e-12)
+		})
+	}
+}
+
+func TestGeminiChatCompatStreamingDoesNotRequestThoughtsWithoutReasoningIntent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, effort := range []string{"", "none"} {
+		t.Run("effort_"+effort, func(t *testing.T) {
+			request := map[string]any{
+				"model": "gemini-3.1-pro", "stream": true,
+				"messages": []map[string]string{{"role": "user", "content": "hello"}},
+			}
+			if effort != "" {
+				request["reasoning_effort"] = effort
+			}
+			body, err := json.Marshal(request)
+			require.NoError(t, err)
+			upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body:       io.NopCloser(strings.NewReader("data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":5}}\n\n")),
+			}}}
+			svc := &GeminiMessagesCompatService{httpUpstream: upstream, cfg: &config.Config{}}
+			c, recorder := newAntigravityCompatContext(http.MethodPost, "/v1/chat/completions", body)
+
+			_, err = svc.ForwardAsChatCompletions(context.Background(), c, geminiSignalTestAccount(), body)
+			require.NoError(t, err)
+			require.Equal(t, http.StatusOK, recorder.Code)
+			require.Len(t, upstream.requestBodies, 1)
+			require.False(t, gjson.GetBytes(upstream.requestBodies[0], "generationConfig.thinkingConfig.includeThoughts").Exists())
 		})
 	}
 }

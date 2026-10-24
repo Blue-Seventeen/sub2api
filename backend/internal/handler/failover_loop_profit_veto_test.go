@@ -81,10 +81,10 @@ func TestProfitVetoAfter503DoesNotLivelock(t *testing.T) {
 	require.Less(t, elapsed, 10*time.Second, "不得每 2s 空转一轮")
 }
 
-// TestProfitVetoKeepsBackoffUsefulForHealthyAccount 钉死修复没有削弱既有的
+// TestProfitVetoDoesNotReopenAnAlreadyFailedAccount 钉死修复没有削弱既有的
 // 503 退避语义：排除列表里仍有非利润否决的账号时，退避照常清空并重试，
 // 只是被利润门否决的账号不再复活。
-func TestProfitVetoKeepsBackoffUsefulForHealthyAccount(t *testing.T) {
+func TestProfitVetoDoesNotReopenAnAlreadyFailedAccount(t *testing.T) {
 	fs := NewFailoverState(10, false)
 	fs.LastFailoverErr = newTestFailoverErr(503, false, false)
 	fs.SwitchCount = 1
@@ -93,15 +93,15 @@ func TestProfitVetoKeepsBackoffUsefulForHealthyAccount(t *testing.T) {
 
 	res := runProfitVetoLoop(t, fs, []int64{2, 1}, map[int64]bool{2: true}, 50)
 
-	require.Equal(t, "forwarded", res.outcome)
-	require.Equal(t, int64(1), res.forwardedID, "退避清空后应重新可选账号 1")
-	require.Equal(t, 1, res.backoffRetries, "应发生且只发生一次退避重试")
+	require.Equal(t, "exhausted", res.outcome)
+	require.Zero(t, res.forwardedID, "已失败账号不能因耗尽重新复活")
+	require.Zero(t, res.backoffRetries)
 	require.Contains(t, fs.FailedAccountIDs, int64(2), "利润否决的账号在退避清空后必须被放回排除集")
 }
 
-// TestProfitVetoAttemptsCapped 钉死没有 503 参与时，大分组整池越线也会在
+// TestProfitVetoTraversesFiniteCandidateSet 钉死没有 503 参与时，大分组整池越线也会在
 // 常数步内终止，而不是把整池逐个选一遍。
-func TestProfitVetoAttemptsCapped(t *testing.T) {
+func TestProfitVetoTraversesFiniteCandidateSet(t *testing.T) {
 	fs := NewFailoverState(10, false)
 	pool := make([]int64, 0, 64)
 	vetoed := make(map[int64]bool, 64)
@@ -113,8 +113,8 @@ func TestProfitVetoAttemptsCapped(t *testing.T) {
 	res := runProfitVetoLoop(t, fs, pool, vetoed, 200)
 
 	require.Equal(t, "exhausted", res.outcome)
-	require.Equal(t, maxProfitVetoAttempts, fs.ProfitVetoCount())
-	require.Equal(t, maxProfitVetoAttempts, res.iterations, "达到上限即终止，不应继续遍历候选池")
+	require.Equal(t, 64, fs.ProfitVetoCount())
+	require.Equal(t, 65, res.iterations, "完整候选集耗尽后有限停止")
 }
 
 // TestRecordProfitVetoExcludesAccount 钉死 RecordProfitVeto 仍然把账号加入
@@ -134,6 +134,6 @@ func TestHandleSelectionExhaustedUnaffectedWithoutProfitVeto(t *testing.T) {
 	fs.SwitchCount = 1
 	fs.FailedAccountIDs[100] = struct{}{}
 
-	require.Equal(t, FailoverContinue, fs.HandleSelectionExhausted(context.Background()))
-	require.Empty(t, fs.FailedAccountIDs, "无利润否决时排除列表应被完全清空")
+	require.Equal(t, FailoverExhausted, fs.HandleSelectionExhausted(context.Background()))
+	require.Contains(t, fs.FailedAccountIDs, int64(100), "排除集合必须单调增长")
 }

@@ -111,6 +111,7 @@ public sealed class BackupEnginePipeFixture : IDisposable {
 }
 '@
 $global:BackupUnitpipe = $null
+$global:BackupUniticacls = if ($IsWindows) { (Get-Command icacls.exe -CommandType Application).Source } else { $null }
 
 function Sync-PipeFixture {
     if ($null -eq $global:BackupUnitpipe) { return }
@@ -165,6 +166,7 @@ function Reset-Fixture {
     $global:BackupUnitadditionalNetwork = $false
     $global:BackupUnitfailureMode = ''
     $global:BackupUnitnoPersistentData = $false
+    $global:BackupUnitaclMode = ''
     $global:BackupUnitappEnvironment = @(
         'DATABASE_HOST=postgres', 'DATABASE_PORT=5432', 'DATABASE_USER=app-user',
         'DATABASE_PASSWORD=unit-secret-never-print', 'DATABASE_DBNAME=selected-app-db',
@@ -302,6 +304,39 @@ function docker {
 
 function Start-Sleep { }
 
+function icacls {
+    if ($global:BackupUnitaclMode -eq 'unprotected') { $global:LASTEXITCODE = 0; return }
+    & $global:BackupUniticacls @args
+    $global:LASTEXITCODE = $LASTEXITCODE
+    if ($LASTEXITCODE -eq 0 -and $global:BackupUnitaclMode -eq 'foreignAllow') {
+        & $global:BackupUniticacls $args[0] /grant '*S-1-1-0:(OI)(CI)RX'
+        $global:LASTEXITCODE = $LASTEXITCODE
+    }
+}
+
+function Get-Acl {
+    [CmdletBinding()]
+    param([string]$LiteralPath)
+    if ($global:BackupUnitaclMode -eq 'unreadable') { throw 'Fixture cannot read Windows DACL.' }
+    $acl = Microsoft.PowerShell.Security\Get-Acl -LiteralPath $LiteralPath
+    if ($global:BackupUnitaclMode -eq 'foreignOwner') {
+        $acl.SetOwner([Security.Principal.SecurityIdentifier]::new('S-1-1-0'))
+    } elseif ($global:BackupUnitaclMode -in @('noAllowRules', 'nonInheritableAllow')) {
+        $acl = [Security.AccessControl.DirectorySecurity]::new()
+        $acl.SetOwner([Security.Principal.WindowsIdentity]::GetCurrent().User)
+        $acl.SetAccessRuleProtection($true, $false)
+        if ($global:BackupUnitaclMode -eq 'nonInheritableAllow') {
+            foreach ($sid in @([Security.Principal.WindowsIdentity]::GetCurrent().User.Value, 'S-1-5-18', 'S-1-5-32-544')) {
+                $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+                    [Security.Principal.SecurityIdentifier]::new($sid),
+                    [Security.AccessControl.FileSystemRights]::FullControl,
+                    [Security.AccessControl.AccessControlType]::Allow))
+            }
+        }
+    }
+    return $acl
+}
+
 function Invoke-Backup([string]$Path, [switch]$KeepAppStopped) {
     & $backupScript -AppContainer app -PostgresContainer postgres -RedisContainer redis `
         -OutputDirectory $Path -KeepAppStopped:$KeepAppStopped *>&1 |
@@ -311,7 +346,15 @@ function Invoke-Backup([string]$Path, [switch]$KeepAppStopped) {
 function Run-Test([string]$Name, [scriptblock]$Body) {
     Reset-Fixture
     try { & $Body; Assert-True (-not $global:BackupUnitpipe.Failure) 'Native pipe fixture detected invalid request framing/EOF'; Write-Output "PASS: $Name" }
-    catch { $global:BackupUnitfailures.Add("${Name}: $($_.Exception.Message)"); Write-Output "FAIL: $Name" }
+    catch {
+        $detail = $_.Exception.Message -replace 'unit-secret[^\s]*', '[fixture-redacted]'
+        $global:BackupUnitfailures.Add("${Name}: $detail")
+        Write-Output "FAIL: ${Name}: $detail"
+        Write-Output $_.ScriptStackTrace
+        foreach ($line in @($global:BackupUnitoutput | Select-Object -Last 6)) {
+            Write-Output ('  fixture: ' + ($line -replace 'unit-secret[^\s]*', '[fixture-redacted]'))
+        }
+    }
     finally { $global:BackupUnitpipe.Dispose(); $global:BackupUnitpipe = $null }
 }
 
@@ -330,6 +373,25 @@ function Get-TransportHelpers {
 }
 
 try {
+    if ($IsWindows) {
+        foreach ($aclScenario in @('unprotected', 'foreignAllow', 'foreignOwner', 'unreadable', 'noAllowRules', 'nonInheritableAllow')) {
+            Run-Test "Windows backup permissions fail closed before secrets or downtime: $aclScenario" {
+                $global:BackupUnitaclMode = $aclScenario
+                $path = Join-Path $testRoot "permissions-$aclScenario"
+                $failed = $false
+                $failureMessage = ''
+                try { Invoke-Backup $path }
+                catch { $failed = $true; $failureMessage = $_.Exception.Message; $global:BackupUnitoutput.Add($failureMessage) }
+                Assert-True $failed 'Unsafe or unverifiable Windows directory permissions were accepted'
+                Assert-True ($failureMessage -match '^Failed to verify private backup directory permissions') 'Permission check did not reject the unsafe DACL'
+                Assert-True $global:BackupUnitappRunning 'Permission failure stopped the application'
+                Assert-True ($global:BackupUnitcalls.Count -eq 0) 'Permission failure must precede every Docker command'
+                Assert-True (@(Get-ChildItem -LiteralPath $path -Force).Count -eq 0) 'Permission failure wrote recovery secrets or archives'
+                Assert-True (($global:BackupUnitoutput -join "`n") -notmatch 'Verified PostgreSQL') 'Permission failure reported backup success'
+            }
+        }
+    }
+
     Run-Test 'non-npipe fallback keeps native stdin open and suppresses stderr' {
         . ([scriptblock]::Create((Get-TransportHelpers)))
         function New-DockerEngineProcess {
@@ -419,7 +481,7 @@ if ($check.IsCompleted) {
         $global:BackupUnitfailCreate = $true
         $failed = $false
         try { & $integrationScript -AppContainer app -PostgresContainer postgres -RedisContainer redis -RecreateApp *>&1 | ForEach-Object { $global:BackupUnitoutput.Add([string]$_) } }
-        catch { $failed = $true }
+        catch { $failed = $true; $global:BackupUnitoutput.Add('Caught integration failure: ' + $_.Exception.Message) }
         Assert-True ($failed -and $global:BackupUnitpipe.PingCount -gt 0) 'Integration did not test Engine transport'
         Assert-True (-not $global:BackupUnitoriginalRemoved) 'Integration removed original before transport validation'
         Assert-True (@($global:BackupUnitcalls | Where-Object { $_[0] -eq 'rm' }).Count -eq 0) 'Failed preflight removed original'
@@ -672,7 +734,7 @@ if ($check.IsCompleted) {
             if ($scenario -eq 'unhealthy') { $global:BackupUnithealth = 'unhealthy' }
             $failed = $false
             try { & $integrationScript -AppContainer app -PostgresContainer postgres -RedisContainer redis -RecreateApp *>&1 | ForEach-Object { $global:BackupUnitoutput.Add([string]$_) } }
-            catch { $failed = $true }
+            catch { $failed = $true; $global:BackupUnitoutput.Add('Caught integration failure: ' + $_.Exception.Message) }
             $privateRoot = Join-Path $env:LOCALAPPDATA 'Sub2API/private-backups'
             $remaining = @(Get-ChildItem $privateRoot -Directory -ErrorAction SilentlyContinue)
             Assert-True ($global:BackupUnitoriginalRemoved) 'Integration recreation never removed the stopped original fixture'
@@ -696,7 +758,7 @@ if ($check.IsCompleted) {
             try {
                 & $integrationScript -AppContainer app -PostgresContainer postgres -RedisContainer redis *>&1 |
                     ForEach-Object { $global:BackupUnitoutput.Add([string]$_) }
-            } catch { $failed = $true }
+            } catch { $failed = $true; $global:BackupUnitoutput.Add('Caught integration failure: ' + $_.Exception.Message) }
             $privateRoot = Join-Path $env:LOCALAPPDATA 'Sub2API/private-backups'
             $remaining = @(Get-ChildItem $privateRoot -Directory -Filter 'backup-local-acceptance-it-*' -ErrorAction SilentlyContinue)
             $passed = ($global:BackupUnitoutput -join "`n") -match 'Backup integration test passed'
@@ -722,7 +784,12 @@ if ($check.IsCompleted) {
     $tempPrefix = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
     if (-not $resolved.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase) -or
         (Split-Path $resolved -Leaf) -notlike 'sub2api-backup-unit-*') { throw 'Unexpected unit test cleanup path' }
-    Remove-Item -LiteralPath $resolved -Recurse -Force
+    try { Remove-Item -LiteralPath $resolved -Recurse -Force }
+    catch {
+        $detail = $_.Exception.Message -replace 'unit-secret[^\s]*', '[fixture-redacted]'
+        $global:BackupUnitfailures.Add("Unit fixture cleanup: $detail")
+        Write-Output "FAIL: unit fixture cleanup: $detail"
+    }
 }
 
 if ($global:BackupUnitfailures.Count -gt 0) { throw ($global:BackupUnitfailures -join "`n") }

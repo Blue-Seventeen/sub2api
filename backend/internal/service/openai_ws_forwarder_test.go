@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -11,6 +12,67 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestShouldRetryOpenAIWSPoolDialFailureRespectsAccountErrorPolicy(t *testing.T) {
+	cases := []struct {
+		name        string
+		credentials map[string]any
+		body        []byte
+		want        bool
+	}{
+		{
+			name:        "configured pool status",
+			credentials: map[string]any{"pool_mode": true, "pool_mode_retry_status_codes": []any{float64(http.StatusServiceUnavailable)}},
+			want:        true,
+		},
+		{
+			name: "custom error allowlist excludes pool retry status",
+			credentials: map[string]any{"pool_mode": true, "pool_mode_retry_status_codes": []any{float64(http.StatusServiceUnavailable)},
+				"custom_error_codes_enabled": true, "custom_error_codes": []any{float64(http.StatusBadGateway)}},
+			want: false,
+		},
+		{
+			name:        "explicit upstream policy rejection",
+			credentials: map[string]any{"pool_mode": true, "pool_mode_retry_status_codes": []any{float64(http.StatusServiceUnavailable)}},
+			body:        []byte(`{"error":{"code":"cyber_policy","message":"blocked"}}`),
+			want:        false,
+		},
+		{
+			name:        "pool disabled",
+			credentials: map[string]any{"pool_mode_retry_status_codes": []any{float64(http.StatusServiceUnavailable)}},
+			want:        false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			account := &Account{Type: AccountTypeAPIKey, Credentials: tc.credentials}
+			require.Equal(t, tc.want, shouldRetryOpenAIWSPoolDialFailure(account, http.StatusServiceUnavailable, tc.body))
+		})
+	}
+}
+
+func TestNewOpenAIWSPoolDialFailoverErrorPreservesConfiguredStatus(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	account := &Account{ID: 77, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{
+		"pool_mode": true, "pool_mode_retry_status_codes": []any{float64(http.StatusServiceUnavailable)},
+	}}
+	dialErr := &openAIWSDialError{
+		StatusCode:      http.StatusServiceUnavailable,
+		ResponseHeaders: http.Header{"X-Request-Id": []string{"ws-pool-503"}},
+		ResponseBody:    []byte(`{"error":{"message":"temporary handshake failure"}}`),
+		Err:             errors.New("handshake returned 503"),
+	}
+
+	failoverErr := svc.newOpenAIWSPoolDialFailoverError(account, dialErr)
+	require.NotNil(t, failoverErr)
+	require.Equal(t, http.StatusServiceUnavailable, failoverErr.StatusCode)
+	require.True(t, failoverErr.RetryableOnSameAccount)
+	require.Equal(t, "ws-pool-503", failoverErr.ResponseHeaders.Get("X-Request-Id"))
+
+	account.Credentials["custom_error_codes_enabled"] = true
+	account.Credentials["custom_error_codes"] = []any{float64(http.StatusBadGateway)}
+	require.Nil(t, svc.newOpenAIWSPoolDialFailoverError(account, dialErr), "custom error allowlist must exclude the retry status")
+}
 
 // TestIsOpenAIWSTokenEvent_TerminalEventsExcluded 覆盖 isOpenAIWSTokenEvent 的回归用例。
 // 重点验证终止事件（response.completed / response.done）不再被当作 token event，

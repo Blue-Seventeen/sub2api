@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"regexp"
 	"sync"
 	"testing"
 	"time"
@@ -19,6 +20,12 @@ type openAIQueuedResponseWriter struct {
 	gin.ResponseWriter
 	scanned <-chan struct{}
 	once    sync.Once
+}
+
+var openAIResponseCreatedAtForTestRE = regexp.MustCompile(`,"created_at":([0-9]+)`)
+
+func stripOpenAIResponseCreatedAtForTest(body string) string {
+	return openAIResponseCreatedAtForTestRE.ReplaceAllString(body, "")
 }
 
 func (w *openAIQueuedResponseWriter) Written() bool {
@@ -56,7 +63,10 @@ func runOpenAIBackloggedStageRegression(t *testing.T) (*openAIResponseFlushRecor
 	require.Equal(t, 7, result.usage.InputTokens)
 	require.Equal(t, 3, result.usage.OutputTokens)
 	gotBody, _ := recorder.snapshot()
-	require.Equal(t, body, gotBody, "staging repair must not change SSE bytes")
+	createdAtValues := openAIResponseCreatedAtForTestRE.FindAllStringSubmatch(gotBody, -1)
+	require.Len(t, createdAtValues, 2)
+	require.Equal(t, createdAtValues[0][1], createdAtValues[1][1], "lifecycle events must share one created_at")
+	require.Equal(t, body, stripOpenAIResponseCreatedAtForTest(gotBody), "created_at compatibility stamping must not change other SSE bytes")
 	return recorder, upstreamHeaders, preamble + semantic, body
 }
 
@@ -75,6 +85,6 @@ func TestOpenAIStagedHeaders_BackloggedFirstSemanticEventFlushesAtBoundary(t *te
 	recorder, _, firstCompleteSemanticEvent, body := runOpenAIBackloggedStageRegression(t)
 	_, flushes := recorder.snapshot()
 	require.NotEmpty(t, flushes)
-	require.Equal(t, firstCompleteSemanticEvent, flushes[0], "first semantic event must flush before draining the queued burst, independently of semantic TTFT")
-	require.Equal(t, body, flushes[len(flushes)-1])
+	require.Equal(t, firstCompleteSemanticEvent, stripOpenAIResponseCreatedAtForTest(flushes[0]), "first semantic event must flush before draining the queued burst, independently of semantic TTFT")
+	require.Equal(t, body, stripOpenAIResponseCreatedAtForTest(flushes[len(flushes)-1]))
 }

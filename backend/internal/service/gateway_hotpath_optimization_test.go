@@ -116,6 +116,7 @@ type modelsListAccountRepoStub struct {
 
 	listByGroupCalls atomic.Int64
 	listAllCalls     atomic.Int64
+	catalogCalls     atomic.Int64
 }
 
 type stickyGatewayCacheHotpathStub struct {
@@ -178,6 +179,17 @@ func (s *modelsListAccountRepoStub) ListSchedulableByGroupID(ctx context.Context
 	out := make([]Account, len(accounts))
 	copy(out, accounts)
 	return out, nil
+}
+
+func (s *modelsListAccountRepoStub) ListModelAvailabilityCandidates(ctx context.Context, groupID *int64, _ []string, _ bool) ([]Account, error) {
+	s.catalogCalls.Add(1)
+	if s.err != nil {
+		return nil, s.err
+	}
+	if groupID == nil {
+		return append([]Account(nil), s.all...), nil
+	}
+	return append([]Account(nil), s.byGroup[*groupID]...), nil
 }
 
 func (s *modelsListAccountRepoStub) ListSchedulable(ctx context.Context) ([]Account, error) {
@@ -586,7 +598,8 @@ func TestResolveCompositeModelOwnershipUsesModelsCacheInvalidation(t *testing.T)
 	first, err := svc.resolveCompositeModelOwnership(context.Background(), groupID, "company-model")
 	require.NoError(t, err)
 	require.Equal(t, CompositeModelOwnership{TargetPlatform: PlatformDeepseek, Matched: true}, first)
-	require.Equal(t, int64(1), repo.listByGroupCalls.Load())
+	require.Equal(t, int64(0), repo.listByGroupCalls.Load())
+	require.Equal(t, int64(1), repo.catalogCalls.Load())
 
 	repo.byGroup[groupID] = []Account{{
 		ID:          2,
@@ -596,13 +609,15 @@ func TestResolveCompositeModelOwnershipUsesModelsCacheInvalidation(t *testing.T)
 	cached, err := svc.resolveCompositeModelOwnership(context.Background(), groupID, "company-model")
 	require.NoError(t, err)
 	require.Equal(t, first, cached)
-	require.Equal(t, int64(1), repo.listByGroupCalls.Load())
+	require.Equal(t, int64(0), repo.listByGroupCalls.Load())
+	require.Equal(t, int64(1), repo.catalogCalls.Load())
 
 	svc.InvalidateAvailableModelsCache(&groupID, PlatformDeepseek)
 	refreshed, err := svc.resolveCompositeModelOwnership(context.Background(), groupID, "company-model")
 	require.NoError(t, err)
 	require.Equal(t, CompositeModelOwnership{TargetPlatform: PlatformOpenAI, Matched: true}, refreshed)
-	require.Equal(t, int64(2), repo.listByGroupCalls.Load())
+	require.Equal(t, int64(0), repo.listByGroupCalls.Load())
+	require.Equal(t, int64(2), repo.catalogCalls.Load())
 }
 
 func TestGetAvailableModels_ErrorAndGlobalListBranches(t *testing.T) {
@@ -715,6 +730,7 @@ func TestGetAvailableModels_OpenAIPassthroughUsesDefaultFallback(t *testing.T) {
 			require.Equal(t, tt.want, got)
 			require.NotContains(t, got, "stale-model", "passthrough mapping must never reach the public list")
 			require.Equal(t, int64(1), repo.listByGroupCalls.Load())
+			require.Equal(t, int64(1), repo.catalogCalls.Load())
 		})
 	}
 }
@@ -737,11 +753,13 @@ func TestGetAvailableModels_UnmappedOpenAISupplementCacheIsolation(t *testing.T)
 	require.NotContains(t, cached, "mutated-by-caller")
 	require.Contains(t, cached, "gpt-5.6-sol")
 	require.Equal(t, int64(1), repo.listByGroupCalls.Load())
+	require.Equal(t, int64(1), repo.catalogCalls.Load())
 
 	repo.byGroup[groupID] = []Account{mapped, {ID: 3, Platform: PlatformAnthropic}}
 	svc.InvalidateAvailableModelsCache(&groupID, PlatformOpenAI)
 	require.Equal(t, []string{"team-coder"}, svc.GetAvailableModels(ctx, &groupID, PlatformOpenAI))
 	require.Equal(t, int64(2), repo.listByGroupCalls.Load())
+	require.Equal(t, int64(2), repo.catalogCalls.Load())
 }
 
 func TestGetAvailableModels_GlobalListPreservesMappedModelsWithOpenAIPassthrough(t *testing.T) {

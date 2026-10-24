@@ -183,6 +183,8 @@ issues/
 # Local release / migration bundles
 .tmp-migration/
 release-artifacts/
+release-input/
+.release-context/
 sub2api-custom-*.tar.gz
 
 # Scraped / bundled external website artifacts accidentally produced during research

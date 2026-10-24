@@ -3,12 +3,11 @@
 package integration
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -16,7 +15,7 @@ import (
 )
 
 var (
-	baseURL = getEnv("BASE_URL", "http://localhost:8080")
+	baseURL = strings.TrimRight(getEnv("BASE_URL", "http://localhost:8080"), "/")
 	// ENDPOINT_PREFIX: 端点前缀，支持混合模式和非混合模式测试
 	// - "" (默认): 使用 /v1/messages, /v1beta/models（混合模式，可调度 antigravity 账户）
 	// - "/antigravity": 使用 /antigravity/v1/messages, /antigravity/v1beta/models（非混合模式，仅 antigravity 账户）
@@ -68,6 +67,23 @@ var geminiModels = []string{
 }
 
 func TestMain(m *testing.M) {
+	if strictE2E() && strings.TrimSpace(os.Getenv("BASE_URL")) == "" {
+		fmt.Fprintln(os.Stderr, "strict E2E requires an explicit BASE_URL for the isolated application")
+		os.Exit(2)
+	}
+	parsed, err := url.Parse(baseURL)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		fmt.Fprintln(os.Stderr, "BASE_URL must be an HTTP(S) application URL without credentials, query, or fragment")
+		os.Exit(2)
+	}
+	if endpointPrefix != "" && endpointPrefix != "/antigravity" {
+		fmt.Fprintln(os.Stderr, "ENDPOINT_PREFIX must be empty or /antigravity")
+		os.Exit(2)
+	}
+	if strictE2E() && isMockMode() {
+		fmt.Fprintln(os.Stderr, "strict E2E does not permit E2E_MOCK; use isolated upstream fixtures behind the application")
+		os.Exit(2)
+	}
 	mode := "混合模式"
 	if endpointPrefix != "" {
 		mode = "Antigravity 模式"
@@ -88,20 +104,12 @@ func TestMain(m *testing.M) {
 
 func requireClaudeAPIKey(t *testing.T) string {
 	t.Helper()
-	key := strings.TrimSpace(os.Getenv(claudeAPIKeyEnv))
-	if key == "" {
-		t.Skipf("未设置 %s，跳过 Claude 相关 E2E 测试", claudeAPIKeyEnv)
-	}
-	return key
+	return requireE2EEnv(t, claudeAPIKeyEnv)
 }
 
 func requireGeminiAPIKey(t *testing.T) string {
 	t.Helper()
-	key := strings.TrimSpace(os.Getenv(geminiAPIKeyEnv))
-	if key == "" {
-		t.Skipf("未设置 %s，跳过 Gemini 相关 E2E 测试", geminiAPIKeyEnv)
-	}
-	return key
+	return requireE2EEnv(t, geminiAPIKeyEnv)
 }
 
 // TestClaudeModelsList 测试 GET /v1/models
@@ -115,27 +123,22 @@ func TestClaudeModelsList(t *testing.T) {
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		t.Fatalf("请求失败: %v", err)
+		t.Fatal("gateway request failed (credentials and response omitted)")
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("HTTP %d: %s", resp.StatusCode, string(body))
-	}
+	requireE2EStatus(t, resp, http.StatusOK)
 
 	var result map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		t.Fatalf("解析响应失败: %v", err)
-	}
+	decodeE2EJSON(t, resp.Body, &result)
 
 	if result["object"] != "list" {
-		t.Errorf("期望 object=list, 得到 %v", result["object"])
+		t.Error("model catalog must contain object=list")
 	}
 
 	data, ok := result["data"].([]any)
-	if !ok {
-		t.Fatal("响应缺少 data 数组")
+	if !ok || len(data) == 0 {
+		t.Fatal("model catalog must contain a non-empty data array")
 	}
 	t.Logf("✅ 返回 %d 个模型", len(data))
 }
@@ -151,23 +154,18 @@ func TestGeminiModelsList(t *testing.T) {
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		t.Fatalf("请求失败: %v", err)
+		t.Fatal("gateway request failed (credentials and response omitted)")
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("HTTP %d: %s", resp.StatusCode, string(body))
-	}
+	requireE2EStatus(t, resp, http.StatusOK)
 
 	var result map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		t.Fatalf("解析响应失败: %v", err)
-	}
+	decodeE2EJSON(t, resp.Body, &result)
 
 	models, ok := result["models"].([]any)
-	if !ok {
-		t.Fatal("响应缺少 models 数组")
+	if !ok || len(models) == 0 {
+		t.Fatal("Gemini catalog must contain a non-empty models array")
 	}
 	t.Logf("✅ 返回 %d 个模型", len(models))
 }
@@ -175,7 +173,7 @@ func TestGeminiModelsList(t *testing.T) {
 // TestClaudeMessages 测试 Claude /v1/messages 接口
 func TestClaudeMessages(t *testing.T) {
 	claudeKey := requireClaudeAPIKey(t)
-	for i, model := range claudeModels {
+	for i, model := range e2eModelFixtures(t, "E2E_CLAUDE_MODELS", claudeModels) {
 		if i > 0 {
 			time.Sleep(testInterval)
 		}
@@ -210,49 +208,27 @@ func testClaudeMessage(t *testing.T, claudeKey string, model string, stream bool
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		t.Fatalf("请求失败: %v", err)
+		t.Fatal("gateway request failed (credentials and response omitted)")
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 200 {
-		respBody, _ := io.ReadAll(resp.Body)
-		t.Fatalf("HTTP %d: %s", resp.StatusCode, string(respBody))
-	}
+	requireE2EStatus(t, resp, http.StatusOK)
 
 	if stream {
 		// 流式：读取 SSE 事件
-		scanner := bufio.NewScanner(resp.Body)
-		eventCount := 0
-		for scanner.Scan() {
-			line := scanner.Text()
-			if strings.HasPrefix(line, "data:") {
-				eventCount++
-				if eventCount >= 3 {
-					break
-				}
-			}
-		}
-		if eventCount == 0 {
-			t.Fatal("未收到任何 SSE 事件")
-		}
-		t.Logf("✅ 收到 %d+ 个 SSE 事件", eventCount)
+		requireE2ESSE(t, resp, "anthropic")
 	} else {
 		// 非流式：解析 JSON 响应
 		var result map[string]any
-		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			t.Fatalf("解析响应失败: %v", err)
-		}
-		if result["type"] != "message" {
-			t.Errorf("期望 type=message, 得到 %v", result["type"])
-		}
-		t.Logf("✅ 收到消息响应 id=%v", result["id"])
+		decodeE2EJSON(t, resp.Body, &result)
+		requireE2EAnthropicMessage(t, result)
 	}
 }
 
 // TestGeminiGenerateContent 测试 Gemini /v1beta/models/:model 接口
 func TestGeminiGenerateContent(t *testing.T) {
 	geminiKey := requireGeminiAPIKey(t)
-	for i, model := range geminiModels {
+	for i, model := range e2eModelFixtures(t, "E2E_GEMINI_MODELS", geminiModels) {
 		if i > 0 {
 			time.Sleep(testInterval)
 		}
@@ -298,40 +274,21 @@ func testGeminiGenerate(t *testing.T, geminiKey string, model string, stream boo
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		t.Fatalf("请求失败: %v", err)
+		t.Fatal("gateway request failed (credentials and response omitted)")
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 200 {
-		respBody, _ := io.ReadAll(resp.Body)
-		t.Fatalf("HTTP %d: %s", resp.StatusCode, string(respBody))
-	}
+	requireE2EStatus(t, resp, http.StatusOK)
 
 	if stream {
 		// 流式：读取 SSE 事件
-		scanner := bufio.NewScanner(resp.Body)
-		eventCount := 0
-		for scanner.Scan() {
-			line := scanner.Text()
-			if strings.HasPrefix(line, "data:") {
-				eventCount++
-				if eventCount >= 3 {
-					break
-				}
-			}
-		}
-		if eventCount == 0 {
-			t.Fatal("未收到任何 SSE 事件")
-		}
-		t.Logf("✅ 收到 %d+ 个 SSE 事件", eventCount)
+		requireE2ESSE(t, resp, "gemini")
 	} else {
 		// 非流式：解析 JSON 响应
 		var result map[string]any
-		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			t.Fatalf("解析响应失败: %v", err)
-		}
-		if _, ok := result["candidates"]; !ok {
-			t.Error("响应缺少 candidates 字段")
+		decodeE2EJSON(t, resp.Body, &result)
+		if candidates, ok := result["candidates"].([]any); !ok || len(candidates) == 0 || result["error"] != nil {
+			t.Error("Gemini response must contain non-empty candidates without an error")
 		}
 		t.Log("✅ 收到 candidates 响应")
 	}
@@ -342,10 +299,10 @@ func testGeminiGenerate(t *testing.T, geminiKey string, model string, stream boo
 func TestClaudeMessagesWithComplexTools(t *testing.T) {
 	claudeKey := requireClaudeAPIKey(t)
 	// 测试模型列表（只测试几个代表性模型）
-	models := []string{
+	models := e2eModelFixtures(t, "E2E_CLAUDE_MODELS", []string{
 		"claude-opus-4-5-20251101",  // Claude 模型
 		"claude-haiku-4-5-20251001", // 映射到 Gemini
-	}
+	})
 
 	for i, model := range models {
 		if i > 0 {
@@ -519,40 +476,15 @@ func testClaudeMessageWithTools(t *testing.T, claudeKey string, model string) {
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		t.Fatalf("请求失败: %v", err)
+		t.Fatal("gateway request failed (credentials and response omitted)")
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
-
-	// 400 错误说明 schema 清理不完整
-	if resp.StatusCode == 400 {
-		t.Fatalf("Schema 清理失败，收到 400 错误: %s", string(respBody))
-	}
-
-	// 503 可能是账号限流，不算测试失败
-	if resp.StatusCode == 503 {
-		t.Skipf("账号暂时不可用 (503): %s", string(respBody))
-	}
-
-	// 429 是限流
-	if resp.StatusCode == 429 {
-		t.Skipf("请求被限流 (429): %s", string(respBody))
-	}
-
-	if resp.StatusCode != 200 {
-		t.Fatalf("HTTP %d: %s", resp.StatusCode, string(respBody))
-	}
+	requireE2EStatus(t, resp, http.StatusOK)
 
 	var result map[string]any
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		t.Fatalf("解析响应失败: %v", err)
-	}
-
-	if result["type"] != "message" {
-		t.Errorf("期望 type=message, 得到 %v", result["type"])
-	}
-	t.Logf("✅ 复杂工具 schema 测试通过, id=%v", result["id"])
+	decodeE2EJSON(t, resp.Body, &result)
+	requireE2EAnthropicMessage(t, result)
 }
 
 // TestClaudeMessagesWithThinkingAndTools 测试 thinking 模式下带工具调用的场景
@@ -560,9 +492,9 @@ func testClaudeMessageWithTools(t *testing.T, claudeKey string, model string) {
 // 系统应自动添加 dummy thought_signature 避免 Gemini 400 错误
 func TestClaudeMessagesWithThinkingAndTools(t *testing.T) {
 	claudeKey := requireClaudeAPIKey(t)
-	models := []string{
+	models := e2eModelFixtures(t, "E2E_THINKING_MODELS", []string{
 		"claude-haiku-4-5-20251001", // gemini-3-flash
-	}
+	})
 	for i, model := range models {
 		if i > 0 {
 			time.Sleep(testInterval)
@@ -647,40 +579,15 @@ func testClaudeThinkingWithToolHistory(t *testing.T, claudeKey string, model str
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		t.Fatalf("请求失败: %v", err)
+		t.Fatal("gateway request failed (credentials and response omitted)")
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
-
-	// 400 错误说明 thought_signature 处理失败
-	if resp.StatusCode == 400 {
-		t.Fatalf("thought_signature 处理失败，收到 400 错误: %s", string(respBody))
-	}
-
-	// 503 可能是账号限流，不算测试失败
-	if resp.StatusCode == 503 {
-		t.Skipf("账号暂时不可用 (503): %s", string(respBody))
-	}
-
-	// 429 是限流
-	if resp.StatusCode == 429 {
-		t.Skipf("请求被限流 (429): %s", string(respBody))
-	}
-
-	if resp.StatusCode != 200 {
-		t.Fatalf("HTTP %d: %s", resp.StatusCode, string(respBody))
-	}
+	requireE2EStatus(t, resp, http.StatusOK)
 
 	var result map[string]any
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		t.Fatalf("解析响应失败: %v", err)
-	}
-
-	if result["type"] != "message" {
-		t.Errorf("期望 type=message, 得到 %v", result["type"])
-	}
-	t.Logf("✅ thinking 模式工具调用测试通过, id=%v", result["id"])
+	decodeE2EJSON(t, resp.Body, &result)
+	requireE2EAnthropicMessage(t, result)
 }
 
 // TestClaudeMessagesWithGeminiModel 测试在 Claude 端点使用 Gemini 模型
@@ -693,13 +600,13 @@ func TestClaudeMessagesWithGeminiModel(t *testing.T) {
 	claudeKey := requireClaudeAPIKey(t)
 
 	// 测试通过 Claude 端点调用 Gemini 模型
-	geminiViaClaude := []string{
+	geminiViaClaude := e2eModelFixtures(t, "E2E_GEMINI_MODELS", []string{
 		"gemini-3-flash",       // 直接支持
 		"gemini-3-pro-low",     // 直接支持
 		"gemini-3-pro-high",    // 直接支持
 		"gemini-3-pro",         // 前缀映射 -> gemini-3-pro-high
 		"gemini-3-pro-preview", // 前缀映射 -> gemini-3-pro-high
-	}
+	})
 
 	for i, model := range geminiViaClaude {
 		if i > 0 {
@@ -719,9 +626,9 @@ func TestClaudeMessagesWithGeminiModel(t *testing.T) {
 // 验证：Gemini 模型接受没有 signature 的 thinking block
 func TestClaudeMessagesWithNoSignature(t *testing.T) {
 	claudeKey := requireClaudeAPIKey(t)
-	models := []string{
+	models := e2eModelFixtures(t, "E2E_THINKING_MODELS", []string{
 		"claude-haiku-4-5-20251001", // gemini-3-flash - 支持无 signature
-	}
+	})
 	for i, model := range models {
 		if i > 0 {
 			time.Sleep(testInterval)
@@ -781,37 +688,15 @@ func testClaudeWithNoSignature(t *testing.T, claudeKey string, model string) {
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		t.Fatalf("请求失败: %v", err)
+		t.Fatal("gateway request failed (credentials and response omitted)")
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
-
-	if resp.StatusCode == 400 {
-		t.Fatalf("无 signature thinking 处理失败，收到 400 错误: %s", string(respBody))
-	}
-
-	if resp.StatusCode == 503 {
-		t.Skipf("账号暂时不可用 (503): %s", string(respBody))
-	}
-
-	if resp.StatusCode == 429 {
-		t.Skipf("请求被限流 (429): %s", string(respBody))
-	}
-
-	if resp.StatusCode != 200 {
-		t.Fatalf("HTTP %d: %s", resp.StatusCode, string(respBody))
-	}
+	requireE2EStatus(t, resp, http.StatusOK)
 
 	var result map[string]any
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		t.Fatalf("解析响应失败: %v", err)
-	}
-
-	if result["type"] != "message" {
-		t.Errorf("期望 type=message, 得到 %v", result["type"])
-	}
-	t.Logf("✅ 无 signature thinking 处理测试通过, id=%v", result["id"])
+	decodeE2EJSON(t, resp.Body, &result)
+	requireE2EAnthropicMessage(t, result)
 }
 
 // TestGeminiEndpointWithClaudeModel 测试通过 Gemini 端点调用 Claude 模型
@@ -823,10 +708,10 @@ func TestGeminiEndpointWithClaudeModel(t *testing.T) {
 	geminiKey := requireGeminiAPIKey(t)
 
 	// 测试通过 Gemini 端点调用 Claude 模型
-	claudeViaGemini := []string{
+	claudeViaGemini := e2eModelFixtures(t, "E2E_CLAUDE_MODELS", []string{
 		"claude-sonnet-4-5",
 		"claude-opus-4-5-thinking",
-	}
+	})
 
 	for i, model := range claudeViaGemini {
 		if i > 0 {

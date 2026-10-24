@@ -307,10 +307,30 @@ type openAISelectionProbeBudget struct {
 	rechecks  int
 	attempted map[int64]struct{}
 	limited   bool
+	limit     int
 }
 
 func newOpenAISelectionProbeBudget() *openAISelectionProbeBudget {
 	return &openAISelectionProbeBudget{attempted: make(map[int64]struct{})}
+}
+
+func (b *openAISelectionProbeBudget) probeLimit() int {
+	if b != nil && b.limit > 0 {
+		return b.limit
+	}
+	return openAIAccountSelectionProbeLimit
+}
+
+func newOpenAISelectionProbeBudgetForAttempt(ctx context.Context) *openAISelectionProbeBudget {
+	budget := newOpenAISelectionProbeBudget()
+	if count := gatewayAttemptCandidateCount(ctx); count > 0 {
+		// One initial scan, one fresh-load pass, four bounded fallback passes,
+		// and a possible concurrency-change re-acquire still fit this finite
+		// request-local universe. Old selectors keep their 64-probe contract.
+		budget.limit = max(openAIAccountSelectionProbeLimit, count*8)
+		budget.limited = true
+	}
+	return budget
 }
 
 func (b *openAISelectionProbeBudget) enableLimit() {
@@ -326,7 +346,7 @@ func (b *openAISelectionProbeBudget) recordAcquire(accountID int64) bool {
 	if !b.limited {
 		return true
 	}
-	if b.acquires >= openAIAccountSelectionProbeLimit {
+	if b.acquires >= b.probeLimit() {
 		return false
 	}
 	if b.attempted == nil {
@@ -344,7 +364,7 @@ func (b *openAISelectionProbeBudget) recordRecheck() bool {
 	if !b.limited {
 		return true
 	}
-	if b.rechecks >= openAIAccountSelectionProbeLimit {
+	if b.rechecks >= b.probeLimit() {
 		return false
 	}
 	b.rechecks++
@@ -352,7 +372,7 @@ func (b *openAISelectionProbeBudget) recordRecheck() bool {
 }
 
 func (b *openAISelectionProbeBudget) acquireExhausted() bool {
-	return b != nil && b.limited && b.acquires >= openAIAccountSelectionProbeLimit
+	return b != nil && b.limited && b.acquires >= b.probeLimit()
 }
 
 func (b *openAISelectionProbeBudget) wasAttempted(accountID int64) bool {
@@ -903,6 +923,11 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 		candidateCount:            len(candidates),
 	}
 	if len(candidates) == 0 {
+		if gatewayAttemptCandidateCount(ctx) > 0 {
+			// Preserve TopK preference while including every remaining member of
+			// the immutable request universe when preferred candidates go stale.
+			plan.includeOverflowFallback = true
+		}
 		plan.selectionOrder = s.buildOpenAISelectionOrder(req, plan)
 		return plan
 	}
@@ -1047,6 +1072,11 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 		plan.topK = 1
 	}
 
+	if gatewayAttemptCandidateCount(ctx) > 0 {
+		// Preserve TopK preference while including every remaining member of
+		// the immutable request universe when preferred candidates go stale.
+		plan.includeOverflowFallback = true
+	}
 	plan.selectionOrder = s.buildOpenAISelectionOrder(req, plan)
 	return plan
 }
@@ -1163,7 +1193,7 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrder(
 	req OpenAIAccountScheduleRequest,
 	selectionOrder []openAIAccountCandidateScore,
 ) (*AccountSelectionResult, bool, error) {
-	budget := newOpenAISelectionProbeBudget()
+	budget := newOpenAISelectionProbeBudgetForAttempt(ctx)
 	budget.enableLimit()
 	return s.tryAcquireOpenAISelectionOrderWithBudget(ctx, req, selectionOrder, budget)
 }
@@ -1181,6 +1211,9 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 		}
 	}
 	for i := 0; i < len(selectionOrder); i++ {
+		if ctx.Err() != nil {
+			return nil, compactBlocked, ctx.Err()
+		}
 		candidate := selectionOrder[i]
 		if candidate.account == nil {
 			continue
@@ -1401,7 +1434,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 	ctx context.Context,
 	req OpenAIAccountScheduleRequest,
 ) (*AccountSelectionResult, int, int, float64, error) {
-	budget := newOpenAISelectionProbeBudget()
+	budget := newOpenAISelectionProbeBudgetForAttempt(ctx)
 	accounts, err := s.service.listSchedulableAccounts(ctx, req.GroupID, req.Platform)
 	if err != nil {
 		return nil, 0, 0, 0, err
@@ -1812,7 +1845,7 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatibleReason(ctx con
 	}) {
 		return false, "shadow_parent_unhealthy"
 	}
-	if req.RequestedModel != "" && !account.IsModelSupported(req.RequestedModel) {
+	if req.RequestedModel != "" && !supportsOpenAIRequestModel(account, req.RequestedModel, req.RequireCompact) {
 		return false, "model_not_supported"
 	}
 	if req.GroupID != nil && s != nil && s.service != nil &&
@@ -2309,7 +2342,8 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	platform string,
 	previousResponseCanMove bool,
 	useUpstreamTokenCost bool,
-) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+) (selected *AccountSelectionResult, selectedDecision OpenAIAccountScheduleDecision, selectionErr error) {
+	defer func() { selectionErr = gatewayRetrySelectionError(ctx, selectionErr) }()
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
 	ctx = s.withOpenAIGroupPrivacyRequirement(ctx, groupID)
 	// 分组利润控制：唯一文本调度入口的防御性装门。handler 文本
@@ -2322,6 +2356,27 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		ctx = s.withOpenAIProfitControlGate(ctx, groupID)
 	}
 	platform = NormalizeOpenAICompatiblePlatform(platform)
+	ctx = withGatewayCandidateScope(ctx, fmt.Sprintf("openai:%d:%s:%s:%s:%s:%t", derefGroupID(groupID), platform, requiredTransport, requiredCapability, requiredImageCapability, requireCompact))
+	if gatewayAttemptNeedsCandidateList(ctx) {
+		accounts, listErr := s.listSchedulableAccounts(ctx, groupID, platform)
+		if listErr != nil {
+			return nil, OpenAIAccountScheduleDecision{}, listErr
+		}
+		if len(accounts) == 0 {
+			return nil, OpenAIAccountScheduleDecision{}, ErrNoAvailableAccounts
+		}
+	}
+	defer func() {
+		if selectionErr == nil && GatewayRetryAccountFromContext(ctx) > 0 {
+			retryErr := s.validateOpenAIRetrySelection(ctx, selected, OpenAIAccountScheduleRequest{GroupID: groupID, Platform: platform, RequestedModel: requestedModel, RequiredTransport: requiredTransport, RequiredCapability: requiredCapability, RequiredImageCapability: requiredImageCapability, RequireCompact: requireCompact, RequirePrivacySet: s.openAIGroupRequiresPrivacySet(ctx, groupID)})
+			if retryErr != nil {
+				if selected != nil && selected.ReleaseFunc != nil {
+					selected.ReleaseFunc()
+				}
+				selected, selectionErr = nil, retryErr
+			}
+		}
+	}()
 	decision := OpenAIAccountScheduleDecision{}
 	preserveGuardianParentBinding := preserveOpenAIGuardianParentBinding(ctx, sessionHash)
 	guardianParentAccountID := int64(0)

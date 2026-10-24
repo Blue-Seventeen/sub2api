@@ -110,13 +110,22 @@ func TestRedeemConcurrentReductionsBothApply(t *testing.T) {
 	for _, code := range codes {
 		go func(code string) { _, err := redeem.RedeemForAdminFulfillment(ctx, userID, code); results <- err }(code)
 	}
-	for range 2 {
-		select {
-		case <-ready:
-		case <-ctx.Done():
-			t.Fatal("both deductions did not reach the read barrier")
-		}
+	select {
+	case <-ready:
+	case <-ctx.Done():
+		t.Fatal("first deduction did not reach the read barrier")
 	}
+	// The group advisory lock serializes subscription reads. Hold the first
+	// transaction until the competing deduction is waiting on that lock.
+	require.Eventually(t, func() bool {
+		var waiting bool
+		err := integrationDB.QueryRowContext(ctx, `SELECT EXISTS (
+			SELECT 1 FROM pg_catalog.pg_locks
+			WHERE locktype = 'advisory' AND NOT granted
+			AND database = (SELECT oid FROM pg_catalog.pg_database WHERE datname = current_database())
+		)`).Scan(&waiting)
+		return err == nil && waiting
+	}, 5*time.Second, 10*time.Millisecond, "second deduction should wait for the subscription group lock")
 	close(release)
 	for range 2 {
 		select {

@@ -86,7 +86,7 @@ func TestForwardAsChatCompletions_ResponseFailed_PassthroughRule(t *testing.T) {
 	require.Contains(t, errMsg, "context window")
 }
 
-func TestResponsesStreamAccessStateFailoverPrecedesPassthroughRule(t *testing.T) {
+func TestResponsesStreamAccessStateRespectsPassthroughRule(t *testing.T) {
 	stream := "event: response.failed\n" +
 		`data: {"type":"response.failed","response":{"status":"failed","error":{"code":"account_disabled","message":"Your account is disabled"}}}` + "\n\n"
 	tests := []struct {
@@ -109,27 +109,38 @@ func TestResponsesStreamAccessStateFailoverPrecedesPassthroughRule(t *testing.T)
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			rec := httptest.NewRecorder()
-			c, _ := gin.CreateTestContext(rec)
-			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-			bindPassthroughRule(c, PlatformOpenAI, []string{"account is disabled"}, http.StatusTeapot)
-			resp := &http.Response{
-				StatusCode: http.StatusOK,
-				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-				Body:       io.NopCloser(strings.NewReader(stream)),
-			}
-			svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}}
-			err := tt.run(svc, c, resp, &Account{ID: 11, Platform: PlatformOpenAI, Type: AccountTypeOAuth})
+		for _, withRule := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/withRule=%v", tt.name, withRule), func(t *testing.T) {
+				rec := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rec)
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+				if withRule {
+					bindPassthroughRule(c, PlatformOpenAI, []string{"account is disabled"}, http.StatusTeapot)
+				}
+				resp := &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+					Body:       io.NopCloser(strings.NewReader(stream)),
+				}
+				svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}}
+				err := tt.run(svc, c, resp, &Account{ID: 11, Platform: PlatformOpenAI, Type: AccountTypeOAuth})
 
-			var failoverErr *UpstreamFailoverError
-			require.ErrorAs(t, err, &failoverErr)
-			require.True(t, failoverErr.IsCredentialFailure())
-			require.Equal(t, OpenAIUpstreamAccessStateReason, failoverErr.Reason)
-			require.False(t, failoverErr.RetryableOnSameAccount)
-			require.Equal(t, http.StatusBadGateway, failoverErr.ClientStatusCode)
-			require.False(t, c.Writer.Written(), "passthrough rule must not commit a response before account failover")
-		})
+				var failoverErr *UpstreamFailoverError
+				if withRule {
+					require.Error(t, err)
+					require.NotErrorAs(t, err, &failoverErr)
+					require.Equal(t, http.StatusTeapot, rec.Code)
+					require.Contains(t, rec.Body.String(), "account is disabled")
+					return
+				}
+				require.ErrorAs(t, err, &failoverErr)
+				require.True(t, failoverErr.IsCredentialFailure())
+				require.Equal(t, OpenAIUpstreamAccessStateReason, failoverErr.Reason)
+				require.False(t, failoverErr.RetryableOnSameAccount)
+				require.Equal(t, http.StatusBadGateway, failoverErr.ClientStatusCode)
+				require.False(t, c.Writer.Written(), "passthrough rule must not commit a response before account failover")
+			})
+		}
 	}
 }
 
@@ -233,6 +244,62 @@ func TestForwardAsChatCompletions_ResponseFailed_NoRule_Still502(t *testing.T) {
 
 	require.Error(t, err)
 	require.Equal(t, http.StatusBadGateway, rec.Code, "without passthrough rule should still be 502")
+}
+
+func TestForwardAsChatCompletions_RawSSEErrorUsesPoolRetryStatus(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"deepseek-chat","messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	account := rawChatCompletionsTestAccount()
+	account.Platform = PlatformDeepseek
+	account.Credentials["pool_mode"] = true
+	account.Credentials["pool_mode_retry_count"] = float64(1)
+	account.Credentials["pool_mode_retry_status_codes"] = []any{float64(http.StatusServiceUnavailable)}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "X-Request-Id": []string{"pool-sse-503"}},
+		Body:       io.NopCloser(strings.NewReader("data: {\"error\":{\"type\":\"server_error\",\"code\":503,\"message\":\"FIXTURE_RETRY_ONLY\"}}\n\n")),
+	}}
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+
+	_, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "")
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.True(t, failoverErr.RetryableOnSameAccount)
+	require.False(t, c.Writer.Written(), "failed SSE attempts must stay private until retries are exhausted")
+	require.Empty(t, rec.Body.String())
+}
+
+func TestForwardAsChatCompletions_RawSSEErrorCustomCodesOverridePoolRetry(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"deepseek-chat","messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	account := rawChatCompletionsTestAccount()
+	account.Platform = PlatformDeepseek
+	account.Credentials["pool_mode"] = true
+	account.Credentials["pool_mode_retry_count"] = float64(1)
+	account.Credentials["pool_mode_retry_status_codes"] = []any{float64(http.StatusServiceUnavailable)}
+	account.Credentials["custom_error_codes_enabled"] = true
+	account.Credentials["custom_error_codes"] = []any{float64(http.StatusBadGateway)}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader("data: {\"error\":{\"type\":\"server_error\",\"code\":503,\"message\":\"temporary upstream failure\"}}\n\n")),
+	}}
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+
+	_, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "")
+	var failoverErr *UpstreamFailoverError
+	require.Error(t, err)
+	require.NotErrorAs(t, err, &failoverErr, "an explicit account error-code allowlist excludes 503")
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	require.NotEmpty(t, rec.Body.String())
 }
 
 // bindStatusCodePassthroughRule 绑定一条按错误码+关键词双条件(MatchModeAll)匹配的规则。

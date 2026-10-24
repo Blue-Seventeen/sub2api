@@ -23,11 +23,23 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
+
+// Error envelopes may include the final usage snapshot even when no successful
+// message_stop follows. Unknown positive usage aliases are replay guards only.
+func mergeNativeAnthropicErrorUsage(usage *ClaudeUsage, payload []byte) {
+	for _, path := range []string{"message.usage", "usage"} {
+		var parsed apicompat.AnthropicUsage
+		if raw := gjson.GetBytes(payload, path); raw.IsObject() && json.Unmarshal([]byte(raw.Raw), &parsed) == nil {
+			mergeAnthropicUsage(usage, parsed)
+		}
+	}
+}
 
 // forwardAnthropicViaNativeAnthropicEndpoint 将 Anthropic Messages 请求零转换
 // 直通到国产供应商的原生 Anthropic 端点。仅做模型名映射与少量 body 清洗
@@ -114,6 +126,9 @@ func (s *OpenAIGatewayService) forwardAnthropicViaNativeAnthropicEndpoint(
 	}
 
 	if clientStream {
+		if err := s.preflightOpenAIPoolCompatStream(c, resp, account, upstreamSSEMessages, writeAnthropicError); err != nil {
+			return nil, err
+		}
 		return s.handleNativeAnthropicStreamingResponse(ctx, resp, c, account, originalModel, billingModel, upstreamModel, reasoningEffort, startTime)
 	}
 	return s.handleNativeAnthropicBufferedResponse(ctx, resp, c, account, originalModel, billingModel, upstreamModel, reasoningEffort, startTime)
@@ -257,6 +272,13 @@ func (s *OpenAIGatewayService) handleNativeAnthropicBufferedResponse(
 	}
 
 	usage := parseClaudeUsageFromResponseBody(body)
+	if isCCUpstreamErrorPayload("", body) {
+		err := s.handleCCUpstreamErrorPayload(c, resp, account, body, true, writeAnthropicError)
+		return &OpenAIForwardResult{RequestID: resp.Header.Get("x-request-id"), UpstreamHeaders: resp.Header,
+			Usage: claudeUsageToOpenAIUsage(usage), Model: originalModel, BillingModel: billingModel,
+			UpstreamModel: upstreamModel, UpstreamEndpoint: "/v1/messages", ReasoningEffort: reasoningEffort,
+			Duration: time.Since(startTime)}, err
+	}
 	if IsForceCacheBilling(ctx) && usage.InputTokens > 0 {
 		body, err = classifyAnthropicResponseInputAsCacheRead(body, usage)
 		if err != nil {
@@ -463,6 +485,16 @@ func (s *OpenAIGatewayService) handleNativeAnthropicStreamingResponse(
 					firstTokenMs = &ms
 				}
 				parseSSEUsagePassthrough(data, usage)
+				if isCCUpstreamErrorPayload("", []byte(trimmed)) {
+					mergeNativeAnthropicErrorUsage(usage, []byte(trimmed))
+				}
+				// A failed attempt may have no message_delta. Preserve the initial
+				// output estimate instead of silently settling it as zero tokens.
+				if gjson.Get(trimmed, "type").String() == "message_start" {
+					if tokens := gjson.Get(trimmed, "message.usage.output_tokens").Int(); tokens > 0 {
+						usage.OutputTokens = int(tokens)
+					}
+				}
 			} else {
 				trimmed := strings.TrimSpace(line)
 				if strings.HasPrefix(trimmed, "event:") && anthropicStreamEventIsTerminal(strings.TrimSpace(strings.TrimPrefix(trimmed, "event:")), "") {

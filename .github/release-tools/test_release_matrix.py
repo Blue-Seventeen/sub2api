@@ -57,6 +57,34 @@ class ReleaseMatrixTest(unittest.TestCase):
         self.assertNotIn({'goos': 'windows', 'goarch': 'arm64'}, full)
         self.assertEqual(release.targets(True), [{'goos': 'linux', 'goarch': 'amd64'}])
 
+    def test_release_workflow_validates_generated_configs_before_publication(self):
+        workflow = yaml.safe_load((ROOT / '.github/workflows/release.yml').read_text(encoding='utf-8'))
+        for job_name, config in (('build-binaries', 'goreleaser.matrix.yaml'), ('release', 'goreleaser.publisher.yaml')):
+            steps = workflow['jobs'][job_name]['steps']
+            checks = [i for i, step in enumerate(steps)
+                      if step.get('with', {}).get('args', '').startswith('check --config=')
+                      and config in step['with']['args']]
+            releases = [i for i, step in enumerate(steps)
+                        if step.get('with', {}).get('args', '').startswith('release ')]
+            self.assertEqual(len(checks), 1)
+            self.assertTrue(releases)
+            self.assertLess(checks[0], min(releases))
+            self.assertFalse(any('--skip=validate' in step.get('with', {}).get('args', '') for step in steps))
+            guards = [i for i, step in enumerate(steps)
+                      if 'git rev-parse HEAD' in step.get('run', '') and 'git status --porcelain' in step.get('run', '')]
+            downloads = [i for i, step in enumerate(steps) if step.get('uses', '').startswith('actions/download-artifact@')]
+            self.assertEqual(len(guards), 1)
+            self.assertLess(guards[0], min(downloads))
+        publication = workflow['jobs']['release']['steps']
+        check = next(i for i, step in enumerate(publication)
+                     if 'goreleaser.publisher.yaml' in step.get('with', {}).get('args', '')
+                     and step['with']['args'].startswith('check '))
+        images = next(i for i, step in enumerate(publication) if step.get('name') == 'Build images and publish manifests')
+        self.assertLess(check, images)
+        ignores = (ROOT / '.gitignore').read_text(encoding='utf-8').splitlines()
+        self.assertIn('release-input/', ignores)
+        self.assertIn('.release-context/', ignores)
+
     def test_leaf_keeps_packaging_and_selects_only_one_target(self):
         original = release.config()
         release.generate_config(argparse.Namespace(mode='build', simple=False, goos='darwin', goarch='arm64', output='leaf.yaml'))
@@ -65,6 +93,10 @@ class ReleaseMatrixTest(unittest.TestCase):
         self.assertEqual(leaf['builds'][0]['goarch'], ['arm64'])
         self.assertEqual(leaf['builds'][0]['ignore'], [])
         self.assertEqual(leaf['archives'], original['archives'])
+        archive = leaf['archives'][0]
+        self.assertNotIn('format', archive)
+        self.assertEqual(archive['formats'], ['tar.gz'])
+        self.assertEqual(archive['format_overrides'], [{'goos': 'windows', 'formats': ['zip']}])
         self.assertEqual(leaf['release'], original['release'])
         self.assertFalse(leaf['dockers'])
         self.assertIn('{{ .Env.RELEASE_DATE }}', '\n'.join(leaf['builds'][0]['ldflags']))

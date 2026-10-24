@@ -64,24 +64,32 @@ func (h *OpenAIGatewayHandler) GrokRealtime(c *gin.Context) {
 	// Keep the HTTP response uncommitted while selecting and probing an account.
 	// Realtime is not an HTTP streaming response; using reqStream=true here would
 	// let the wait queue flush an SSE ping before the WebSocket handshake succeeds.
-	failed := map[int64]struct{}{}
+	fs := NewFailoverState(h.maxAccountSwitches, false)
+	c.Request = c.Request.WithContext(service.NewGatewayRequestAttemptContext(c.Request.Context()))
+	failed := fs.FailedAccountIDs
 	var selection *service.AccountSelectionResult
 	var release func()
 	var token string
 	var upstream *service.GrokRealtimeUpstream
 	var candidateSeen bool
-	for attempts := 0; attempts < 4; attempts++ {
+	for {
+		if failoverClientGone(c) {
+			return
+		}
 		// Realtime's voice model is not a text-model capability. Passing a
 		// concrete text model here would reject accounts mapped only to an
 		// older/default text model before the upstream handshake can decide.
 		// An empty requested model keeps account selection capability-based;
 		// the actual voice model remains in the upstream WS query below.
 		candidate, _, selectErr := h.gatewayService.SelectAccountWithSchedulerForCapability(
-			c.Request.Context(), apiKey.GroupID, "", "", "", failed,
+			fs.SelectionContext(c.Request.Context()), apiKey.GroupID, "", "", "", failed,
 			service.OpenAIUpstreamTransportHTTPSSE,
 			service.OpenAIEndpointCapabilityChatCompletions,
 			false, false, false, service.PlatformGrok,
 		)
+		if fs.HandleRetrySelectionError(selectErr) {
+			continue
+		}
 		if selectErr != nil || candidate == nil || candidate.Account == nil {
 			break
 		}
@@ -115,10 +123,12 @@ func (h *OpenAIGatewayHandler) GrokRealtime(c *gin.Context) {
 			if errors.As(openErr, &dialErr) && dialErr.StatusCode > 0 {
 				statusCode = dialErr.StatusCode
 			}
-			h.gatewayService.HandleGrokRealtimeUpstreamError(c.Request.Context(), account, statusCode, []byte(openErr.Error()))
+			fe := h.gatewayService.HandleGrokRealtimeUpstreamError(c.Request.Context(), account, statusCode, []byte(openErr.Error()))
 			release()
 			release = nil
-			failed[account.ID] = struct{}{}
+			if fe == nil || fs.HandleFailoverError(c.Request.Context(), nil, account.ID, account.Platform, account.GetPoolModeRetryCount(), fe) != FailoverContinue {
+				break
+			}
 			continue
 		}
 		selection, upstream = candidate, candidateUpstream
@@ -241,14 +251,23 @@ func (h *OpenAIGatewayHandler) GrokVoice(c *gin.Context, endpoint string) {
 		contentType = "application/json"
 	}
 
-	failed := map[int64]struct{}{}
+	fs := NewFailoverState(h.maxAccountSwitches, false)
+	failed := fs.FailedAccountIDs
+	c.Request = c.Request.WithContext(service.NewGatewayRequestAttemptContext(c.Request.Context()))
+	safeInference := endpoint == "tts" || endpoint == "stt"
 	var last *service.UpstreamFailoverError
 	reqLog := requestLogger(c, "handler.openai_gateway.grok_voice", zap.String("endpoint", endpoint))
 	selectionModel := "grok-4.5"
 
-	for attempts := 0; attempts < 4; attempts++ {
+	for attempts := 0; ; attempts++ {
+		if failoverClientGone(c) {
+			return
+		}
+		if !safeInference && attempts >= 4 {
+			break
+		}
 		selection, _, selectErr := h.gatewayService.SelectAccountWithSchedulerForCapability(
-			c.Request.Context(),
+			fs.SelectionContext(c.Request.Context()),
 			apiKey.GroupID,
 			"",
 			"",
@@ -261,6 +280,10 @@ func (h *OpenAIGatewayHandler) GrokVoice(c *gin.Context, endpoint string) {
 			false,
 			service.PlatformGrok,
 		)
+		if fs.HandleRetrySelectionError(selectErr) {
+			failed = fs.FailedAccountIDs
+			continue
+		}
 		if selectErr != nil || selection == nil || selection.Account == nil {
 			if last != nil {
 				h.handleFailoverExhausted(c, last, false)
@@ -272,18 +295,17 @@ func (h *OpenAIGatewayHandler) GrokVoice(c *gin.Context, endpoint string) {
 		account := selection.Account
 		var started bool
 		release, status := h.acquireResponsesAccountSlot(c, apiKey.GroupID, "", selection, false, &started, reqLog)
-		if status == openAISlotAcquireProfitVetoed {
-			failed[account.ID] = struct{}{}
-			continue
-		}
-		if status != openAISlotAcquireOK {
-			// Failed already wrote error response (or transient reject).
-			if status == openAISlotAcquireFailed && len(failed) == 0 {
-				// Slot path wrote the response; stop.
+		if status == openAISlotAcquireProfitVetoed || status == openAISlotAcquireUnavailable {
+			if fs.MaxSwitches == 0 {
+				h.errorResponse(c, http.StatusTooManyRequests, "rate_limit_error", "Account concurrency limit exceeded")
 				return
 			}
 			failed[account.ID] = struct{}{}
 			continue
+		}
+		if status != openAISlotAcquireOK {
+			// Admission infrastructure failures have already written the final error.
+			return
 		}
 		result, forwardErr := func() (*service.OpenAIForwardResult, error) {
 			defer release()
@@ -295,8 +317,16 @@ func (h *OpenAIGatewayHandler) GrokVoice(c *gin.Context, endpoint string) {
 		}
 		var failoverErr *service.UpstreamFailoverError
 		if errors.As(forwardErr, &failoverErr) && failoverErr.ShouldRetryNextAccount() {
-			failed[account.ID] = struct{}{}
 			last = failoverErr
+			if safeInference {
+				if fs.HandleFailoverError(c.Request.Context(), nil, account.ID, account.Platform, account.GetPoolModeRetryCount(), failoverErr) != FailoverContinue {
+					h.handleFailoverExhausted(c, failoverErr, false)
+					return
+				}
+				failed = fs.FailedAccountIDs
+			} else {
+				failed[account.ID] = struct{}{}
+			}
 			continue
 		}
 		// Non-failover errors: handleGrokMediaErrorResponse / transport already wrote response.

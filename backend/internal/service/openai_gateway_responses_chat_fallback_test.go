@@ -443,7 +443,7 @@ func TestForwardResponses_GPT61SolToolsDoesNotDowngradeAfterNativeStreamFailure(
 	require.Equal(t, "/v1/responses", upstream.requests[0].URL.Path)
 }
 
-func TestForwardResponses_BillableNativeFailedEventUsesOfficialFailoverWithoutUsage(t *testing.T) {
+func TestForwardResponses_BillableNativeFailedEventPreservesUsageWithoutFailover(t *testing.T) {
 	body := []byte(`{"model":"gpt-6-astra","input":"hello","stream":true}`)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -470,11 +470,15 @@ func TestForwardResponses_BillableNativeFailedEventUsesOfficialFailoverWithoutUs
 
 	result, err := svc.Forward(context.Background(), c, account, body)
 	require.Error(t, err)
-	require.Nil(t, result)
+	require.NotNil(t, result)
+	require.Equal(t, 5, result.Usage.InputTokens)
+	require.Equal(t, 1, result.Usage.OutputTokens)
 	var failoverErr *UpstreamFailoverError
-	require.True(t, errors.As(err, &failoverErr))
+	require.False(t, errors.As(err, &failoverErr))
 	require.Len(t, upstream.requests, 1)
 	require.Equal(t, "/v1/responses", upstream.requests[0].URL.Path)
+	require.Contains(t, rec.Body.String(), "response.failed")
+	require.NotContains(t, rec.Body.String(), "response.completed")
 }
 
 func TestForwardResponses_TransportErrorDoesNotFallbackToChat(t *testing.T) {
@@ -541,7 +545,7 @@ func TestForwardResponses_ForceChatKeepsExistingMessageContentConversion(t *test
 	require.Equal(t, "hello", gjson.GetBytes(upstream.bodies[0], "messages.0.content").String())
 }
 
-func TestForwardResponses_NativeTerminalErrorDropsFailedAttemptUsage(t *testing.T) {
+func TestForwardResponses_NativeTerminalErrorPreservesAcceptedUsage(t *testing.T) {
 	for _, tc := range []struct {
 		name           string
 		requestBody    string
@@ -581,14 +585,19 @@ func TestForwardResponses_NativeTerminalErrorDropsFailedAttemptUsage(t *testing.
 			result, err := (&OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}).Forward(context.Background(), c, account, body)
 
 			require.Error(t, err)
-			require.Nil(t, result, "failed-attempt usage is discarded before official retry/failover handling")
-			require.Len(t, upstream.requests, 1, "the service reports one attempt; the handler owns account failover")
+			require.NotNil(t, result)
+			require.Equal(t, 5, result.Usage.InputTokens)
+			require.Equal(t, 1, result.Usage.OutputTokens)
+			require.Equal(t, "native-billed", result.RequestID)
+			var failoverErr *UpstreamFailoverError
+			require.NotErrorAs(t, err, &failoverErr)
+			require.Len(t, upstream.requests, 1, "accepted usage forbids service or handler account replay")
 			require.NotContains(t, rec.Body.String(), "response.completed")
 		})
 	}
 }
 
-func TestForwardResponses_NativeBillableFailureRemainsOfficiallyRetryable(t *testing.T) {
+func TestForwardResponses_NativeBillableFailureIsNotOfficiallyRetryable(t *testing.T) {
 	body := []byte(`{"model":"gpt-5.4","input":"hello","stream":true}`)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
@@ -602,9 +611,11 @@ func TestForwardResponses_NativeBillableFailureRemainsOfficiallyRetryable(t *tes
 	result, err := (&OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}).Forward(context.Background(), c, account, body)
 
 	require.Error(t, err)
-	require.Nil(t, result)
+	require.NotNil(t, result)
+	require.Equal(t, 5, result.Usage.InputTokens)
+	require.Equal(t, 1, result.Usage.OutputTokens)
 	var failoverErr *UpstreamFailoverError
-	require.True(t, errors.As(err, &failoverErr), "the handler must receive the upstream retry classification")
+	require.False(t, errors.As(err, &failoverErr), "the handler must not retry after accepted usage")
 	require.Len(t, upstream.requests, 1)
 }
 

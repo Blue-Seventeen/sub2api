@@ -52,7 +52,10 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 	clientStream := anthropicReq.Stream
 
 	// 2. Anthropic → Chat Completions (direct, no Responses intermediary)
-	chatReq, err := apicompat.AnthropicToChatCompletionsRequest(&anthropicReq)
+	chatReq, err := apicompat.AnthropicToChatCompletionsRequestWithMinOutputTokens(
+		&anthropicReq,
+		configuredMinOutputTokens(s.cfg),
+	)
 	if err != nil {
 		writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, fmt.Errorf("convert anthropic to chat completions: %w", err)
@@ -159,6 +162,11 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsAnthropic(
 	requestID := resp.Header.Get("x-request-id")
 	ccResp, usage, err := s.readCCUpstreamJSONResponse(c, resp, account, writeAnthropicError)
 	if err != nil {
+		if openAIUsageHasTokens(&usage) {
+			return &OpenAIForwardResult{RequestID: requestID, UpstreamHeaders: resp.Header, Usage: usage,
+				Model: originalModel, BillingModel: billingModel, UpstreamModel: upstreamModel,
+				ReasoningEffort: reasoningEffort, ServiceTier: serviceTier, Duration: time.Since(startTime)}, err
+		}
 		return nil, err
 	}
 	anthropicResp := apicompat.ChatCompletionsResponseToAnthropic(ccResp, originalModel)
@@ -194,6 +202,9 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 	serviceTier *string,
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
+	if err := s.preflightOpenAIPoolCompatStream(c, resp, account, upstreamSSEChat, writeAnthropicError); err != nil {
+		return nil, err
+	}
 	beginUpstreamResponseModelObservation(c)
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
@@ -253,7 +264,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 	if len(scan.ErrorPayload) > 0 {
 		message := extractOpenAISSEErrorMessage(scan.ErrorPayload)
 		status, passthroughType, passthroughMessage, matched := applyOpenAIStreamFailedErrorPassthroughRule(c, account.Platform, scan.ErrorPayload, message)
-		if !matched && !clientOutputStarted && !openAIUsageHasTokens(&usage) && openAIStreamErrorEventShouldFailover(scan.ErrorPayload, message) {
+		if !matched && !clientOutputStarted && !clientDisconnected && !scan.BillableUsageSeen && !openAIUsageHasTokens(&usage) && openAIStreamErrorEventShouldFailover(scan.ErrorPayload, message) && openAIErrorPayloadAllowsReplay(c, account, scan.ErrorPayload, message) {
 			return &OpenAIForwardResult{
 				RequestID:                   requestID,
 				UpstreamHeaders:             resp.Header,

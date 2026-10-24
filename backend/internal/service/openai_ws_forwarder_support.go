@@ -392,6 +392,23 @@ func (s *OpenAIGatewayService) handleOpenAIWSDialTransientFailure(ctx context.Co
 	s.handleOpenAIAccountUpstreamError(ctx, account, dialErr.StatusCode, dialErr.ResponseHeaders, dialErr.ResponseBody, canonicalModel)
 }
 
+func shouldRetryOpenAIWSPoolDialFailure(account *Account, statusCode int, responseBody []byte) bool {
+	return account != nil && account.IsPoolMode() && account.ShouldHandleErrorCode(statusCode) &&
+		account.IsPoolModeRetryableStatus(statusCode) && !isDefinitiveUpstreamRequestError(statusCode, responseBody)
+}
+
+func (s *OpenAIGatewayService) newOpenAIWSPoolDialFailoverError(account *Account, dialErr *openAIWSDialError) *UpstreamFailoverError {
+	if dialErr == nil || !shouldRetryOpenAIWSPoolDialFailure(account, dialErr.StatusCode, dialErr.ResponseBody) {
+		return nil
+	}
+	message := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(dialErr.ResponseBody)))
+	if message == "" && dialErr.Err != nil {
+		message = sanitizeUpstreamErrorMessage(dialErr.Err.Error())
+	}
+	return s.newOpenAIAccountFailoverError(account, dialErr.StatusCode, dialErr.ResponseHeaders,
+		dialErr.ResponseBody, message, false, true)
+}
+
 func isOpenAIWSTokenEvent(eventType string) bool {
 	eventType = strings.TrimSpace(eventType)
 	if eventType == "" {
@@ -597,7 +614,7 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 		return 0, nil, "", nil
 	}
-	if requestedModel != "" && !account.IsModelSupported(requestedModel) {
+	if requestedModel != "" && !supportsOpenAIRequestModel(account, requestedModel, requireCompact) {
 		return 0, nil, "", nil
 	}
 	if !account.SupportsOpenAIEndpointCapability(requiredCapability) {
@@ -636,7 +653,7 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 			_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 			return 0, nil, "", nil
 		}
-		if requestedModel != "" && !latest.IsModelSupported(requestedModel) {
+		if requestedModel != "" && !supportsOpenAIRequestModel(latest, requestedModel, requireCompact) {
 			return 0, nil, "", nil
 		}
 		if !latest.SupportsOpenAIEndpointCapability(requiredCapability) {
@@ -748,7 +765,7 @@ func (s *OpenAIGatewayService) newOpenAIWSRateLimitFailoverError(account *Accoun
 		responseBody,
 		strings.TrimSpace(message),
 		false,
-		false,
+		account != nil && account.IsPoolMode() && account.IsPoolModeRetryableStatus(http.StatusTooManyRequests),
 	)
 }
 

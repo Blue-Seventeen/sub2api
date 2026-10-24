@@ -139,6 +139,23 @@ func (s *GatewayService) handleSystemOneErrorResponse(ctx context.Context, c *gi
 		return &SystemOneUpstreamError{StatusCode: resp.StatusCode}
 	}
 
+	if account.IsPoolMode() {
+		failoverErr := poolModeHTTPFailover(ctx, s.rateLimitService, account, resp.StatusCode, resp.Header, respBody, typesafe.JevLatestModel)
+		if failoverErr == nil {
+			appendOpsUpstreamError(c, event)
+			return &SystemOneUpstreamError{StatusCode: resp.StatusCode}
+		}
+		event.Kind = "pool_mode_failover"
+		appendOpsUpstreamError(c, event)
+		if resp.StatusCode == http.StatusUnauthorized {
+			failoverErr.Stage = GatewayFailureStageAccountAuth
+			failoverErr.Scope = GatewayFailureScopeAccount
+			failoverErr.Reason = TypeSafeCredentialRejectedReason
+			failoverErr.NextAccountAction = NextAccountRetry
+		}
+		return failoverErr
+	}
+
 	shouldDisable := false
 	if s.rateLimitService != nil {
 		shouldDisable = s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody, typesafe.JevLatestModel)

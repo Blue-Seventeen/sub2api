@@ -377,6 +377,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 	if platform == service.PlatformGemini {
 		fs := NewFailoverState(h.maxAccountSwitchesGemini, hasBoundSession)
+		c.Request = c.Request.WithContext(service.NewGatewayRequestAttemptContext(c.Request.Context()))
 		var lastFailedAccount *service.Account
 		var lastFailedDurationMs int64
 
@@ -388,7 +389,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		}
 
 		for {
-			selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, sessionKey, reqModel, fs.FailedAccountIDs, "", int64(0)) // Gemini 不使用会话限制
+			selection, err := h.gatewayService.SelectAccountWithLoadAwareness(fs.SelectionContext(c.Request.Context()), apiKey.GroupID, sessionKey, reqModel, fs.FailedAccountIDs, "", int64(0)) // Gemini 不使用会话限制
+			if fs.HandleRetrySelectionError(err) {
+				continue
+			}
 			if err != nil {
 				if failoverClientGone(c) {
 					reqLog.Info("gateway.account_select_aborted_client_disconnected", zap.Error(err))
@@ -473,8 +477,13 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						zap.Int64("account_id", account.ID),
 						zap.Int("max_waiting", selection.WaitPlan.MaxWaiting),
 					)
-					h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error", "Too many pending requests, please retry later", streamStarted)
-					return
+					if fs.MaxSwitches == 0 {
+						h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error", "Account concurrency limit exceeded", streamStarted)
+						return
+					}
+					fs.FailedAccountIDs[account.ID] = struct{}{}
+					fs.pendingRetryAccountID = 0
+					continue
 				}
 				if err == nil && canWait {
 					accountWaitCounted = true
@@ -494,6 +503,16 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					reqStream,
 					&streamStarted,
 				)
+				if fs.MaxSwitches != 0 && accountAdmissionUnavailable(c.Request.Context(), err) {
+					releaseWait()
+					if fs.MaxSwitches == 0 {
+						h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error", "Account concurrency limit exceeded", streamStarted)
+						return
+					}
+					fs.FailedAccountIDs[account.ID] = struct{}{}
+					fs.pendingRetryAccountID = 0
+					continue
+				}
 				if err != nil {
 					reqLog.Warn("gateway.account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 					releaseWait()
@@ -735,6 +754,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 	for {
 		fs := NewFailoverState(h.maxAccountSwitches, hasBoundSession)
+		c.Request = c.Request.WithContext(service.NewGatewayRequestAttemptContext(c.Request.Context()))
 		var lastFailedAccount *service.Account
 		var lastFailedDurationMs int64
 		retryWithFallback := false
@@ -753,7 +773,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				zap.Bool("has_bound_session", hasBoundSession),
 				zap.Int("failed_account_count", len(fs.FailedAccountIDs)),
 			)
-			selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), currentAPIKey.GroupID, sessionKey, reqModel, fs.FailedAccountIDs, parsedReq.MetadataUserID, subject.UserID)
+			selection, err := h.gatewayService.SelectAccountWithLoadAwareness(fs.SelectionContext(c.Request.Context()), currentAPIKey.GroupID, sessionKey, reqModel, fs.FailedAccountIDs, parsedReq.MetadataUserID, subject.UserID)
+			if fs.HandleRetrySelectionError(err) {
+				continue
+			}
 			if err != nil {
 				if failoverClientGone(c) {
 					reqLog.Info("gateway.account_select_aborted_client_disconnected", zap.Error(err))
@@ -848,8 +871,13 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						zap.Int64("account_id", account.ID),
 						zap.Int("max_waiting", selection.WaitPlan.MaxWaiting),
 					)
-					h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error", "Too many pending requests, please retry later", streamStarted)
-					return
+					if fs.MaxSwitches == 0 {
+						h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error", "Account concurrency limit exceeded", streamStarted)
+						return
+					}
+					fs.FailedAccountIDs[account.ID] = struct{}{}
+					fs.pendingRetryAccountID = 0
+					continue
 				}
 				if err == nil && canWait {
 					accountWaitCounted = true
@@ -869,6 +897,16 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					reqStream,
 					&streamStarted,
 				)
+				if fs.MaxSwitches != 0 && accountAdmissionUnavailable(c.Request.Context(), err) {
+					releaseWait()
+					if fs.MaxSwitches == 0 {
+						h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error", "Account concurrency limit exceeded", streamStarted)
+						return
+					}
+					fs.FailedAccountIDs[account.ID] = struct{}{}
+					fs.pendingRetryAccountID = 0
+					continue
+				}
 				if err != nil {
 					reqLog.Warn("gateway.account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 					releaseWait()
@@ -1310,7 +1348,7 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 		return
 	}
 
-	if len(availableModels) > 0 {
+	if len(availableModels) > 0 || (platform == service.PlatformOpenAI && availableModels != nil) {
 		writeModelsList(c, platform, availableModels)
 		return
 	}
@@ -1481,8 +1519,10 @@ func (h *GatewayHandler) compositeAvailableModels(ctx context.Context, groupID *
 			continue
 		}
 		platformModels := h.gatewayService.GetAvailableModels(ctx, groupID, platform)
-		if len(platformModels) == 0 && !isNativeCNProviderPlatform(platform) {
-			if _, ok := schedulablePlatforms[platform]; ok {
+		if len(platformModels) == 0 && !isNativeCNProviderPlatform(platform) &&
+			(platform != service.PlatformOpenAI || platformModels == nil) {
+			// CN and multi-protocol API-key providers should expose mapped models only.
+			if _, ok := schedulablePlatforms[platform]; ok && !service.IsMultiProtocolAPIKeyProvider(platform) {
 				platformModels = defaultModelIDsForPlatform(platform)
 			}
 		}
@@ -1816,7 +1856,7 @@ func defaultModelIDsForPlatform(platform string) []string {
 // allowlist filtering. Anthropic keeps both sources because its compatible
 // clients may request either native or mapped Claude model IDs.
 func modelListingSource(platform string, availableModels, fallbackModels []string) []string {
-	if len(availableModels) == 0 {
+	if availableModels == nil {
 		return fallbackModels
 	}
 	if platform == service.PlatformAnthropic {
@@ -2547,23 +2587,50 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	}
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
 
-	// 选择支持该模型的账号
-	account, err := h.gatewayService.SelectAccountForModel(c.Request.Context(), apiKey.GroupID, sessionHash, parsedReq.Model)
-	if err != nil {
-		reqLog.Warn("gateway.count_tokens_select_account_failed", zap.Error(err))
-		cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, parsedReq.Model, parsedReq.Model, service.PlatformAnthropic)
-		if !cls.ModelNotFound {
-			markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
+	fs := NewFailoverState(h.maxAccountSwitches, false)
+	c.Request = c.Request.WithContext(service.NewGatewayRequestAttemptContext(c.Request.Context()))
+	for {
+		// 选择支持该模型的账号
+		account, err := h.gatewayService.SelectAccountForModelWithExclusions(fs.SelectionContext(c.Request.Context()), apiKey.GroupID, sessionHash, parsedReq.Model, fs.FailedAccountIDs)
+		if fs.HandleRetrySelectionError(err) {
+			continue
 		}
-		h.errorResponse(c, cls.Status, cls.ErrType, cls.Message)
-		return
-	}
-	setOpsSelectedAccount(c, account.ID, account.Platform)
+		if err != nil {
+			if fs.LastFailoverErr != nil {
+				h.handleFailoverExhausted(c, fs.LastFailoverErr, service.PlatformAnthropic, false)
+				return
+			}
+			reqLog.Warn("gateway.count_tokens_select_account_failed", zap.Error(err))
+			cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, parsedReq.Model, parsedReq.Model, service.PlatformAnthropic)
+			if !cls.ModelNotFound {
+				markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
+			}
+			h.errorResponse(c, cls.Status, cls.ErrType, cls.Message)
+			return
+		}
+		setOpsSelectedAccount(c, account.ID, account.Platform)
 
-	// 转发请求（不记录使用量）
-	if err := h.gatewayService.ForwardCountTokens(c.Request.Context(), c, account, parsedReq); err != nil {
-		reqLog.Error("gateway.count_tokens_forward_failed", zap.Int64("account_id", account.ID), zap.Error(err))
-		// 错误响应已在 ForwardCountTokens 中处理
+		// 转发请求（不记录使用量）
+		// Each account receives the original logical payload, not the previous
+		// account's model mapping or signed/rectified wire request.
+		attemptParsed, parseErr := service.ParseGatewayRequest(service.NewRequestBodyRef(body), domain.PlatformAnthropic)
+		if parseErr != nil {
+			h.errorResponse(c, 400, "invalid_request_error", "Failed to parse request body")
+			return
+		}
+		writerBefore := c.Writer.Size()
+		if err := h.gatewayService.ForwardCountTokens(c.Request.Context(), c, account, attemptParsed); err != nil {
+			var fe *service.UpstreamFailoverError
+			if errors.As(err, &fe) && c.Writer.Size() == writerBefore {
+				if fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, account.GetPoolModeRetryCount(), fe) == FailoverContinue {
+					continue
+				}
+				h.handleFailoverExhausted(c, fe, service.PlatformAnthropic, false)
+			}
+			reqLog.Error("gateway.count_tokens_forward_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+			// 错误响应已在 ForwardCountTokens 中处理
+			return
+		}
 		return
 	}
 }

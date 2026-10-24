@@ -267,11 +267,12 @@ func TestNonStreamingSSEToJSON_EntryPointsPreserveAccountAndTerminalVerdict(t *t
 		status    int
 		committed bool
 		keepalive bool
+		accepted  bool
 	}{
 		{name: "failed", body: failed, failover: true, status: http.StatusBadGateway},
 		{name: "event_field_only", body: "event: error\ndata: {\"error\":{\"message\":\"temporary failure, please retry\"}}\n\n", failover: true, status: http.StatusBadGateway},
 		{name: "failed_after_bare_error", body: "data: {\"type\":\"error\",\"error\":{\"message\":\"upstream rejected request\"}}\n\n" + failed, failover: true, status: http.StatusBadGateway},
-		{name: "failed_after_completed", body: completed + failed, failover: true, status: http.StatusBadGateway},
+		{name: "failed_after_completed", body: completed + failed, status: http.StatusBadGateway, accepted: true},
 		{name: "completed_after_error", body: "data: {\"type\":\"error\",\"error\":{\"message\":\"temporary failure\"}}\n\n" + completed},
 		{name: "non_retryable_error", body: "data: {\"type\":\"error\",\"error\":{\"message\":\"upstream rejected request\"}}\n\n", status: http.StatusBadGateway},
 		{name: "committed", body: failed, committed: true, status: http.StatusBadGateway},
@@ -304,22 +305,28 @@ func TestNonStreamingSSEToJSON_EntryPointsPreserveAccountAndTerminalVerdict(t *t
 				if entry == "passthrough" {
 					result, resultErr := svc.handleNonStreamingResponsePassthrough(c.Request.Context(), resp, c, account, "model", "model")
 					err = resultErr
-					if tt.status != 0 {
+					if tt.status != 0 && !tt.accepted {
 						require.Nil(t, result)
 					} else {
 						require.NotNil(t, result)
 						require.Equal(t, 7, result.usage.InputTokens)
-						require.Equal(t, "actual-model", result.upstreamResponseModel)
+						require.Equal(t, 3, result.usage.OutputTokens)
+						if !tt.accepted {
+							require.Equal(t, "actual-model", result.upstreamResponseModel)
+						}
 					}
 				} else {
 					result, resultErr := svc.handleNonStreamingResponse(c.Request.Context(), resp, c, account, "model", "model")
 					err = resultErr
-					if tt.status != 0 {
+					if tt.status != 0 && !tt.accepted {
 						require.Nil(t, result)
 					} else {
 						require.NotNil(t, result)
 						require.Equal(t, 7, result.usage.InputTokens)
-						require.Equal(t, "actual-model", result.upstreamResponseModel)
+						require.Equal(t, 3, result.usage.OutputTokens)
+						if !tt.accepted {
+							require.Equal(t, "actual-model", result.upstreamResponseModel)
+						}
 					}
 				}
 				var failoverErr *UpstreamFailoverError
@@ -343,6 +350,7 @@ func TestNonStreamingSSEToJSON_EntryPointsPreserveAccountAndTerminalVerdict(t *t
 					require.Error(t, err)
 					require.False(t, errors.As(err, &failoverErr))
 					require.Equal(t, tt.status, rec.Code)
+					require.NotContains(t, rec.Body.String(), "response.completed")
 				} else {
 					require.NoError(t, err)
 					require.Equal(t, http.StatusOK, rec.Code)

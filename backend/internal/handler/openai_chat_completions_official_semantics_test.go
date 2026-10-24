@@ -92,50 +92,79 @@ func TestOpenAIChatCompletions_NonFailoverTerminalErrorBillsReturnedUsage(t *tes
 	require.Greater(t, billing.commands[0].BalanceCost, 0.0)
 }
 
-func TestOpenAIChatCompletions_FailoverTerminalErrorDoesNotBillAttemptUsage(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	cfg := &config.Config{}
-	cfg.Default.RateMultiplier = 1
-	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
-	cfg.Gateway.MaxAccountSwitches = 1
-	group := &service.Group{ID: 2302, Hydrated: true, Platform: service.PlatformOpenAI, Status: service.StatusActive, RateMultiplier: 1}
-	key := &service.APIKey{
-		ID: 3302, UserID: 4302, GroupID: &group.ID, Group: group,
-		User: &service.User{ID: 4302, Status: service.StatusActive, Balance: 100},
+func TestOpenAIChatCompletions_TerminalErrorHonorsBillableBoundary(t *testing.T) {
+	for _, billable := range []bool{false, true} {
+		name := "unaccepted-failover-does-not-bill"
+		if billable {
+			name = "accepted-usage-bills-once-without-replay"
+		}
+		t.Run(name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			cfg := &config.Config{}
+			cfg.Default.RateMultiplier = 1
+			cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+			cfg.Gateway.MaxAccountSwitches = 1
+			group := &service.Group{ID: 2302, Hydrated: true, Platform: service.PlatformOpenAI, Status: service.StatusActive, RateMultiplier: 1}
+			key := &service.APIKey{
+				ID: 3302, UserID: 4302, GroupID: &group.ID, Group: group,
+				User: &service.User{ID: 4302, Status: service.StatusActive, Balance: 100},
+			}
+			accounts := []service.Account{{
+				ID: 1302, Name: "openai-responses", Platform: service.PlatformOpenAI,
+				Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true,
+				GroupIDs:    []int64{group.ID},
+				Credentials: map[string]any{"api_key": "test-key", "base_url": "http://upstream.example"},
+				Extra:       map[string]any{openai_compat.ExtraKeyResponsesSupported: true},
+			}}
+			upstream := &openAIChatTerminalFailureUpstream{body: "data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp-failed\",\"status\":\"failed\",\"usage\":{\"input_tokens\":7,\"output_tokens\":2},\"error\":{\"code\":\"server_error\",\"message\":\"temporary upstream failure\"}}}\n\n"}
+			if billable {
+				accounts[0].Credentials["pool_mode"] = true
+				accounts[0].Credentials["pool_mode_retry_count"] = 10
+				accounts[0].Credentials["pool_mode_retry_status_codes"] = []any{float64(502)}
+				accounts[0].Priority = 1
+				backup := accounts[0]
+				backup.ID, backup.Name, backup.Priority = 1304, "backup-responses", 2
+				accounts = append(accounts, backup)
+			} else {
+				// A failed attempt can only be replayed before upstream acceptance.
+				upstream.body = strings.ReplaceAll(upstream.body, `"input_tokens":7,"output_tokens":2`, `"input_tokens":0,"output_tokens":0`)
+			}
+			users := &grokMediaBillingUserRepo{user: key.User}
+			billing := &grokMediaBillingRepo{}
+			logs := &grokMediaBillingLogRepo{}
+			cache := service.NewBillingCacheService(nil, users, nil, nil, nil, nil, cfg, nil)
+			t.Cleanup(cache.Stop)
+			gateway := service.NewOpenAIGatewayService(
+				&openAIWSFailoverHandlerAccountRepoStub{accounts: accounts}, logs, billing, users, nil, nil, nil,
+				cfg, nil, nil, service.NewBillingService(cfg, nil), nil, cache, upstream,
+				&service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil,
+			)
+			h := NewOpenAIGatewayHandler(gateway, nil, service.NewConcurrencyService(nil), cache,
+				service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg), nil, nil, nil, nil, nil, nil, cfg)
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5.4","stream":true,"messages":[{"role":"user","content":"hello"}]}`))
+			c.Request.Header.Set("Content-Type", "application/json")
+			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Group, group))
+			c.Set(string(middleware.ContextKeyAPIKey), key)
+			c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: key.UserID})
+
+			h.ChatCompletions(c)
+
+			require.Equal(t, []string{"/v1/responses"}, upstream.paths)
+			if billable {
+				require.Len(t, logs.logs, 1, "an accepted terminal attempt is settled, not replayed")
+				require.Equal(t, 7, logs.logs[0].InputTokens)
+				require.Equal(t, 2, logs.logs[0].OutputTokens)
+				require.Len(t, billing.commands, 1)
+				require.Equal(t, logs.logs[0].RequestID, billing.commands[0].RequestID)
+				require.Greater(t, billing.commands[0].BalanceCost, 0.0)
+				return
+			}
+			require.Empty(t, logs.logs, "usage from a failover attempt must not enter billing")
+			require.Empty(t, billing.commands)
+		})
 	}
-	accounts := []service.Account{{
-		ID: 1302, Name: "openai-responses", Platform: service.PlatformOpenAI,
-		Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true,
-		GroupIDs:    []int64{group.ID},
-		Credentials: map[string]any{"api_key": "test-key", "base_url": "http://upstream.example"},
-		Extra:       map[string]any{openai_compat.ExtraKeyResponsesSupported: true},
-	}}
-	upstream := &openAIChatTerminalFailureUpstream{body: "data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp-failed\",\"status\":\"failed\",\"usage\":{\"input_tokens\":7,\"output_tokens\":2},\"error\":{\"code\":\"server_error\",\"message\":\"temporary upstream failure\"}}}\n\n"}
-	users := &grokMediaBillingUserRepo{user: key.User}
-	billing := &grokMediaBillingRepo{}
-	logs := &grokMediaBillingLogRepo{}
-	cache := service.NewBillingCacheService(nil, users, nil, nil, nil, nil, cfg, nil)
-	t.Cleanup(cache.Stop)
-	gateway := service.NewOpenAIGatewayService(
-		&openAIWSFailoverHandlerAccountRepoStub{accounts: accounts}, logs, billing, users, nil, nil, nil,
-		cfg, nil, nil, service.NewBillingService(cfg, nil), nil, cache, upstream,
-		&service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil,
-	)
-	h := NewOpenAIGatewayHandler(gateway, nil, service.NewConcurrencyService(nil), cache,
-		service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg), nil, nil, nil, nil, nil, nil, cfg)
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5.4","stream":true,"messages":[{"role":"user","content":"hello"}]}`))
-	c.Request.Header.Set("Content-Type", "application/json")
-	c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Group, group))
-	c.Set(string(middleware.ContextKeyAPIKey), key)
-	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: key.UserID})
-
-	h.ChatCompletions(c)
-
-	require.Equal(t, []string{"/v1/responses"}, upstream.paths)
-	require.Empty(t, logs.logs, "usage from a failover attempt must not enter billing")
-	require.Empty(t, billing.commands)
 }
 
 func TestOpenAIChatCompletions_NewAPIStyleUsageRecordsActualUpstreamEndpoint(t *testing.T) {

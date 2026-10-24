@@ -1654,8 +1654,12 @@ func TestOpenAIStreamingPostOutputDisconnectQuarantinesSharedProxyWithoutSameStr
 			StatusCode: http.StatusOK,
 			Body: &openAIStreamReadThenErrorCloser{
 				reader: strings.NewReader(strings.Join([]string{
+					"event: response.in_progress",
+					`data: {"type":"response.in_progress","response":{"usage":{"input_tokens":9,"output_tokens":1}}}`,
+					"",
 					"event: response.output_text.delta",
 					`data: {"type":"response.output_text.delta","delta":"partial"}`,
+					"",
 					"",
 				}, "\n")),
 				err: readErr,
@@ -1663,8 +1667,11 @@ func TestOpenAIStreamingPostOutputDisconnectQuarantinesSharedProxyWithoutSameStr
 			Header: http.Header{"X-Request-Id": []string{"rid-proxy-disconnect"}},
 		}
 
-		_, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, account, time.Now(), "gpt-5.6-sol", "gpt-5.6-sol")
+		result, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, account, time.Now(), "gpt-5.6-sol", "gpt-5.6-sol")
 		require.Error(t, err)
+		require.NotNil(t, result)
+		require.True(t, result.accepted)
+		require.Equal(t, OpenAIUsage{InputTokens: 9, OutputTokens: 1}, *result.usage)
 		var failoverErr *UpstreamFailoverError
 		require.False(t, errors.As(err, &failoverErr), "post-output disconnect must not fail over inside the same stream")
 		require.Contains(t, rec.Body.String(), "partial")

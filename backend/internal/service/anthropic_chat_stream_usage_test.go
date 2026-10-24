@@ -61,7 +61,14 @@ func TestAnthropicChatStreamAuthoritativeUsage(t *testing.T) {
 						if adapter == "native" {
 							svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
 							result, err := svc.forwardChatCompletionsViaNativeAnthropic(context.Background(), c, nativeAnthropicTestAccount(), body, "")
-							require.NoError(t, err)
+							if terminal == "eof" {
+								require.Error(t, err, "EOF without message_stop must not synthesize successful completion")
+								var failoverErr *UpstreamFailoverError
+								require.NotErrorAs(t, err, &failoverErr)
+							} else {
+								require.NoError(t, err)
+							}
+							require.NotNil(t, result)
 							require.Equal(t, tc.totalInput, result.Usage.InputTokens)
 							require.Equal(t, tc.output, result.Usage.OutputTokens)
 							require.Equal(t, tc.cached, result.Usage.CacheReadInputTokens)
@@ -76,7 +83,8 @@ func TestAnthropicChatStreamAuthoritativeUsage(t *testing.T) {
 							require.Equal(t, tc.cached, result.Usage.CacheReadInputTokens)
 							require.Equal(t, tc.created, result.Usage.CacheCreationInputTokens)
 						}
-						count, done := 0, 0
+						require.Len(t, upstream.requests, 1)
+						count, done, errorCount := 0, 0, 0
 						var last *apicompat.ChatCompletionsChunk
 						for _, line := range strings.Split(rec.Body.String(), "\n") {
 							if !strings.HasPrefix(line, "data: ") {
@@ -92,6 +100,14 @@ func TestAnthropicChatStreamAuthoritativeUsage(t *testing.T) {
 								continue
 							}
 							require.Zero(t, done, "chunk after DONE")
+							var envelope struct {
+								Error json.RawMessage `json:"error"`
+							}
+							require.NoError(t, json.Unmarshal([]byte(payload), &envelope))
+							if len(envelope.Error) > 0 {
+								errorCount++
+								continue
+							}
 							var chunk apicompat.ChatCompletionsChunk
 							require.NoError(t, json.Unmarshal([]byte(payload), &chunk))
 							last = &chunk
@@ -109,11 +125,18 @@ func TestAnthropicChatStreamAuthoritativeUsage(t *testing.T) {
 								require.Equal(t, tc.created, chunk.Usage.PromptTokensDetails.CacheCreationTokens)
 							}
 						}
-						require.Equal(t, 1, done)
-						if tc.want {
-							require.Equal(t, 1, count)
+						if adapter == "native" && terminal == "eof" {
+							require.Zero(t, done, "an incomplete native stream must not emit DONE")
+							require.Equal(t, 1, errorCount)
+							require.Zero(t, count, "do not synthesize a terminal usage chunk on failure; partial usage remains in the result")
 						} else {
-							require.Zero(t, count)
+							require.Equal(t, 1, done)
+							require.Zero(t, errorCount)
+							if tc.want {
+								require.Equal(t, 1, count)
+							} else {
+								require.Zero(t, count)
+							}
 						}
 					})
 				}

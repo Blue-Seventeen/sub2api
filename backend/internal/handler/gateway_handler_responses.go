@@ -185,6 +185,8 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 
 	// 3. Account selection + failover loop
 	fs := NewFailoverState(h.maxAccountSwitches, false)
+	requestCtx = service.NewGatewayRequestAttemptContext(requestCtx)
+	c.Request = c.Request.WithContext(service.NewGatewayRequestAttemptContext(c.Request.Context()))
 	var lastFailedAccount *service.Account
 	var lastFailedDurationMs int64
 
@@ -192,7 +194,10 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		if failoverClientGone(c) {
 			return
 		}
-		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(requestCtx, apiKey.GroupID, sessionHash, reqModel, fs.FailedAccountIDs, "", int64(0))
+		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(fs.SelectionContext(requestCtx), apiKey.GroupID, sessionHash, reqModel, fs.FailedAccountIDs, "", int64(0))
+		if fs.HandleRetrySelectionError(err) {
+			continue
+		}
 		if err != nil {
 			if failoverClientGone(c) {
 				reqLog.Info("gateway.responses.account_select_aborted_client_disconnected", zap.Error(err))
@@ -246,6 +251,11 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 				reqStream,
 				&streamStarted,
 			)
+			if fs.MaxSwitches != 0 && accountAdmissionUnavailable(c.Request.Context(), err) {
+				fs.FailedAccountIDs[account.ID] = struct{}{}
+				fs.pendingRetryAccountID = 0
+				continue
+			}
 			if err != nil {
 				reqLog.Warn("gateway.responses.account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				h.handleConcurrencyError(c, err, "account", streamStarted)

@@ -177,7 +177,10 @@ func TestGatewayService_Forward_StreamErrorWithoutUsageReturnsNilResult(t *testi
 
 	result, err := svc.Forward(context.Background(), c, account, parsed)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "missing terminal event")
+	var failover *UpstreamFailoverError
+	require.ErrorAs(t, err, &failover)
+	require.Equal(t, http.StatusBadGateway, failover.StatusCode)
+	require.False(t, c.Writer.Written(), "ping-only failure must remain eligible for handler recovery")
 	require.Nil(t, result, "无已观测 usage 时不应返回部分结果")
 }
 

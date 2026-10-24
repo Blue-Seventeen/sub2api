@@ -122,19 +122,21 @@ type OrderListParams struct {
 }
 
 type RefundPlan struct {
-	OrderID         int64
-	Order           *dbent.PaymentOrder
-	RefundAmount    float64
-	GatewayAmount   float64
-	Reason          string
-	Force           bool
-	DeductBalance   bool
-	DeductionType   string
-	BalanceToDeduct float64
-	SubDaysToDeduct int
-	SubscriptionID  int64
-
+	OrderID                        int64
+	Order                          *dbent.PaymentOrder
+	RefundAmount                   float64
+	GatewayAmount                  float64
+	Reason                         string
+	Force                          bool
+	DeductBalance                  bool
+	DeductionType                  string
+	BalanceToDeduct                float64
+	SubDaysToDeduct                int
+	SubscriptionID                 int64
 	SubscriptionDeductionSnapshots []UserSubscription
+	subscriptionDeductionAfter     []UserSubscription
+	// deductionHeld 表示扣减已在进入 REFUND_PENDING 前执行并保留，终态收敛时不再重复扣减。
+	deductionHeld bool
 }
 
 type RefundResult struct {

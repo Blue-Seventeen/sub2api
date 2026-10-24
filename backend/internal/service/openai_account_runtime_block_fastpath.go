@@ -10,23 +10,17 @@ import (
 )
 
 const (
-	openAIAccountStateUpdateTimeout       = 5 * time.Second
-	openAIOAuth429FallbackCooldown        = 5 * time.Second
-	openAIOAuth429RetryWindow             = 2 * time.Minute
-	openAIOAuth429RetryDelay              = 500 * time.Millisecond
-	openAIOAuth429MaxRetryDelay           = 8 * time.Second
-	openAIOAuth429MaxAccountAttempts      = 3
-	openAIStopSchedulingBridgeCooldown    = 2 * time.Minute
-	openAIOAuth429StormWindow             = 10 * time.Second
-	openAIOAuth429StormMaxAccountSwitches = 1
+	openAIAccountStateUpdateTimeout    = 5 * time.Second
+	openAIOAuth429FallbackCooldown     = 5 * time.Second
+	openAIOAuth429RetryWindow          = 2 * time.Minute
+	openAIOAuth429RetryDelay           = 500 * time.Millisecond
+	openAIOAuth429MaxRetryDelay        = 8 * time.Second
+	openAIStopSchedulingBridgeCooldown = 2 * time.Minute
+	openAIOAuth429StormWindow          = 10 * time.Second
 )
 
-// OpenAIOAuth429FailoverState tracks the request-local follow-up budget after
-// the first Grok OAuth 429. Once that 429 occurs, exactly one different account
-// may be attempted; any failure from that follow-up account ends failover.
-type OpenAIOAuth429FailoverState struct {
-	grokOAuth429FollowupPending bool
-}
+// OpenAIOAuth429FailoverState is kept for caller compatibility. Candidate exhaustion is request-scoped.
+type OpenAIOAuth429FailoverState struct{}
 
 type openAIOAuth429Disposition uint8
 
@@ -584,32 +578,11 @@ func (s *OpenAIGatewayService) recordOpenAIOAuth429() {
 	s.openaiOAuth429WindowCount.Add(1)
 }
 
+// ShouldStopOpenAIOAuth429Failover retains source compatibility for callers.
+// Account-local 429s do not terminate a request while an untried eligible
+// candidate remains. The handler owns cancellation, replay safety and the
+// immutable request candidate universe; provider/request stop errors remain
+// governed by UpstreamFailoverError.ShouldRetryNextAccount.
 func (s *OpenAIGatewayService) ShouldStopOpenAIOAuth429Failover(account *Account, statusCode int, failedSwitches int, state *OpenAIOAuth429FailoverState) bool {
-	if failedSwitches < openAIOAuth429StormMaxAccountSwitches {
-		return false
-	}
-	if state != nil && state.grokOAuth429FollowupPending {
-		// The follow-up budget was armed by a Grok OAuth 429. Consume it on
-		// any failing follow-up account, even if a mixed pool selected an API-key
-		// account next.
-		return true
-	}
-	if isGrokOAuthAccount(account) {
-		if state == nil {
-			// Preserve the old threshold for callers that have not adopted the
-			// request-local state contract yet.
-			return statusCode == http.StatusTooManyRequests && failedSwitches >= 2
-		}
-		if statusCode == http.StatusTooManyRequests {
-			state.grokOAuth429FollowupPending = true
-		}
-		return false
-	}
-	if statusCode != http.StatusTooManyRequests || !isOpenAIOAuthAccount(account) {
-		return false
-	}
-	// Each OpenAI OAuth candidate has already consumed its full same-account
-	// retry window before reaching this switch point. A global storm is useful
-	// telemetry, but must not prevent trying the bounded next-account budget.
-	return failedSwitches >= openAIOAuth429MaxAccountAttempts
+	return false
 }

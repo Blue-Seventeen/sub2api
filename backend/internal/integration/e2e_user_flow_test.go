@@ -4,315 +4,232 @@ package integration
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 )
 
-// E2E 用户流程测试
-// 测试完整的用户操作链路：注册 → 登录 → 创建 API Key → 调用网关 → 查询用量
+type e2eAuthData struct {
+	AccessToken string `json:"access_token"`
+	TokenType   string `json:"token_type"`
+	User        struct {
+		ID    int64  `json:"id"`
+		Email string `json:"email"`
+	} `json:"user"`
+}
 
-var (
-	testUserEmail    = "e2e-test-" + fmt.Sprintf("%d", time.Now().UnixMilli()) + "@test.local"
-	testUserPassword = "E2eTest@12345"
-	testUserName     = "e2e-test-user"
-)
-
-// TestUserRegistrationAndLogin 测试用户注册和登录流程
 func TestUserRegistrationAndLogin(t *testing.T) {
-	// 步骤 1: 注册新用户
-	t.Run("注册新用户", func(t *testing.T) {
-		payload := map[string]string{
-			"email":    testUserEmail,
-			"password": testUserPassword,
-			"username": testUserName,
-		}
-		body, _ := json.Marshal(payload)
-
-		resp, err := doRequest(t, "POST", "/api/auth/register", body, "")
+	email := fmt.Sprintf("e2e-test-%d@example.com", time.Now().UnixNano())
+	var secret [24]byte
+	if _, err := rand.Read(secret[:]); err != nil {
+		t.Fatal("cannot generate isolated registration password")
+	}
+	password := "E2e-" + hex.EncodeToString(secret[:])
+	if !t.Run("注册新用户", func(t *testing.T) {
+		body, err := json.Marshal(map[string]string{"email": email, "password": password})
 		if err != nil {
-			t.Skipf("注册接口不可用，跳过用户流程测试: %v", err)
-			return
+			t.Fatal("cannot encode registration request")
 		}
+		resp := mustE2ERequest(t, http.MethodPost, "/api/v1/auth/register", body, "")
 		defer resp.Body.Close()
+		var auth e2eAuthData
+		decodeE2EAPIData(t, resp, &auth)
+		requireE2EAuth(t, auth, email)
+	}) {
+		return
+	}
 
-		respBody, _ := io.ReadAll(resp.Body)
-
-		// 注册可能返回 200（成功）或 400（邮箱已存在）或 403（注册已关闭）
-		switch resp.StatusCode {
-		case 200:
-			t.Logf("✅ 用户注册成功: %s", testUserEmail)
-		case 400:
-			t.Logf("⚠️ 用户可能已存在: %s", string(respBody))
-		case 403:
-			t.Skipf("注册功能已关闭: %s", string(respBody))
-		default:
-			t.Logf("⚠️ 注册返回 HTTP %d: %s（继续尝试登录）", resp.StatusCode, string(respBody))
-		}
-	})
-
-	// 步骤 2: 登录获取 JWT
 	var accessToken string
-	t.Run("用户登录获取JWT", func(t *testing.T) {
-		payload := map[string]string{
-			"email":    testUserEmail,
-			"password": testUserPassword,
-		}
-		body, _ := json.Marshal(payload)
-
-		resp, err := doRequest(t, "POST", "/api/auth/login", body, "")
-		if err != nil {
-			t.Fatalf("登录请求失败: %v", err)
-		}
-		defer resp.Body.Close()
-
-		respBody, _ := io.ReadAll(resp.Body)
-
-		if resp.StatusCode != 200 {
-			t.Skipf("登录失败 HTTP %d: %s（可能需要先注册用户）", resp.StatusCode, string(respBody))
-			return
-		}
-
-		var result map[string]any
-		if err := json.Unmarshal(respBody, &result); err != nil {
-			t.Fatalf("解析登录响应失败: %v", err)
-		}
-
-		// 尝试从标准响应格式获取 token
-		if token, ok := result["access_token"].(string); ok && token != "" {
-			accessToken = token
-		} else if data, ok := result["data"].(map[string]any); ok {
-			if token, ok := data["access_token"].(string); ok {
-				accessToken = token
-			}
-		}
-
-		if accessToken == "" {
-			t.Skipf("未获取到 access_token，响应: %s", string(respBody))
-			return
-		}
-
-		// 验证 token 不为空且格式基本正确
-		if len(accessToken) < 10 {
-			t.Fatalf("access_token 格式异常: %s", accessToken)
-		}
-
-		t.Logf("✅ 登录成功，获取 JWT（长度: %d）", len(accessToken))
-	})
-
-	if accessToken == "" {
-		t.Skip("未获取到 JWT，跳过后续测试")
+	if !t.Run("用户登录获取JWT", func(t *testing.T) {
+		accessToken = loginE2EUser(t, email, password)
+	}) {
 		return
 	}
-
-	// 步骤 3: 使用 JWT 获取当前用户信息
 	t.Run("获取当前用户信息", func(t *testing.T) {
-		resp, err := doRequest(t, "GET", "/api/user/me", nil, accessToken)
-		if err != nil {
-			t.Fatalf("请求失败: %v", err)
-		}
+		resp := mustE2ERequest(t, http.MethodGet, "/api/v1/auth/me", nil, accessToken)
 		defer resp.Body.Close()
-
-		if resp.StatusCode != 200 {
-			body, _ := io.ReadAll(resp.Body)
-			t.Fatalf("HTTP %d: %s", resp.StatusCode, string(body))
+		var user struct {
+			ID    int64  `json:"id"`
+			Email string `json:"email"`
 		}
-
-		t.Logf("✅ 成功获取用户信息")
+		decodeE2EAPIData(t, resp, &user)
+		if user.ID <= 0 || user.Email != email {
+			t.Fatal("current user response does not match the registered user")
+		}
 	})
 }
 
-// TestAPIKeyLifecycle 测试 API Key 的创建和使用
 func TestAPIKeyLifecycle(t *testing.T) {
-	// 先登录获取 JWT
 	accessToken := loginTestUser(t)
-	if accessToken == "" {
-		t.Skip("无法登录，跳过 API Key 生命周期测试")
+	groupRaw := strings.TrimSpace(os.Getenv("E2E_GROUP_ID"))
+	if groupRaw == "" {
+		groupRaw = requireE2EEnv(t, "E2E_GROUP_ID")
+	}
+	groupID, err := strconv.ParseInt(groupRaw, 10, 64)
+	if err != nil || groupID <= 0 {
+		t.Fatal("E2E_GROUP_ID must be a positive fixture group ID")
+	}
+	model := requireE2EEnv(t, "E2E_USER_MODEL")
+	var created struct {
+		ID      int64  `json:"id"`
+		Key     string `json:"key"`
+		GroupID *int64 `json:"group_id"`
+	}
+	if !t.Run("创建API_Key", func(t *testing.T) {
+		body, err := json.Marshal(map[string]any{
+			"name": fmt.Sprintf("e2e-test-key-%d", time.Now().UnixNano()), "group_id": groupID,
+		})
+		if err != nil {
+			t.Fatal("cannot encode API key request")
+		}
+		resp := mustE2ERequest(t, http.MethodPost, "/api/v1/keys", body, accessToken)
+		defer resp.Body.Close()
+		decodeE2EAPIData(t, resp, &created)
+		if created.ID <= 0 || created.Key == "" || created.GroupID == nil || *created.GroupID != groupID {
+			t.Fatal("created API key is missing its ID, credential, or requested group")
+		}
+	}) {
 		return
 	}
-
-	var apiKey string
-
-	// 步骤 1: 创建 API Key
-	t.Run("创建API_Key", func(t *testing.T) {
-		payload := map[string]string{
-			"name": "e2e-test-key-" + fmt.Sprintf("%d", time.Now().UnixMilli()),
-		}
-		body, _ := json.Marshal(payload)
-
-		resp, err := doRequest(t, "POST", "/api/keys", body, accessToken)
-		if err != nil {
-			t.Fatalf("创建 API Key 请求失败: %v", err)
-		}
+	t.Cleanup(func() {
+		resp := mustE2ERequest(t, http.MethodDelete, fmt.Sprintf("/api/v1/keys/%d", created.ID), nil, accessToken)
 		defer resp.Body.Close()
-
-		respBody, _ := io.ReadAll(resp.Body)
-
-		if resp.StatusCode != 200 {
-			t.Skipf("创建 API Key 失败 HTTP %d: %s", resp.StatusCode, string(respBody))
-			return
+		var data struct {
+			Message string `json:"message"`
 		}
-
-		var result map[string]any
-		if err := json.Unmarshal(respBody, &result); err != nil {
-			t.Fatalf("解析响应失败: %v", err)
+		decodeE2EAPIData(t, resp, &data)
+		if data.Message == "" {
+			t.Error("API key deletion response is missing confirmation")
 		}
-
-		// 从响应中提取 key
-		if key, ok := result["key"].(string); ok {
-			apiKey = key
-		} else if data, ok := result["data"].(map[string]any); ok {
-			if key, ok := data["key"].(string); ok {
-				apiKey = key
-			}
-		}
-
-		if apiKey == "" {
-			t.Skipf("未获取到 API Key，响应: %s", string(respBody))
-			return
-		}
-
-		// 验证 API Key 脱敏日志（只显示前 8 位）
-		masked := apiKey
-		if len(masked) > 8 {
-			masked = masked[:8] + "..."
-		}
-		t.Logf("✅ API Key 创建成功: %s", masked)
 	})
-
-	if apiKey == "" {
-		t.Skip("未创建 API Key，跳过后续测试")
+	if !t.Run("使用API_Key调用网关", func(t *testing.T) {
+		resp := mustE2ERequest(t, http.MethodGet, endpointPrefix+"/v1/models", nil, created.Key)
+		defer resp.Body.Close()
+		requireE2EStatus(t, resp, http.StatusOK)
+		var catalog struct {
+			Object string            `json:"object"`
+			Data   []json.RawMessage `json:"data"`
+		}
+		decodeE2EJSON(t, resp.Body, &catalog)
+		if catalog.Object != "list" || len(catalog.Data) == 0 {
+			t.Fatal("gateway model catalog must be a non-empty list")
+		}
+		testClaudeMessage(t, created.Key, model, false)
+	}) {
 		return
 	}
-
-	// 步骤 2: 使用 API Key 调用网关（需要 Claude 或 Gemini 可用）
-	t.Run("使用API_Key调用网关", func(t *testing.T) {
-		// 尝试调用 models 列表（最轻量的 API 调用）
-		resp, err := doRequest(t, "GET", "/v1/models", nil, apiKey)
-		if err != nil {
-			t.Fatalf("网关请求失败: %v", err)
-		}
-		defer resp.Body.Close()
-
-		respBody, _ := io.ReadAll(resp.Body)
-
-		// 可能返回 200（成功）或 402（余额不足）或 403（无可用账户）
-		switch {
-		case resp.StatusCode == 200:
-			t.Logf("✅ API Key 网关调用成功")
-		case resp.StatusCode == 402:
-			t.Logf("⚠️ 余额不足，但 API Key 认证通过")
-		case resp.StatusCode == 403:
-			t.Logf("⚠️ 无可用账户，但 API Key 认证通过")
-		default:
-			t.Logf("⚠️ 网关返回 HTTP %d: %s", resp.StatusCode, string(respBody))
-		}
-	})
-
-	// 步骤 3: 查询用量记录
 	t.Run("查询用量记录", func(t *testing.T) {
-		resp, err := doRequest(t, "GET", "/api/usage/dashboard", nil, accessToken)
-		if err != nil {
-			t.Fatalf("用量查询请求失败: %v", err)
+		deadline := time.Now().Add(20 * time.Second)
+		for {
+			resp := mustE2ERequest(t, http.MethodGet, fmt.Sprintf("/api/v1/usage?api_key_id=%d&page=1&page_size=10", created.ID), nil, accessToken)
+			var usage struct {
+				Items *[]struct {
+					ID       int64 `json:"id"`
+					APIKeyID int64 `json:"api_key_id"`
+				} `json:"items"`
+			}
+			decodeE2EAPIData(t, resp, &usage)
+			_ = resp.Body.Close()
+			if usage.Items == nil {
+				t.Fatal("usage response is missing its items array")
+			}
+			found := false
+			for _, record := range *usage.Items {
+				found = found || (record.ID > 0 && record.APIKeyID == created.ID)
+			}
+			if found {
+				break
+			}
+			if !time.Now().Before(deadline) {
+				t.Fatal("gateway request did not persist usage for the newly created API key")
+			}
+			time.Sleep(time.Second)
 		}
+		resp := mustE2ERequest(t, http.MethodGet, "/api/v1/usage/dashboard/stats", nil, accessToken)
 		defer resp.Body.Close()
-
-		if resp.StatusCode != 200 {
-			body, _ := io.ReadAll(resp.Body)
-			t.Logf("⚠️ 用量查询返回 HTTP %d: %s", resp.StatusCode, string(body))
-			return
+		var stats struct {
+			TotalRequests *int64 `json:"total_requests"`
 		}
-
-		t.Logf("✅ 用量查询成功")
+		decodeE2EAPIData(t, resp, &stats)
+		if stats.TotalRequests == nil || *stats.TotalRequests < 1 {
+			t.Fatal("usage dashboard must report the completed gateway request")
+		}
 	})
 }
-
-// =============================================================================
-// 辅助函数
-// =============================================================================
 
 func doRequest(t *testing.T, method, path string, body []byte, token string) (*http.Response, error) {
 	t.Helper()
-
-	url := baseURL + path
-	var bodyReader io.Reader
+	var reader io.Reader
 	if body != nil {
-		bodyReader = bytes.NewReader(body)
+		reader = bytes.NewReader(body)
 	}
-
-	req, err := http.NewRequest(method, url, bodyReader)
+	req, err := http.NewRequest(method, baseURL+path, reader)
 	if err != nil {
-		return nil, fmt.Errorf("创建请求失败: %w", err)
+		return nil, err
 	}
-
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if method == http.MethodPost && path == "/api/v1/keys" {
+		req.Header.Set("Idempotency-Key", fmt.Sprintf("e2e-key-%d", time.Now().UnixNano()))
 	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
+	return (&http.Client{Timeout: 30 * time.Second}).Do(req)
+}
 
-	client := &http.Client{Timeout: 30 * time.Second}
-	return client.Do(req)
+func mustE2ERequest(t *testing.T, method, path string, body []byte, token string) *http.Response {
+	t.Helper()
+	resp, err := doRequest(t, method, path, body, token)
+	if err != nil {
+		t.Fatalf("%s request failed (credentials and response omitted)", method)
+	}
+	return resp
+}
+
+func requireE2EAuth(t *testing.T, auth e2eAuthData, email string) {
+	t.Helper()
+	if len(strings.Split(auth.AccessToken, ".")) != 3 || auth.TokenType != "Bearer" || auth.User.ID <= 0 || auth.User.Email != email {
+		t.Fatal("authentication response must contain a JWT, Bearer token type, and the expected user")
+	}
+}
+
+func loginE2EUser(t *testing.T, email, password string) string {
+	t.Helper()
+	body, err := json.Marshal(map[string]string{"email": email, "password": password})
+	if err != nil {
+		t.Fatal("cannot encode login request")
+	}
+	resp := mustE2ERequest(t, http.MethodPost, "/api/v1/auth/login", body, "")
+	defer resp.Body.Close()
+	var auth e2eAuthData
+	decodeE2EAPIData(t, resp, &auth)
+	requireE2EAuth(t, auth, email)
+	return auth.AccessToken
 }
 
 func loginTestUser(t *testing.T) string {
 	t.Helper()
-
-	// 先尝试用管理员账户登录
-	// 管理员邮箱不再有固定默认值（未设置时安装阶段随机生成），需同时提供邮箱与密码。
-	adminEmail := getEnv("ADMIN_EMAIL", "")
-	adminPassword := getEnv("ADMIN_PASSWORD", "")
-
-	if adminEmail == "" || adminPassword == "" {
-		// 尝试用测试用户
-		adminEmail = testUserEmail
-		adminPassword = testUserPassword
+	email, password := strings.TrimSpace(os.Getenv("E2E_USER_EMAIL")), os.Getenv("E2E_USER_PASSWORD")
+	if email == "" && password == "" {
+		email, password = strings.TrimSpace(os.Getenv("ADMIN_EMAIL")), os.Getenv("ADMIN_PASSWORD")
 	}
-
-	payload := map[string]string{
-		"email":    adminEmail,
-		"password": adminPassword,
-	}
-	body, _ := json.Marshal(payload)
-
-	resp, err := doRequest(t, "POST", "/api/auth/login", body, "")
-	if err != nil {
-		return ""
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		return ""
-	}
-
-	respBody, _ := io.ReadAll(resp.Body)
-	var result map[string]any
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return ""
-	}
-
-	if token, ok := result["access_token"].(string); ok {
-		return token
-	}
-	if data, ok := result["data"].(map[string]any); ok {
-		if token, ok := data["access_token"].(string); ok {
-			return token
+	if email == "" || password == "" {
+		if strictE2E() {
+			t.Fatal("strict E2E requires E2E_USER_EMAIL/E2E_USER_PASSWORD or ADMIN_EMAIL/ADMIN_PASSWORD fixtures")
 		}
+		t.Skip("user credentials fixture is not configured")
 	}
-
-	return ""
+	return loginE2EUser(t, email, password)
 }
 
-// redactAPIKey API Key 脱敏，只显示前 8 位
-func redactAPIKey(key string) string {
-	key = strings.TrimSpace(key)
-	if len(key) <= 8 {
-		return "***"
-	}
-	return key[:8] + "..."
-}
+func redactAPIKey(string) string { return "[redacted]" }

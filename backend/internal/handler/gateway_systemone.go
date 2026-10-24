@@ -122,11 +122,15 @@ func (h *GatewayHandler) SystemOne(c *gin.Context) {
 	defer inflightRelease()
 
 	fs := NewFailoverState(h.maxAccountSwitches, false)
+	c.Request = c.Request.WithContext(service.NewGatewayRequestAttemptContext(c.Request.Context()))
 	for {
 		if failoverClientGone(c) {
 			return
 		}
-		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, "", model, fs.FailedAccountIDs, "", subject.UserID)
+		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(fs.SelectionContext(c.Request.Context()), apiKey.GroupID, "", model, fs.FailedAccountIDs, "", subject.UserID)
+		if fs.HandleRetrySelectionError(err) {
+			continue
+		}
 		if err == nil && (selection == nil || selection.Account == nil) {
 			err = service.ErrNoAvailableAccounts
 		}
@@ -170,6 +174,11 @@ func (h *GatewayHandler) SystemOne(c *gin.Context) {
 				return
 			}
 			accountRelease, err = h.concurrencyHelper.AcquireAccountSlotWithWaitTimeout(c, account.ID, selection.WaitPlan.MaxConcurrency, selection.WaitPlan.Timeout, false, &streamStarted)
+			if fs.MaxSwitches != 0 && accountAdmissionUnavailable(c.Request.Context(), err) {
+				fs.FailedAccountIDs[account.ID] = struct{}{}
+				fs.pendingRetryAccountID = 0
+				continue
+			}
 			if err != nil {
 				reqLog.Warn("systemone.account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				h.handleConcurrencyError(c, err, "account", false)

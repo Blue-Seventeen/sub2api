@@ -1049,7 +1049,8 @@ func (s *OpenAIGatewayService) handleGrokMediaErrorResponse(
 	}
 
 	kind := "http_error"
-	if s.shouldFailoverGrokUpstreamError(resp.StatusCode, body) {
+	if !isOpenAIAccountTerminalUpstreamRequestError(account, resp.StatusCode, upstreamMsg, body) &&
+		(s.shouldFailoverGrokUpstreamError(resp.StatusCode, body) || (account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode))) {
 		kind = "failover"
 	}
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{

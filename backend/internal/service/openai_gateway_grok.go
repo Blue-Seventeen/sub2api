@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -209,6 +210,7 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 
 	var usage *OpenAIUsage
 	var firstTokenMs *int
+	var forwardErr error
 	responseID := ""
 	searchCount := 0
 	imageCount := 0
@@ -224,7 +226,11 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 		}
 		streamResult, err := s.handleStreamingResponse(ctx, resp, c, account, startTime, originalModel, upstreamModel)
 		if err != nil {
-			return nil, err
+			var failoverErr *UpstreamFailoverError
+			if streamResult == nil || !streamResult.accepted || errors.As(err, &failoverErr) {
+				return nil, err
+			}
+			forwardErr = err
 		}
 		usage = streamResult.usage
 		firstTokenMs = streamResult.firstTokenMs
@@ -235,7 +241,11 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 	} else {
 		nonStreamResult, err := s.handleNonStreamingResponse(ctx, resp, c, account, originalModel, upstreamModel)
 		if err != nil {
-			return nil, err
+			var failoverErr *UpstreamFailoverError
+			if nonStreamResult == nil || errors.As(err, &failoverErr) {
+				return nil, err
+			}
+			forwardErr = err
 		}
 		usage = nonStreamResult.usage
 		responseID = strings.TrimSpace(nonStreamResult.responseID)
@@ -247,7 +257,7 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 	if usage == nil {
 		usage = &OpenAIUsage{}
 	}
-	if !reqStream && !hasBillableGrokChatUsage(*usage) {
+	if forwardErr == nil && !reqStream && !hasBillableGrokChatUsage(*usage) {
 		return nil, newGrokMissingUsageFailoverError(
 			c,
 			account,
@@ -278,7 +288,7 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 		result.ImageCount = imageCount
 		result.ImageOutputSizes = imageOutputSizes
 	}
-	return result, nil
+	return result, forwardErr
 }
 
 func isGrokInvalidEncryptedContentResponse(statusCode int, body []byte) bool {

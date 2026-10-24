@@ -165,6 +165,11 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 	requestID := resp.Header.Get("x-request-id")
 	ccResp, usage, err := s.readCCUpstreamJSONResponse(c, resp, account, writeOpenAIResponsesFallbackError)
 	if err != nil {
+		if openAIUsageHasTokens(&usage) {
+			return &OpenAIForwardResult{RequestID: requestID, UpstreamHeaders: resp.Header, Usage: usage,
+				Model: originalModel, BillingModel: billingModel, UpstreamModel: upstreamModel,
+				ReasoningEffort: reasoningEffort, ServiceTier: serviceTier, Duration: time.Since(startTime)}, err
+		}
 		return nil, err
 	}
 	responsesResp := apicompat.ChatCompletionsResponseToResponses(ccResp, originalModel, customTools, functionTools, toolSearch, namespaceTools)
@@ -205,6 +210,9 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	serviceTier *string,
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
+	if err := s.preflightOpenAIPoolCompatStream(c, resp, account, upstreamSSEChat, writeOpenAIResponsesFallbackError); err != nil {
+		return nil, err
+	}
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
 
@@ -252,7 +260,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 		// A terminal error may carry usage. Keep that usage for billing and only
 		// allow replay when no billable tokens have been observed yet.
 		terminalErr := s.handleCCUpstreamErrorPayload(c, resp, account, scan.ErrorPayload,
-			!c.Writer.Written() && !clientDisconnected && !openAIUsageHasTokens(&scan.Usage),
+			!c.Writer.Written() && !clientDisconnected && !scan.BillableUsageSeen && !openAIUsageHasTokens(&scan.Usage),
 			func(c *gin.Context, status int, errType, message string) {
 				if clientDisconnected {
 					return
@@ -262,7 +270,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 					return
 				}
 				source, _ := json.Marshal(gin.H{"error": gin.H{"type": errType, "message": message}})
-				if _, err := fmt.Fprint(c.Writer, buildOpenAIResponseFailedSSE(state.ResponseID, originalModel, source, message)); err != nil {
+				if _, err := fmt.Fprint(c.Writer, buildOpenAIResponseFailedSSE(state.ResponseID, originalModel, time.Now().Unix(), source, message)); err != nil {
 					clientDisconnected = true
 				} else {
 					c.Writer.Flush()
@@ -306,7 +314,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 		if !clientDisconnected {
 			if !c.Writer.Written() {
 				writeOpenAIResponsesFallbackError(c, http.StatusBadGateway, "upstream_error", message)
-			} else if _, err := fmt.Fprint(c.Writer, buildOpenAIResponseFailedSSE(state.ResponseID, originalModel, nil, message)); err != nil {
+			} else if _, err := fmt.Fprint(c.Writer, buildOpenAIResponseFailedSSE(state.ResponseID, originalModel, time.Now().Unix(), nil, message)); err != nil {
 				clientDisconnected = true
 			} else {
 				c.Writer.Flush()
