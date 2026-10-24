@@ -83,6 +83,9 @@ type OpsInsertErrorLogInput struct {
 	Model       string
 	RequestPath string
 	Stream      bool
+	// ProxyRoutes captures observed outbound routes, never current account bindings.
+	// A nil snapshot means attribution was not observed.
+	ProxyRoutes []ProxyRouteSnapshot `json:"proxy_routes"`
 	// InboundEndpoint is the normalized client-facing API endpoint path, e.g. /v1/chat/completions.
 	InboundEndpoint string
 	// UpstreamEndpoint is the normalized upstream endpoint path, e.g. /v1/responses.

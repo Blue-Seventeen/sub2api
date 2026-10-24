@@ -6,6 +6,7 @@ import UsageView from '../UsageView.vue'
 import UsageTable from '@/components/admin/usage/UsageTable.vue'
 import UsageFilters from '@/components/admin/usage/UsageFilters.vue'
 import UsageCleanupDialog from '@/components/admin/usage/UsageCleanupDialog.vue'
+import OpsErrorLogTable from '@/views/admin/ops/components/OpsErrorLogTable.vue'
 
 const { list, getStats, getSnapshotV2, getById, getModelStats, getIPOptions, adminUsageList, saveAsMock, listErrorLogs, routeQuery } = vi.hoisted(() => {
   vi.stubGlobal('localStorage', {
@@ -205,6 +206,39 @@ describe('admin UsageView route filters', () => {
     expect(getById).toHaveBeenCalledWith(42, true)
     expect(list).toHaveBeenCalledWith(expect.objectContaining({ user_id: 42 }), expect.anything())
     expect(wrapper.find('[data-test="user-filter-label"]').text()).toBe('route-user@test.com')
+  })
+
+  it('shows proxy routes by default and supports column visibility toggles', async () => {
+    const wrapper = mountRouteFilteredUsageView()
+    await flushPromises()
+    const table = wrapper.findComponent(UsageTable)
+    const columnKeys = () => table.props('columns').map((column: { key: string }) => column.key)
+    expect(columnKeys()).toContain('proxy_routes')
+    ;(wrapper.vm as any).toggleColumn('proxy_routes')
+    await wrapper.vm.$nextTick()
+    expect(columnKeys()).not.toContain('proxy_routes')
+    ;(wrapper.vm as any).toggleColumn('proxy_routes')
+    await wrapper.vm.$nextTick()
+    expect(columnKeys()).toContain('proxy_routes')
+    wrapper.unmount()
+  })
+
+  it('shows proxy routes in error rows and saves independent column visibility', async () => {
+    const wrapper = mountRouteFilteredUsageView()
+    await flushPromises()
+    const errorTable = wrapper.findComponent(OpsErrorLogTable)
+    expect(errorTable.props('visibleColumnKeys')).toContain('proxy_routes')
+
+    ;(wrapper.vm as any).toggleErrColumn('proxy_routes')
+    await wrapper.vm.$nextTick()
+    expect(errorTable.props('visibleColumnKeys')).not.toContain('proxy_routes')
+    expect(localStorage.setItem).toHaveBeenLastCalledWith('usage-error-hidden-columns', expect.stringContaining('proxy_routes'))
+    expect(wrapper.findComponent(UsageTable).props('columns').map((column: { key: string }) => column.key)).toContain('proxy_routes')
+
+    ;(wrapper.vm as any).toggleErrColumn('proxy_routes')
+    await wrapper.vm.$nextTick()
+    expect(errorTable.props('visibleColumnKeys')).toContain('proxy_routes')
+    wrapper.unmount()
   })
 
   it('synchronizes IP filtering with rows, stats, charts, candidates, refresh and reset', async () => {
@@ -456,6 +490,10 @@ describe('admin UsageView distribution metric toggles', () => {
       total_cost: 0,
       actual_cost: 0,
       duration_ms: 10,
+      proxy_routes: id === 101 ? [
+        { kind: 'proxy', proxy_id: 9, name: 'Tokyo node', host: 'proxy.example.test', port: 1080 },
+        { kind: 'proxy', proxy_id: 10, name: 'IPv6 backup', host: '2001:db8::8', port: 2080 },
+      ] : null,
     })
 
     let finishFirstPage!: (value: object) => void
@@ -531,6 +569,9 @@ describe('admin UsageView distribution metric toggles', () => {
     expect(csvText).toContain("'-request")
     expect(csvText).toContain("'\tagent")
     expect(csvText).toContain(',1,50,0,0,150,')
+    expect(csvText).toContain('admin.usage.proxyNode')
+    expect(csvText).toContain('Tokyo node (proxy.example.test:1080) → IPv6 backup ([2001:db8::8]:2080)')
+    expect(csvText).toContain('admin.usage.proxyRouteUnknown')
   })
 })
 

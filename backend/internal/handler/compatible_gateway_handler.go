@@ -369,7 +369,6 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 		writerSizeBefore := c.Writer.Size()
 		var result *service.ForwardResult
 		var upstreamEndpoint string
-		activeUsageHandle := beginProxyActiveUsage(h.base.proxyActiveUsageTracker, account)
 		if h.base.newAPIStyleService != nil && account.UseNewAPIStyleInterfaceForGroup(apiKey.Group) {
 			var newAPIRoute service.NewAPIStyleRoute
 			switch route {
@@ -405,7 +404,6 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 		} else {
 			result, upstreamEndpoint, err = h.compatibleService.Forward(c.Request.Context(), c, account, route, forwardBody)
 		}
-		endProxyActiveUsage(activeUsageHandle)
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
 		}

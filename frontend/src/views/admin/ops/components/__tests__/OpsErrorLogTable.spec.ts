@@ -4,6 +4,7 @@ import OpsErrorLogTable from '../OpsErrorLogTable.vue'
 import zhLocale from '@/i18n/locales/zh'
 import enLocale from '@/i18n/locales/en'
 import type { OpsErrorLog } from '@/api/admin/ops'
+import type { UsageProxyRoute } from '@/types'
 
 vi.mock('vue-i18n', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-i18n')>()
@@ -102,6 +103,44 @@ describe('OpsErrorLogTable column order', () => {
       'admin.ops.errorLog.message',
       'admin.ops.errorLog.time',
     ])
+    wrapper.unmount()
+  })
+})
+
+describe('OpsErrorLogTable proxy routes', () => {
+  it.each<{ name: string; routes: UsageProxyRoute[] | null | undefined; expected: string }>([
+    { name: 'missing historical routes', routes: undefined, expected: 'admin.usage.proxyRouteUnknown' },
+    { name: 'null historical routes', routes: null, expected: 'admin.usage.proxyRouteUnknown' },
+    { name: 'empty historical routes', routes: [], expected: 'admin.usage.proxyRouteUnknown' },
+    { name: 'explicit unknown routes', routes: [{ kind: 'unknown' }], expected: 'admin.usage.proxyRouteUnknown' },
+    { name: 'direct and system proxy routes', routes: [{ kind: 'direct' }, { kind: 'system_proxy' }], expected: 'admin.usage.proxyRouteDirect → admin.usage.proxyRouteSystem' },
+    {
+      name: 'ordered proxy nodes with IPv6',
+      routes: [
+        { kind: 'proxy', name: 'Tokyo node', host: 'proxy.example.test', port: 1080 },
+        { kind: 'proxy', name: 'IPv6 backup', host: '2001:db8::8', port: 2080 },
+      ],
+      expected: 'Tokyo node (proxy.example.test:1080) → IPv6 backup ([2001:db8::8]:2080)',
+    },
+  ])('shows $name in the default administrator table', ({ routes, expected }) => {
+    const wrapper = mountTable({ proxy_routes: routes })
+    const headers = wrapper.findAll('thead th').map((header) => header.text())
+    const columnIndex = headers.indexOf('admin.usage.proxyNode')
+
+    expect(columnIndex).toBeGreaterThanOrEqual(0)
+    expect(wrapper.findAll('tbody td')[columnIndex].text()).toBe(expected)
+    wrapper.unmount()
+  })
+
+  it('honors proxy route visibility without dropping the row', async () => {
+    const wrapper = mountTable({ proxy_routes: [{ kind: 'proxy', name: 'Tokyo node', host: 'proxy.example.test', port: 1080 }] })
+    await wrapper.setProps({ visibleColumnKeys: ['message', 'proxy_routes'] })
+    expect(wrapper.findAll('thead th').map((header) => header.text())).toEqual(['admin.ops.errorLog.message', 'admin.usage.proxyNode'])
+    expect(wrapper.text()).toContain('Tokyo node (proxy.example.test:1080)')
+
+    await wrapper.setProps({ visibleColumnKeys: ['message'] })
+    expect(wrapper.text()).not.toContain('Tokyo node')
+    expect(wrapper.findAll('tbody td').map((cell) => cell.text())).toEqual(['boom'])
     wrapper.unmount()
   })
 })

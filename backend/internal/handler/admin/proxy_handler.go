@@ -258,10 +258,26 @@ func (h *ProxyHandler) GetAll(c *gin.Context) {
 }
 
 func (h *ProxyHandler) GetActiveUsage(c *gin.Context) {
+	proxyIDs, ok := parseActiveUsageProxyIDs(c)
+	if !ok {
+		return
+	}
+	response.Success(c, h.activeUsageCounts(c.Request.Context(), proxyIDs))
+}
+
+// GetActiveUsageDetails returns account and request counts without masking store failures as zero.
+func (h *ProxyHandler) GetActiveUsageDetails(c *gin.Context) {
+	proxyIDs, ok := parseActiveUsageProxyIDs(c)
+	if !ok {
+		return
+	}
+	response.Success(c, h.activeUsageStats.GetActiveUsageDetails(c.Request.Context(), proxyIDs))
+}
+
+func parseActiveUsageProxyIDs(c *gin.Context) ([]int64, bool) {
 	idsParam := strings.TrimSpace(c.Query("ids"))
 	if idsParam == "" {
-		response.Success(c, map[int64]int64{})
-		return
+		return nil, true
 	}
 	parts := strings.Split(idsParam, ",")
 	proxyIDs := make([]int64, 0, len(parts))
@@ -269,11 +285,11 @@ func (h *ProxyHandler) GetActiveUsage(c *gin.Context) {
 		id, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64)
 		if err != nil || id <= 0 {
 			response.BadRequest(c, "Invalid proxy ID")
-			return
+			return nil, false
 		}
 		proxyIDs = append(proxyIDs, id)
 	}
-	response.Success(c, h.activeUsageCounts(c.Request.Context(), proxyIDs))
+	return proxyIDs, true
 }
 
 func (h *ProxyHandler) GetSnapshots(c *gin.Context) {

@@ -94,6 +94,7 @@ var usageLogInsertArgTypes = [...]string{
 	"text",        // billing_tier
 	"text",        // billing_mode
 	"numeric",     // account_stats_cost
+	"jsonb",       // proxy_routes
 	"text",        // upstream_request_id
 	"text",        // session_id
 	"boolean",     // native_compaction_v2
@@ -307,6 +308,7 @@ func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,
 			billing_tier,
 			billing_mode,
 			account_stats_cost,
+			proxy_routes,
 			upstream_request_id,
 			session_id,
 			native_compaction_v2,
@@ -772,6 +774,7 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 			billing_tier,
 			billing_mode,
 			account_stats_cost,
+			proxy_routes,
 			upstream_request_id,
 			session_id,
 			native_compaction_v2,
@@ -877,6 +880,7 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				billing_tier,
 				billing_mode,
 				account_stats_cost,
+				proxy_routes,
 				upstream_request_id,
 				session_id,
 				native_compaction_v2,
@@ -953,6 +957,7 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				billing_tier,
 				billing_mode,
 				account_stats_cost,
+				proxy_routes,
 				upstream_request_id,
 				session_id,
 				native_compaction_v2,
@@ -1069,6 +1074,7 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			billing_tier,
 			billing_mode,
 			account_stats_cost,
+			proxy_routes,
 			upstream_request_id,
 			session_id,
 			native_compaction_v2,
@@ -1171,6 +1177,7 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			billing_tier,
 			billing_mode,
 			account_stats_cost,
+			proxy_routes,
 			upstream_request_id,
 			session_id,
 			native_compaction_v2,
@@ -1247,6 +1254,7 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			billing_tier,
 			billing_mode,
 			account_stats_cost,
+			proxy_routes,
 			upstream_request_id,
 			session_id,
 			native_compaction_v2,
@@ -1331,6 +1339,7 @@ func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared 
 			billing_tier,
 			billing_mode,
 			account_stats_cost,
+			proxy_routes,
 			upstream_request_id,
 			session_id,
 			native_compaction_v2,
@@ -1486,12 +1495,24 @@ func prepareUsageLogInsert(log *service.UsageLog) usageLogInsertPrepared {
 			billingTier,
 			billingMode,
 			log.AccountStatsCost, // account_stats_cost
+			nullProxyRoutesJSON(log.ProxyRoutes),
 			upstreamRequestID,
 			sessionID, // session_id
 			log.NativeCompactionV2,
 			createdAt,
 		},
 	}
+}
+
+func nullProxyRoutesJSON(routes []service.ProxyRouteSnapshot) any {
+	if len(routes) == 0 {
+		return nil
+	}
+	// ProxyRouteSnapshot only contains primitive strings and integers, so it
+	// cannot fail JSON encoding. Materialize now to detach queued writes from
+	// the caller's mutable slice.
+	payload, _ := json.Marshal(routes)
+	return string(payload)
 }
 
 func usageLogBatchKey(requestID string, apiKeyID int64) string {

@@ -211,6 +211,10 @@ type OpsStreamError struct {
 	UpstreamMessage string
 	UpstreamDetail  string
 	UpstreamErrors  []*OpsUpstreamErrorEvent
+	// Capture routes when the error is marked: a WebSocket connection can reset
+	// its observation before these errors are persisted. Captured nil is unknown.
+	ProxyRoutes         []ProxyRouteSnapshot
+	ProxyRoutesCaptured bool
 	// RequestScoped 表示该带内失败是请求级结果（如上游内容策略截停），与本请求此前的
 	// 上游尝试无关：分类不受上游错误上下文影响、不快照也不落库上游归因、不继承透传规则的
 	// skip_monitoring，按业务限制计，落库状态取 IntendedStatus 以便进入错误列表。
@@ -306,6 +310,8 @@ func snapshotOpsStreamErrorContext(c *gin.Context, streamErr *OpsStreamError) {
 		return
 	}
 	if c.Request != nil {
+		streamErr.ProxyRoutes = ProxyRoutesFromContext(c.Request.Context())
+		streamErr.ProxyRoutesCaptured = true
 		if accountID, ok := c.Request.Context().Value(ctxkey.AccountID).(int64); ok && accountID > 0 {
 			streamErr.AccountID = accountID
 		}

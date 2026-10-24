@@ -8,7 +8,7 @@ import zh from '@/i18n/locales/zh'
 import type { Proxy, ProxyAutoProbeStatus } from '@/types'
 
 const api = vi.hoisted(() => ({
-  list: vi.fn(), getAllWithCount: vi.fn(), getActiveUsage: vi.fn(),
+  list: vi.fn(), getAllWithCount: vi.fn(), getActiveUsageDetails: vi.fn(),
   getAutoProbeConfig: vi.fn(), getSnapshots: vi.fn(),
   refreshClashSubscription: vi.fn(), getClashSubscriptionStatus: vi.fn(), update: vi.fn()
 }))
@@ -80,7 +80,7 @@ beforeEach(() => {
   proxy = makeProxy()
   api.list.mockImplementation(async () => ({ items: [{ ...proxy }], total: 1, pages: 1 }))
   api.getAllWithCount.mockResolvedValue([])
-  api.getActiveUsage.mockResolvedValue({})
+  api.getActiveUsageDetails.mockResolvedValue({})
   api.getAutoProbeConfig.mockResolvedValue(probeStatus())
   api.getSnapshots.mockResolvedValue([])
   api.refreshClashSubscription.mockResolvedValue({})

@@ -15,7 +15,7 @@
         @click="emit('select', 'group')"
       >
         <span class="block text-sm font-medium text-gray-900 dark:text-white">
-          {{ t("admin.groups.modelsList.groupScope") }}
+          {{ groupScopeLabel }}
         </span>
         <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">
           {{ t("admin.groups.modelsList.groupScopeHint") }}
@@ -27,7 +27,7 @@
         @click="emit('select', 'global')"
       >
         <span class="block text-sm font-medium text-gray-900 dark:text-white">
-          {{ t("admin.groups.modelsList.globalScope") }}
+          {{ globalScopeLabel }}
         </span>
         <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">
           {{ t("admin.groups.modelsList.globalScopeHint") }}
@@ -65,6 +65,22 @@ const title = computed(() =>
   props.operation === "add"
     ? t("admin.groups.modelsList.addScopeTitle")
     : t("admin.groups.modelsList.deleteScopeTitle"),
+);
+
+const groupScopeLabel = computed(() =>
+  t(
+    props.operation === "add"
+      ? "admin.groups.modelsList.groupScope"
+      : "admin.groups.modelsList.deleteGroupScope",
+  ),
+);
+
+const globalScopeLabel = computed(() =>
+  t(
+    props.operation === "add"
+      ? "admin.groups.modelsList.globalScope"
+      : "admin.groups.modelsList.deleteGlobalScope",
+  ),
 );
 
 const description = computed(() =>

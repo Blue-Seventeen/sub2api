@@ -52674,6 +52674,8 @@ type UsageLogMutation struct {
 	addfirst_token_ms            *int
 	user_agent                   *string
 	ip_address                   *string
+	proxy_routes                 *jsontext.Value
+	appendproxy_routes           jsontext.Value
 	image_count                  *int
 	addimage_count               *int
 	billable_duration_seconds    *int
@@ -54843,6 +54845,71 @@ func (m *UsageLogMutation) ResetIPAddress() {
 	delete(m.clearedFields, usagelog.FieldIPAddress)
 }
 
+// SetProxyRoutes sets the "proxy_routes" field.
+func (m *UsageLogMutation) SetProxyRoutes(j jsontext.Value) {
+	m.proxy_routes = &j
+	m.appendproxy_routes = nil
+}
+
+// ProxyRoutes returns the value of the "proxy_routes" field in the mutation.
+func (m *UsageLogMutation) ProxyRoutes() (r jsontext.Value, exists bool) {
+	v := m.proxy_routes
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldProxyRoutes returns the old "proxy_routes" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldProxyRoutes(ctx context.Context) (v jsontext.Value, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldProxyRoutes is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldProxyRoutes requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldProxyRoutes: %w", err)
+	}
+	return oldValue.ProxyRoutes, nil
+}
+
+// AppendProxyRoutes adds j to the "proxy_routes" field.
+func (m *UsageLogMutation) AppendProxyRoutes(j jsontext.Value) {
+	m.appendproxy_routes = append(m.appendproxy_routes, j...)
+}
+
+// AppendedProxyRoutes returns the list of values that were appended to the "proxy_routes" field in this mutation.
+func (m *UsageLogMutation) AppendedProxyRoutes() (jsontext.Value, bool) {
+	if len(m.appendproxy_routes) == 0 {
+		return nil, false
+	}
+	return m.appendproxy_routes, true
+}
+
+// ClearProxyRoutes clears the value of the "proxy_routes" field.
+func (m *UsageLogMutation) ClearProxyRoutes() {
+	m.proxy_routes = nil
+	m.appendproxy_routes = nil
+	m.clearedFields[usagelog.FieldProxyRoutes] = struct{}{}
+}
+
+// ProxyRoutesCleared returns if the "proxy_routes" field was cleared in this mutation.
+func (m *UsageLogMutation) ProxyRoutesCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldProxyRoutes]
+	return ok
+}
+
+// ResetProxyRoutes resets all changes to the "proxy_routes" field.
+func (m *UsageLogMutation) ResetProxyRoutes() {
+	m.proxy_routes = nil
+	m.appendproxy_routes = nil
+	delete(m.clearedFields, usagelog.FieldProxyRoutes)
+}
+
 // SetImageCount sets the "image_count" field.
 func (m *UsageLogMutation) SetImageCount(i int) {
 	m.image_count = &i
@@ -56261,7 +56328,7 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 64)
+	fields := make([]string, 0, 65)
 	if m.user != nil {
 		fields = append(fields, usagelog.FieldUserID)
 	}
@@ -56378,6 +56445,9 @@ func (m *UsageLogMutation) Fields() []string {
 	}
 	if m.ip_address != nil {
 		fields = append(fields, usagelog.FieldIPAddress)
+	}
+	if m.proxy_routes != nil {
+		fields = append(fields, usagelog.FieldProxyRoutes)
 	}
 	if m.image_count != nil {
 		fields = append(fields, usagelog.FieldImageCount)
@@ -56540,6 +56610,8 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.UserAgent()
 	case usagelog.FieldIPAddress:
 		return m.IPAddress()
+	case usagelog.FieldProxyRoutes:
+		return m.ProxyRoutes()
 	case usagelog.FieldImageCount:
 		return m.ImageCount()
 	case usagelog.FieldBillableDurationSeconds:
@@ -56677,6 +56749,8 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldUserAgent(ctx)
 	case usagelog.FieldIPAddress:
 		return m.OldIPAddress(ctx)
+	case usagelog.FieldProxyRoutes:
+		return m.OldProxyRoutes(ctx)
 	case usagelog.FieldImageCount:
 		return m.OldImageCount(ctx)
 	case usagelog.FieldBillableDurationSeconds:
@@ -57008,6 +57082,13 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetIPAddress(v)
+		return nil
+	case usagelog.FieldProxyRoutes:
+		v, ok := value.(jsontext.Value)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetProxyRoutes(v)
 		return nil
 	case usagelog.FieldImageCount:
 		v, ok := value.(int)
@@ -57598,6 +57679,9 @@ func (m *UsageLogMutation) ClearedFields() []string {
 	if m.FieldCleared(usagelog.FieldIPAddress) {
 		fields = append(fields, usagelog.FieldIPAddress)
 	}
+	if m.FieldCleared(usagelog.FieldProxyRoutes) {
+		fields = append(fields, usagelog.FieldProxyRoutes)
+	}
 	if m.FieldCleared(usagelog.FieldImageSize) {
 		fields = append(fields, usagelog.FieldImageSize)
 	}
@@ -57704,6 +57788,9 @@ func (m *UsageLogMutation) ClearField(name string) error {
 		return nil
 	case usagelog.FieldIPAddress:
 		m.ClearIPAddress()
+		return nil
+	case usagelog.FieldProxyRoutes:
+		m.ClearProxyRoutes()
 		return nil
 	case usagelog.FieldImageSize:
 		m.ClearImageSize()
@@ -57877,6 +57964,9 @@ func (m *UsageLogMutation) ResetField(name string) error {
 		return nil
 	case usagelog.FieldIPAddress:
 		m.ResetIPAddress()
+		return nil
+	case usagelog.FieldProxyRoutes:
+		m.ResetProxyRoutes()
 		return nil
 	case usagelog.FieldImageCount:
 		m.ResetImageCount()

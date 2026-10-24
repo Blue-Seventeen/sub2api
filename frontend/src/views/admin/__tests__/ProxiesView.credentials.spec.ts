@@ -2,8 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import ProxiesView from '../ProxiesView.vue'
 
-const { list, update, getAllWithCount } = vi.hoisted(() => ({ list: vi.fn(), update: vi.fn(), getAllWithCount: vi.fn() }))
-vi.mock('@/api/admin', () => ({ adminAPI: { proxies: { list, update, getAllWithCount } } }))
+const { list, update, getAllWithCount, getActiveUsageDetails, getAutoProbeConfig } = vi.hoisted(() => ({
+  list: vi.fn(), update: vi.fn(), getAllWithCount: vi.fn(), getActiveUsageDetails: vi.fn(), getAutoProbeConfig: vi.fn(),
+}))
+vi.mock('@/api/admin', () => ({ adminAPI: { proxies: { list, update, getAllWithCount, getActiveUsageDetails, getAutoProbeConfig } } }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError: vi.fn(), showSuccess: vi.fn() }) }))
 vi.mock('vue-i18n', async () => ({
   ...await vi.importActual<typeof import('vue-i18n')>('vue-i18n'),
@@ -13,7 +15,7 @@ const mountView = () => shallowMount(ProxiesView, {
   global: { stubs: {
     AppLayout: { template: '<div><slot /></div>' },
     TablePageLayout: { template: '<div><slot name="table" /></div>' },
-    DataTable: { props: ['data'], template: '<div v-for="row in data" :key="row.id"><slot name="cell-actions" :row="row" /></div>' },
+    DataTable: { props: ['data'], template: '<div><div v-for="row in data" :key="row.id"><slot name="cell-actions" :row="row" /></div></div>' },
     BaseDialog: { props: ['show'], template: '<div v-if="show"><slot /><slot name="footer" /></div>' },
   } },
 })
@@ -22,6 +24,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   list.mockResolvedValue({ items: [{ id: 9, name: 'proxy', protocol: 'http', host: 'proxy.example', port: 8080, username: 'old-user', status: 'active' }], total: 1, pages: 1 })
   getAllWithCount.mockResolvedValue([])
+  getActiveUsageDetails.mockResolvedValue({})
+  getAutoProbeConfig.mockResolvedValue({ enabled: false })
   update.mockResolvedValue({})
 })
 afterEach(() => wrapper?.unmount())

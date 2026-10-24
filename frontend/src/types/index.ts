@@ -1943,7 +1943,23 @@ export interface UsageLogAccountSummary {
   name: string
 }
 
+export interface UsageProxyRoute {
+  kind: 'proxy' | 'direct' | 'system_proxy' | 'unknown'
+  proxy_id?: number | null
+  name?: string | null
+  host?: string | null
+  port?: number | null
+}
+
+export interface ProxyActiveUsageDetails {
+  account_count: number | null
+  request_count: number | null
+  status: 'ok' | 'unavailable'
+}
+
 export interface AdminUsageLog extends UsageLog {
+  // Immutable logical egress routes; available only in administrator responses.
+  proxy_routes?: UsageProxyRoute[] | null
   upstream_reasoning_effort?: string | null
   upstream_request_id?: string | null
   account_id?: number | null

@@ -250,7 +250,7 @@ func (s *AntigravityGatewayService) prepareAntigravityCompatCall(
 		request:      request,
 		billingModel: mappedModel,
 		prefix:       logPrefix(getSessionID(c), account.Name),
-		proxyURL:     antigravityCompatProxyURL(account),
+		proxyURL:     antigravityCompatProxyURL(ctx, account),
 		accessToken:  accessToken,
 		geminiBody:   geminiBody,
 	}, nil
@@ -403,11 +403,11 @@ func hasMixedGeminiToolMaps(tools []any) bool {
 	return hasFunctionDeclarations && hasServerSideTool
 }
 
-func antigravityCompatProxyURL(account *Account) string {
+func antigravityCompatProxyURL(ctx context.Context, account *Account) string {
 	if account.ProxyID == nil || account.Proxy == nil {
 		return ""
 	}
-	return account.Proxy.URL()
+	return registerProxyRoute(ctx, account.Proxy.URL(), account.Proxy)
 }
 
 func (s *AntigravityGatewayService) handleAntigravityCompatTransportError(c *gin.Context, err error) error {

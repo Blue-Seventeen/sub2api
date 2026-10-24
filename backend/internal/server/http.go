@@ -82,6 +82,9 @@ func ProvideRouter(
 					continue
 				}
 			}
+			if route := p.ProxyRoute; route != nil {
+				pc.ProxyRoute = &websearch.ProxyRouteMetadata{ID: route.ProxyID, Name: route.Name, Host: route.Host, Port: route.Port}
+			}
 			configs = append(configs, pc)
 		}
 		service.SetWebSearchManager(websearch.NewManager(configs, redisClient))

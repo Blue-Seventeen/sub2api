@@ -78,6 +78,7 @@ type openAIWSAcquireRequest struct {
 	// lastAcquire or delayed prewarm state.
 	HeadersFactory  func(context.Context, http.Header) (http.Header, error)
 	ProxyURL        string
+	proxyRoute      ProxyRouteSnapshot
 	PreferredConnID string
 	// ForceNewConn: 强制本次获取新连接（避免复用导致连接内续链状态互相污染）。
 	ForceNewConn bool
@@ -106,6 +107,34 @@ type openAIWSConnLease struct {
 	ageBefore  time.Duration
 	reused     bool
 	released   atomic.Bool
+	proxyMu    sync.Mutex
+	proxyTurn  *ProxyRouteAttempt
+}
+
+// BeginProxyTurn observes a business turn on the route captured when this
+// connection was dialed. A pooled connection can stay leased while the client
+// is idle, so acquiring a connection alone must not start a live usage lease.
+func (l *openAIWSConnLease) BeginProxyTurn(ctx context.Context) {
+	if l == nil || l.conn == nil {
+		return
+	}
+	l.proxyMu.Lock()
+	defer l.proxyMu.Unlock()
+	if l.released.Load() || l.proxyTurn != nil {
+		return
+	}
+	l.proxyTurn = BeginProxyRouteSnapshotAttempt(ctx, l.accountID, l.conn.proxyRoute)
+}
+
+func (l *openAIWSConnLease) EndProxyTurn() {
+	if l == nil {
+		return
+	}
+	l.proxyMu.Lock()
+	attempt := l.proxyTurn
+	l.proxyTurn = nil
+	l.proxyMu.Unlock()
+	attempt.End()
 }
 
 func (l *openAIWSConnLease) activeConn() (*openAIWSConn, error) {
@@ -265,6 +294,7 @@ func (l *openAIWSConnLease) MarkBroken() {
 	if l == nil || l.pool == nil || l.conn == nil || l.released.Load() {
 		return
 	}
+	l.EndProxyTurn()
 	l.pool.evictConn(l.accountID, l.conn.id)
 }
 
@@ -275,6 +305,7 @@ func (l *openAIWSConnLease) Release() {
 	if !l.released.CompareAndSwap(false, true) {
 		return
 	}
+	l.EndProxyTurn()
 	l.conn.release()
 	if l.pool != nil {
 		l.pool.notifyAccountPoolChanged(l.accountID)
@@ -288,6 +319,7 @@ type openAIWSConn struct {
 	handshakeHeaders       http.Header
 	handshakeCompatibility openAIWSHandshakeCompatibilityKey
 	routingAffinity        string
+	proxyRoute             ProxyRouteSnapshot
 
 	leaseCh   chan struct{}
 	closedCh  chan struct{}
@@ -1112,6 +1144,9 @@ type openAIWSAcquireQueueWait struct {
 func (p *openAIWSConnPool) Acquire(ctx context.Context, req openAIWSAcquireRequest) (*openAIWSConnLease, error) {
 	if p != nil {
 		p.metrics.acquireTotal.Add(1)
+		// Background prewarm retains this snapshot after the request context
+		// disappears; its local listener URL is not the logical proxy node.
+		req.proxyRoute = ProxyRouteSnapshotFromContext(ctx, req.ProxyURL, openAIWSUsesEnvironmentProxy(p.clientDialer, req.WSURL, req.ProxyURL))
 	}
 	queueWait := &openAIWSAcquireQueueWait{}
 	lease, err := p.acquire(ctx, cloneOpenAIWSAcquireRequest(req), 0, queueWait)
@@ -1147,6 +1182,9 @@ func (p *openAIWSConnPool) acquire(ctx context.Context, req openAIWSAcquireReque
 		return nil, err
 	}
 	req.ProxyURL = proxyURL
+	if req.proxyRoute.Kind == "" {
+		req.proxyRoute = ProxyRouteSnapshotFromContext(ctx, proxyURL, openAIWSUsesEnvironmentProxy(p.clientDialer, req.WSURL, proxyURL))
+	}
 	if queueWait == nil {
 		queueWait = &openAIWSAcquireQueueWait{}
 	}
@@ -2131,6 +2169,9 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 		return nil, err
 	}
 	req.ProxyURL = proxyURL
+	if req.proxyRoute.Kind == "" {
+		req.proxyRoute = ProxyRouteSnapshotFromContext(ctx, proxyURL, openAIWSUsesEnvironmentProxy(p.clientDialer, req.WSURL, proxyURL))
+	}
 	headers := cloneHeader(req.Headers)
 	if req.HeadersFactory != nil {
 		headers, err = req.HeadersFactory(ctx, headers)
@@ -2138,7 +2179,11 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 			return nil, err
 		}
 	}
+	// Business handshakes are actual attempts too. Prewarming runs with a
+	// detached context, so it retains the snapshot but starts no usage lease.
+	dialAttempt := BeginProxyRouteSnapshotAttempt(ctx, req.Account.ID, req.proxyRoute)
 	conn, status, handshakeHeaders, err := p.clientDialer.Dial(ctx, req.WSURL, headers, req.ProxyURL)
+	dialAttempt.End()
 	if err != nil {
 		var handshakeErr *openAIWSHandshakeError
 		var responseBody []byte
@@ -2161,6 +2206,7 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 	}
 	id := p.nextConnID(req.Account.ID)
 	pooledConn := newOpenAIWSConn(id, req.Account.ID, conn, handshakeHeaders)
+	pooledConn.proxyRoute = req.proxyRoute
 	accountID := req.Account.ID
 	evict := func() { p.evictConn(accountID, id) }
 	pooledConn.onPeerClosed.Store(&evict)

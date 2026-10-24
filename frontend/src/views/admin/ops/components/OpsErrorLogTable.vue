@@ -150,6 +150,10 @@
           </div>
         </template>
 
+        <template #cell-proxy_routes="{ row }">
+          <span class="block max-w-sm whitespace-normal break-words text-sm text-gray-600 dark:text-gray-400">{{ formatUsageProxyRoutes(row.proxy_routes, t) }}</span>
+        </template>
+
         <template #cell-actions="{ row }">
           <button
             type="button"
@@ -191,11 +195,12 @@ import type { Column } from '@/components/common/types'
 import { getSeverityClass, formatDateTime } from '../utils/opsFormatters'
 import { mapErrorCategory } from '@/utils/errorCategory'
 import { mapErrorSortKey, statusCodeBadgeClass } from '@/utils/errorBadges'
+import { formatUsageProxyRoutes } from '@/utils/usageProxyRoutes'
 
 const { t } = useI18n()
 
 // 列序对齐管理端用量明细:身份(用户→Key→账号)→ 请求形态(平台→模型→端点→分组→类型)
-// → 结果(状态→消息)→ 时间→UA→IP→操作
+// → 结果(状态→消息)→ 时间→UA→IP→代理节点→操作
 const allColumns = computed<Column[]>(() => [
   { key: 'user', label: t('admin.ops.errorLog.user') },
   { key: 'api_key', label: t('admin.ops.errorLog.apiKey') },
@@ -211,6 +216,7 @@ const allColumns = computed<Column[]>(() => [
   { key: 'created_at', label: t('admin.ops.errorLog.time'), sortable: true },
   { key: 'user_agent', label: t('usage.userAgent') },
   { key: 'client_ip', label: t('admin.ops.errorLog.ip') },
+  { key: 'proxy_routes', label: t('admin.usage.proxyNode') },
   { key: 'actions', label: t('admin.ops.errorLog.action') },
 ])
 

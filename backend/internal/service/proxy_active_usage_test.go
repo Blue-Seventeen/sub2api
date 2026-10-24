@@ -79,6 +79,65 @@ func (s *memoryProxyActiveUsageStore) CountProxyActiveAccounts(_ context.Context
 	return out, nil
 }
 
+func (s *memoryProxyActiveUsageStore) CountProxyActiveUsage(_ context.Context, proxyIDs []int64) (map[int64]ProxyActiveUsageCounts, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[int64]ProxyActiveUsageCounts, len(proxyIDs))
+	for _, proxyID := range proxyIDs {
+		if proxyID <= 0 {
+			continue
+		}
+		count := ProxyActiveUsageCounts{AccountCount: int64(len(s.accounts[proxyID]))}
+		for _, requests := range s.accounts[proxyID] {
+			count.RequestCount += int64(len(requests))
+		}
+		out[proxyID] = count
+	}
+	return out, nil
+}
+
+func TestProxyActiveUsageTrackerDetailsDistinguishAccountsAndRequests(t *testing.T) {
+	tracker := NewProxyActiveUsageTracker(newMemoryProxyActiveUsageStore())
+	defer tracker.Stop()
+	first := tracker.BeginProxy(10, 100)
+	second := tracker.BeginProxy(10, 100)
+	third := tracker.BeginProxy(10, 100)
+	require.NotNil(t, first)
+	require.NotNil(t, second)
+	require.NotNil(t, third)
+	defer first.End()
+	defer second.End()
+	defer third.End()
+	require.Eventually(t, func() bool {
+		details := tracker.GetActiveUsageDetails(context.Background(), []int64{10})[10]
+		return details.Status == "ok" && details.AccountCount != nil && *details.AccountCount == 1 && details.RequestCount != nil && *details.RequestCount == 3
+	}, time.Second, time.Millisecond)
+	details := tracker.GetActiveUsageDetails(context.Background(), []int64{20, -1})
+	require.Len(t, details, 1)
+	require.Equal(t, "ok", details[20].Status)
+	require.NotNil(t, details[20].AccountCount)
+	require.Equal(t, int64(0), *details[20].AccountCount)
+	require.Equal(t, int64(0), *details[20].RequestCount)
+}
+
+func TestProxyActiveUsageTrackerDetailsUnavailableAreNotZero(t *testing.T) {
+	store := newMemoryProxyActiveUsageStore()
+	store.err = errors.New("redis unavailable")
+	tracker := NewProxyActiveUsageTracker(store)
+	defer tracker.Stop()
+	for _, subject := range []*ProxyActiveUsageTracker{tracker, nil, NewProxyActiveUsageTracker(nil)} {
+		details := subject.GetActiveUsageDetails(context.Background(), []int64{10})[10]
+		require.Equal(t, "unavailable", details.Status)
+		require.Nil(t, details.AccountCount)
+		require.Nil(t, details.RequestCount)
+	}
+	// The compatibility API deliberately retains its zero-on-error contract.
+	require.Equal(t, int64(0), tracker.GetActiveAccountCounts(context.Background(), []int64{10})[10])
+}
+
 func waitForProxyActiveUsageCount(t *testing.T, tracker *ProxyActiveUsageTracker, proxyID int64, want int64) {
 	t.Helper()
 	require.Eventually(t, func() bool {

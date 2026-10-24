@@ -21,13 +21,22 @@ import (
 
 // ProviderConfig holds the configuration for a single search provider.
 type ProviderConfig struct {
-	Type         string `json:"type"`                    // ProviderTypeBrave | ProviderTypeTavily
-	APIKey       string `json:"api_key"`                 // secret
-	QuotaLimit   int64  `json:"quota_limit"`             // 0 = unlimited
-	SubscribedAt *int64 `json:"subscribed_at,omitempty"` // subscription start (unix seconds); quota resets monthly from this date
-	ProxyURL     string `json:"-"`                       // resolved proxy URL (not persisted)
-	ProxyID      int64  `json:"-"`                       // resolved proxy ID for unavailability tracking
-	ExpiresAt    *int64 `json:"expires_at,omitempty"`    // optional expiration (unix seconds)
+	Type         string              `json:"type"`                    // ProviderTypeBrave | ProviderTypeTavily
+	APIKey       string              `json:"api_key"`                 // secret
+	QuotaLimit   int64               `json:"quota_limit"`             // 0 = unlimited
+	SubscribedAt *int64              `json:"subscribed_at,omitempty"` // subscription start (unix seconds); quota resets monthly from this date
+	ProxyURL     string              `json:"-"`                       // resolved proxy URL (not persisted)
+	ProxyID      int64               `json:"-"`                       // resolved proxy ID for unavailability tracking
+	ExpiresAt    *int64              `json:"expires_at,omitempty"`    // optional expiration (unix seconds)
+	ProxyRoute   *ProxyRouteMetadata `json:"-"`
+}
+
+// ProxyRouteMetadata describes a logical node, never its authenticated URL.
+type ProxyRouteMetadata struct {
+	ID   int64
+	Name string
+	Host string
+	Port int
 }
 
 // Manager selects providers by quota-weighted load balancing and tracks quota via Redis.
@@ -378,6 +387,11 @@ func (m *Manager) executeSearch(ctx context.Context, cfg ProviderConfig, req Sea
 		return nil, fmt.Errorf("websearch: %w", err)
 	}
 	provider := m.buildProvider(cfg, client)
+	if req.BeforeAttempt != nil {
+		if end := req.BeforeAttempt(cfg, proxyURL); end != nil {
+			defer end()
+		}
+	}
 	return provider.Search(ctx, req)
 }
 

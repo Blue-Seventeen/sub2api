@@ -281,6 +281,15 @@ func (r *pluginRuntime) roundTrip(ctx context.Context, request *http.Request, pr
 		cancel()
 		return nil, normalizePluginRPCError(ctx, "创建插件转发流", err, false)
 	}
+	// Opening the local RPC stream is not yet an outbound attempt. The start
+	// frame commits the logical route to the plugin's transport contract.
+	attempt := BeginProxyRouteAttempt(ctx, account.ID, proxyURL, false)
+	attemptReturned := false
+	defer func() {
+		if !attemptReturned {
+			attempt.End()
+		}
+	}()
 	requestID := strconv.FormatInt(time.Now().UnixNano(), 36) + "-" + strconv.FormatInt(account.ID, 36)
 	if err := stream.Send(&pluginv1.ForwardRequest{Frame: &pluginv1.ForwardRequest_Start{Start: &pluginv1.ForwardRequestStart{
 		RequestId:          requestID,
@@ -341,17 +350,19 @@ func (r *pluginRuntime) roundTrip(ctx context.Context, request *http.Request, pr
 		done:   r.finishRequest,
 	}
 	go receivePluginResponseBody(stream, pipeWriter, sendErr)
-	return &http.Response{
+	response := &http.Response{
 		Status:        start.Status,
 		StatusCode:    int(start.StatusCode),
 		Proto:         start.Protocol,
 		ProtoMajor:    int(start.ProtocolMajor),
 		ProtoMinor:    int(start.ProtocolMinor),
 		Header:        headersFromPlugin(start.Headers),
-		Body:          body,
+		Body:          attempt.WrapBody(body),
 		ContentLength: start.ContentLength,
 		Request:       request,
-	}, nil
+	}
+	attemptReturned = true
+	return response, nil
 }
 
 type PluginTransportError struct {

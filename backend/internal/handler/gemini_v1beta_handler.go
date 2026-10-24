@@ -730,7 +730,6 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		if fs.SwitchCount > 0 {
 			requestCtx = service.WithAccountSwitchCount(requestCtx, fs.SwitchCount, h.metadataBridgeEnabled())
 		}
-		activeUsageHandle := beginProxyActiveUsage(h.proxyActiveUsageTracker, account)
 		sessionGroupID := derefGroupID(apiKey.GroupID)
 		writerSizeBeforeForward := c.Writer.Size()
 		if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
@@ -748,7 +747,6 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		} else {
 			result, err = h.geminiCompatService.ForwardNative(requestCtx, c, account, modelName, action, stream, body)
 		}
-		endProxyActiveUsage(activeUsageHandle)
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
 		}

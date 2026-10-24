@@ -593,6 +593,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		var bridgeReplayInput []json.RawMessage
 		bridgeReplayInputExists := false
 		for turn := 1; ; turn++ {
+			if turn > 1 {
+				ResetProxyRouteUsage(ctx)
+			}
 			if turn > 1 && hooks != nil && hooks.BeforeRequest != nil {
 				if err := hooks.BeforeRequest(turn, currentBridgePayload.rawForHash, currentBridgePayload.originalModel); err != nil {
 					return err
@@ -929,6 +932,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		turnStart := time.Now()
 		wroteDownstream := false
+		lease.BeginProxyTurn(ctx)
+		defer lease.EndProxyTurn()
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(payload), s.openAIWSWriteTimeout()); err != nil {
 			ClearAutoSelectedProxyStickyOnTransportError(ctx, account, err)
 			return nil, wrapOpenAIWSIngressTurnError(
@@ -1424,6 +1429,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		return true
 	}
 	for {
+		if turn > 1 && !skipBeforeTurn {
+			ResetProxyRouteUsage(ctx)
+		}
 		if turn > 1 && !skipBeforeTurn && hooks != nil && hooks.BeforeRequest != nil {
 			if err := hooks.BeforeRequest(turn, currentClientPayload, currentOriginalModel); err != nil {
 				return err

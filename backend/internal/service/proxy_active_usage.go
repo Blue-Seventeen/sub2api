@@ -25,26 +25,50 @@ const proxyActiveUsageUpsertScript = `
 if redis.call('EXISTS', KEYS[4]) == 1 then
   return 0
 end
-redis.call('SADD', KEYS[2], ARGV[1])
-redis.call('PEXPIRE', KEYS[2], ARGV[2])
-redis.call('ZADD', KEYS[1], ARGV[3], ARGV[4])
-redis.call('PEXPIRE', KEYS[1], ARGV[5])
-redis.call('SET', KEYS[3], ARGV[6], 'PX', ARGV[2])
+local clock = redis.call('TIME')
+local now = tonumber(clock[1]) * 1000 + math.floor(tonumber(clock[2]) / 1000)
+local expires = now + tonumber(ARGV[2])
+redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', now)
+redis.call('ZADD', KEYS[2], expires, ARGV[1])
+local accountLast = redis.call('ZREVRANGE', KEYS[2], 0, 0, 'WITHSCORES')
+redis.call('PEXPIRE', KEYS[2], math.max(1, tonumber(accountLast[2]) - now))
+redis.call('ZADD', KEYS[1], accountLast[2], ARGV[3])
+local proxyLast = redis.call('ZREVRANGE', KEYS[1], 0, 0, 'WITHSCORES')
+redis.call('PEXPIRE', KEYS[1], math.max(1, tonumber(proxyLast[2]) - now))
+redis.call('ZREMRANGEBYSCORE', KEYS[5], '-inf', now)
+redis.call('ZADD', KEYS[5], expires, ARGV[1])
+local requestLast = redis.call('ZREVRANGE', KEYS[5], 0, 0, 'WITHSCORES')
+redis.call('PEXPIRE', KEYS[5], math.max(1, tonumber(requestLast[2]) - now))
+redis.call('SET', KEYS[3], ARGV[4], 'PX', ARGV[2])
 return 1
 `
 
 const proxyActiveUsageRemoveScript = `
 redis.call('SET', KEYS[4], '1', 'PX', ARGV[2])
 redis.call('DEL', KEYS[3])
-redis.call('SREM', KEYS[2], ARGV[1])
-local remaining = redis.call('SCARD', KEYS[2])
+local clock = redis.call('TIME')
+local now = tonumber(clock[1]) * 1000 + math.floor(tonumber(clock[2]) / 1000)
+redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', now)
+redis.call('ZREM', KEYS[2], ARGV[1])
+redis.call('ZREM', KEYS[5], ARGV[1])
+local remaining = redis.call('ZCARD', KEYS[2])
 if remaining <= 0 then
   redis.call('DEL', KEYS[2])
-  redis.call('ZREM', KEYS[1], ARGV[4])
+  redis.call('ZREM', KEYS[1], ARGV[3])
 else
-  redis.call('PEXPIRE', KEYS[2], ARGV[2])
+  local accountLast = redis.call('ZREVRANGE', KEYS[2], 0, 0, 'WITHSCORES')
+  redis.call('ZADD', KEYS[1], accountLast[2], ARGV[3])
+  redis.call('PEXPIRE', KEYS[2], math.max(1, tonumber(accountLast[2]) - now))
 end
 return remaining
+`
+
+const proxyActiveUsageCountScript = `
+local clock = redis.call('TIME')
+local now = tonumber(clock[1]) * 1000 + math.floor(tonumber(clock[2]) / 1000)
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now)
+redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', now)
+return {redis.call('ZCARD', KEYS[1]), redis.call('ZCARD', KEYS[2])}
 `
 
 type ProxyActiveUsageEntry struct {
@@ -57,6 +81,19 @@ type ProxyActiveUsageStore interface {
 	UpsertProxyActiveUsage(ctx context.Context, entry ProxyActiveUsageEntry, ttl time.Duration) error
 	RemoveProxyActiveUsage(ctx context.Context, entry ProxyActiveUsageEntry, ttl time.Duration) error
 	CountProxyActiveAccounts(ctx context.Context, proxyIDs []int64) (map[int64]int64, error)
+	CountProxyActiveUsage(ctx context.Context, proxyIDs []int64) (map[int64]ProxyActiveUsageCounts, error)
+}
+
+type ProxyActiveUsageCounts struct {
+	AccountCount int64
+	RequestCount int64
+}
+
+// Pointer counts distinguish a successful zero measurement from an unavailable store.
+type ProxyActiveUsageDetails struct {
+	AccountCount *int64 `json:"account_count"`
+	RequestCount *int64 `json:"request_count"`
+	Status       string `json:"status"`
 }
 
 func (e ProxyActiveUsageEntry) Valid() bool {
@@ -201,6 +238,44 @@ func (t *ProxyActiveUsageTracker) GetActiveAccountCounts(ctx context.Context, pr
 		counts[proxyID] = count
 	}
 	return counts
+}
+
+func (t *ProxyActiveUsageTracker) GetActiveUsageDetails(ctx context.Context, proxyIDs []int64) map[int64]ProxyActiveUsageDetails {
+	details := make(map[int64]ProxyActiveUsageDetails, len(proxyIDs))
+	for _, proxyID := range proxyIDs {
+		if proxyID > 0 {
+			details[proxyID] = ProxyActiveUsageDetails{Status: "unavailable"}
+		}
+	}
+	if t == nil || t.store == nil || len(details) == 0 {
+		return details
+	}
+	queryCtx := ctx
+	cancel := func() {}
+	if _, ok := ctx.Deadline(); !ok && t.taskTimeout > 0 {
+		queryCtx, cancel = context.WithTimeout(ctx, t.taskTimeout)
+	}
+	defer cancel()
+	counts, err := t.store.CountProxyActiveUsage(queryCtx, proxyIDs)
+	if err != nil {
+		logger.L().With(
+			zap.String("component", "service.proxy_active_usage_tracker"),
+			zap.Error(err),
+		).Warn("proxy_active_usage.details_failed")
+		return details
+	}
+	for proxyID := range details {
+		count, ok := counts[proxyID]
+		if !ok {
+			continue
+		}
+		details[proxyID] = ProxyActiveUsageDetails{
+			AccountCount: &count.AccountCount,
+			RequestCount: &count.RequestCount,
+			Status:       "ok",
+		}
+	}
+	return details
 }
 
 func (t *ProxyActiveUsageTracker) Stop() {
@@ -358,4 +433,8 @@ func ProxyActiveUsageUpsertScript() string {
 
 func ProxyActiveUsageRemoveScript() string {
 	return proxyActiveUsageRemoveScript
+}
+
+func ProxyActiveUsageCountScript() string {
+	return proxyActiveUsageCountScript
 }

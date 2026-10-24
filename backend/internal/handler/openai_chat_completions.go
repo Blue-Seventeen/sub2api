@@ -280,7 +280,6 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		}
 		var result *service.OpenAIForwardResult
 		var upstreamEndpoint string
-		activeUsageHandle := beginProxyActiveUsage(h.proxyActiveUsageTracker, account)
 		if h.newAPIStyleService != nil && h.newAPIStyleService.SupportsForGatewayHandler(account, apiKey.Group, service.NewAPIStyleRouteChatCompletions) {
 			result, upstreamEndpoint, err = h.newAPIStyleService.ForwardOpenAI(
 				c.Request.Context(),
@@ -302,7 +301,6 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		} else {
 			result, err = h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, promptCacheKey, "")
 		}
-		endProxyActiveUsage(activeUsageHandle)
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
 		}

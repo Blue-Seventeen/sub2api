@@ -81,7 +81,7 @@ func (s *OpenAIGatewayService) ForwardResponsesInputTokens(
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+		proxyURL = registerProxyRoute(ctx, account.Proxy.URL(), account.Proxy)
 	}
 	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 	if err != nil {
@@ -334,7 +334,7 @@ func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+		proxyURL = registerProxyRoute(ctx, account.Proxy.URL(), account.Proxy)
 	}
 	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 	if err != nil {

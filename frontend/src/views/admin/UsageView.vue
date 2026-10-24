@@ -199,6 +199,7 @@ import { formatReasoningEffort } from '@/utils/format'
 import { resolveUsageRequestType, requestTypeToLegacyStream } from '@/utils/usageRequestType'
 import { formatAdminDisplayBaseRateMultiplier } from '@/utils/usageRate'
 import { textOutputTokens } from '@/utils/imageUsage'
+import { formatUsageProxyRoutes } from '@/utils/usageProxyRoutes'
 import AppLayout from '@/components/layout/AppLayout.vue'; import Pagination from '@/components/common/Pagination.vue'; import Select from '@/components/common/Select.vue'; import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import UsageStatsCards from '@/components/admin/usage/UsageStatsCards.vue'; import UsageFilters from '@/components/admin/usage/UsageFilters.vue'
 import UsageTable from '@/components/admin/usage/UsageTable.vue'; import UsageExportProgress from '@/components/admin/usage/UsageExportProgress.vue'
@@ -675,7 +676,7 @@ const exportToExcel = async () => {
       t('admin.usage.cacheReadCost'), t('admin.usage.cacheCreationCost'), t('usage.imageOutputCost'),
       t('usage.rate'), t('usage.accountMultiplier'), t('usage.original'), t('usage.userBilled'), t('usage.accountBilled'),
       t('usage.firstToken'), t('usage.duration'),
-      t('admin.usage.requestId'), t('admin.usage.upstreamRequestId'), t('usage.userAgent'), t('admin.usage.ipAddress')
+      t('admin.usage.requestId'), t('admin.usage.upstreamRequestId'), t('usage.userAgent'), t('admin.usage.ipAddress'), t('admin.usage.proxyNode')
     ]
     const csvRows = [csvRow(headers)]
     while (true) {
@@ -694,7 +695,7 @@ const exportToExcel = async () => {
         formatAdminDisplayBaseRateMultiplier(log.rate_multiplier, log.unified_rate_multiplier), (log.account_rate_multiplier ?? 1).toPrecision(4),
         log.total_cost?.toFixed(6) || '0.000000', (log.real_actual_cost ?? log.actual_cost ?? 0).toFixed(6),
         accountBilledExportCost(log), log.first_token_ms ?? '', log.duration_ms,
-        log.request_id || '', log.upstream_request_id || '', log.user_agent || '', log.ip_address || ''
+        log.request_id || '', log.upstream_request_id || '', log.user_agent || '', log.ip_address || '', formatUsageProxyRoutes(log.proxy_routes, t)
       ])
       if (rows.length) {
         csvRows.push(...rows.map(csvRow))
@@ -738,7 +739,8 @@ const allColumns = computed(() => [
   { key: 'request_id', label: t('admin.usage.requestId'), sortable: false },
   { key: 'upstream_request_id', label: t('admin.usage.upstreamRequestId'), sortable: false },
   { key: 'user_agent', label: t('usage.userAgent'), sortable: false },
-  { key: 'ip_address', label: t('admin.usage.ipAddress'), sortable: false }
+  { key: 'ip_address', label: t('admin.usage.ipAddress'), sortable: false },
+  { key: 'proxy_routes', label: t('admin.usage.proxyNode'), sortable: false }
 ])
 
 const hiddenColumns = reactive<Set<string>>(new Set())
@@ -790,6 +792,7 @@ const errAllColumns = computed(() => [
   { key: 'created_at', label: t('admin.ops.errorLog.time') },
   { key: 'user_agent', label: t('usage.userAgent') },
   { key: 'client_ip', label: t('admin.ops.errorLog.ip') },
+  { key: 'proxy_routes', label: t('admin.usage.proxyNode') },
   { key: 'actions', label: t('admin.ops.errorLog.action') },
 ])
 

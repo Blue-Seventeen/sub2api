@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -25,10 +27,9 @@ func (s *RedisProxyActiveUsageStore) UpsertProxyActiveUsage(ctx context.Context,
 		return nil
 	}
 	ttlMs := proxyActiveUsageTTLMillis(ttl)
-	expireAtMs := time.Now().Add(time.Duration(ttlMs) * time.Millisecond).UnixMilli()
 	keys := proxyActiveUsageKeys(entry)
 	payload := strconv.FormatInt(entry.ProxyID, 10) + ":" + strconv.FormatInt(entry.AccountID, 10)
-	return s.rdb.Eval(ctx, service.ProxyActiveUsageUpsertScript(), keys, entry.Token, ttlMs, expireAtMs, strconv.FormatInt(entry.AccountID, 10), ttlMs*2, payload).Err()
+	return s.rdb.Eval(ctx, service.ProxyActiveUsageUpsertScript(), keys, entry.Token, ttlMs, strconv.FormatInt(entry.AccountID, 10), payload).Err()
 }
 
 func (s *RedisProxyActiveUsageStore) RemoveProxyActiveUsage(ctx context.Context, entry service.ProxyActiveUsageEntry, ttl time.Duration) error {
@@ -36,30 +37,52 @@ func (s *RedisProxyActiveUsageStore) RemoveProxyActiveUsage(ctx context.Context,
 		return nil
 	}
 	keys := proxyActiveUsageKeys(entry)
-	return s.rdb.Eval(ctx, service.ProxyActiveUsageRemoveScript(), keys, entry.Token, proxyActiveUsageTTLMillis(ttl), time.Now().UnixMilli(), strconv.FormatInt(entry.AccountID, 10)).Err()
+	return s.rdb.Eval(ctx, service.ProxyActiveUsageRemoveScript(), keys, entry.Token, proxyActiveUsageTTLMillis(ttl), strconv.FormatInt(entry.AccountID, 10)).Err()
 }
 
 func (s *RedisProxyActiveUsageStore) CountProxyActiveAccounts(ctx context.Context, proxyIDs []int64) (map[int64]int64, error) {
 	out := zeroProxyActiveUsageCounts(proxyIDs)
-	if s == nil || s.rdb == nil || len(out) == 0 {
-		return out, nil
-	}
-	nowMs := strconv.FormatInt(time.Now().UnixMilli(), 10)
-	pipe := s.rdb.Pipeline()
-	cardCmds := make(map[int64]*redis.IntCmd, len(out))
-	for proxyID := range out {
-		key := proxyActiveUsageAccountsKey(proxyID)
-		pipe.ZRemRangeByScore(ctx, key, "-inf", nowMs)
-		cardCmds[proxyID] = pipe.ZCard(ctx, key)
-	}
-	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
+	counts, err := s.CountProxyActiveUsage(ctx, proxyIDs)
+	if err != nil {
 		return out, err
 	}
-	for proxyID, cmd := range cardCmds {
-		count, err := cmd.Result()
-		if err == nil && count > 0 {
-			out[proxyID] = count
+	for proxyID, count := range counts {
+		out[proxyID] = count.AccountCount
+	}
+	return out, nil
+}
+
+func (s *RedisProxyActiveUsageStore) CountProxyActiveUsage(ctx context.Context, proxyIDs []int64) (map[int64]service.ProxyActiveUsageCounts, error) {
+	out := make(map[int64]service.ProxyActiveUsageCounts, len(proxyIDs))
+	for _, proxyID := range proxyIDs {
+		if proxyID > 0 {
+			out[proxyID] = service.ProxyActiveUsageCounts{}
 		}
+	}
+	if len(out) == 0 {
+		return out, nil
+	}
+	if s == nil || s.rdb == nil {
+		return nil, errors.New("proxy active usage store unavailable")
+	}
+	pipe := s.rdb.Pipeline()
+	countCmds := make(map[int64]*redis.Cmd, len(out))
+	for proxyID := range out {
+		keys := []string{proxyActiveUsageAccountsKey(proxyID), proxyActiveUsageRequestsKey(proxyID)}
+		countCmds[proxyID] = pipe.Eval(ctx, service.ProxyActiveUsageCountScript(), keys)
+	}
+	if _, err := pipe.Exec(ctx); err != nil {
+		return nil, err
+	}
+	for proxyID, cmd := range countCmds {
+		counts, err := cmd.Int64Slice()
+		if err != nil {
+			return nil, err
+		}
+		if len(counts) != 2 {
+			return nil, fmt.Errorf("invalid proxy active usage counts for proxy %d", proxyID)
+		}
+		out[proxyID] = service.ProxyActiveUsageCounts{AccountCount: counts[0], RequestCount: counts[1]}
 	}
 	return out, nil
 }
@@ -78,23 +101,29 @@ func proxyActiveUsageKeys(entry service.ProxyActiveUsageEntry) []string {
 		proxyActiveUsageAccountRequestsKey(entry.ProxyID, entry.AccountID),
 		proxyActiveUsageRequestKey(entry.Token),
 		proxyActiveUsageEndedKey(entry.Token),
+		proxyActiveUsageRequestsKey(entry.ProxyID),
 	}
 }
 
+// v2 isolates expiring token sorted sets from legacy account SET keys during upgrades.
 func proxyActiveUsageAccountsKey(proxyID int64) string {
-	return "proxy_active_usage:proxy:" + strconv.FormatInt(proxyID, 10) + ":accounts"
+	return "proxy_active_usage:v2:proxy:" + strconv.FormatInt(proxyID, 10) + ":accounts"
 }
 
 func proxyActiveUsageAccountRequestsKey(proxyID, accountID int64) string {
-	return "proxy_active_usage:proxy:" + strconv.FormatInt(proxyID, 10) + ":account:" + strconv.FormatInt(accountID, 10) + ":requests"
+	return "proxy_active_usage:v2:proxy:" + strconv.FormatInt(proxyID, 10) + ":account:" + strconv.FormatInt(accountID, 10) + ":requests"
+}
+
+func proxyActiveUsageRequestsKey(proxyID int64) string {
+	return "proxy_active_usage:v2:proxy:" + strconv.FormatInt(proxyID, 10) + ":requests"
 }
 
 func proxyActiveUsageRequestKey(token string) string {
-	return "proxy_active_usage:req:" + token
+	return "proxy_active_usage:v2:req:" + token
 }
 
 func proxyActiveUsageEndedKey(token string) string {
-	return "proxy_active_usage:req_ended:" + token
+	return "proxy_active_usage:v2:req_ended:" + token
 }
 
 func zeroProxyActiveUsageCounts(proxyIDs []int64) map[int64]int64 {

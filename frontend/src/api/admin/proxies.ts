@@ -6,6 +6,7 @@
 import { apiClient } from '../client'
 import type {
   Proxy,
+  ProxyActiveUsageDetails,
   ProxyAutoProbeConfig,
   ProxyAutoProbeStatus,
   ProxyAccountSummary,
@@ -219,6 +220,14 @@ export async function getActiveUsage(ids: number[]): Promise<Record<string, numb
   return data
 }
 
+export async function getActiveUsageDetails(ids: number[]): Promise<Record<string, ProxyActiveUsageDetails>> {
+  if (ids.length === 0) return {}
+  const { data } = await apiClient.get<Record<string, ProxyActiveUsageDetails>>('/admin/proxies/active-usage/details', {
+    params: { ids: ids.join(',') }
+  })
+  return data
+}
+
 export async function getAutoProbeConfig(): Promise<ProxyAutoProbeStatus> {
   const { data } = await apiClient.get<ProxyAutoProbeStatus>('/admin/proxies/auto-probe/config')
   return data
@@ -354,6 +363,7 @@ export const proxiesAPI = {
   getStats,
   getProxyAccounts,
   getActiveUsage,
+  getActiveUsageDetails,
   getAutoProbeConfig,
   selectAutoProxy,
   updateAutoProbeConfig,

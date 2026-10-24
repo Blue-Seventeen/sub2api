@@ -4,6 +4,7 @@ package ent
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"time"
@@ -530,6 +531,12 @@ func (_c *UsageLogCreate) SetNillableIPAddress(v *string) *UsageLogCreate {
 	if v != nil {
 		_c.SetIPAddress(*v)
 	}
+	return _c
+}
+
+// SetProxyRoutes sets the "proxy_routes" field.
+func (_c *UsageLogCreate) SetProxyRoutes(v jsontext.Value) *UsageLogCreate {
+	_c.mutation.SetProxyRoutes(v)
 	return _c
 }
 
@@ -1436,6 +1443,10 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.IPAddress(); ok {
 		_spec.SetField(usagelog.FieldIPAddress, field.TypeString, value)
 		_node.IPAddress = &value
+	}
+	if value, ok := _c.mutation.ProxyRoutes(); ok {
+		_spec.SetField(usagelog.FieldProxyRoutes, field.TypeJSON, value)
+		_node.ProxyRoutes = value
 	}
 	if value, ok := _c.mutation.ImageCount(); ok {
 		_spec.SetField(usagelog.FieldImageCount, field.TypeInt, value)
@@ -2355,6 +2366,24 @@ func (u *UsageLogUpsert) UpdateIPAddress() *UsageLogUpsert {
 // ClearIPAddress clears the value of the "ip_address" field.
 func (u *UsageLogUpsert) ClearIPAddress() *UsageLogUpsert {
 	u.SetNull(usagelog.FieldIPAddress)
+	return u
+}
+
+// SetProxyRoutes sets the "proxy_routes" field.
+func (u *UsageLogUpsert) SetProxyRoutes(v jsontext.Value) *UsageLogUpsert {
+	u.Set(usagelog.FieldProxyRoutes, v)
+	return u
+}
+
+// UpdateProxyRoutes sets the "proxy_routes" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateProxyRoutes() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldProxyRoutes)
+	return u
+}
+
+// ClearProxyRoutes clears the value of the "proxy_routes" field.
+func (u *UsageLogUpsert) ClearProxyRoutes() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldProxyRoutes)
 	return u
 }
 
@@ -3624,6 +3653,27 @@ func (u *UsageLogUpsertOne) UpdateIPAddress() *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) ClearIPAddress() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearIPAddress()
+	})
+}
+
+// SetProxyRoutes sets the "proxy_routes" field.
+func (u *UsageLogUpsertOne) SetProxyRoutes(v jsontext.Value) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetProxyRoutes(v)
+	})
+}
+
+// UpdateProxyRoutes sets the "proxy_routes" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateProxyRoutes() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateProxyRoutes()
+	})
+}
+
+// ClearProxyRoutes clears the value of the "proxy_routes" field.
+func (u *UsageLogUpsertOne) ClearProxyRoutes() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearProxyRoutes()
 	})
 }
 
@@ -5130,6 +5180,27 @@ func (u *UsageLogUpsertBulk) UpdateIPAddress() *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) ClearIPAddress() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearIPAddress()
+	})
+}
+
+// SetProxyRoutes sets the "proxy_routes" field.
+func (u *UsageLogUpsertBulk) SetProxyRoutes(v jsontext.Value) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetProxyRoutes(v)
+	})
+}
+
+// UpdateProxyRoutes sets the "proxy_routes" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateProxyRoutes() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateProxyRoutes()
+	})
+}
+
+// ClearProxyRoutes clears the value of the "proxy_routes" field.
+func (u *UsageLogUpsertBulk) ClearProxyRoutes() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearProxyRoutes()
 	})
 }
 

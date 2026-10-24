@@ -64,9 +64,10 @@ INSERT INTO ops_error_logs (
   attempted_key_prefix,
   deleted_key_owner_user_id,
   deleted_key_name,
-  api_key_prefix
+  api_key_prefix,
+  proxy_routes
 ) VALUES (
-  $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46
+  $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47
 )`
 
 func NewOpsRepository(db *sql.DB) service.OpsRepository {
@@ -184,6 +185,7 @@ func opsInsertErrorLogArgs(input *service.OpsInsertErrorLogInput) []any {
 		opsNullInt64(input.DeletedKeyOwnerUserID),
 		opsNullString(input.DeletedKeyName),
 		opsNullString(input.APIKeyPrefix),
+		nullProxyRoutesJSON(input.ProxyRoutes),
 	}
 }
 
@@ -291,7 +293,8 @@ SELECT
   ak.deleted_at,
   COALESCE(e.deleted_key_name, ''),
   e.deleted_key_owner_user_id,
-  COALESCE(du.email, '')
+  COALESCE(du.email, ''),
+  e.proxy_routes
 FROM ops_error_logs e
 LEFT JOIN accounts a ON e.account_id = a.id
 LEFT JOIN groups g ON e.group_id = g.id
@@ -330,6 +333,7 @@ LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
 		var deletedKeyName string
 		var deletedKeyOwnerID sql.NullInt64
 		var deletedKeyOwnerEmail string
+		var proxyRoutes sql.NullString
 		if err := rows.Scan(
 			&item.ID,
 			&item.CreatedAt,
@@ -373,8 +377,14 @@ LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
 			&deletedKeyName,
 			&deletedKeyOwnerID,
 			&deletedKeyOwnerEmail,
+			&proxyRoutes,
 		); err != nil {
 			return nil, err
+		}
+		if proxyRoutes.Valid {
+			if err := json.Unmarshal([]byte(proxyRoutes.String), &item.ProxyRoutes); err != nil {
+				return nil, fmt.Errorf("decode ops error proxy routes: %w", err)
+			}
 		}
 		if resolvedAt.Valid {
 			t := resolvedAt.Time
@@ -504,7 +514,8 @@ SELECT
   COALESCE(e.deleted_key_name, ''),
   COALESCE(e.api_key_prefix, ''),
   COALESCE(ak.name, ''),
-  ak.deleted_at
+  ak.deleted_at,
+  e.proxy_routes
 FROM ops_error_logs e
 LEFT JOIN users u ON e.user_id = u.id
 LEFT JOIN accounts a ON e.account_id = a.id
@@ -536,6 +547,7 @@ LIMIT 1`
 	var deletedKeyName string
 	var detailAPIKeyName string
 	var detailAPIKeyDeletedAt sql.NullTime
+	var proxyRoutes sql.NullString
 
 	err := r.db.QueryRowContext(ctx, q, id).Scan(
 		&out.ID,
@@ -595,9 +607,15 @@ LIMIT 1`
 		&out.APIKeyPrefix,
 		&detailAPIKeyName,
 		&detailAPIKeyDeletedAt,
+		&proxyRoutes,
 	)
 	if err != nil {
 		return nil, err
+	}
+	if proxyRoutes.Valid {
+		if err := json.Unmarshal([]byte(proxyRoutes.String), &out.ProxyRoutes); err != nil {
+			return nil, fmt.Errorf("decode ops error proxy routes: %w", err)
+		}
 	}
 
 	out.StatusCode = int(statusCode.Int64)

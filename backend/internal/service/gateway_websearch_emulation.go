@@ -205,13 +205,20 @@ func writeEmulatedWebSearch(
 }
 
 func doWebSearch(ctx context.Context, account *Account, query string) (*websearch.SearchResponse, string, error) {
-	proxyURL := resolveDirectAttachedProxyURL(account)
+	proxyURL := resolveDirectAttachedProxyURL(ctx, account)
 	mgr := getWebSearchManager()
 	if mgr == nil {
 		return nil, "", fmt.Errorf("web search emulation: manager not initialized")
 	}
 	resp, providerName, err := mgr.SearchWithBestProvider(ctx, websearch.SearchRequest{
 		Query: query, MaxResults: webSearchDefaultMaxResults, ProxyURL: proxyURL,
+		BeforeAttempt: func(provider websearch.ProviderConfig, effective string) func() {
+			if proxyURL == "" && provider.ProxyRoute != nil {
+				route := provider.ProxyRoute
+				return BeginProxyRouteSnapshotAttempt(ctx, account.ID, ProxyRouteSnapshot{Kind: "proxy", ProxyID: route.ID, Name: route.Name, Host: route.Host, Port: route.Port}).End
+			}
+			return BeginProxyRouteAttempt(ctx, account.ID, effective, false).End
+		},
 	})
 	if err != nil {
 		slog.Error("web search emulation: search failed", "error", err)
@@ -220,9 +227,9 @@ func doWebSearch(ctx context.Context, account *Account, query string) (*websearc
 	return resp, providerName, nil
 }
 
-func resolveDirectAttachedProxyURL(account *Account) string {
+func resolveDirectAttachedProxyURL(ctx context.Context, account *Account) string {
 	if account.ProxyID != nil && account.Proxy != nil {
-		return ResolveProxyURL(context.Background(), account.Proxy)
+		return ResolveProxyURL(ctx, account.Proxy)
 	}
 	return ""
 }

@@ -197,9 +197,12 @@ func wrapUsageRecordTaskContext(parent context.Context, task service.UsageRecord
 	if parent != nil {
 		done = service.InflightReservationFromContext(parent).Acquire()
 	}
+	// Capture now: a pooled WebSocket can start its next turn before this
+	// asynchronous task runs, and accounts/proxies can be renamed or rebound.
+	routes := service.ProxyRoutesFromContext(parent)
 	return func(ctx context.Context) {
 		defer done()
-		task(usageRecordContext(parent, ctx))
+		task(service.WithProxyRoutesSnapshot(usageRecordContext(parent, ctx), routes))
 	}, done
 }
 
@@ -303,6 +306,9 @@ func NewOpenAIGatewayHandler(gatewayService *service.OpenAIGatewayService, args 
 		cfg = dependencyOrNil[config.Config](args[7])
 	default:
 		panic(fmt.Sprintf("NewOpenAIGatewayHandler: unsupported dependency count %d", len(args)))
+	}
+	if gatewayService != nil {
+		gatewayService.SetProxyActiveUsageTracker(proxyActiveUsageTracker)
 	}
 	pingInterval := time.Duration(0)
 	maxAccountSwitches := 3
@@ -720,7 +726,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		// 应用渠道模型映射到请求体
 		var result *service.OpenAIForwardResult
 		var upstreamEndpoint string
-		activeUsageHandle := beginProxyActiveUsage(h.proxyActiveUsageTracker, account)
 		// 跨 passthrough 边界的 failover：从 Kiro 等透传账号切到 Bedrock 等非透传账号前，
 		// 从不可变的 canonical forwardBody 派生本次尝试 body 并整块剔除上游私有的加密
 		// reasoning item（含耦合的 id/summary），避免非透传上游 400 拒绝 Kiro reasoning 形态。
@@ -729,7 +734,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			// 用扣除 compact 心跳字节的口径快照：心跳注释不构成语义响应，
 			// 不能因心跳字节变化而放弃 failover 换号（#3887）。
 			defer func() {
-				endProxyActiveUsage(activeUsageHandle)
 				if accountReleaseFunc != nil {
 					accountReleaseFunc()
 				}
@@ -1404,7 +1408,6 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		writerSizeBeforeForward := c.Writer.Size()
 		var result *service.OpenAIForwardResult
 		var upstreamEndpoint string
-		activeUsageHandle := beginProxyActiveUsage(h.proxyActiveUsageTracker, account)
 		if h.newAPIStyleService != nil && h.newAPIStyleService.SupportsForGroup(account, apiKey.Group, service.NewAPIStyleRouteMessages) {
 			result, upstreamEndpoint, err = h.newAPIStyleService.ForwardOpenAI(
 				c.Request.Context(),
@@ -1426,7 +1429,6 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		} else {
 			result, err = h.gatewayService.ForwardAsAnthropic(c.Request.Context(), c, account, forwardBody, promptCacheKey, defaultMappedModel)
 		}
-		endProxyActiveUsage(activeUsageHandle)
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
 		}
@@ -2860,9 +2862,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			// AfterTurn 闭包保活旧请求体；current-turn replay 更新后重新计算。
 			requestPayloadHash = service.HashUsageRequestPayload(wsFirstMessage)
 			proxyStart := time.Now()
-			activeUsageHandle := beginProxyActiveUsage(h.proxyActiveUsageTracker, account)
 			proxyErr = func() (err error) {
-				defer endProxyActiveUsage(activeUsageHandle)
 				return h.gatewayService.ProxyResponsesWebSocketFromClient(ctx, c, wsConn, account, token, wsFirstMessage, hooks)
 			}()
 			if proxyErr == nil {
@@ -3764,6 +3764,7 @@ type cyberPolicyOpsErrorMeta struct {
 	ClientIP        string
 	CreatedAt       time.Time
 	SessionBlockKey string
+	ProxyRoutes     []service.ProxyRouteSnapshot `json:"proxy_routes"`
 }
 
 // buildCyberPolicyOpsErrorEntry builds the ops_error_logs entry for an upstream
@@ -3782,6 +3783,7 @@ func buildCyberPolicyOpsErrorEntry(meta cyberPolicyOpsErrorMeta, mark *service.C
 		RequestType:       &rt,
 		UserAgent:         meta.UserAgent,
 		APIKeyPrefix:      meta.APIKeyPrefix,
+		ProxyRoutes:       append([]service.ProxyRouteSnapshot(nil), meta.ProxyRoutes...),
 		ErrorPhase:        "request",
 		ErrorType:         "cyber_policy",
 		Severity:          "P3",
@@ -4073,6 +4075,7 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 		GroupID:         groupID,
 		ClientIP:        clientIPStr,
 		CreatedAt:       time.Now(),
+		ProxyRoutes:     service.ProxyRoutesFromContext(requestCtx),
 	}
 	cyberLogOnly := h.cyberPolicyLogOnly(c, apiKey)
 	if gwSvc != nil && apiKey != nil && !cyberLogOnly {

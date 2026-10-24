@@ -117,7 +117,7 @@ func (s *OpenAIGatewayService) ForwardSeedance(ctx context.Context, c *gin.Conte
 	account.ApplyHeaderOverrides(req.Header)
 	proxy := ""
 	if account.ProxyID != nil && account.Proxy != nil {
-		proxy = account.Proxy.URL()
+		proxy = registerProxyRoute(ctx, account.Proxy.URL(), account.Proxy)
 	}
 	resp, err := s.httpUpstream.Do(req, proxy, account.ID, account.Concurrency)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(started).Milliseconds())

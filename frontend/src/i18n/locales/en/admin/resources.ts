@@ -42,6 +42,8 @@ export default {
 
     // Proxies
     proxies: {
+      activeUsageCounts: '{accounts} accounts / {requests} requests',
+      activeUsageUnknown: 'Unknown',
       title: 'Proxy Management',
       description: 'Manage proxy servers for accounts',
       createProxy: 'Create Proxy',
@@ -557,6 +559,10 @@ export default {
       upstreamModelMismatchOnly: 'Mismatched only',
       upstreamModelMatchedOnly: 'Matched only',
       ipAddress: 'IP',
+      proxyNode: 'Proxy node',
+      proxyRouteUnknown: 'Unknown',
+      proxyRouteDirect: 'Direct',
+      proxyRouteSystem: 'System proxy',
       clickToViewBalance: 'Click to view balance history',
       failedToLoadUser: 'Failed to load user info',
       userDeletedBadge: 'Deleted',

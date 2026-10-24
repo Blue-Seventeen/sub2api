@@ -4,11 +4,13 @@ package ent
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
+	"entgo.io/ent/dialect/sql/sqljson"
 	"entgo.io/ent/schema/field"
 	"github.com/Wei-Shaw/sub2api/ent/account"
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
@@ -812,6 +814,24 @@ func (_u *UsageLogUpdate) SetNillableIPAddress(v *string) *UsageLogUpdate {
 // ClearIPAddress clears the value of the "ip_address" field.
 func (_u *UsageLogUpdate) ClearIPAddress() *UsageLogUpdate {
 	_u.mutation.ClearIPAddress()
+	return _u
+}
+
+// SetProxyRoutes sets the "proxy_routes" field.
+func (_u *UsageLogUpdate) SetProxyRoutes(v jsontext.Value) *UsageLogUpdate {
+	_u.mutation.SetProxyRoutes(v)
+	return _u
+}
+
+// AppendProxyRoutes appends value to the "proxy_routes" field.
+func (_u *UsageLogUpdate) AppendProxyRoutes(v jsontext.Value) *UsageLogUpdate {
+	_u.mutation.AppendProxyRoutes(v)
+	return _u
+}
+
+// ClearProxyRoutes clears the value of the "proxy_routes" field.
+func (_u *UsageLogUpdate) ClearProxyRoutes() *UsageLogUpdate {
+	_u.mutation.ClearProxyRoutes()
 	return _u
 }
 
@@ -1719,6 +1739,17 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.IPAddressCleared() {
 		_spec.ClearField(usagelog.FieldIPAddress, field.TypeString)
+	}
+	if value, ok := _u.mutation.ProxyRoutes(); ok {
+		_spec.SetField(usagelog.FieldProxyRoutes, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedProxyRoutes(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, usagelog.FieldProxyRoutes, value)
+		})
+	}
+	if _u.mutation.ProxyRoutesCleared() {
+		_spec.ClearField(usagelog.FieldProxyRoutes, field.TypeJSON)
 	}
 	if value, ok := _u.mutation.ImageCount(); ok {
 		_spec.SetField(usagelog.FieldImageCount, field.TypeInt, value)
@@ -2809,6 +2840,24 @@ func (_u *UsageLogUpdateOne) ClearIPAddress() *UsageLogUpdateOne {
 	return _u
 }
 
+// SetProxyRoutes sets the "proxy_routes" field.
+func (_u *UsageLogUpdateOne) SetProxyRoutes(v jsontext.Value) *UsageLogUpdateOne {
+	_u.mutation.SetProxyRoutes(v)
+	return _u
+}
+
+// AppendProxyRoutes appends value to the "proxy_routes" field.
+func (_u *UsageLogUpdateOne) AppendProxyRoutes(v jsontext.Value) *UsageLogUpdateOne {
+	_u.mutation.AppendProxyRoutes(v)
+	return _u
+}
+
+// ClearProxyRoutes clears the value of the "proxy_routes" field.
+func (_u *UsageLogUpdateOne) ClearProxyRoutes() *UsageLogUpdateOne {
+	_u.mutation.ClearProxyRoutes()
+	return _u
+}
+
 // SetImageCount sets the "image_count" field.
 func (_u *UsageLogUpdateOne) SetImageCount(v int) *UsageLogUpdateOne {
 	_u.mutation.ResetImageCount()
@@ -3743,6 +3792,17 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if _u.mutation.IPAddressCleared() {
 		_spec.ClearField(usagelog.FieldIPAddress, field.TypeString)
+	}
+	if value, ok := _u.mutation.ProxyRoutes(); ok {
+		_spec.SetField(usagelog.FieldProxyRoutes, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedProxyRoutes(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, usagelog.FieldProxyRoutes, value)
+		})
+	}
+	if _u.mutation.ProxyRoutesCleared() {
+		_spec.ClearField(usagelog.FieldProxyRoutes, field.TypeJSON)
 	}
 	if value, ok := _u.mutation.ImageCount(); ok {
 		_spec.SetField(usagelog.FieldImageCount, field.TypeInt, value)

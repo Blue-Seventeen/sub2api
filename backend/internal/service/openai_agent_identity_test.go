@@ -9,8 +9,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -125,6 +128,76 @@ func TestRegisterAgentIdentityTaskAcceptsPlaintextAndEncryptedResponses(t *testi
 	taskID, err = registerAgentIdentityTask(context.Background(), account)
 	require.NoError(t, err)
 	require.Equal(t, "task-encrypted", taskID)
+}
+
+func TestProxyRouteAgentIdentityRegistrationKeepsLeaseUntilResponseBody(t *testing.T) {
+	key, privateKey := newTestAgentIdentityKey(t)
+	release := make(chan struct{})
+	headersSent := make(chan struct{})
+	var releaseOnce sync.Once
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"task_id":`))
+		w.(http.Flusher).Flush()
+		close(headersSent)
+		select {
+		case <-release:
+			_, _ = w.Write([]byte(`"task-observed"}`))
+		case <-r.Context().Done():
+		}
+	}))
+	defer proxy.Close()
+	defer releaseOnce.Do(func() { close(release) })
+	u, err := url.Parse(proxy.URL)
+	require.NoError(t, err)
+	host, rawPort, err := net.SplitHostPort(u.Host)
+	require.NoError(t, err)
+	port, err := strconv.Atoi(rawPort)
+	require.NoError(t, err)
+	oldBase := openAIAgentIdentityAuthAPIBaseURL
+	openAIAgentIdentityAuthAPIBaseURL = "http://agent-registration.fixture"
+	defer func() { openAIAgentIdentityAuthAPIBaseURL = oldBase }()
+	proxyID := int64(91)
+	account := &Account{ID: 52, Type: AccountTypeOAuth, Platform: PlatformOpenAI, ProxyID: &proxyID,
+		Proxy: &Proxy{ID: 91, Name: "agent-registration-node", Protocol: "http", Host: host, Port: port},
+		Credentials: map[string]any{
+			"auth_mode": OpenAIAuthModeAgentIdentity, "agent_runtime_id": key.runtimeID, "agent_private_key": privateKey,
+		}}
+	tracker := NewProxyActiveUsageTracker(newMemoryProxyActiveUsageStore())
+	defer tracker.Stop()
+	ctx, observation := NewProxyRouteObservation(t.Context(), tracker)
+	defer observation.Close()
+	type result struct {
+		taskID string
+		err    error
+	}
+	completed := make(chan result, 1)
+	go func() {
+		taskID, err := registerAgentIdentityTask(ctx, account)
+		completed <- result{taskID: taskID, err: err}
+	}()
+	select {
+	case <-headersSent:
+	case <-time.After(3 * time.Second):
+		t.Fatal("registration request did not reach the loopback proxy")
+	}
+	require.Equal(t, []ProxyRouteSnapshot{{Kind: "proxy", ProxyID: 91, Name: "agent-registration-node", Host: host, Port: port}}, ProxyRoutesFromContext(ctx))
+	require.Eventually(t, func() bool {
+		count := tracker.GetActiveUsageDetails(context.Background(), []int64{91})[91]
+		return count.RequestCount != nil && *count.RequestCount == 1 && count.AccountCount != nil && *count.AccountCount == 1
+	}, time.Second, time.Millisecond)
+	releaseOnce.Do(func() { close(release) })
+	select {
+	case got := <-completed:
+		require.NoError(t, got.err)
+		require.Equal(t, "task-observed", got.taskID)
+	case <-time.After(3 * time.Second):
+		t.Fatal("registration did not finish after completing its response body")
+	}
+	require.Eventually(t, func() bool {
+		count := tracker.GetActiveUsageDetails(context.Background(), []int64{91})[91]
+		return count.RequestCount != nil && *count.RequestCount == 0 && count.AccountCount != nil && *count.AccountCount == 0
+	}, time.Second, time.Millisecond)
 }
 
 func TestEnsureAgentIdentityTaskPersistsAndRedactsCredentials(t *testing.T) {

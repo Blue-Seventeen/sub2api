@@ -243,16 +243,16 @@
             </span>
           </template>
 
-          <template #cell-active_egress_account_count="{ value }">
+          <template #cell-active_egress_account_count="{ row }">
             <span
               :class="[
                 'inline-flex items-center rounded px-2 py-0.5 text-xs font-medium',
-                (value || 0) > 0
+                (activeUsageDetails[row.id]?.request_count || 0) > 0
                   ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
                   : 'bg-gray-100 text-gray-600 dark:bg-dark-600 dark:text-gray-300'
               ]"
             >
-              {{ value || 0 }}
+              {{ activeUsageLabel(row.id) }}
             </span>
           </template>
 
@@ -1221,7 +1221,7 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
-import type { ManagedProxyRuntimeStatus, Proxy, ProxyAccountSummary, ProxyAutoProbeConfig, ProxyAutoProbeStatus, ProxyProtocol, ProxyQualityCheckResult } from '@/types'
+import type { ManagedProxyRuntimeStatus, Proxy, ProxyAccountSummary, ProxyActiveUsageDetails, ProxyAutoProbeConfig, ProxyAutoProbeStatus, ProxyProtocol, ProxyQualityCheckResult } from '@/types'
 import type { Column } from '@/components/common/types'
 import { parseProxyBatchInput } from '@/utils/proxyBatchInput'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -1481,6 +1481,16 @@ let autoProbePollInFlight = false
 let autoProbeLastCompletionSeq = 0
 let activeUsagePollTimer: ReturnType<typeof setInterval> | null = null
 let activeUsagePollInFlight = false
+let activeUsageDisposed = false
+const activeUsageDetails = ref<Record<number, ProxyActiveUsageDetails>>({})
+const unavailableActiveUsage = (): ProxyActiveUsageDetails => ({ account_count: null, request_count: null, status: 'unavailable' })
+const activeUsageLabel = (id: number) => {
+  const detail = activeUsageDetails.value[id]
+  if (detail?.status !== 'ok' || detail.account_count == null || detail.request_count == null) {
+    return t('admin.proxies.activeUsageUnknown')
+  }
+  return t('admin.proxies.activeUsageCounts', { accounts: detail.account_count, requests: detail.request_count })
+}
 const managedRuntimePollTimers = new Map<number, ReturnType<typeof setInterval>>()
 const managedRuntimePollMaxAttempts = 15
 const managedRuntimePollIntervalMs = 1000
@@ -1531,6 +1541,7 @@ const loadProxies = async () => {
       return
     }
     proxies.value = response.items
+    activeUsageDetails.value = {}
     pagination.total = response.total
     pagination.pages = response.pages
     refreshActiveUsageCounts()
@@ -1607,7 +1618,7 @@ const refreshRowsFromAutoProbeStatus = async (status: ProxyAutoProbeStatus) => {
 }
 
 const refreshActiveUsageCounts = async () => {
-  if (activeUsagePollInFlight || proxies.value.length === 0) {
+  if (activeUsageDisposed || document.visibilityState === 'hidden' || activeUsagePollInFlight || proxies.value.length === 0) {
     return
   }
   const ids = proxies.value.map((proxy) => proxy.id).filter((id) => Number.isFinite(id) && id > 0)
@@ -1615,19 +1626,32 @@ const refreshActiveUsageCounts = async () => {
     return
   }
   activeUsagePollInFlight = true
+  const requestedRows = proxies.value
   try {
-    const counts = await adminAPI.proxies.getActiveUsage(ids)
-    for (const proxy of proxies.value) {
-      const next = counts[String(proxy.id)] ?? 0
-      if (proxy.active_egress_account_count !== next) {
-        proxy.active_egress_account_count = next
-      }
+    const details = await adminAPI.proxies.getActiveUsageDetails(ids)
+    if (activeUsageDisposed || proxies.value !== requestedRows) return
+    for (const proxy of requestedRows) {
+      activeUsageDetails.value[proxy.id] = details[String(proxy.id)] ?? unavailableActiveUsage()
     }
   } catch (error) {
+    if (!activeUsageDisposed && proxies.value === requestedRows) {
+      for (const proxy of requestedRows) activeUsageDetails.value[proxy.id] = unavailableActiveUsage()
+    }
     console.debug('Failed to refresh proxy active usage counts:', error)
   } finally {
     activeUsagePollInFlight = false
+    if (!activeUsageDisposed && proxies.value !== requestedRows) void refreshActiveUsageCounts()
   }
+}
+
+const syncActiveUsagePolling = () => {
+  if (activeUsagePollTimer) {
+    clearInterval(activeUsagePollTimer)
+    activeUsagePollTimer = null
+  }
+  if (activeUsageDisposed || document.visibilityState === 'hidden') return
+  void refreshActiveUsageCounts()
+  activeUsagePollTimer = setInterval(refreshActiveUsageCounts, 2000)
 }
 
 const syncAutoProbePolling = () => {
@@ -2734,12 +2758,15 @@ function closeCopyMenu() {
 onMounted(() => {
   loadProxies()
   loadAutoProbeConfig(false)
-  activeUsagePollTimer = setInterval(refreshActiveUsageCounts, 5000)
+  syncActiveUsagePolling()
+  document.addEventListener('visibilitychange', syncActiveUsagePolling)
   loadBackupProxyOptions()
   document.addEventListener('click', closeCopyMenu)
 })
 
 onUnmounted(() => {
+  activeUsageDisposed = true
+  document.removeEventListener('visibilitychange', syncActiveUsagePolling)
   clearTimeout(searchTimeout)
   if (autoProbePollTimer) {
     clearInterval(autoProbePollTimer)

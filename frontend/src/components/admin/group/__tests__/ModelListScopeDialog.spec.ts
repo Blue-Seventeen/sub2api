@@ -34,6 +34,18 @@ describe("ModelListScopeDialog", () => {
     expect(wrapper.emitted("select")).toEqual([["group"], ["global"]]);
   });
 
+  it("shows delete labels for delete operations", () => {
+    const wrapper = mount(ModelListScopeDialog, {
+      props: { show: true, operation: "remove", selectedCount: 2 },
+      global: { stubs: { BaseDialog: { template: "<div><slot /><slot name='footer' /></div>" } } },
+    });
+
+    const choices = wrapper.findAll("button").map((button) => button.text());
+
+    expect(choices[0]).toContain("admin.groups.modelsList.deleteGroupScope");
+    expect(choices[1]).toContain("admin.groups.modelsList.deleteGlobalScope");
+  });
+
   it("describes the selected count for delete operations", () => {
     const wrapper = mount(ModelListScopeDialog, {
       props: { show: true, operation: "remove", selectedCount: 3 },

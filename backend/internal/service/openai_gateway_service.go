@@ -441,35 +441,36 @@ var ErrNoAvailableCompactAccounts = errors.New("no available accounts support /r
 
 // OpenAIGatewayService handles OpenAI API gateway operations
 type OpenAIGatewayService struct {
-	accountRepo           AccountRepository
-	usageLogRepo          UsageLogRepository
-	usageBillingRepo      UsageBillingRepository
-	userRepo              UserRepository
-	userSubRepo           UserSubscriptionRepository
-	cache                 GatewayCache
-	cfg                   *config.Config
-	codexDetector         CodexClientRestrictionDetector
-	schedulerSnapshot     *SchedulerSnapshotService
-	concurrencyService    *ConcurrencyService
-	billingService        *BillingService
-	rateLimitService      *RateLimitService
-	billingCacheService   *BillingCacheService
-	userGroupRateResolver *userGroupRateResolver
-	httpUpstream          HTTPUpstream
-	pluginManager         *PluginManager
-	deferredService       *DeferredService
-	openAITokenProvider   *OpenAITokenProvider
-	grokTokenProvider     *GrokTokenProvider
-	toolCorrector         *CodexToolCorrector
-	openaiWSResolver      OpenAIWSProtocolResolver
-	resolver              *ModelPricingResolver
-	channelService        *ChannelService
-	balanceNotifyService  *BalanceNotifyService
-	settingService        *SettingService
-	proxyStatsRepo        ProxyStatsRepository
-	userPlatformQuotaRepo UserPlatformQuotaRepository
-	liveAttestation       liveattestation.Provider
-	liveAttestationCipher SecretEncryptor
+	accountRepo             AccountRepository
+	usageLogRepo            UsageLogRepository
+	usageBillingRepo        UsageBillingRepository
+	userRepo                UserRepository
+	userSubRepo             UserSubscriptionRepository
+	cache                   GatewayCache
+	cfg                     *config.Config
+	codexDetector           CodexClientRestrictionDetector
+	schedulerSnapshot       *SchedulerSnapshotService
+	concurrencyService      *ConcurrencyService
+	billingService          *BillingService
+	rateLimitService        *RateLimitService
+	billingCacheService     *BillingCacheService
+	userGroupRateResolver   *userGroupRateResolver
+	httpUpstream            HTTPUpstream
+	pluginManager           *PluginManager
+	deferredService         *DeferredService
+	openAITokenProvider     *OpenAITokenProvider
+	grokTokenProvider       *GrokTokenProvider
+	toolCorrector           *CodexToolCorrector
+	openaiWSResolver        OpenAIWSProtocolResolver
+	resolver                *ModelPricingResolver
+	channelService          *ChannelService
+	balanceNotifyService    *BalanceNotifyService
+	settingService          *SettingService
+	proxyStatsRepo          ProxyStatsRepository
+	userPlatformQuotaRepo   UserPlatformQuotaRepository
+	liveAttestation         liveattestation.Provider
+	liveAttestationCipher   SecretEncryptor
+	proxyActiveUsageTracker atomic.Pointer[ProxyActiveUsageTracker]
 
 	openaiWSPoolOnce               sync.Once
 	openaiWSStateStoreOnce         sync.Once
@@ -505,6 +506,14 @@ type OpenAIGatewayService struct {
 	openaiCompatAnthropicDigestSessions sync.Map
 	openaiCodexTurnStateOrigins         sync.Map
 	openaiCodexTurnStateWrites          atomic.Uint64
+}
+
+// SetProxyActiveUsageTracker shares gateway request accounting with detached
+// Live sideband observers, whose lifetime extends beyond the creating request.
+func (s *OpenAIGatewayService) SetProxyActiveUsageTracker(tracker *ProxyActiveUsageTracker) {
+	if s != nil {
+		s.proxyActiveUsageTracker.Store(tracker)
+	}
 }
 
 // NewOpenAIGatewayService creates a new OpenAIGatewayService

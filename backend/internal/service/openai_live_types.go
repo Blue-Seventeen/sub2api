@@ -73,6 +73,9 @@ type LiveCallRecord struct {
 	InboundEndpoint string
 	// AttestationCiphertext 仅用于让同一会话的 Sideband 复用创建时的证明。
 	AttestationCiphertext string
+	// ProxyRoutes stores immutable logical routes for creation and sideband
+	// attempts; reconnects append without rewriting controller state.
+	ProxyRoutes []ProxyRouteSnapshot
 }
 
 type LiveCallCreated struct {
@@ -90,6 +93,12 @@ type LiveCallStore interface {
 	ReleaseLiveController(ctx context.Context, callHash, owner string) (bool, error)
 	GetLiveController(ctx context.Context, callHash string) (string, error)
 	MarkLiveCallClosed(ctx context.Context, callHash string, ttl time.Duration) (bool, error)
+}
+
+// LiveCallProxyRouteStore is optional for legacy cache implementations. Redis
+// atomically merges route snapshots while preserving the session controller.
+type LiveCallProxyRouteStore interface {
+	AppendLiveCallProxyRoutes(ctx context.Context, callHash string, routes []ProxyRouteSnapshot) error
 }
 
 type LiveConcurrencyCache interface {

@@ -7,6 +7,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/gin-gonic/gin"
 )
 
 func gatewayProxyStatsRequestID(ctx context.Context) string {
@@ -107,15 +108,22 @@ func elapsedMillisSince(start time.Time) int64 {
 	return durationMs
 }
 
-func beginProxyActiveUsage(tracker *service.ProxyActiveUsageTracker, account *service.Account) *service.ProxyActiveUsageHandle {
-	if tracker == nil || account == nil {
-		return nil
+// ProxyRouteObservationMiddleware owns route attribution for the entire request,
+// including internal retries. Actual HTTP attempts/WS turns acquire the leases.
+func ProxyRouteObservationMiddleware(h *Handlers) gin.HandlerFunc {
+	var tracker *service.ProxyActiveUsageTracker
+	if h != nil {
+		if h.OpenAIGateway != nil {
+			tracker = h.OpenAIGateway.proxyActiveUsageTracker
+		}
+		if tracker == nil && h.Gateway != nil {
+			tracker = h.Gateway.proxyActiveUsageTracker
+		}
 	}
-	return tracker.Begin(account)
-}
-
-func endProxyActiveUsage(handle *service.ProxyActiveUsageHandle) {
-	if handle != nil {
-		handle.End()
+	return func(c *gin.Context) {
+		ctx, observation := service.NewProxyRouteObservation(c.Request.Context(), tracker)
+		defer observation.Close()
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
 	}
 }

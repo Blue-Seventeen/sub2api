@@ -145,6 +145,40 @@ describe('RelayPulseMatrix', () => {
 })
 
 describe('RelayPulseMatrix axis range', () => {
+  it.each([
+    { overflowing: true, modifier: '', prevented: false },
+    { overflowing: true, modifier: 'ctrlKey', prevented: true },
+    { overflowing: true, modifier: 'metaKey', prevented: true },
+    { overflowing: false, modifier: '', prevented: true },
+  ])('preserves vertical scrolling when overflowing=$overflowing and modifier=$modifier', async ({ overflowing, modifier, prevented }) => {
+    const wrapper = mount(RelayPulseMatrix, {
+      props: {
+        rows: [{ platform: 'openai', model: 'gpt-5', metrics: metrics(10), health, buckets: [] }],
+        coverage: {
+          requested_start: '2026-08-01T00:00:00Z', requested_end: '2026-08-01T00:30:00Z',
+          coverage_start: '2026-08-01T00:00:00Z', data_through: '2026-08-01T00:30:00Z',
+          computed_at: '2026-08-01T00:30:00Z', aggregation_lag_seconds: 0, coverage_complete: true, bucket_seconds: 60,
+        },
+        healthMode: 'overall',
+      },
+    })
+    const viewport = wrapper.find('.matrix-scroll').element
+    Object.defineProperties(viewport, {
+      clientHeight: { value: 200 },
+      scrollHeight: { value: overflowing ? 1200 : 100 },
+    })
+    const event = new WheelEvent('wheel', {
+      bubbles: true, cancelable: true, deltaY: -100,
+      ...(modifier ? { [modifier]: true } : {}),
+    })
+    wrapper.find('.pulse-cell').element.dispatchEvent(event)
+    await wrapper.vm.$nextTick()
+    expect(event.defaultPrevented).toBe(prevented)
+    expect(wrapper.find('button').attributes('disabled') === undefined).toBe(prevented)
+    expect(wrapper.findAll('.pulse-cell')).toHaveLength(prevented ? 27 : 30)
+    wrapper.unmount()
+  })
+
   it('uses selected requested range for the X axis even with partial coverage', () => {
     const wrapper = mount(RelayPulseMatrix, {
       props: {

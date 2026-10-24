@@ -1,6 +1,6 @@
 <template>
   <section
-    class="card flex min-h-[360px] flex-col overflow-visible !rounded-3xl !border-0 !p-6 shadow-sm ring-1 ring-gray-900/5 dark:!bg-dark-800 dark:ring-dark-700"
+    class="card flex max-h-[min(76vh,680px)] flex-col overflow-visible !rounded-3xl !border-0 !p-6 shadow-sm ring-1 ring-gray-900/5 dark:!bg-dark-800 dark:ring-dark-700"
   >
     <div class="card-header mb-4 flex shrink-0 flex-wrap items-start justify-between gap-3 !border-0 !p-0">
       <div class="min-w-0">
@@ -28,11 +28,11 @@
       </div>
     </div>
 
-    <div class="card-body min-h-0 flex-1 !p-0">
+    <div class="card-body flex min-h-0 flex-1 flex-col !p-0">
       <div
         v-if="rows.length"
         ref="scrollRef"
-        class="matrix-scroll max-h-[min(42vh,420px)] max-w-full overflow-auto rounded-2xl bg-gray-50/60 p-2 dark:bg-dark-900/30"
+        class="matrix-scroll max-h-[min(42vh,420px)] min-h-0 max-w-full flex-1 overflow-auto rounded-2xl bg-gray-50/60 p-2 dark:bg-dark-900/30"
         @wheel="onMatrixWheel"
       >
         <div class="matrix-table w-full" :style="tableStyle">
@@ -132,7 +132,7 @@
         />
       </div>
 
-      <div class="mt-4 flex flex-col gap-2" :aria-label="t('channelMonitorV2.matrix.legendAria')">
+      <div class="mt-4 flex shrink-0 flex-col gap-2" :aria-label="t('channelMonitorV2.matrix.legendAria')">
         <div class="flex items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
           <span class="shrink-0">{{ t('channelMonitorV2.matrix.bad') }}</span>
           <div class="score-legend h-2.5 flex-1 overflow-hidden rounded-full"></div>
@@ -318,12 +318,10 @@ function onMatrixWheel(event: WheelEvent) {
   const target = event.target as HTMLElement | null
   const pulse = target?.closest('.pulse-track') as HTMLElement | null
   const overMatrix = Boolean(target?.closest('.matrix-scroll'))
-  // Plain vertical wheel over the matrix zooms X (narrower range → wider cells).
-  // Shift+wheel or horizontal delta pans; leave non-matrix page scroll alone.
   const isPan = event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)
   if (!overMatrix && !pulse) return
-  // When not zoomed and user scrolls vertically outside pulse, still zoom if over matrix body.
-  if (!overMatrix && !isPan) return
+  // Let overflowing channel lists scroll naturally; modifiers retain X zoom.
+  if (track && track.scrollHeight > track.clientHeight && !isPan && !event.ctrlKey && !event.metaKey) return
   event.preventDefault()
   const ratioEl = pulse || track
   const ratio = clientXRatio(event.clientX, ratioEl)

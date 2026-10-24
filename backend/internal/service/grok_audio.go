@@ -135,7 +135,10 @@ func (s *OpenAIGatewayService) ProxyGrokRealtime(ctx context.Context, c *gin.Con
 	return s.ProxyGrokRealtimeConn(ctx, c, client, upstream)
 }
 
-type GrokRealtimeUpstream struct{ conn openAIWSClientConn }
+type GrokRealtimeUpstream struct {
+	conn         openAIWSClientConn
+	proxyAttempt *ProxyRouteAttempt
+}
 
 // GrokRealtimeDialError preserves an HTTP status returned before WebSocket
 // upgrade so handlers can apply the normal Grok account policy.
@@ -151,6 +154,7 @@ func (u *GrokRealtimeUpstream) Close() error {
 	if u == nil || u.conn == nil {
 		return nil
 	}
+	u.proxyAttempt.End()
 	return u.conn.Close()
 }
 
@@ -179,11 +183,14 @@ func (s *OpenAIGatewayService) OpenGrokRealtime(ctx context.Context, account *Ac
 	if err != nil {
 		return nil, err
 	}
-	conn, status, _, err := s.getOpenAIWSPassthroughDialer().Dial(ctx, u.String(), headers, proxyURL)
+	dialer := s.getOpenAIWSPassthroughDialer()
+	proxyAttempt := BeginProxyRouteAttempt(ctx, account.ID, proxyURL, openAIWSUsesEnvironmentProxy(dialer, u.String(), proxyURL))
+	conn, status, _, err := dialer.Dial(ctx, u.String(), headers, proxyURL)
 	if err != nil {
+		proxyAttempt.End()
 		return nil, &GrokRealtimeDialError{StatusCode: status, Err: err}
 	}
-	return &GrokRealtimeUpstream{conn: conn}, nil
+	return &GrokRealtimeUpstream{conn: conn, proxyAttempt: proxyAttempt}, nil
 }
 
 // HandleGrokRealtimeUpstreamError applies the shared Grok account policy to a
@@ -207,6 +214,7 @@ func (s *OpenAIGatewayService) ProxyGrokRealtimeConn(ctx context.Context, c *gin
 		return false, fmt.Errorf("realtime connection is required")
 	}
 	conn := upstream.conn
+	defer upstream.proxyAttempt.End()
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

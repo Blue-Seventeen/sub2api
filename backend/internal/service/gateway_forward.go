@@ -332,7 +332,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
 		if !account.IsCustomBaseURLEnabled() || account.GetCustomBaseURL() == "" {
-			proxyURL = account.Proxy.URL()
+			proxyURL = registerProxyRoute(ctx, account.Proxy.URL(), account.Proxy)
 		}
 	}
 

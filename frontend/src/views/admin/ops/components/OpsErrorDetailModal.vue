@@ -85,6 +85,13 @@
         </div>
 
         <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
+          <div class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t('admin.usage.proxyNode') }}</div>
+          <div class="mt-1 break-words text-sm font-medium text-gray-900 dark:text-white">
+            {{ formatUsageProxyRoutes(detail.proxy_routes, t) }}
+          </div>
+        </div>
+
+        <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
           <div class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t('admin.ops.errorDetail.status') }}</div>
           <div class="mt-1">
             <span :class="['inline-flex items-center rounded-lg px-2 py-1 text-xs font-black ring-1 ring-inset shadow-sm', statusClass]">
@@ -252,6 +259,7 @@ import Icon from '@/components/icons/Icon.vue'
 import { useAppStore } from '@/stores'
 import { opsAPI, type OpsErrorDetail } from '@/api/admin/ops'
 import { formatDateTime } from '@/utils/format'
+import { formatUsageProxyRoutes } from '@/utils/usageProxyRoutes'
 import { resolveUpstreamPayload } from '../utils/errorDetailResponse'
 
 interface Props {

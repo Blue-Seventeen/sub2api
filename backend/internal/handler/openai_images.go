@@ -282,8 +282,6 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		var result *service.OpenAIForwardResult
 		var upstreamEndpoint string
 		func() {
-			activeUsageHandle := beginProxyActiveUsage(h.proxyActiveUsageTracker, account)
-			defer endProxyActiveUsage(activeUsageHandle)
 			defer func() {
 				if accountReleaseFunc != nil {
 					accountReleaseFunc()

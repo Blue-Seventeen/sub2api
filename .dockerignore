@@ -36,6 +36,7 @@ artifacts/
 release-artifacts/
 .superpowers/
 .codex/
+.dev/
 
 # Node modules (will be installed in container)
 frontend/node_modules/

@@ -192,6 +192,9 @@ type UsageLog struct {
 	FirstTokenMs       *int
 	UserAgent          *string
 	IPAddress          *string
+	// ProxyRoutes contains ordered snapshots of routes used by actual outbound
+	// attempts. Nil means attribution was not recorded, including historical rows.
+	ProxyRoutes []ProxyRouteSnapshot
 	// SessionID is the explicit client-provided request correlation identifier
 	// (e.g. the session_id / X-Session-Id headers). Nil when the client sent no
 	// valid session header. It is never derived from prompt_cache_key or content.

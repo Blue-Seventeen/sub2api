@@ -297,7 +297,6 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		}
 		var result *service.ForwardResult
 		var upstreamEndpoint string
-		activeUsageHandle := beginProxyActiveUsage(h.proxyActiveUsageTracker, account)
 		setActualUpstreamEndpoint(c, "")
 		if h.newAPIStyleService != nil && h.newAPIStyleService.SupportsForGatewayHandler(account, apiKey.Group, service.NewAPIStyleRouteResponses) {
 			result, upstreamEndpoint, err = h.newAPIStyleService.Forward(
@@ -330,7 +329,6 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		} else {
 			result, err = h.gatewayService.ForwardAsResponses(requestCtx, c, account, forwardBody, parsedReq)
 		}
-		endProxyActiveUsage(activeUsageHandle)
 
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()

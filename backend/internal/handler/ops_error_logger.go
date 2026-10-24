@@ -416,6 +416,9 @@ func estimateOpsErrorLogJobBytes(entry *service.OpsInsertErrorLogInput) int64 {
 	if entry.UpstreamErrorsJSON != nil {
 		size += len(*entry.UpstreamErrorsJSON)
 	}
+	for _, route := range entry.ProxyRoutes {
+		size += 64 + len(route.Kind) + len(route.Name) + len(route.Host)
+	}
 	return int64(size)
 }
 
@@ -1288,6 +1291,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			entry.ClientIP = &clientIP
 		}
 
+		applyOpsProxyRoutesFromContext(c, entry)
 		enqueueOpsErrorLog(ops, entry)
 	}
 }
@@ -1410,7 +1414,14 @@ func logOpsRecoveredUpstream(c *gin.Context, ops *service.OpsService, finalStatu
 		entry.ClientIP = &clientIP
 	}
 	applyOpsLatencyFieldsFromContext(c, entry)
+	applyOpsProxyRoutesFromContext(c, entry)
 	enqueueOpsErrorLog(ops, entry)
+}
+
+func applyOpsProxyRoutesFromContext(c *gin.Context, entry *service.OpsInsertErrorLogInput) {
+	if c != nil && c.Request != nil && entry != nil {
+		entry.ProxyRoutes = service.ProxyRoutesFromContext(c.Request.Context())
+	}
 }
 
 func opsRequestTypeFromContext(c *gin.Context) *int16 {
@@ -1597,6 +1608,13 @@ func logOpsStreamErrorValue(c *gin.Context, ops *service.OpsService, wireStatus 
 		entry.ClientIP = &clientIP
 	}
 
+	if streamErr.ProxyRoutesCaptured || streamErr.Turn > 0 {
+		// Unknown attribution in an earlier WS turn must not inherit the final
+		// turn's routes. The copy also detaches the async job from stream state.
+		entry.ProxyRoutes = append([]service.ProxyRouteSnapshot(nil), streamErr.ProxyRoutes...)
+	} else {
+		applyOpsProxyRoutesFromContext(c, entry)
+	}
 	enqueueOpsErrorLog(ops, entry)
 }
 

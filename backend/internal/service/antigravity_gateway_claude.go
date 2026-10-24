@@ -84,7 +84,7 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 	// 代理 URL
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+		proxyURL = registerProxyRoute(ctx, account.Proxy.URL(), account.Proxy)
 	}
 
 	// 获取转换选项

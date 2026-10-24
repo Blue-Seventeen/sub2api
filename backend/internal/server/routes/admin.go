@@ -563,6 +563,7 @@ func registerProxyRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth
 		proxies.GET("/data", gin.HandlerFunc(stepUpAuth), h.Admin.Proxy.ExportData)
 		proxies.POST("/data", h.Admin.Proxy.ImportData)
 		proxies.GET("/active-usage", h.Admin.Proxy.GetActiveUsage)
+		proxies.GET("/active-usage/details", h.Admin.Proxy.GetActiveUsageDetails)
 		proxies.GET("/snapshots", h.Admin.Proxy.GetSnapshots)
 		proxies.GET("/:id", h.Admin.Proxy.GetByID)
 		proxies.POST("", h.Admin.Proxy.Create)

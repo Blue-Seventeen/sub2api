@@ -1129,6 +1129,8 @@ export default {
         groupScopeHint: '只修改当前分组的模型策略',
         globalScope: '全局新增',
         globalScopeHint: '修改同平台所有未删除分组',
+        deleteGroupScope: '分组删除',
+        deleteGlobalScope: '全局删除',
         addScopeTitle: '选择新增范围',
         deleteScopeTitle: '选择删除范围',
         addScopeDescription: '请选择本次模型新增只作用于当前分组，还是同步到同平台全部分组。',

@@ -559,7 +559,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
 			writerSizeBeforeForward := c.Writer.Size()
 			forwardStart := time.Now()
-			activeUsageHandle := beginProxyActiveUsage(h.proxyActiveUsageTracker, account)
 			if h.newAPIStyleService != nil && h.newAPIStyleService.SupportsForGroup(account, apiKey.Group, service.NewAPIStyleRouteMessages) {
 				result, _, err = h.newAPIStyleService.Forward(
 					requestCtx,
@@ -593,7 +592,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			} else {
 				result, err = h.geminiCompatService.Forward(requestCtx, c, account, body)
 			}
-			endProxyActiveUsage(activeUsageHandle)
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()
 			}
@@ -1024,7 +1022,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
 			writerSizeBeforeForward := c.Writer.Size()
 			forwardStart := time.Now()
-			activeUsageHandle := beginProxyActiveUsage(h.proxyActiveUsageTracker, account)
 			if h.newAPIStyleService != nil && h.newAPIStyleService.SupportsForGroup(account, currentAPIKey.Group, service.NewAPIStyleRouteMessages) {
 				result, _, err = h.newAPIStyleService.Forward(
 					requestCtx,
@@ -1048,7 +1045,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			} else {
 				result, err = h.gatewayService.Forward(requestCtx, c, account, attemptParsedReq)
 			}
-			endProxyActiveUsage(activeUsageHandle)
 
 			// 兜底释放串行锁（正常情况已通过回调提前释放）
 			if queueRelease != nil {

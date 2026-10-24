@@ -63,7 +63,7 @@ export default {
     matrix: {
       provisional: '样本不足，暂定状态',
       provisionalLegend: '虚线色块：低置信度暂定状态',
-      title: '可用性趋势', description: '每行是一种渠道组合，每个色块代表一个统计区间；悬停查看明细', wheelZoom: '在色块上滚轮放大（区间变窄、色块变宽）', wheelZoomX: '在色块上滚轮放大（区间变窄、色块变宽）', dimension: '渠道维度', emptyTitle: '当前筛选窗口没有矩阵数据', legendAria: '健康分数图例', bad: '差', good: '好', healthyLegend: '健康 (≥80)', warningLegend: '需关注 (50–79)', criticalLegend: '异常 (<50)', unknownLegend: '无流量 / 指标不适用', noTraffic: '该区间无流量', noTrafficAt: '{time} · 无流量', scoreLine: '健康分 {score}', resetZoom: '重置缩放'
+      title: '可用性趋势', description: '每行是一种渠道组合，每个色块代表一个统计区间；悬停查看明细', wheelZoom: '在色块上滚轮放大（区间变窄、色块变宽）', wheelZoomX: 'Ctrl/⌘ + 滚轮缩放；多渠道时滚轮上下滚动', dimension: '渠道维度', emptyTitle: '当前筛选窗口没有矩阵数据', legendAria: '健康分数图例', bad: '差', good: '好', healthyLegend: '健康 (≥80)', warningLegend: '需关注 (50–79)', criticalLegend: '异常 (<50)', unknownLegend: '无流量 / 指标不适用', noTraffic: '该区间无流量', noTrafficAt: '{time} · 无流量', scoreLine: '健康分 {score}', resetZoom: '重置缩放'
     },
     chart: {
       title: '可用性趋势', description: '平滑趋势：错误率 · 首 Token P50 · 缓存率', emptyTitle: '当前筛选窗口没有趋势数据', errorLegend: '错误率（左轴 %）', cacheLegend: '缓存率（左轴 %）', ttftLegend: '首 Token P50（右轴）', errorDataset: '错误率趋势 %', cacheDataset: '缓存率趋势 %', ttftDataset: '首 Token 趋势 P50 (ms)', percentAxis: '比率 %', resetZoom: '重置缩放'

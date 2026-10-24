@@ -3,7 +3,29 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const { get } = vi.hoisted(() => ({ get: vi.fn() }))
 vi.mock('@/api/client', () => ({ apiClient: { get } }))
 
-import { getAll, getAllWithCount, list } from '@/api/admin/proxies'
+import { getActiveUsage, getActiveUsageDetails, getAll, getAllWithCount, list } from '@/api/admin/proxies'
+
+describe('proxy live-usage API compatibility', () => {
+  beforeEach(() => get.mockReset())
+
+  it('keeps legacy counts on the legacy route and requests nullable details separately', async () => {
+    get.mockResolvedValueOnce({ data: { '9': 1 } })
+      .mockResolvedValueOnce({ data: { '9': { account_count: null, request_count: null, status: 'unavailable' } } })
+    await expect(getActiveUsage([9])).resolves.toEqual({ '9': 1 })
+    await expect(getActiveUsageDetails([9, 10])).resolves.toEqual({
+      '9': { account_count: null, request_count: null, status: 'unavailable' },
+    })
+    expect(get.mock.calls).toEqual([
+      ['/admin/proxies/active-usage', { params: { ids: '9' } }],
+      ['/admin/proxies/active-usage/details', { params: { ids: '9,10' } }],
+    ])
+  })
+
+  it('skips the details request when no proxy rows are visible', async () => {
+    await expect(getActiveUsageDetails([])).resolves.toEqual({})
+    expect(get).not.toHaveBeenCalled()
+  })
+})
 
 describe.each([
   { name: 'paginated list', load: () => list(), wrap: (items: unknown[]) => ({ items, total: items.length, pages: 1 }) },

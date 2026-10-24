@@ -2,13 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import ProxiesView from '../ProxiesView.vue'
 
-const { listProxies, getAllWithCount } = vi.hoisted(() => ({
+const { listProxies, getAllWithCount, getActiveUsageDetails, getAutoProbeConfig } = vi.hoisted(() => ({
   listProxies: vi.fn(),
-  getAllWithCount: vi.fn()
+  getAllWithCount: vi.fn(), getActiveUsageDetails: vi.fn(), getAutoProbeConfig: vi.fn()
 }))
 
 vi.mock('@/api/admin', () => ({
-  adminAPI: { proxies: { list: listProxies, getAllWithCount } }
+  adminAPI: { proxies: { list: listProxies, getAllWithCount, getActiveUsageDetails, getAutoProbeConfig } }
 }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError: vi.fn() }) }))
 vi.mock('vue-i18n', async () => ({
@@ -49,6 +49,8 @@ let wrapper: ReturnType<typeof mountView>
 beforeEach(() => {
   vi.clearAllMocks()
   getAllWithCount.mockResolvedValue([])
+  getActiveUsageDetails.mockResolvedValue({})
+  getAutoProbeConfig.mockResolvedValue({ enabled: false })
   listProxies.mockResolvedValue({ items: [], total: 100, pages: 5 })
 })
 

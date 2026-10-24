@@ -662,6 +662,9 @@ type UsageLog struct {
 type AdminUsageLog struct {
 	UsageLog
 
+	// ProxyRoutes is admin-only; nil explicitly represents unknown historical routing.
+	ProxyRoutes []service.ProxyRouteSnapshot `json:"proxy_routes"`
+
 	AccountID *int64 `json:"account_id,omitempty"`
 
 	// UpstreamEndpoint is the normalized upstream endpoint path, e.g. /v1/responses.

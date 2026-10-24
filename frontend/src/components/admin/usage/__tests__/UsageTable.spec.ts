@@ -102,6 +102,9 @@ const messages: Record<string, string> = {
   'usage.upstreamResponseModel': 'Upstream response',
   'usage.modelVariant': 'Possible version variant',
   'usage.modelMismatch': 'Different model',
+  'admin.usage.proxyRouteUnknown': 'Unknown',
+  'admin.usage.proxyRouteDirect': 'Direct',
+  'admin.usage.proxyRouteSystem': 'System proxy',
 }
 
 vi.mock('vue-i18n', async () => {
@@ -156,6 +159,41 @@ const baseImageRow = {
   image_size_source: null,
   image_size_breakdown: null,
 }
+
+describe('admin UsageTable proxy routes', () => {
+  const mountRoutes = (routes: unknown) => mount(UsageTable, {
+    props: {
+      data: [{ ...baseImageRow, proxy_routes: routes }] as any,
+      columns: [{ key: 'proxy_routes', label: 'Proxy node' }],
+    },
+    global: { stubs: {
+      DataTable: { props: ['data'], template: '<div><slot name="cell-proxy_routes" :row="data[0]" /></div>' },
+      EmptyState: true, Icon: true, Teleport: true,
+    } },
+  })
+
+  it('shows ordered logical nodes with full names and IPv6-safe addresses', () => {
+    const wrapper = mountRoutes([
+      { kind: 'proxy', proxy_id: 9, name: 'Tokyo node', host: 'proxy.example.test', port: 1080 },
+      { kind: 'proxy', proxy_id: 10, name: 'IPv6 backup', host: '2001:db8::8', port: 2080 },
+    ])
+    expect(wrapper.text()).toBe('Tokyo node (proxy.example.test:1080) → IPv6 backup ([2001:db8::8]:2080)')
+    wrapper.unmount()
+  })
+
+  it.each([
+    [null, 'Unknown'],
+    [undefined, 'Unknown'],
+    [[], 'Unknown'],
+    [[{ kind: 'unknown' }], 'Unknown'],
+    [[{ kind: 'direct' }], 'Direct'],
+    [[{ kind: 'system_proxy' }], 'System proxy'],
+  ])('distinguishes missing history and route modes for %j', (routes, expected) => {
+    const wrapper = mountRoutes(routes)
+    expect(wrapper.text()).toBe(expected)
+    wrapper.unmount()
+  })
+})
 
 describe('admin UsageTable tooltip', () => {
   it('shows output TPS in the latency cell using total duration', () => {

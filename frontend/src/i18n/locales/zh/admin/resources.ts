@@ -42,6 +42,8 @@ export default {
 
     // Proxies Management
     proxies: {
+      activeUsageCounts: '{accounts} 账号 / {requests} 请求',
+      activeUsageUnknown: '未知',
       title: 'IP管理',
       description: '管理代理服务器配置',
       createProxy: '添加代理',
@@ -554,6 +556,10 @@ export default {
       upstreamModelMismatchOnly: '仅不一致',
       upstreamModelMatchedOnly: '仅一致',
       ipAddress: 'IP',
+      proxyNode: '代理节点',
+      proxyRouteUnknown: '未知',
+      proxyRouteDirect: '直连',
+      proxyRouteSystem: '系统代理',
       clickToViewBalance: '点击查看充值记录',
       failedToLoadUser: '加载用户信息失败',
       userDeletedBadge: '已删除',

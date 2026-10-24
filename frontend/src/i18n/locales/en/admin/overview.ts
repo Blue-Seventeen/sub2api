@@ -1132,6 +1132,8 @@ export default {
         groupScopeHint: 'Change only the current group model policy',
         globalScope: 'Global add',
         globalScopeHint: 'Change every non-deleted group on this platform',
+        deleteGroupScope: 'Group delete',
+        deleteGlobalScope: 'Global delete',
         addScopeTitle: 'Choose add scope',
         deleteScopeTitle: 'Choose delete scope',
         addScopeDescription: 'Choose whether the model is added only to this group or to every group on the same platform.',

@@ -247,7 +247,7 @@
         />
       </section>
 
-      <div class="relative min-h-[320px]">
+      <div class="relative">
         <MonitorTrendChart
           v-if="trendView === 'line'"
           :trend="snapshot?.trend || []"

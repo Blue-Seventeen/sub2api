@@ -13,6 +13,9 @@ type SearchRequest struct {
 	Query      string
 	MaxResults int    // defaults to defaultMaxResults if <= 0
 	ProxyURL   string // optional HTTP proxy URL
+	// BeforeAttempt observes the effective route after account/provider selection.
+	// Its returned function runs after Search has consumed the response body.
+	BeforeAttempt func(ProviderConfig, string) func() `json:"-"`
 }
 
 // SearchResponse holds the results of a web search.

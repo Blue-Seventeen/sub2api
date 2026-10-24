@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -45,6 +46,23 @@ type liveFrameConn interface {
 	ReadFrame(ctx context.Context) (coderws.MessageType, []byte, error)
 	WriteFrame(ctx context.Context, msgType coderws.MessageType, payload []byte) error
 	Close() error
+}
+
+type liveProxyRouteConn struct {
+	liveFrameConn
+	attempt     *ProxyRouteAttempt
+	observation *ProxyRouteObservation
+	closeOnce   sync.Once
+	closeErr    error
+}
+
+func (c *liveProxyRouteConn) Close() error {
+	c.closeOnce.Do(func() {
+		c.attempt.End()
+		c.observation.Close()
+		c.closeErr = c.liveFrameConn.Close()
+	})
+	return c.closeErr
 }
 
 func liveSidebandReadError(err error) error {
@@ -233,6 +251,7 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 			IPAddress:             identity.IPAddress,
 			InboundEndpoint:       identity.InboundEndpoint,
 			AttestationCiphertext: attestationCiphertext,
+			ProxyRoutes:           ProxyRoutesFromContext(ctx),
 		}
 		mappingTTL := s.liveMaxSessionDuration() + 5*time.Minute
 		if saveErr := store.SaveLiveCall(ctx, record, mappingTTL); saveErr != nil {
@@ -450,6 +469,17 @@ func (s *OpenAIGatewayService) liveSidebandHeaders(
 }
 
 func (s *OpenAIGatewayService) dialLiveSideband(ctx context.Context, record *LiveCallRecord) (liveFrameConn, error) {
+	var observation *ProxyRouteObservation
+	if proxyRouteObservationFromContext(ctx) == nil {
+		ctx, observation = NewProxyRouteObservation(ctx, s.proxyActiveUsageTracker.Load())
+		SeedProxyRouteUsage(ctx, record.ProxyRoutes)
+	}
+	keepObservation := false
+	defer func() {
+		if !keepObservation {
+			observation.Close()
+		}
+	}()
 	account, err := s.accountRepo.GetByID(ctx, record.AccountID)
 	if err != nil {
 		return nil, err
@@ -462,16 +492,32 @@ func (s *OpenAIGatewayService) dialLiveSideband(ctx context.Context, record *Liv
 		return nil, err
 	}
 	target := strings.TrimRight(chatGPTLiveSidebandBaseURL, "/") + "/" + url.PathEscape(record.CallID)
-	conn, status, _, err := s.getOpenAIWSPassthroughDialer().Dial(ctx, target, headers, resolveAccountProxyURL(ctx, account, nil))
+	proxyURL := resolveAccountProxyURL(ctx, account, nil)
+	dialer := s.getOpenAIWSPassthroughDialer()
+	attempt := BeginProxyRouteAttempt(ctx, account.ID, proxyURL, openAIWSUsesEnvironmentProxy(dialer, target, proxyURL))
+	// A sideband is one continuous active Live session rather than an idle
+	// connection-pool entry. Keep its lease until the controlling transport closes.
+	conn, status, _, err := dialer.Dial(ctx, target, headers, proxyURL)
+	if routeStore, ok := s.cache.(LiveCallProxyRouteStore); ok {
+		persistCtx, cancel := context.WithTimeout(context.Background(), liveRedisOperationTimeout)
+		persistErr := routeStore.AppendLiveCallProxyRoutes(persistCtx, record.CallHash, ProxyRoutesFromContext(ctx))
+		cancel()
+		if persistErr != nil && !errors.Is(persistErr, ErrLiveCallNotFound) {
+			logger.FromContext(ctx).Warn("OpenAI Live 代理归因持久化失败", zap.Int64("account_id", account.ID), zap.String("error_type", fmt.Sprintf("%T", persistErr)))
+		}
+	}
 	if err != nil {
+		attempt.End()
 		return nil, fmt.Errorf("dial live sideband (status %d): %w", status, err)
 	}
 	raw, ok := conn.(liveFrameConn)
 	if !ok {
+		attempt.End()
 		_ = conn.Close()
 		return nil, errors.New("live sideband transport does not support raw frames")
 	}
-	return raw, nil
+	keepObservation = true
+	return &liveProxyRouteConn{liveFrameConn: raw, attempt: attempt, observation: observation}, nil
 }
 
 func (s *OpenAIGatewayService) GetLiveCallForIdentity(
@@ -823,6 +869,14 @@ func (s *OpenAIGatewayService) finalizeLiveCall(record *LiveCallRecord) {
 	if s.usageLogRepo == nil {
 		return
 	}
+	// Attribution lookup gets its own budget and cannot prevent the existing
+	// close marker or concurrency release when Redis is slow.
+	proxyRoutes := append([]ProxyRouteSnapshot(nil), record.ProxyRoutes...)
+	ctx, cancel = context.WithTimeout(context.Background(), liveRedisOperationTimeout)
+	if latest, getErr := store.GetLiveCall(ctx, record.CallHash); getErr == nil && latest != nil {
+		proxyRoutes = append([]ProxyRouteSnapshot(nil), latest.ProxyRoutes...)
+	}
+	cancel()
 	duration := int(time.Since(record.CreatedAt).Milliseconds())
 	if duration < 0 {
 		duration = 0
@@ -860,6 +914,7 @@ func (s *OpenAIGatewayService) finalizeLiveCall(record *LiveCallRecord) {
 		IPAddress:        &ipAddress,
 		InboundEndpoint:  &inboundEndpoint,
 		UpstreamEndpoint: &upstreamEndpoint,
+		ProxyRoutes:      proxyRoutes,
 		CreatedAt:        record.CreatedAt,
 	}, "service.openai_live")
 }

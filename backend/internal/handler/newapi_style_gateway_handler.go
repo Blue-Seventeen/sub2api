@@ -327,7 +327,6 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 		accountReleaseFunc = wrapReleaseOnDone(c.Request.Context(), accountReleaseFunc)
 
 		writerSizeBefore := c.Writer.Size()
-		activeUsageHandle := beginProxyActiveUsage(h.base.proxyActiveUsageTracker, account)
 		result, upstreamEndpoint, err := h.base.newAPIStyleService.Forward(
 			c.Request.Context(),
 			c,
@@ -346,7 +345,6 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 				HeaderSource:       c.Request.Header,
 			},
 		)
-		endProxyActiveUsage(activeUsageHandle)
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
 		}

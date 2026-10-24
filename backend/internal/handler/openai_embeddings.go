@@ -230,10 +230,8 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
 		}
 		writerSizeBeforeForward := c.Writer.Size()
-		activeUsageHandle := beginProxyActiveUsage(h.proxyActiveUsageTracker, account)
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {
-				endProxyActiveUsage(activeUsageHandle)
 				if accountReleaseFunc != nil {
 					accountReleaseFunc()
 				}

@@ -217,12 +217,12 @@ func ResolveProxyURL(ctx context.Context, proxy *Proxy) string {
 		resolver := GetDefaultManagedProxyResolver()
 		if resolver != nil {
 			if proxyURL, err := resolveManagedProxyURL(ctx, proxy, resolver); err == nil && proxyURL != "" {
-				return proxyURL
+				return registerProxyRoute(ctx, proxyURL, proxy)
 			}
 		}
 		return fmt.Sprintf("managed-proxy://unavailable/%d", *proxy.SubscriptionID)
 	}
-	return proxy.URL()
+	return registerProxyRoute(ctx, proxy.URL(), proxy)
 }
 
 func managedProxyURLForProxy(proxyURL string, proxy *Proxy) string {

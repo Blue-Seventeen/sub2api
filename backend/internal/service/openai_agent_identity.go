@@ -183,7 +183,7 @@ func registerAgentIdentityTask(ctx context.Context, account *Account) (string, e
 	}
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+		proxyURL = registerProxyRoute(ctx, account.Proxy.URL(), account.Proxy)
 	}
 	client, err := httpclient.GetClient(httpclient.Options{
 		ProxyURL:              proxyURL,
@@ -207,6 +207,8 @@ func registerAgentIdentityTask(ctx context.Context, account *Account) (string, e
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+	attempt := BeginProxyRouteAttempt(ctx, account.ID, proxyURL, false)
+	defer attempt.End()
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", errors.New("agent task registration request failed")

@@ -325,6 +325,10 @@
           <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
         </template>
 
+        <template #cell-proxy_routes="{ row }">
+          <span class="block max-w-sm whitespace-normal break-words text-sm text-gray-600 dark:text-gray-400">{{ formatUsageProxyRoutes(row.proxy_routes, t) }}</span>
+        </template>
+
         <template #empty><EmptyState :message="t('usage.noRecords')" /></template>
       </DataTable>
     </div>
@@ -682,6 +686,7 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import IpGeoCell from '@/components/common/IpGeoCell.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { fetchBatch, getEntry } from '@/utils/ipGeoLookup'
+import { formatUsageProxyRoutes } from '@/utils/usageProxyRoutes'
 import type { AdminUsageLog, UsageIPOptions } from '@/types'
 import UsageIPFilter from './UsageIPFilter.vue'
 import type { Column } from '@/components/common/types'

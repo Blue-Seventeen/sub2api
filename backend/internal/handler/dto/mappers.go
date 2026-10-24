@@ -797,6 +797,7 @@ func UsageLogFromServiceAdmin(l *service.UsageLog) *AdminUsageLog {
 	requested := strings.TrimSpace(derefString(l.RequestedReasoningEffort))
 	out := &AdminUsageLog{
 		UsageLog:              usageLog,
+		ProxyRoutes:           append([]service.ProxyRouteSnapshot(nil), l.ProxyRoutes...),
 		UpstreamModel:         l.UpstreamModel,
 		UpstreamResponseModel: l.UpstreamResponseModel,
 		UpstreamModelMismatch: l.UpstreamModelMismatch,

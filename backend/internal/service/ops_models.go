@@ -60,6 +60,8 @@ type OpsErrorLog struct {
 	ClientIP    *string `json:"client_ip"`
 	RequestPath string  `json:"request_path"`
 	Stream      bool    `json:"stream"`
+	// ProxyRoutes is admin-only request-time attribution. Historical rows remain nil.
+	ProxyRoutes []ProxyRouteSnapshot `json:"proxy_routes"`
 
 	InboundEndpoint    string `json:"inbound_endpoint"`
 	UpstreamEndpoint   string `json:"upstream_endpoint"`

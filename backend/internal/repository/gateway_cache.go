@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -439,11 +440,16 @@ func (c *gatewayCache) SaveLiveCall(ctx context.Context, record *service.LiveCal
 		"inbound_endpoint": record.InboundEndpoint,
 		"attestation":      record.AttestationCiphertext,
 	}
+	proxyRoutes, err := json.Marshal(record.ProxyRoutes)
+	if err != nil {
+		return fmt.Errorf("encode live proxy routes: %w", err)
+	}
+	values["proxy_routes"] = string(proxyRoutes)
 	key := liveCallKey(record.CallHash)
 	pipe := c.rdb.TxPipeline()
 	pipe.HSet(ctx, key, values)
 	pipe.Expire(ctx, key, ttl)
-	_, err := pipe.Exec(ctx)
+	_, err = pipe.Exec(ctx)
 	return err
 }
 
@@ -461,6 +467,12 @@ func (c *gatewayCache) GetLiveCall(ctx context.Context, callHash string) (*servi
 	}
 	createdAt := time.UnixMilli(parseInt("created_at"))
 	expiresAt := time.UnixMilli(parseInt("expires_at"))
+	var proxyRoutes []service.ProxyRouteSnapshot
+	if raw := values["proxy_routes"]; raw != "" {
+		if err := json.Unmarshal([]byte(raw), &proxyRoutes); err != nil {
+			return nil, fmt.Errorf("decode live proxy routes: %w", err)
+		}
+	}
 	return &service.LiveCallRecord{
 		CallID:                values["call_id"],
 		CallHash:              callHash,
@@ -479,7 +491,50 @@ func (c *gatewayCache) GetLiveCall(ctx context.Context, callHash string) (*servi
 		IPAddress:             values["ip_address"],
 		InboundEndpoint:       values["inbound_endpoint"],
 		AttestationCiphertext: values["attestation"],
+		ProxyRoutes:           proxyRoutes,
 	}, nil
+}
+
+var appendLiveCallProxyRoutesScript = redis.NewScript(`
+	local key = KEYS[1]
+	if redis.call('EXISTS', key) == 0 then return 0 end
+	local raw = redis.call('HGET', key, 'proxy_routes')
+	local routes = {}
+	if raw and raw ~= 'null' then routes = cjson.decode(raw) end
+	local seen = {}
+	for _, route in ipairs(routes) do
+		local identity = route.kind
+		if identity == 'proxy' then identity = identity .. ':' .. tostring(route.proxy_id or 0) end
+		seen[identity] = true
+	end
+	for _, route in ipairs(cjson.decode(ARGV[1])) do
+		local identity = route.kind
+		if identity == 'proxy' then identity = identity .. ':' .. tostring(route.proxy_id or 0) end
+		if not seen[identity] then
+			table.insert(routes, route)
+			seen[identity] = true
+		end
+	end
+	redis.call('HSET', key, 'proxy_routes', cjson.encode(routes))
+	return 1
+`)
+
+func (c *gatewayCache) AppendLiveCallProxyRoutes(ctx context.Context, callHash string, routes []service.ProxyRouteSnapshot) error {
+	if len(routes) == 0 {
+		return nil
+	}
+	data, err := json.Marshal(routes)
+	if err != nil {
+		return err
+	}
+	result, err := appendLiveCallProxyRoutesScript.Run(ctx, c.rdb, []string{liveCallKey(callHash)}, string(data)).Int()
+	if err != nil {
+		return err
+	}
+	if result == 0 {
+		return service.ErrLiveCallNotFound
+	}
+	return nil
 }
 
 func (c *gatewayCache) ClaimLiveController(ctx context.Context, callHash, controller, owner string) (bool, error) {

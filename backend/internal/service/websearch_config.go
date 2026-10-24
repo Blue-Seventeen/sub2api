@@ -22,14 +22,15 @@ type WebSearchEmulationConfig struct {
 
 // WebSearchProviderConfig describes a single search provider (Brave or Tavily).
 type WebSearchProviderConfig struct {
-	Type             string `json:"type"`                    // websearch.ProviderTypeBrave | Tavily
-	APIKey           string `json:"api_key,omitempty"`       // secret — omitted in API responses
-	APIKeyConfigured bool   `json:"api_key_configured"`      // read-only mask
-	QuotaLimit       *int64 `json:"quota_limit"`             // nil = unlimited, >0 = limited
-	SubscribedAt     *int64 `json:"subscribed_at,omitempty"` // subscription start (unix seconds); quota resets monthly
-	QuotaUsed        int64  `json:"quota_used,omitempty"`    // read-only: current usage from Redis
-	ProxyID          *int64 `json:"proxy_id"`                // optional proxy association
-	ExpiresAt        *int64 `json:"expires_at,omitempty"`    // optional expiration timestamp
+	Type             string              `json:"type"`                    // websearch.ProviderTypeBrave | Tavily
+	APIKey           string              `json:"api_key,omitempty"`       // secret — omitted in API responses
+	APIKeyConfigured bool                `json:"api_key_configured"`      // read-only mask
+	QuotaLimit       *int64              `json:"quota_limit"`             // nil = unlimited, >0 = limited
+	SubscribedAt     *int64              `json:"subscribed_at,omitempty"` // subscription start (unix seconds); quota resets monthly
+	QuotaUsed        int64               `json:"quota_used,omitempty"`    // read-only: current usage from Redis
+	ProxyID          *int64              `json:"proxy_id"`                // optional proxy association
+	ExpiresAt        *int64              `json:"expires_at,omitempty"`    // optional expiration timestamp
+	ProxyRoute       *ProxyRouteSnapshot `json:"-"`                       // detached metadata for the in-process manager
 }
 
 // --- Validation ---
@@ -235,6 +236,11 @@ func (s *SettingService) rebuildWebSearchManager(ctx context.Context) {
 		SetWebSearchManager(nil)
 		return
 	}
+	// Cached settings are shared with API readers. Annotate only the manager's
+	// detached copy, never mutate the settings snapshot during rebuild.
+	detached := *cfg
+	detached.Providers = append([]WebSearchProviderConfig(nil), cfg.Providers...)
+	cfg = &detached
 	proxyURLs := s.resolveProviderProxyURLs(ctx, cfg)
 	s.webSearchManagerBuilder(cfg, proxyURLs)
 }
@@ -261,6 +267,12 @@ func (s *SettingService) resolveProviderProxyURLs(ctx context.Context, cfg *WebS
 	result := make(map[int64]string, len(proxies))
 	for _, px := range proxies {
 		result[px.ID] = px.URL()
+		for i := range cfg.Providers {
+			if id := cfg.Providers[i].ProxyID; id != nil && *id == px.ID {
+				route := ProxyRouteSnapshot{Kind: "proxy", ProxyID: px.ID, Name: px.Name, Host: px.Host, Port: px.Port}
+				cfg.Providers[i].ProxyRoute = &route
+			}
+		}
 	}
 	return result
 }

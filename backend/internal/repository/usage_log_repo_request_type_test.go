@@ -855,6 +855,7 @@ func buildUsageLogScanValues(opts usageLogScanRowOptions) []any {
 		sql.NullString{},  // billing_tier
 		sql.NullString{},  // billing_mode
 		sql.NullFloat64{}, // account_stats_cost
+		sql.NullString{},  // proxy_routes
 		nullString(opts.UpstreamRequestID),
 		sql.NullString{}, // session_id
 		opts.NativeCompactionV2,

@@ -2140,6 +2140,16 @@ func IPAddressContainsFold(v string) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldContainsFold(FieldIPAddress, v))
 }
 
+// ProxyRoutesIsNil applies the IsNil predicate on the "proxy_routes" field.
+func ProxyRoutesIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldProxyRoutes))
+}
+
+// ProxyRoutesNotNil applies the NotNil predicate on the "proxy_routes" field.
+func ProxyRoutesNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldProxyRoutes))
+}
+
 // ImageCountEQ applies the EQ predicate on the "image_count" field.
 func ImageCountEQ(v int) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldImageCount, v))

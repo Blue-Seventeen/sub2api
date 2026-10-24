@@ -78,6 +78,38 @@ func newDefaultOpenAIWSClientDialer() openAIWSClientDialer {
 	}
 }
 
+// With no explicit proxy coder/websocket uses http.DefaultClient. Inspect that
+// client's actual transport proxy function with the HTTP handshake URL so a
+// NO_PROXY bypass remains confirmed direct, rather than guessing from env vars.
+func openAIWSUsesEnvironmentProxy(dialer openAIWSClientDialer, target, explicitProxy string) bool {
+	if strings.TrimSpace(explicitProxy) != "" {
+		return false
+	}
+	if _, ok := dialer.(*coderOpenAIWSClientDialer); !ok {
+		return false
+	}
+	transport := http.DefaultClient.Transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+	tr, ok := transport.(*http.Transport)
+	if !ok || tr.Proxy == nil {
+		return false
+	}
+	u, err := url.Parse(target)
+	if err != nil {
+		return false
+	}
+	switch u.Scheme {
+	case "ws":
+		u.Scheme = "http"
+	case "wss":
+		u.Scheme = "https"
+	}
+	proxy, err := tr.Proxy(&http.Request{URL: u})
+	return err == nil && proxy != nil
+}
+
 type coderOpenAIWSClientDialer struct {
 	proxyMu      sync.Mutex
 	proxyClients map[string]*openAIWSProxyClientEntry
