@@ -34,9 +34,15 @@ backend/internal/web/dist/
 build/
 artifacts/
 release-artifacts/
+**/artifacts/
+**/release-artifacts/
 .superpowers/
 .codex/
 .dev/
+docs-local/
+assets/
+skills/
+openspec/
 
 # Node modules (will be installed in container)
 frontend/node_modules/
@@ -45,6 +51,11 @@ node_modules/
 # Go build cache (will be built in container)
 backend/vendor/
 backend/.local-v*/
+# Explicitly exclude the protected local runtime tree from every build context.
+# Keep both directory forms because Docker Desktop and BuildKit normalize
+# Windows paths differently before applying patterns.
+/backend/.local-v0.2.17
+/backend/.local-v0.2.17/**
 
 # Test files
 *_test.go
