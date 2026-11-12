@@ -149,6 +149,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		}
 		if account.IsPoolMode() && resp.StatusCode >= 400 {
 			respBody := s.readUpstreamErrorBody(resp)
+			SetOpsUpstreamAuthCategoryFromBody(c, resp.StatusCode, respBody)
 			_ = resp.Body.Close()
 			if failoverErr := poolModeHTTPFailover(ctx, s.rateLimitService, account, resp.StatusCode, resp.Header, respBody, mappedModel); failoverErr != nil {
 				return nil, failoverErr
@@ -168,6 +169,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 
 		if resp.StatusCode >= 400 && s.shouldRetryGeminiUpstreamError(account, resp.StatusCode) {
 			respBody := s.readUpstreamErrorBody(resp)
+			SetOpsUpstreamAuthCategoryFromBody(c, resp.StatusCode, respBody)
 			_ = resp.Body.Close()
 			if resp.StatusCode == http.StatusForbidden && isGeminiInsufficientScope(resp.Header, respBody) {
 				resp = &http.Response{
@@ -223,6 +225,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 
 	if resp.StatusCode >= 400 {
 		respBody := s.readUpstreamErrorBody(resp)
+		SetOpsUpstreamAuthCategoryFromBody(c, resp.StatusCode, respBody)
 		policy := ErrorPolicyNone
 		if s.rateLimitService != nil {
 			policy = s.finalErrorPolicy(ctx, account, resp.StatusCode, respBody, mappedModel, checkedPolicy)

@@ -472,6 +472,7 @@ func setOpsSelectedAccount(c *gin.Context, accountID int64, platform ...string) 
 		return
 	}
 	c.Set(opsAccountIDKey, accountID)
+	service.SetOpsSelectedAccountForAttempt(c, accountID)
 	c.Set(opsUpstreamModelKey, "")
 	if c.Request != nil {
 		ctx := context.WithValue(c.Request.Context(), ctxkey.AccountID, accountID)
@@ -497,6 +498,19 @@ func markOpsRoutingCapacityLimitedIfNoAvailable(c *gin.Context, err error) {
 		return
 	}
 	markOpsRoutingCapacityLimited(c)
+}
+
+// markOpsCandidatesExhaustedFromSelection is deliberately strict: account
+// selector exhaustion is observability metadata, not a synonym for an
+// infrastructure, cancellation, or pinned-account error. Call it only at a
+// terminal selection branch after a finite request candidate set is exhausted.
+func markOpsCandidatesExhaustedFromSelection(c *gin.Context, err error) {
+	if c == nil || err == nil || errors.Is(err, context.Canceled) || errors.Is(err, service.ErrSameAccountRetryUnavailable) {
+		return
+	}
+	if errors.Is(err, service.ErrNoAvailableAccounts) || errors.Is(err, service.ErrNoAvailableCompactAccounts) {
+		c.Set(service.OpsCandidatesExhaustedKey, true)
+	}
 }
 
 func isOpsRoutingCapacityLimited(c *gin.Context) bool {
@@ -1591,6 +1605,7 @@ func logOpsStreamErrorValue(c *gin.Context, ops *service.OpsService, wireStatus 
 	if streamErr.Turn > 0 && !streamErr.RequestScoped {
 		applyOpsStreamErrorSnapshot(entry, streamErr)
 	}
+	annotateOpsAttemptOutcome(c, entry)
 
 	if apiKey != nil {
 		entry.APIKeyID = &apiKey.ID
@@ -1722,8 +1737,37 @@ func applyOpsUpstreamFieldsFromContext(c *gin.Context, entry *service.OpsInsertE
 	if v, ok := c.Get(service.OpsUpstreamErrorsKey); ok {
 		if events, ok := v.([]*service.OpsUpstreamErrorEvent); ok && len(events) > 0 {
 			applyOpsUpstreamErrorEvents(entry, events)
+			annotateOpsAttemptOutcome(c, entry)
 		}
 	}
+}
+
+// A 2xx wire response is not proof of semantic model completion. Preserve the
+// distinction in diagnostics; controlled/live acceptance also verifies the
+// terminal event and persisted usage. Copy snapshots before final annotation.
+func annotateOpsAttemptOutcome(c *gin.Context, entry *service.OpsInsertErrorLogInput) {
+	if c == nil || entry == nil || len(entry.UpstreamErrors) == 0 {
+		return
+	}
+	outcome := "response_2xx"
+	if c.Request != nil && c.Request.Context().Err() != nil {
+		outcome = "canceled"
+	} else if entry.StatusCode >= 400 || len(service.GetOpsStreamErrors(c)) > 0 {
+		outcome = "failed"
+	}
+	events := make([]*service.OpsUpstreamErrorEvent, 0, len(entry.UpstreamErrors))
+	for _, ev := range entry.UpstreamErrors {
+		if ev == nil {
+			events = append(events, nil)
+			continue
+		}
+		copyOfEvent := *ev
+		copyOfEvent.RequestOutcome = outcome
+		copyOfEvent.CandidatesExhausted = c.GetBool(service.OpsCandidatesExhaustedKey)
+		copyOfEvent.SelectedAccountID, copyOfEvent.AccountSwitchCount = service.OpsSelectedAccountForAttempt(c)
+		events = append(events, &copyOfEvent)
+	}
+	entry.UpstreamErrors = events
 }
 
 func applyOpsUpstreamErrorEvents(entry *service.OpsInsertErrorLogInput, events []*service.OpsUpstreamErrorEvent) {

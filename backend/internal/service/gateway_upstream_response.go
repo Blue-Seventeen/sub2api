@@ -563,6 +563,7 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 	scheduleOllamaCloudUsageActivity(s.deferredService, account)
 	scheduleOpenCodeGoUsageActivity(s.deferredService, account)
 	body, readErr := s.readUpstreamErrorBody(resp)
+	SetOpsUpstreamAuthCategoryFromBody(c, resp.StatusCode, body)
 	if readErr != nil {
 		// 读取失败时 body 可能被截断，错误分类会基于不完整数据；记录日志以便排查，
 		// 避免静默吞掉导致误判。

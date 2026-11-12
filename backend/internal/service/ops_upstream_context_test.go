@@ -35,6 +35,67 @@ func TestSafeUpstreamURL(t *testing.T) {
 	}
 }
 
+func TestOpsUpstreamAuthCategoryIsCapturedBeforeBodyRedaction(t *testing.T) {
+	t.Run("expired token survives disabled body logging", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		SetOpsUpstreamAuthCategoryFromBody(c, 401, []byte(`{"error":{"code":"token_expired"}}`))
+		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{UpstreamStatusCode: 401})
+		raw, ok := c.Get(OpsUpstreamErrorsKey)
+		require.True(t, ok)
+		events, ok := raw.([]*OpsUpstreamErrorEvent)
+		require.True(t, ok)
+		require.Len(t, events, 1)
+		require.Equal(t, "credential_expired", events[0].AuthCategory)
+		require.Empty(t, events[0].Detail)
+		require.Empty(t, events[0].UpstreamResponseBody)
+	})
+
+	t.Run("content policy 403 is not authentication", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		SetOpsUpstreamAuthCategoryFromBody(c, 403, []byte(`{"error":{"code":"content_policy_violation"}}`))
+		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{UpstreamStatusCode: 403})
+		raw, ok := c.Get(OpsUpstreamErrorsKey)
+		require.True(t, ok)
+		events, ok := raw.([]*OpsUpstreamErrorEvent)
+		require.True(t, ok)
+		require.Len(t, events, 1)
+		require.Empty(t, events[0].AuthCategory)
+	})
+
+	t.Run("category does not leak to a later non-auth attempt", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		SetOpsUpstreamAuthCategoryFromBody(c, 401, []byte(`{"error":{"code":"token_expired"}}`))
+		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{UpstreamStatusCode: 401})
+		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{UpstreamStatusCode: 401})
+		raw, ok := c.Get(OpsUpstreamErrorsKey)
+		require.True(t, ok)
+		events, ok := raw.([]*OpsUpstreamErrorEvent)
+		require.True(t, ok)
+		require.Len(t, events, 2)
+		require.Equal(t, "credential_expired", events[0].AuthCategory)
+		require.Equal(t, "authentication_unspecified", events[1].AuthCategory)
+	})
+}
+
+func TestGeminiOpsAuthCategoryUsesRawBodyWithLoggingDisabledPerAttempt(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	svc := &GeminiMessagesCompatService{}
+	account := &Account{ID: 73, Name: "gemini-auth-test", Platform: PlatformGemini}
+
+	svc.recordGeminiNativeUpstreamError(c, account, 401, []byte(`{"error":{"code":"token_expired"}}`), "gemini-expired")
+	svc.recordGeminiNativeUpstreamError(c, account, 401, []byte(`{"error":{"message":"Unauthorized"}}`), "gemini-unknown")
+
+	raw, ok := c.Get(OpsUpstreamErrorsKey)
+	require.True(t, ok)
+	events, ok := raw.([]*OpsUpstreamErrorEvent)
+	require.True(t, ok)
+	require.Len(t, events, 2)
+	require.Equal(t, "credential_expired", events[0].AuthCategory)
+	require.Equal(t, "authentication_unspecified", events[1].AuthCategory)
+	require.Empty(t, events[0].Detail)
+	require.Empty(t, events[0].UpstreamResponseBody)
+}
+
 func TestOpsUpstreamErrorEventKeepsExplicitProxySnapshotPerAttempt(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 

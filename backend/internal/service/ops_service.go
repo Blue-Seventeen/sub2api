@@ -622,6 +622,12 @@ func sanitizeOpsUpstreamErrors(entry *OpsInsertErrorLogInput) error {
 		out.Stage = truncateString(strings.TrimSpace(out.Stage), 64)
 		out.Scope = truncateString(strings.TrimSpace(out.Scope), 64)
 		out.Reason = truncateString(strings.TrimSpace(out.Reason), 128)
+		if !isValidOpsAuthCategory(out.AuthCategory) {
+			out.AuthCategory = ""
+		}
+		if !isValidOpsRequestOutcome(out.RequestOutcome) {
+			out.RequestOutcome = ""
+		}
 
 		if out.AccountID < 0 {
 			out.AccountID = 0
@@ -631,6 +637,15 @@ func sanitizeOpsUpstreamErrors(entry *OpsInsertErrorLogInput) error {
 		}
 		if out.AtUnixMs < 0 {
 			out.AtUnixMs = 0
+		}
+		if out.AttemptIndex < 0 {
+			out.AttemptIndex = 0
+		}
+		if out.SelectedAccountID < 0 {
+			out.SelectedAccountID = 0
+		}
+		if out.AccountSwitchCount < 0 {
+			out.AccountSwitchCount = 0
 		}
 
 		if body := strings.TrimSpace(out.UpstreamRequestBody); body != "" {
@@ -673,6 +688,24 @@ func sanitizeOpsUpstreamErrors(entry *OpsInsertErrorLogInput) error {
 	entry.UpstreamErrorsJSON = marshalOpsUpstreamErrors(sanitized)
 	entry.UpstreamErrors = nil
 	return nil
+}
+
+func isValidOpsAuthCategory(value string) bool {
+	switch value {
+	case "", "credential_revoked", "credential_expired", "authentication_unspecified", "provider_auth":
+		return true
+	default:
+		return false
+	}
+}
+
+func isValidOpsRequestOutcome(value string) bool {
+	switch value {
+	case "", "response_2xx", "failed", "canceled":
+		return true
+	default:
+		return false
+	}
 }
 
 // boundOpsUpstreamErrors enforces the per-entry event count and serialized

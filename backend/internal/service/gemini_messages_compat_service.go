@@ -743,6 +743,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 		// downgrading Claude thinking/tool history to plain text (conservative two-stage retry).
 		if resp.StatusCode == http.StatusBadRequest && signatureRetryStage < 2 {
 			respBody := s.readUpstreamErrorBody(resp)
+			SetOpsUpstreamAuthCategoryFromBody(c, resp.StatusCode, respBody)
 			_ = resp.Body.Close()
 
 			if isGeminiSignatureRelatedError(respBody) {
@@ -814,6 +815,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 
 		if account.IsPoolMode() && resp.StatusCode >= 400 {
 			respBody := s.readUpstreamErrorBody(resp)
+			SetOpsUpstreamAuthCategoryFromBody(c, resp.StatusCode, respBody)
 			_ = resp.Body.Close()
 			if failoverErr := poolModeHTTPFailover(ctx, s.rateLimitService, account, resp.StatusCode, resp.Header, respBody, mappedModel); failoverErr != nil {
 				return nil, failoverErr
@@ -834,6 +836,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 
 		if resp.StatusCode >= 400 && s.shouldRetryGeminiUpstreamError(account, resp.StatusCode) {
 			respBody := s.readUpstreamErrorBody(resp)
+			SetOpsUpstreamAuthCategoryFromBody(c, resp.StatusCode, respBody)
 			_ = resp.Body.Close()
 			// Don't treat insufficient-scope as transient.
 			if resp.StatusCode == 403 && isGeminiInsufficientScope(resp.Header, respBody) {
@@ -895,6 +898,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 
 	if resp.StatusCode >= 400 {
 		respBody := s.readUpstreamErrorBody(resp)
+		SetOpsUpstreamAuthCategoryFromBody(c, resp.StatusCode, respBody)
 		// 统一错误策略：自定义错误码 + 临时不可调度
 		if s.rateLimitService != nil {
 			policy := s.finalErrorPolicy(ctx, account, resp.StatusCode, respBody, mappedModel, checkedPolicy)
@@ -1335,6 +1339,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 		}
 		if account.IsPoolMode() && resp.StatusCode >= 400 {
 			respBody := s.readUpstreamErrorBody(resp)
+			SetOpsUpstreamAuthCategoryFromBody(c, resp.StatusCode, respBody)
 			_ = resp.Body.Close()
 			if failoverErr := poolModeHTTPFailover(ctx, s.rateLimitService, account, resp.StatusCode, resp.Header, respBody, mappedModel); failoverErr != nil {
 				return nil, failoverErr
@@ -1355,6 +1360,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 
 		if resp.StatusCode >= 400 && s.shouldRetryGeminiUpstreamError(account, resp.StatusCode) {
 			respBody := s.readUpstreamErrorBody(resp)
+			SetOpsUpstreamAuthCategoryFromBody(c, resp.StatusCode, respBody)
 			_ = resp.Body.Close()
 			// Don't treat insufficient-scope as transient.
 			if resp.StatusCode == 403 && isGeminiInsufficientScope(resp.Header, respBody) {
@@ -1434,6 +1440,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 
 	if resp.StatusCode >= 400 {
 		respBody := s.readUpstreamErrorBody(resp)
+		SetOpsUpstreamAuthCategoryFromBody(c, resp.StatusCode, respBody)
 		// 引用缓存不存在是请求问题：统一返回 403，不改账号状态、不换号。
 		if isGeminiCachedContentNotFound(resp.StatusCode, respBody) {
 			return nil, s.writeGeminiCachedContentNotFound(c, account, resp, respBody, requestID, isOAuth)
@@ -1752,6 +1759,7 @@ func (s *GeminiMessagesCompatService) skippedErrorPolicyFailoverError(c *gin.Con
 	if !s.shouldFailoverGeminiUpstreamError(statusCode) {
 		return nil
 	}
+	SetOpsUpstreamAuthCategoryFromBody(c, statusCode, respBody)
 	upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
 	upstreamDetail := s.upstreamErrorDetail(respBody)
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -1794,6 +1802,7 @@ func (s *GeminiMessagesCompatService) upstreamErrorDetail(body []byte) string {
 // 客户端统一收到 500 + 固定文案（由 write 按端点格式写出），不透传上游细节；
 // 上游真实状态码与错误信息仅记录到 ops 错误日志。
 func (s *GeminiMessagesCompatService) writeGeminiCustomCodeSkippedError(c *gin.Context, account *Account, upstreamStatus int, upstreamRequestID string, body []byte, write func()) error {
+	SetOpsUpstreamAuthCategoryFromBody(c, upstreamStatus, body)
 	upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(body)))
 	upstreamDetail := s.upstreamErrorDetail(body)
 	setOpsUpstreamError(c, upstreamStatus, upstreamMsg, upstreamDetail)
@@ -1847,6 +1856,7 @@ func (s *GeminiMessagesCompatService) writeGeminiCachedContentNotFound(c *gin.Co
 
 // recordGeminiNativeUpstreamError 把上游错误响应登记到 ops 上下文，返回脱敏后的上游错误文案。
 func (s *GeminiMessagesCompatService) recordGeminiNativeUpstreamError(c *gin.Context, account *Account, statusCode int, respBody []byte, requestID string) string {
+	SetOpsUpstreamAuthCategoryFromBody(c, statusCode, respBody)
 	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 	upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 	upstreamDetail := s.upstreamErrorDetail(respBody)
@@ -1899,6 +1909,7 @@ func sanitizeUpstreamErrorMessage(msg string) string {
 }
 
 func (s *GeminiMessagesCompatService) writeGeminiMappedError(c *gin.Context, account *Account, upstreamStatus int, upstreamRequestID string, body []byte) error {
+	SetOpsUpstreamAuthCategoryFromBody(c, upstreamStatus, body)
 	MarkResponseCommitted(c)
 	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(body))
 	upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)

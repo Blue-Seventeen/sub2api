@@ -23,9 +23,13 @@ const (
 	OpsUpstreamStatusCodeKey   = "ops_upstream_status_code"
 	OpsUpstreamErrorMessageKey = "ops_upstream_error_message"
 	OpsUpstreamErrorDetailKey  = "ops_upstream_error_detail"
+	OpsUpstreamAuthCategoryKey = "ops_upstream_auth_category"
 	OpsUpstreamErrorsKey       = "ops_upstream_errors"
 	OpsUpstreamRequestBodyKey  = "ops_upstream_request_body"
 	OpsUpstreamModelKey        = "ops_upstream_model"
+	OpsCandidatesExhaustedKey  = "ops_candidates_exhausted"
+	OpsSelectedAccountIDKey    = "ops_selected_account_id"
+	OpsAccountSwitchCountKey   = "ops_account_switch_count"
 
 	// Optional stage latencies (milliseconds) for troubleshooting and alerting.
 	OpsAuthLatencyMsKey      = "ops_auth_latency_ms"
@@ -110,6 +114,31 @@ func ClearOpsUpstreamModel(c *gin.Context) {
 		return
 	}
 	c.Set(OpsUpstreamModelKey, "")
+}
+
+// SetOpsSelectedAccountForAttempt records only non-secret routing metadata.
+// It is request-scoped and is intentionally separate from account attribution
+// so final diagnostics can distinguish the failed attempt from the account
+// eventually selected after a safe pool failover.
+func SetOpsSelectedAccountForAttempt(c *gin.Context, accountID int64) {
+	if c == nil || accountID <= 0 {
+		return
+	}
+	previous, _ := c.Get(OpsSelectedAccountIDKey)
+	previousID, _ := previous.(int64)
+	if previousID > 0 && previousID != accountID {
+		c.Set(OpsAccountSwitchCountKey, c.GetInt(OpsAccountSwitchCountKey)+1)
+	}
+	c.Set(OpsSelectedAccountIDKey, accountID)
+}
+
+func OpsSelectedAccountForAttempt(c *gin.Context) (int64, int) {
+	if c == nil {
+		return 0, 0
+	}
+	id, _ := c.Get(OpsSelectedAccountIDKey)
+	accountID, _ := id.(int64)
+	return accountID, c.GetInt(OpsAccountSwitchCountKey)
 }
 
 func MarkOpsClientBusinessLimited(c *gin.Context, reason string) {
@@ -236,6 +265,7 @@ func BeginOpsStreamTurn(c *gin.Context, turn int) {
 	c.Set(OpsUpstreamStatusCodeKey, 0)
 	c.Set(OpsUpstreamErrorMessageKey, "")
 	c.Set(OpsUpstreamErrorDetailKey, "")
+	c.Set(OpsUpstreamAuthCategoryKey, "")
 }
 
 // MarkOpsStreamError 记录一次就地 SSE 错误，供 ops 日志采集。
@@ -407,6 +437,20 @@ func setOpsUpstreamError(c *gin.Context, upstreamStatusCode int, upstreamMessage
 	}
 }
 
+// SetOpsUpstreamAuthCategoryFromBody classifies an upstream authentication
+// response before body logging is optionally disabled. Only the allowlisted
+// category is retained in the request context; the response body is not.
+func SetOpsUpstreamAuthCategoryFromBody(c *gin.Context, status int, body []byte) {
+	if c == nil || (status != 401 && status != 403) {
+		return
+	}
+	category := ""
+	if len(body) > 0 {
+		category = opsUpstreamAuthCategory(status, string(body))
+	}
+	c.Set(OpsUpstreamAuthCategoryKey, category)
+}
+
 func setOpsUpstreamRequestBody(c *gin.Context, body []byte) {
 	if c == nil || len(body) == 0 {
 		return
@@ -420,6 +464,16 @@ func setOpsUpstreamRequestBody(c *gin.Context, body []byte) {
 // It is stored in ops_error_logs.upstream_errors as a JSON array.
 type OpsUpstreamErrorEvent struct {
 	AtUnixMs int64 `json:"at_unix_ms,omitempty"`
+	// AttemptIndex counts observed error events, not successful upstream calls.
+	AttemptIndex      int    `json:"attempt_index,omitempty"`
+	ResponseCommitted bool   `json:"response_committed"`
+	AuthCategory      string `json:"auth_category,omitempty"`
+	// Final request outcome is annotated before persistence; a wire 2xx is
+	// deliberately not described as successful model completion.
+	RequestOutcome      string `json:"request_outcome,omitempty"`
+	CandidatesExhausted bool   `json:"candidates_exhausted,omitempty"`
+	SelectedAccountID   int64  `json:"selected_account_id,omitempty"`
+	AccountSwitchCount  int    `json:"account_switch_count,omitempty"`
 
 	// Passthrough 表示本次请求是否命中“原样透传（仅替换认证）”分支。
 	// 该字段用于排障与灰度评估；存入 JSON，不涉及 DB schema 变更。
@@ -554,6 +608,18 @@ func appendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) {
 	ev.UpstreamURL = safeUpstreamURL(strings.TrimSpace(ev.UpstreamURL))
 	ev.Message = strings.TrimSpace(ev.Message)
 	ev.Detail = strings.TrimSpace(ev.Detail)
+	if ev.UpstreamStatusCode == 401 || ev.UpstreamStatusCode == 403 {
+		if category, exists := c.Get(OpsUpstreamAuthCategoryKey); exists {
+			ev.AuthCategory, _ = category.(string)
+			c.Set(OpsUpstreamAuthCategoryKey, "")
+			if ev.AuthCategory == "" {
+				ev.AuthCategory = opsUpstreamAuthCategory(ev.UpstreamStatusCode, ev.Detail, ev.UpstreamResponseBody)
+			}
+		} else {
+			ev.AuthCategory = opsUpstreamAuthCategory(ev.UpstreamStatusCode, ev.Detail, ev.UpstreamResponseBody)
+		}
+	}
+	ev.ResponseCommitted = IsResponseCommitted(c) || (c.Writer != nil && c.Writer.Written())
 	if ev.Message != "" {
 		ev.Message = sanitizeUpstreamErrorMessage(ev.Message)
 	}
@@ -575,11 +641,51 @@ func appendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) {
 		}
 	}
 
+	ev.AttemptIndex = len(existing) + 1
 	evCopy := ev
 	existing = append(existing, &evCopy)
 	c.Set(OpsUpstreamErrorsKey, existing)
 
 	checkSkipMonitoringForUpstreamEvent(c, &evCopy)
+}
+
+// Only structured provider codes/types are evidence of expired/revoked
+// credentials. Free-form messages can echo input and must never decide this.
+func opsUpstreamAuthCategory(status int, bodies ...string) string {
+	if status != 401 && status != 403 {
+		return ""
+	}
+	providerAuth := false
+	for _, body := range bodies {
+		if !gjson.Valid(body) {
+			continue
+		}
+		for _, path := range []string{"error.code", "error.type", "response.error.code", "response.error.type"} {
+			value := gjson.Get(body, path)
+			if value.Type != gjson.String {
+				continue
+			}
+			code := strings.ToLower(strings.TrimSpace(value.String()))
+			if status == 403 && (strings.Contains(code, "content") || strings.Contains(code, "safety") || strings.Contains(code, "policy")) {
+				return ""
+			}
+			switch code {
+			case "token_revoked", "access_token_revoked", "refresh_token_revoked":
+				return "credential_revoked"
+			case "token_expired", "access_token_expired", "refresh_token_expired":
+				return "credential_expired"
+			case "authentication_error", "invalid_api_key", "invalid_authentication":
+				providerAuth = true
+			}
+		}
+	}
+	if providerAuth {
+		return "provider_auth"
+	}
+	if status == 401 {
+		return "authentication_unspecified"
+	}
+	return ""
 }
 
 // checkSkipMonitoringForUpstreamEvent checks whether the upstream error event

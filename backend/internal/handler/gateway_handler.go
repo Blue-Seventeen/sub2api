@@ -428,6 +428,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					failoverClientGone(c)
 					return
 				default: // FailoverExhausted
+					markOpsCandidatesExhaustedFromSelection(c, err)
 					if fs.LastFailoverErr != nil {
 						recordGatewayProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, lastFailedAccount, apiKey, lastFailedDurationMs, "handler.gateway.messages")
 						h.handleFailoverExhausted(c, fs.LastFailoverErr, service.PlatformGemini, streamStarted)
@@ -808,6 +809,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					failoverClientGone(c)
 					return
 				default: // FailoverExhausted
+					markOpsCandidatesExhaustedFromSelection(c, err)
 					if fs.LastFailoverErr != nil {
 						recordGatewayProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, lastFailedAccount, currentAPIKey, lastFailedDurationMs, "handler.gateway.messages")
 						h.handleFailoverExhausted(c, fs.LastFailoverErr, platform, streamStarted)

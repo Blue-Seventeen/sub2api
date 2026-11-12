@@ -245,6 +245,7 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 			case FailoverCanceled:
 				return
 			default:
+				markOpsCandidatesExhaustedFromSelection(c, err)
 				if fs.LastFailoverErr != nil {
 					h.base.handleFailoverExhaustedSimple(c, fs.LastFailoverErr.StatusCode, streamStarted)
 				} else {

@@ -602,6 +602,11 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				failoverClientGone(c)
 				return
 			default: // FailoverExhausted
+				// A cache/content binding mismatch intentionally pins the request to
+				// one account; it is not evidence that the pool candidate set ran out.
+				if cachedContentBinding == nil {
+					markOpsCandidatesExhaustedFromSelection(c, err)
+				}
 				h.handleGeminiFailoverExhausted(c, fs.LastFailoverErr)
 				return
 			}

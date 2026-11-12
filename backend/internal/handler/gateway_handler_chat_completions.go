@@ -226,6 +226,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				failoverClientGone(c)
 				return
 			default:
+				markOpsCandidatesExhaustedFromSelection(c, err)
 				if fs.LastFailoverErr != nil {
 					recordGatewayProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, lastFailedAccount, apiKey, lastFailedDurationMs, "handler.gateway.chat_completions")
 					h.handleCCFailoverExhausted(c, fs.LastFailoverErr, streamStarted)
