@@ -590,6 +590,11 @@ export default {
         partialSuccess: '操作部分完成：{success} 成功，{failed} 失败'
       },
       bulkEdit: {
+        verificationFailed: '无法确认账号设置已正确保存。表单保持打开；重试将检查已保存值，不会重复发送已完成的更新。',
+        responseIncomplete: '更新响应未可靠标明全部结果。请核对刷新后的账号；如需再次修改，请关闭并重新打开表单。当前表单不会重复发送更新。',
+        unconfirmedResult: '部分更新可能已保存，但无法确认操作已完整完成。当前表单仅检查已保存值并刷新列表，不会再次发送更新。请核对账号，关闭并重新打开表单后再提交新的修改。',
+        refreshFailed: '更新已提交，但账号列表刷新失败。表单保持打开；重试将刷新列表，不会重复发送更新。',
+        schedulerSyncWarning: '账号更新已保存，但调度缓存刷新失败；持久化 outbox 将继续尝试同步。',
         title: '批量编辑账号',
         selectionInfo: '已选择 {count} 个账号。只更新您勾选或填写的字段，未勾选的字段保持不变。',
         baseUrlPlaceholder: 'https://api.anthropic.com 或 https://api.openai.com',
@@ -839,8 +844,8 @@ export default {
       explicitCacheUpstreamMaxTTL: '上游缓存有效期上限（秒）',
       explicitCacheUpstreamMaxTTLHint: '填写上游网关允许的最长有效期，超出的请求不会发往该账号；留空沿用本站上限。',
       customErrorCodes: '自定义错误码',
-      customErrorCodesHint: '仅对选中的错误码停止调度',
-      customErrorCodesWarning: '仅选中的错误码会停止调度，其他错误将返回 500。',
+      customErrorCodesHint: '控制选中错误码的停调与账号状态处理',
+      customErrorCodesWarning: '池模式下，此设置只控制停调与账号状态等副作用；其他错误仍按安全重试规则处理，并非所有故障都会重试。非池模式保持原行为：未选中的其他错误返回 500。',
       customErrorCodes429Warning:
         '429 已有内置的限流处理机制。添加到自定义错误码后，将直接停止调度而非临时限流。确定要添加吗？',
       customErrorCodes529Warning:

@@ -120,7 +120,8 @@ const PaginationStub = {
 }
 
 const BulkEditAccountModalStub = {
-  props: ['show', 'target'],
+  props: ['show', 'target', 'accountIds', 'refreshAccounts'],
+  emits: ['updated', 'close'],
   template: '<div data-test="bulk-edit-modal" :data-show="String(show)" :data-target-mode="target?.mode ?? \'\'"></div>'
 }
 
@@ -209,6 +210,61 @@ describe('admin AccountsView bulk edit scope', () => {
 
     expect(wrapper.get('[data-test="bulk-edit-modal"]').attributes('data-show')).toBe('true')
     expect(wrapper.get('[data-test="bulk-edit-modal"]').attributes('data-target-mode')).toBe('filtered')
+  })
+
+  it('reloads actual persisted rows after partial save and keeps only failed IDs open for retry', async () => {
+    const account = (id: number, rate: number) => ({
+      id, name: `account-${id}`, platform: 'openai', type: 'apikey', status: 'active',
+      schedulable: true, rate_multiplier: rate, created_at: '2026-07-13T00:00:00Z', updated_at: '2026-07-13T00:00:00Z'
+    })
+    let persisted = [account(1, 1), account(2, 1)]
+    listAccounts.mockImplementation(async () => ({ items: persisted, total: 2, page: 1, page_size: 20, pages: 1 }))
+    const wrapper = mount(AccountsView, {
+      global: { stubs: {
+        AppLayout: { template: '<div><slot /></div>' },
+        TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+        DataTable: DataTableStub, AccountBulkActionsBar: AccountBulkActionsBarStub,
+        AccountTableActions: true, AccountTableFilters: true, AccountActionMenu: true,
+        Pagination: true, ConfirmDialog: true, ImportDataModal: true, ReAuthAccountModal: true,
+        AccountTestModal: true, AccountStatsModal: true, ScheduledTestsPanel: true, SyncFromCrsModal: true,
+        TempUnschedStatusModal: true, ErrorPassthroughRulesModal: true, TLSFingerprintProfilesModal: true,
+        CreateAccountModal: true, EditAccountModal: true, BulkEditAccountModal: BulkEditAccountModalStub,
+        PlatformTypeBadge: true, AccountCapacityCell: true, AccountStatusIndicator: true,
+        AccountTodayStatsCell: true, AccountGroupsCell: true, AccountUsageCell: true, Icon: true
+      } }
+    })
+    await flushPromises()
+    await wrapper.get('[data-test="edit-filtered"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.getComponent(BulkEditAccountModalStub).props('target').mode).toBe('filtered')
+    const beforeReloads = listAccounts.mock.calls.length
+    persisted = [account(1, 0), account(2, 1)]
+    let finishStaleList!: (response: any) => void
+    let staleSignal!: AbortSignal
+    listAccounts.mockImplementationOnce((_page, _pageSize, _filters, options) => {
+      staleSignal = options.signal
+      return new Promise(resolve => { finishStaleList = resolve })
+    })
+    const staleLoad = (wrapper.vm as any).$.setupState.load()
+    await wrapper.getComponent(BulkEditAccountModalStub).props('refreshAccounts')()
+    expect(staleSignal.aborted).toBe(true)
+    finishStaleList({ items: [account(1, 1), account(2, 1)], total: 2, page: 1, page_size: 20, pages: 1 })
+    await staleLoad
+    wrapper.getComponent(BulkEditAccountModalStub).vm.$emit('updated', { partial: true, failedIds: [2] })
+    await flushPromises()
+    const modal = wrapper.getComponent(BulkEditAccountModalStub)
+    expect(modal.props('show')).toBe(true)
+    expect(modal.props('accountIds')).toEqual([2])
+    expect(modal.props('target')).toMatchObject({ mode: 'selected', accountIds: [2] })
+    expect(listAccounts.mock.calls.length).toBeGreaterThan(beforeReloads)
+    expect(wrapper.findAll('[data-test="account-rate"]').map(row => row.text())).toEqual(['0.0x', '1.00x'])
+    listAccounts.mockRejectedValueOnce(Object.assign(new Error('fixture canceled refresh'), { name: 'AbortError' }))
+    await expect(modal.props('refreshAccounts')()).rejects.toMatchObject({ name: 'AbortError' })
+    expect(modal.props('show')).toBe(true)
+    modal.vm.$emit('updated')
+    await flushPromises()
+    expect(wrapper.find('[data-test="bulk-edit-modal"]').exists()).toBe(false)
+    wrapper.unmount()
   })
 
   it('renders the created_at column by default', async () => {

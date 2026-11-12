@@ -192,6 +192,46 @@ describe('useTableLoader', () => {
   // --- 请求取消 ---
 
   describe('请求取消', () => {
+    it('strict reload cancels an older load and ignores its late response even when fetch ignores abort', async () => {
+      let finishOld!: (response: any) => void
+      let oldSignal!: AbortSignal
+      const fetchFn = vi.fn()
+        .mockImplementationOnce((_page, _size, _params, options) => {
+          oldSignal = options.signal
+          return new Promise(resolve => { finishOld = resolve })
+        })
+        .mockResolvedValueOnce({ items: [{ id: 2 }], total: 1, pages: 1 })
+      const { load, reload, items, pagination } = useTableLoader({ fetchFn })
+      const oldLoad = load()
+      await reload({ strict: true })
+      expect(oldSignal.aborted).toBe(true)
+      finishOld({ items: [{ id: 1 }], total: 9, pages: 9 })
+      await oldLoad
+      expect(items.value).toEqual([{ id: 2 }])
+      expect(pagination.total).toBe(1)
+      expect(pagination.pages).toBe(1)
+    })
+
+    it('strict reload rejects cancellation instead of acknowledging a fresh read', async () => {
+      const fetchFn = vi.fn().mockRejectedValue({ name: 'CanceledError', code: 'ERR_CANCELED' })
+      const { reload } = useTableLoader({ fetchFn })
+      await expect(reload({ strict: true })).rejects.toMatchObject({ code: 'ERR_CANCELED' })
+    })
+
+    it('strict load rejects a superseded response even when fetch ignores abort', async () => {
+      let finishStrict!: (response: any) => void
+      const fetchFn = vi.fn()
+        .mockImplementationOnce(() => new Promise(resolve => { finishStrict = resolve }))
+        .mockResolvedValueOnce({ items: [{ id: 2 }], total: 1, pages: 1 })
+      const { load, items } = useTableLoader({ fetchFn })
+      const strictLoad = load({ strict: true })
+      const rejected = expect(strictLoad).rejects.toMatchObject({ name: 'AbortError' })
+      await load()
+      finishStrict({ items: [{ id: 1 }], total: 1, pages: 1 })
+      await rejected
+      expect(items.value).toEqual([{ id: 2 }])
+    })
+
     it('新请求取消前一个未完成的请求', async () => {
       let callCount = 0
       const fetchFn = vi.fn((_page, _size, _params, options) => {

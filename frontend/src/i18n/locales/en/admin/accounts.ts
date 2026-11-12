@@ -524,6 +524,11 @@ export default {
         partialSuccess: 'Partially completed: {success} succeeded, {failed} failed'
       },
       bulkEdit: {
+        verificationFailed: 'The saved account settings could not be verified. The form stays open; retry checks the saved values without resending completed updates.',
+        responseIncomplete: 'The update response did not identify all results reliably. Check the refreshed accounts, then close and reopen the form if another update is needed. Saving here will not resend the update.',
+        unconfirmedResult: 'Some updates may already be saved, but their completion could not be confirmed. This form only checks saved values and refreshes the list. Review the accounts, then close and reopen the form before submitting another update.',
+        refreshFailed: 'The update was submitted, but the account list could not be refreshed. The form stays open; retry refreshes the list without resending the update.',
+        schedulerSyncWarning: 'The account update was saved, but scheduler cache refresh failed. The durable outbox will retry synchronization.',
         title: 'Bulk Edit Accounts',
         selectionInfo:
           '{count} account(s) selected. Only checked or filled fields will be updated; others stay unchanged.',
@@ -787,9 +792,9 @@ export default {
       explicitCacheUpstreamMaxTTL: 'Upstream Cache TTL Limit (seconds)',
       explicitCacheUpstreamMaxTTLHint: 'Maximum TTL allowed by the upstream gateway; requests above it are not sent to this account. Leave blank to use this site\'s limit.',
       customErrorCodes: 'Custom Error Codes',
-      customErrorCodesHint: 'Only stop scheduling for selected error codes',
+      customErrorCodesHint: 'Control scheduling and account-state handling for selected error codes',
       customErrorCodesWarning:
-        'Only selected error codes will stop scheduling. Other errors will return 500.',
+        'In pool mode, this setting only controls scheduling and account-state side effects. Other errors still follow safe retry rules; not every failure is retried. Outside pool mode, the existing behavior remains: other unselected errors return 500.',
       customErrorCodes429Warning:
         '429 already has built-in rate limit handling. Adding it to custom error codes will disable the account instead of temporary rate limiting. Are you sure?',
       customErrorCodes529Warning:

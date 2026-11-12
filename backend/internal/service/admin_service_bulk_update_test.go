@@ -148,7 +148,7 @@ func (s *accountRepoStubForBulkUpdate) ListWithFilters(_ context.Context, params
 
 // TestAdminService_BulkUpdateAccounts_AllSuccessIDs 验证批量更新成功时返回 success_ids/failed_ids。
 func TestAdminService_BulkUpdateAccounts_AllSuccessIDs(t *testing.T) {
-	repo := &accountRepoStubForBulkUpdate{}
+	repo := &accountRepoStubForBulkUpdate{getByIDsAccounts: []*Account{{ID: 1}, {ID: 2}, {ID: 3}}}
 	svc := &adminServiceImpl{accountRepo: repo}
 
 	schedulable := true
@@ -201,6 +201,7 @@ func TestAdminService_BulkUpdateAccounts_RejectsRateChangeForSyncedAccounts(t *t
 // TestAdminService_BulkUpdateAccounts_PartialFailureIDs 验证部分失败时 success_ids/failed_ids 正确。
 func TestAdminService_BulkUpdateAccounts_PartialFailureIDs(t *testing.T) {
 	repo := &accountRepoStubForBulkUpdate{
+		getByIDsAccounts: []*Account{{ID: 1}, {ID: 2}, {ID: 3}},
 		bindGroupErrByID: map[int64]error{
 			2: errors.New("bind failed"),
 		},
@@ -278,6 +279,7 @@ func TestAdminService_BulkUpdateAccounts_MixedChannelPreCheckBlocksOnExistingCon
 
 func TestAdminServiceBulkUpdateAccounts_ResolvesIDsFromFilters(t *testing.T) {
 	repo := &accountRepoStubForBulkUpdate{
+		getByIDsAccounts: []*Account{{ID: 7}, {ID: 11}},
 		listData: []Account{
 			{ID: 7},
 			{ID: 11},

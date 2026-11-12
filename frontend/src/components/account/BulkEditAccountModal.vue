@@ -1480,6 +1480,7 @@ import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
+import { verifyBulkUpdatedAccounts } from './bulkUpdateVerification'
 import type {
   Proxy as ProxyConfig,
   AdminGroup,
@@ -1533,12 +1534,13 @@ interface Props {
   }
   proxies: ProxyConfig[]
   groups: AdminGroup[]
+  refreshAccounts?: () => Promise<unknown>
 }
 
 const props = defineProps<Props>()
 const emit = defineEmits<{
   close: []
-  updated: []
+  updated: [result?: { partial: true; failedIds: number[] }]
 }>()
 
 const AUTO_PROXY_BEST_SENTINEL = -1
@@ -1681,6 +1683,17 @@ const submitting = ref(false)
 const showMixedChannelWarning = ref(false)
 const mixedChannelWarningMessage = ref('')
 const pendingUpdatesForConfirm = ref<Record<string, unknown> | null>(null)
+const pendingVerification = ref<{
+  updates: Record<string, unknown>
+  ids: number[]
+  failedIds: number[]
+  unconfirmedIds: number[]
+  success: number
+  failed: number
+  inherited: number
+  responseIncomplete: boolean
+  schedulerSyncWarning?: string
+} | null>(null)
 const baseUrl = ref('')
 const modelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist')
 const allowedModels = ref<string[]>([])
@@ -1950,14 +1963,8 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
         : proxyId.value
 
     const extra = ensureExtra()
-    if (proxyId.value === AUTO_PROXY_BEST_SENTINEL) {
-      extra.auto_select_proxy = true
-    } else {
-      delete extra.auto_select_proxy
-    }
-    if (Object.keys(extra).length === 0) {
-      delete updates.extra
-    }
+    // 批量更新采用 JSONB merge，省略不能清除已有的自动选择设置。
+    extra.auto_select_proxy = proxyId.value === AUTO_PROXY_BEST_SENTINEL
   }
 
   if (enableConcurrency.value) {
@@ -2146,6 +2153,9 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
       extra.rpm_strategy = bulkRpmStrategy.value
       if (bulkRpmStickyBuffer.value != null && bulkRpmStickyBuffer.value > 0) {
         extra.rpm_sticky_buffer = bulkRpmStickyBuffer.value
+      } else {
+        // 与单账号编辑留空回落默认值一致；merge 需要显式清除旧 override。
+        extra.rpm_sticky_buffer = 0
       }
     } else {
       // 关闭 RPM 限制 - 设置 base_rpm 为 0，并用空值覆盖关联字段
@@ -2213,6 +2223,15 @@ const preCheckMixedChannelRisk = async (built: Record<string, unknown>): Promise
 }
 
 const handleSubmit = async () => {
+  if (pendingVerification.value) {
+    submitting.value = true
+    try {
+      await completeBulkVerification()
+    } finally {
+      submitting.value = false
+    }
+    return
+  }
   if (targetMode.value === 'selected' && props.accountIds.length === 0) {
     appStore.showError(t('admin.accounts.bulkEdit.noSelection'))
     return
@@ -2288,6 +2307,58 @@ const handleSubmit = async () => {
   await submitBulkUpdate(built)
 }
 
+const completeBulkVerification = async () => {
+  const pending = pendingVerification.value
+  if (!pending) return
+  if (pending.responseIncomplete) {
+    try {
+      await props.refreshAccounts?.()
+    } catch {
+      appStore.showError(t('admin.accounts.bulkEdit.refreshFailed'))
+      return
+    }
+    appStore.showError(t('admin.accounts.bulkEdit.responseIncomplete'))
+    return
+  }
+  const verification = await verifyBulkUpdatedAccounts(pending.ids, pending.updates, adminAPI.accounts.getById)
+  pending.ids = [...new Set([...verification.failedIds, ...pending.unconfirmedIds])]
+  const retryIds = [...new Set([...pending.failedIds, ...verification.failedIds])]
+  try {
+    await props.refreshAccounts?.()
+  } catch {
+    appStore.showError(t('admin.accounts.bulkEdit.refreshFailed'))
+    return
+  }
+  if (verification.failedIds.length > 0) {
+    if (pending.unconfirmedIds.length === 0) emit('updated', { partial: true, failedIds: retryIds })
+    appStore.showError(t('admin.accounts.bulkEdit.verificationFailed'))
+    return
+  }
+  if (pending.unconfirmedIds.length > 0) {
+    // Matching fields cannot prove that a post-commit side effect succeeded.
+    // Keep this submission read-only until the operator closes the form.
+    appStore.showError(t('admin.accounts.bulkEdit.unconfirmedResult'))
+    return
+  }
+  pendingVerification.value = null
+  pendingUpdatesForConfirm.value = null
+  if (pending.failed > 0) {
+    const key = pending.inherited > 0 ? 'admin.accounts.bulkEdit.partialSuccessWithInherited' : 'admin.accounts.bulkEdit.partialSuccess'
+    appStore.showError(t(key, { success: pending.success, failed: pending.failed, inherited: pending.inherited }))
+    if (pending.schedulerSyncWarning) appStore.showWarning(t('admin.accounts.bulkEdit.schedulerSyncWarning'))
+    emit('updated', { partial: true, failedIds: pending.failedIds })
+    return
+  }
+  if (pending.inherited > 0) {
+    appStore.showSuccess(t('admin.accounts.bulkEdit.successWithInherited', { count: pending.success, inherited: pending.inherited }))
+  } else {
+    appStore.showSuccess(t('admin.accounts.bulkEdit.success', { count: pending.success }))
+  }
+  if (pending.schedulerSyncWarning) appStore.showWarning(t('admin.accounts.bulkEdit.schedulerSyncWarning'))
+  emit('updated')
+  handleClose()
+}
+
 const submitBulkUpdate = async (baseUpdates: Record<string, unknown>) => {
   // 无论是预检查确认还是 409 兜底确认，只要 mixedChannelConfirmed 为 true 就带上 flag
   const updates = mixedChannelConfirmed.value
@@ -2306,30 +2377,30 @@ const submitBulkUpdate = async (baseUpdates: Record<string, unknown>) => {
     const success = res.success || 0
     const failed = res.failed || 0
     const inherited = res.long_context_inherited_count || 0
+    const unconfirmedIds = [...new Set(res.unconfirmed_ids ?? [])]
 
-    if (success > 0 && failed === 0) {
-      if (inherited > 0) {
-        appStore.showSuccess(t('admin.accounts.bulkEdit.successWithInherited', {
-          count: success,
-          inherited
-        }))
-      } else {
-        appStore.showSuccess(t('admin.accounts.bulkEdit.success', { count: success }))
-      }
-    } else if (success > 0) {
-      const key = inherited > 0
-        ? 'admin.accounts.bulkEdit.partialSuccessWithInherited'
-        : 'admin.accounts.bulkEdit.partialSuccess'
-      appStore.showError(t(key, { success, failed, inherited }))
-    } else {
+    if (success <= 0 && unconfirmedIds.length === 0) {
       appStore.showError(t('admin.accounts.bulkEdit.failed'))
+      return
     }
-
-    if (success > 0) {
-      pendingUpdatesForConfirm.value = null
-      emit('updated')
-      handleClose()
-    }
+    const failedIds = [...new Set([
+      ...(res.failed_ids ?? []),
+      ...(res.results ?? []).filter(result => !result.success).map(result => result.account_id)
+    ])]
+    const reportedSuccessIds = res.success_ids ?? (res.results?.length
+      ? res.results.filter(result => result.success).map(result => result.account_id)
+      : targetMode.value === 'selected' ? props.accountIds.filter(id => !failedIds.includes(id)) : [])
+    const successIds = [...new Set(reportedSuccessIds)]
+    const responseIncomplete = successIds.length !== success || failedIds.length !== failed ||
+      successIds.some(id => failedIds.includes(id)) ||
+      unconfirmedIds.some(id => !failedIds.includes(id)) ||
+      [...successIds, ...failedIds, ...unconfirmedIds].some(id => !Number.isSafeInteger(id) || id <= 0 ||
+        (targetMode.value === 'selected' && !props.accountIds.includes(id))) ||
+      (targetMode.value === 'selected' && success + failed !== new Set(props.accountIds).size)
+    // The write already committed. Retain even an unusable response so Save can
+    // never replay the write while the operator is checking the account state.
+    pendingVerification.value = { updates: baseUpdates, ids: [...new Set([...successIds, ...unconfirmedIds])], failedIds, unconfirmedIds, success, failed, inherited, responseIncomplete, schedulerSyncWarning: res.scheduler_sync_warning }
+    await completeBulkVerification()
   } catch (error: any) {
     // 兜底：多平台混合场景下，预检查跳过，由后端 409 触发确认框
     if (error.status === 409 && error.error === 'mixed_channel_warning') {
@@ -2437,6 +2508,7 @@ watch(
       showMixedChannelWarning.value = false
       mixedChannelWarningMessage.value = ''
       pendingUpdatesForConfirm.value = null
+      pendingVerification.value = null
       mixedChannelConfirmed.value = false
     }
   }

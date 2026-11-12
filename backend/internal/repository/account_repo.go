@@ -1822,9 +1822,9 @@ func (r *accountRepository) deleteSchedulerAccountSnapshot(ctx context.Context, 
 	}
 }
 
-func (r *accountRepository) syncSchedulerAccountSnapshots(ctx context.Context, accountIDs []int64) {
+func (r *accountRepository) syncSchedulerAccountSnapshots(ctx context.Context, accountIDs []int64) error {
 	if r == nil || r.schedulerCache == nil || len(accountIDs) == 0 {
-		return
+		return nil
 	}
 
 	uniqueIDs := make([]int64, 0, len(accountIDs))
@@ -1840,13 +1840,18 @@ func (r *accountRepository) syncSchedulerAccountSnapshots(ctx context.Context, a
 		uniqueIDs = append(uniqueIDs, id)
 	}
 	if len(uniqueIDs) == 0 {
-		return
+		return nil
 	}
 
 	accounts, err := r.GetByIDs(ctx, uniqueIDs)
 	if err != nil {
 		logger.LegacyPrintf("repository.account", "[Scheduler] batch sync account snapshot read failed: count=%d err=%v", len(uniqueIDs), err)
-		return
+		return &service.SchedulerSnapshotSyncError{AccountIDs: uniqueIDs, Err: err}
+	}
+	if len(accounts) != len(uniqueIDs) {
+		err := errors.New("scheduler snapshot read returned an incomplete account set")
+		logger.LegacyPrintf("repository.account", "[Scheduler] batch sync account snapshot incomplete: requested=%d returned=%d", len(uniqueIDs), len(accounts))
+		return &service.SchedulerSnapshotSyncError{AccountIDs: uniqueIDs, Err: err}
 	}
 
 	for _, account := range accounts {
@@ -1855,8 +1860,10 @@ func (r *accountRepository) syncSchedulerAccountSnapshots(ctx context.Context, a
 		}
 		if err := r.schedulerCache.SetAccount(ctx, account); err != nil {
 			logger.LegacyPrintf("repository.account", "[Scheduler] batch sync account snapshot write failed: id=%d err=%v", account.ID, err)
+			return &service.SchedulerSnapshotSyncError{AccountIDs: []int64{account.ID}, Err: err}
 		}
 	}
+	return nil
 }
 
 func (r *accountRepository) ClearError(ctx context.Context, id int64) error {
@@ -1943,37 +1950,42 @@ func (r *accountRepository) GetGroups(ctx context.Context, accountID int64) ([]s
 }
 
 func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, groupIDs []int64) error {
-	existingGroupIDs, err := r.loadAccountGroupIDs(ctx, accountID)
+	// Bindings and the durable event share the caller's transaction, including
+	// clearing every binding. Lock before reading old groups so a concurrent
+	// binding edit/deletion cannot lose the buckets that must be invalidated.
+	txClient := r.client
+	var tx *dbent.Tx
+	if contextTx := dbent.TxFromContext(ctx); contextTx != nil {
+		txClient = contextTx.Client()
+	} else {
+		var err error
+		tx, err = r.client.Tx(ctx)
+		if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+			return err
+		}
+		if tx != nil {
+			defer func() { _ = tx.Rollback() }()
+			txClient = tx.Client()
+		}
+	}
+	if _, err := txClient.Account.Query().Where(dbaccount.IDEQ(accountID), dbaccount.DeletedAtIsNil()).ForUpdate().Only(ctx); err != nil {
+		return translatePersistenceError(err, service.ErrAccountNotFound, nil)
+	}
+	entries, err := txClient.AccountGroup.Query().Where(dbaccountgroup.AccountIDEQ(accountID)).All(ctx)
 	if err != nil {
 		return err
 	}
-	// 使用事务保证删除旧绑定与创建新绑定的原子性
-	tx, err := r.client.Tx(ctx)
-	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
-		return err
+	existingGroupIDs := make([]int64, 0, len(entries))
+	for _, entry := range entries {
+		existingGroupIDs = append(existingGroupIDs, entry.GroupID)
 	}
-
-	var txClient *dbent.Client
-	if err == nil {
-		defer func() { _ = tx.Rollback() }()
-		txClient = tx.Client()
-	} else {
-		// 已处于外部事务中（ErrTxStarted），复用当前 client
-		txClient = r.client
-	}
+	groupIDs = mergeGroupIDs(nil, groupIDs)
 	if err := lockLiveGroups(ctx, txClient, groupIDs); err != nil {
 		return err
 	}
 
 	if _, err := txClient.AccountGroup.Delete().Where(dbaccountgroup.AccountIDEQ(accountID)).Exec(ctx); err != nil {
 		return err
-	}
-
-	if len(groupIDs) == 0 {
-		if tx != nil {
-			return tx.Commit()
-		}
-		return nil
 	}
 
 	builders := make([]*dbent.AccountGroupCreate, 0, len(groupIDs))
@@ -1985,7 +1997,13 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 		)
 	}
 
-	if _, err := txClient.AccountGroup.CreateBulk(builders...).Save(ctx); err != nil {
+	if len(builders) > 0 {
+		if _, err := txClient.AccountGroup.CreateBulk(builders...).Save(ctx); err != nil {
+			return err
+		}
+	}
+	payload := buildSchedulerGroupPayload(mergeGroupIDs(existingGroupIDs, groupIDs))
+	if err := enqueueSchedulerOutbox(ctx, txClient, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, payload); err != nil {
 		return err
 	}
 
@@ -1994,11 +2012,51 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 			return err
 		}
 	}
-	payload := buildSchedulerGroupPayload(mergeGroupIDs(existingGroupIDs, groupIDs))
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, payload); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue bind groups failed: account=%d err=%v", accountID, err)
-	}
 	return nil
+}
+
+// BulkUpdateAndBindGroups applies field and group changes for one account in a
+// single transaction. A bulk admin operation can still partially succeed across
+// accounts, but a failed group binding must not leave this account's columns
+// committed.
+//
+// A caller-supplied Ent transaction owns the final commit and all durable outbox
+// records. In that case immediate cache publication is deliberately deferred to
+// the outbox consumer.
+func (r *accountRepository) BulkUpdateAndBindGroups(ctx context.Context, accountID int64, updates service.AccountBulkUpdate, groupIDs []int64) (int64, error) {
+	if contextTx := dbent.TxFromContext(ctx); contextTx != nil {
+		rows, err := r.BulkUpdate(ctx, []int64{accountID}, updates)
+		if err != nil || rows != 1 {
+			return rows, err
+		}
+		if err := r.BindGroups(ctx, accountID, groupIDs); err != nil {
+			return 0, err
+		}
+		return rows, nil
+	}
+
+	tx, err := r.client.Tx(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	txCtx := dbent.NewTxContext(ctx, tx)
+	rows, err := r.BulkUpdate(txCtx, []int64{accountID}, updates)
+	if err != nil || rows != 1 {
+		return rows, err
+	}
+	if err := r.BindGroups(txCtx, accountID, groupIDs); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	// Fields and group IDs are visible together only after the commit. The
+	// transactional outbox remains responsible for cross-node propagation.
+	if err := r.syncSchedulerAccountSnapshots(ctx, []int64{accountID}); err != nil {
+		return rows, err
+	}
+	return rows, nil
 }
 
 func (r *accountRepository) ListSchedulable(ctx context.Context) ([]service.Account, error) {
@@ -3245,6 +3303,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 
 	baseCtx := ctx
 	contextTx := dbent.TxFromContext(ctx)
+	externalTransaction := contextTx != nil
 	exec := r.sql
 	var tx *dbent.Tx
 	if contextTx != nil {
@@ -3252,6 +3311,9 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	} else if r.client != nil {
 		var txErr error
 		tx, txErr = r.client.Tx(ctx)
+		if errors.Is(txErr, dbent.ErrTxStarted) {
+			externalTransaction = true
+		}
 		if txErr != nil && !errors.Is(txErr, dbent.ErrTxStarted) {
 			return 0, txErr
 		}
@@ -3295,16 +3357,11 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			return 0, err
 		}
 	}
-	if rows > 0 && contextTx == nil {
-		shouldSync := false
-		if updates.Status != nil && (*updates.Status == service.StatusError || *updates.Status == service.StatusDisabled) {
-			shouldSync = true
-		}
-		if updates.Schedulable != nil && !*updates.Schedulable {
-			shouldSync = true
-		}
-		if shouldSync {
-			r.syncSchedulerAccountSnapshots(baseCtx, ids)
+	if rows > 0 && !externalTransaction {
+		// Ordinary routing edits need the same immediate visibility as a single
+		// account update. The durable outbox still rebuilds affected buckets.
+		if err := r.syncSchedulerAccountSnapshots(baseCtx, ids); err != nil {
+			return rows, err
 		}
 	}
 	return rows, nil

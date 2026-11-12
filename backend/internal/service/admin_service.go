@@ -540,12 +540,16 @@ type UserGroupRPMStatus struct {
 
 // BulkUpdateAccountsResult is the aggregated response for bulk updates.
 type BulkUpdateAccountsResult struct {
-	Success                   int                       `json:"success"`
-	Failed                    int                       `json:"failed"`
-	SuccessIDs                []int64                   `json:"success_ids"`
-	FailedIDs                 []int64                   `json:"failed_ids"`
+	Success    int     `json:"success"`
+	Failed     int     `json:"failed"`
+	SuccessIDs []int64 `json:"success_ids"`
+	FailedIDs  []int64 `json:"failed_ids"`
+	// UnconfirmedIDs is the subset of FailedIDs whose changes may already be committed.
+	// Callers must refresh these targets before deciding whether to retry.
+	UnconfirmedIDs            []int64                   `json:"unconfirmed_ids,omitempty"`
 	Results                   []BulkUpdateAccountResult `json:"results"`
 	LongContextInheritedCount int                       `json:"long_context_inherited_count,omitempty"`
+	SchedulerSyncWarning      string                    `json:"scheduler_sync_warning,omitempty"`
 }
 
 type CreateProxyInput struct {

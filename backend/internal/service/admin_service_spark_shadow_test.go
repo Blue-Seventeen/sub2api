@@ -102,6 +102,29 @@ func (s *sparkShadowRepoStub) Update(_ context.Context, account *Account) error 
 	return nil
 }
 
+// BulkUpdate mirrors the subset used by shadow propagation tests. Production
+// bulk edits update the parent before copying its proxy to shadows; returning
+// rows without changing this fixture would test a state that cannot occur.
+func (s *sparkShadowRepoStub) BulkUpdate(_ context.Context, ids []int64, updates AccountBulkUpdate) (int64, error) {
+	updated := int64(0)
+	for _, id := range ids {
+		account := s.accounts[id]
+		if account == nil {
+			continue
+		}
+		if updates.ProxyID != nil {
+			if *updates.ProxyID == 0 {
+				account.ProxyID = nil
+			} else {
+				proxyID := *updates.ProxyID
+				account.ProxyID = &proxyID
+			}
+		}
+		updated++
+	}
+	return updated, nil
+}
+
 func (s *sparkShadowRepoStub) Delete(_ context.Context, id int64) error {
 	delete(s.accounts, id)
 	delete(s.accountsByID, id)

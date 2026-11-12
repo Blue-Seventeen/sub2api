@@ -15,6 +15,32 @@ var (
 	ErrAccountNotInFallback = infraerrors.BadRequest("ACCOUNT_NOT_IN_FALLBACK", "account is not in proxy fallback state")
 )
 
+// SchedulerSnapshotSyncError reports a committed account mutation whose
+// immediate scheduler-cache publication failed. The durable outbox remains
+// available for eventual recovery, but callers must not present the mutation
+// as an unqualified success.
+type SchedulerSnapshotSyncError struct {
+	AccountIDs []int64
+	Err        error
+}
+
+func (e *SchedulerSnapshotSyncError) Error() string {
+	if e == nil {
+		return "scheduler snapshot synchronization failed"
+	}
+	if e.Err == nil {
+		return "scheduler snapshot synchronization failed"
+	}
+	return fmt.Sprintf("scheduler snapshot synchronization failed: %v", e.Err)
+}
+
+func (e *SchedulerSnapshotSyncError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
 const AccountListGroupUngrouped int64 = -1
 const AccountPrivacyModeUnsetFilter = "__unset__"
 

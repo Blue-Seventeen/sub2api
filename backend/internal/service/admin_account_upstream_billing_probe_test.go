@@ -621,7 +621,7 @@ func TestUpdateAccountExtraDropsManagedBillingProbeFields(t *testing.T) {
 }
 
 func TestBulkUpdateAccountsDropsManagedUpstreamBillingProbeState(t *testing.T) {
-	repo := &upstreamBillingProbeAccountRepo{}
+	repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{1: {ID: 1}}}
 	svc := &adminServiceImpl{accountRepo: repo}
 	input := &BulkUpdateAccountsInput{
 		AccountIDs: []int64{1},
@@ -705,7 +705,7 @@ func TestBulkUpdateAccountsRejectsProbeSettingWhenTargetIsMissing(t *testing.T) 
 }
 
 func TestBulkUpdateAccountsInvalidatesProbeSnapshotForIdentityCredentials(t *testing.T) {
-	repo := &upstreamBillingProbeAccountRepo{}
+	repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{1: {ID: 1}}}
 	input := &BulkUpdateAccountsInput{
 		AccountIDs:  []int64{1},
 		Credentials: map[string]any{"api_key": "sk-new"},
@@ -722,7 +722,7 @@ func TestBulkUpdateAccountsInvalidatesProbeSnapshotForIdentityCredentials(t *tes
 
 func TestBulkUpdateAccountsInvalidatesProbeSnapshotForProxyUpdate(t *testing.T) {
 	proxyID := int64(9)
-	baseRepo := &upstreamBillingProbeAccountRepo{}
+	baseRepo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{1: {ID: 1}}}
 	input := &BulkUpdateAccountsInput{
 		AccountIDs: []int64{1},
 		ProxyID:    &proxyID,
@@ -738,7 +738,7 @@ func TestBulkUpdateAccountsInvalidatesProbeSnapshotForProxyUpdate(t *testing.T) 
 }
 
 func TestBulkUpdateAccountsKeepsProbeSnapshotForUnrelatedCredentials(t *testing.T) {
-	repo := &upstreamBillingProbeAccountRepo{}
+	repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{1: {ID: 1}}}
 	input := &BulkUpdateAccountsInput{
 		AccountIDs:  []int64{1},
 		Credentials: map[string]any{"model_mapping": map[string]any{"gpt-old": "gpt-new"}},

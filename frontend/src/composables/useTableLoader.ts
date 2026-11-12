@@ -17,6 +17,10 @@ interface TableLoaderOptions<T, P> {
   debounceMs?: number
 }
 
+interface TableLoadOptions {
+  strict?: boolean
+}
+
 /**
  * 通用表格数据加载 Composable
  * 统一处理分页、筛选、搜索防抖和请求取消
@@ -40,13 +44,15 @@ export function useTableLoader<T, P extends Record<string, any>>(options: TableL
     return error?.name === 'AbortError' || error?.code === 'ERR_CANCELED' || error?.name === 'CanceledError'
   }
 
-  const load = async () => {
+  const load = async ({ strict = false }: TableLoadOptions = {}) => {
     if (abortController) {
       abortController.abort()
     }
     const currentController = new AbortController()
     abortController = currentController
     loading.value = true
+    const isCurrentRequest = () => abortController === currentController && !currentController.signal.aborted
+    const supersededError = () => new DOMException('Table load was canceled or superseded', 'AbortError')
 
     try {
       const response = await fetchFn(
@@ -56,14 +62,19 @@ export function useTableLoader<T, P extends Record<string, any>>(options: TableL
         { signal: currentController.signal }
       )
 
+      // Some transports may finish after abort. Only the current request owns
+      // the table, and strict callers require an actual fresh acknowledgement.
+      if (!isCurrentRequest()) throw supersededError()
       items.value = response.items || []
       pagination.total = response.total || 0
       pagination.pages = response.pages || 0
     } catch (error) {
-      if (!isAbortError(error)) {
-        console.error('Table load error:', error)
-        throw error
+      if (isAbortError(error) || !isCurrentRequest()) {
+        if (strict) throw isAbortError(error) ? error : supersededError()
+        return
       }
+      console.error('Table load error:', error)
+      throw error
     } finally {
       if (abortController === currentController) {
         loading.value = false
@@ -71,9 +82,9 @@ export function useTableLoader<T, P extends Record<string, any>>(options: TableL
     }
   }
 
-  const reload = () => {
+  const reload = (loadOptions: TableLoadOptions = {}) => {
     pagination.page = 1
-    return load()
+    return load(loadOptions)
   }
 
   const debouncedReload = useDebounceFn(reload, debounceMs)

@@ -145,7 +145,13 @@ func TestAdminUpdateAccountExtraStripsSeedAndLeavesAtomicEnsureToRepository(t *t
 }
 
 func TestBulkUpdateAccountsDoesNotPrewriteCodexSeed(t *testing.T) {
-	repo := &upstreamBillingProbeAccountRepo{}
+	// Bulk mutations preflight live targets before writing so they cannot claim
+	// success for deleted IDs. Populate the in-memory repository accordingly;
+	// this test remains focused on the atomic seed contract.
+	repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{
+		301: {ID: 301, Platform: PlatformOpenAI, Type: AccountTypeOAuth},
+		302: {ID: 302, Platform: PlatformOpenAI, Type: AccountTypeOAuth},
+	}}
 
 	result, err := (&adminServiceImpl{accountRepo: repo}).BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
 		AccountIDs: []int64{301, 302},

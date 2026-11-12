@@ -29,6 +29,7 @@ type schedulerCacheRecorder struct {
 	deleteIDs   []int64
 	accounts    map[int64]*service.Account
 	setCtxErr   error
+	setErr      error
 }
 
 func (s *schedulerCacheRecorder) GetSnapshot(ctx context.Context, bucket service.SchedulerBucket) ([]*service.Account, bool, error) {
@@ -69,6 +70,9 @@ func (s *schedulerCacheRecorder) GetAccount(ctx context.Context, accountID int64
 func (s *schedulerCacheRecorder) SetAccount(ctx context.Context, account *service.Account) error {
 	s.setCtxErr = ctx.Err()
 	s.setAccounts = append(s.setAccounts, account)
+	if s.setErr != nil {
+		return s.setErr
+	}
 	if s.accounts == nil {
 		s.accounts = make(map[int64]*service.Account)
 	}
@@ -819,13 +823,19 @@ func (s *AccountRepoSuite) TestSetSchedulable() {
 }
 
 func (s *AccountRepoSuite) TestBulkUpdate_SyncSchedulerSnapshotOnDisabled() {
-	account1 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "bulk-1", Status: service.StatusActive, Schedulable: true})
-	account2 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "bulk-2", Status: service.StatusActive, Schedulable: true})
+	// This suite uses an outer transaction in SetupTest. A bulk write must not
+	// publish snapshots before that transaction commits, so use a standalone
+	// client here to verify the repository-owned commit path.
+	client := testEntClient(s.T())
+	repo := newAccountRepositoryWithSQL(client, integrationDB, nil)
+	account1 := mustCreateAccount(s.T(), client, &service.Account{Name: "bulk-1", Status: service.StatusActive, Schedulable: true})
+	account2 := mustCreateAccount(s.T(), client, &service.Account{Name: "bulk-2", Status: service.StatusActive, Schedulable: true})
+	s.T().Cleanup(func() { cleanupBulkAccountRegressionFixtures([]int64{account1.ID, account2.ID}, nil) })
 	cacheRecorder := &schedulerCacheRecorder{}
-	s.repo.schedulerCache = cacheRecorder
+	repo.schedulerCache = cacheRecorder
 
 	disabled := service.StatusDisabled
-	rows, err := s.repo.BulkUpdate(s.ctx, []int64{account1.ID, account2.ID}, service.AccountBulkUpdate{
+	rows, err := repo.BulkUpdate(context.Background(), []int64{account1.ID, account2.ID}, service.AccountBulkUpdate{
 		Status: &disabled,
 	})
 	s.Require().NoError(err)

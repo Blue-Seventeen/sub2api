@@ -506,6 +506,7 @@
       :target="bulkEditTarget || undefined"
       :proxies="proxies"
       :groups="groups"
+      :refresh-accounts="refreshAccountsForBulkVerification"
       @close="showBulkEdit = false"
       @updated="handleBulkUpdated"
     />
@@ -1245,6 +1246,17 @@ const reload = async () => {
   resetAutoRefreshCache()
   pendingTodayStatsRefresh.value = false
   await baseReload()
+  await refreshTodayStatsBatch()
+}
+
+// `useTableLoader` intentionally absorbs cancellation for ordinary navigation.
+// A bulk-save acknowledgement must fail unless it completed a fresh list read.
+const refreshAccountsForBulkVerification = async () => {
+  syncAccountListDerivedParams()
+  hasPendingListSync.value = false
+  resetAutoRefreshCache()
+  pendingTodayStatsRefresh.value = false
+  await baseReload({ strict: true })
   await refreshTodayStatsBatch()
 }
 
@@ -2265,11 +2277,23 @@ const openBulkEditFiltered = async () => {
   }
 }
 
-const handleBulkUpdated = () => {
+const handleBulkUpdated = (result?: { partial: true; failedIds: number[] }) => {
+  if (result?.partial) {
+    // 筛选范围也转为明确失败 ID，重试不得再次修改已成功账号。
+    const metadata = bulkEditTarget.value
+    clearSelection()
+    setSelectedIds(result.failedIds)
+    bulkEditTarget.value = {
+      mode: 'selected',
+      accountIds: result.failedIds,
+      selectedPlatforms: metadata?.selectedPlatforms ?? [],
+      selectedTypes: metadata?.selectedTypes ?? []
+    }
+    return
+  }
   showBulkEdit.value = false
   bulkEditTarget.value = null
   clearSelection()
-  reload()
 }
 const handleDataImported = () => { showImportData.value = false; reload() }
 const ACCOUNT_UNGROUPED_GROUP_QUERY_VALUE = 'ungrouped'

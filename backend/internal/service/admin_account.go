@@ -971,6 +971,16 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		}
 		input.AccountIDs = accountIDs
 	}
+	// A repeated ID is one target, not another successful mutation.
+	requestedIDs := make([]int64, 0, len(input.AccountIDs))
+	seenIDs := make(map[int64]struct{}, len(input.AccountIDs))
+	for _, id := range input.AccountIDs {
+		if _, seen := seenIDs[id]; !seen {
+			seenIDs[id] = struct{}{}
+			requestedIDs = append(requestedIDs, id)
+		}
+	}
+	input.AccountIDs = requestedIDs
 
 	result := &BulkUpdateAccountsResult{
 		SuccessIDs: make([]int64, 0, len(input.AccountIDs)),
@@ -996,14 +1006,11 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	needMixedChannelCheck := input.GroupIDs != nil && !input.SkipMixedChannelCheck
 
-	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
-	var cachedTargets []*Account
-	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil {
-		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
-		if err != nil {
-			return nil, err
-		}
-		cachedTargets = loaded
+	// Resolve live targets for every field, including column-only/group-only edits.
+	// Otherwise missing/deleted IDs are reported as successful without a write.
+	cachedTargets, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
+	if err != nil {
+		return nil, err
 	}
 	targetsByID := make(map[int64]*Account, len(cachedTargets))
 	for _, account := range cachedTargets {
@@ -1149,13 +1156,11 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		repoUpdates.RateMultiplier = input.RateMultiplier
 	}
 	if input.LoadFactor != nil {
-		if *input.LoadFactor <= 0 {
-			repoUpdates.LoadFactor = nil // 0 或负数表示清除
-		} else if *input.LoadFactor > 10000 {
+		if *input.LoadFactor > 10000 {
 			return nil, errors.New("load_factor must be <= 10000")
-		} else {
-			repoUpdates.LoadFactor = input.LoadFactor
 		}
+		// Keep the non-nil clear sentinel; nil means do not change in BulkUpdate.
+		repoUpdates.LoadFactor = input.LoadFactor
 	}
 	if input.Status != "" {
 		repoUpdates.Status = &input.Status
@@ -1164,12 +1169,87 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		repoUpdates.Schedulable = input.Schedulable
 	}
 
-	// Run bulk update for column/jsonb fields first.
-	if _, err := s.accountRepo.BulkUpdate(ctx, input.AccountIDs, repoUpdates); err != nil {
-		return nil, err
+	hasColumnUpdates := repoUpdates.Name != nil || repoUpdates.ProxyID != nil ||
+		repoUpdates.Concurrency != nil || repoUpdates.Priority != nil || repoUpdates.RateMultiplier != nil ||
+		repoUpdates.LoadFactor != nil || repoUpdates.Status != nil || repoUpdates.Schedulable != nil ||
+		repoUpdates.ProbeEnabled != nil || len(repoUpdates.Credentials) > 0 || len(repoUpdates.Extra) > 0
+	if !hasColumnUpdates && input.GroupIDs == nil {
+		return nil, infraerrors.BadRequest("NO_ACCOUNT_UPDATES", "No updates provided")
 	}
-	for _, accountID := range input.AccountIDs {
-		s.invalidateCompatibleEndpointModeCache(accountID)
+	liveIDs := make([]int64, 0, len(requestedIDs))
+	for _, id := range requestedIDs {
+		if targetsByID[id] != nil {
+			liveIDs = append(liveIDs, id)
+		}
+	}
+	input.AccountIDs = liveIDs
+	columnUpdateUnconfirmed := make(map[int64]bool)
+	postCommitFailures := make(map[int64]error)
+	atomicCombinedFailures := make(map[int64]error)
+	atomicCombined := false
+	if hasColumnUpdates && input.GroupIDs != nil && len(liveIDs) > 0 {
+		if updater, ok := s.accountRepo.(interface {
+			BulkUpdateAndBindGroups(context.Context, int64, AccountBulkUpdate, []int64) (int64, error)
+		}); ok {
+			atomicCombined = true
+			for _, accountID := range liveIDs {
+				rows, err := updater.BulkUpdateAndBindGroups(ctx, accountID, repoUpdates, *input.GroupIDs)
+				if err != nil {
+					var snapshotSyncErr *SchedulerSnapshotSyncError
+					if errors.As(err, &snapshotSyncErr) && rows == 1 {
+						result.SchedulerSyncWarning = snapshotSyncErr.Error() + "; durable scheduler outbox remains available for recovery"
+						continue
+					}
+					if rows > 0 || snapshotSyncErr != nil {
+						columnUpdateUnconfirmed[accountID] = true
+						postCommitFailures[accountID] = err
+						continue
+					}
+					atomicCombinedFailures[accountID] = err
+					continue
+				}
+				if rows != 1 {
+					columnUpdateUnconfirmed[accountID] = true
+				}
+			}
+		}
+	}
+	if hasColumnUpdates && !atomicCombined && len(liveIDs) > 0 {
+		rows, err := s.accountRepo.BulkUpdate(ctx, liveIDs, repoUpdates)
+		var snapshotSyncErr *SchedulerSnapshotSyncError
+		if err != nil && !errors.As(err, &snapshotSyncErr) {
+			if rows == 0 {
+				return nil, err
+			}
+			// A repository may report a follow-up failure after committing some or
+			// all columns. Without per-target commit evidence none is safe to retry.
+			for _, accountID := range liveIDs {
+				columnUpdateUnconfirmed[accountID] = true
+				postCommitFailures[accountID] = err
+			}
+		}
+		if snapshotSyncErr != nil {
+			result.SchedulerSyncWarning = snapshotSyncErr.Error() + "; durable scheduler outbox remains available for recovery"
+		}
+		if rows != int64(len(liveIDs)) && len(postCommitFailures) == 0 {
+			// A concurrent deletion can reduce affected rows after preflight. Do not
+			// pretend that an already committed UPDATE was rolled back on read failure.
+			remaining, readErr := s.accountRepo.GetByIDs(ctx, liveIDs)
+			remainingIDs := make(map[int64]bool, len(remaining))
+			for _, account := range remaining {
+				if account != nil {
+					remainingIDs[account.ID] = true
+				}
+			}
+			for _, id := range liveIDs {
+				columnUpdateUnconfirmed[id] = readErr != nil || int64(len(remainingIDs)) != rows || !remainingIDs[id]
+			}
+		}
+	}
+	for _, accountID := range liveIDs {
+		if !columnUpdateUnconfirmed[accountID] && atomicCombinedFailures[accountID] == nil {
+			s.invalidateCompatibleEndpointModeCache(accountID)
+		}
 	}
 
 	// 将 proxy 变更传播到每个目标账号的 spark 影子账号
@@ -1178,21 +1258,49 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		if *repoUpdates.ProxyID != 0 {
 			effectiveProxyID = repoUpdates.ProxyID
 		}
-		for _, accountID := range input.AccountIDs {
+		for _, accountID := range liveIDs {
+			if columnUpdateUnconfirmed[accountID] || atomicCombinedFailures[accountID] != nil {
+				continue
+			}
 			if err := s.propagateProxyToShadows(ctx, accountID, effectiveProxyID); err != nil {
-				return nil, err
+				columnUpdateUnconfirmed[accountID] = true
+				postCommitFailures[accountID] = err
 			}
 		}
 	}
 
 	// Handle group bindings per account (requires individual operations).
-	for _, accountID := range input.AccountIDs {
+	for _, accountID := range requestedIDs {
 		entry := BulkUpdateAccountResult{AccountID: accountID}
+		if targetsByID[accountID] == nil || columnUpdateUnconfirmed[accountID] {
+			entry.Error = "account does not exist or the update could not be confirmed; refresh before retrying"
+			if columnUpdateUnconfirmed[accountID] {
+				result.UnconfirmedIDs = append(result.UnconfirmedIDs, accountID)
+				if err := postCommitFailures[accountID]; err != nil {
+					entry.Error = "account fields may have been updated, but follow-up failed; refresh before retrying: " + err.Error()
+				}
+			}
+			result.Failed++
+			result.FailedIDs = append(result.FailedIDs, accountID)
+			result.Results = append(result.Results, entry)
+			continue
+		}
+		if err := atomicCombinedFailures[accountID]; err != nil {
+			entry.Error = err.Error()
+			result.Failed++
+			result.FailedIDs = append(result.FailedIDs, accountID)
+			result.Results = append(result.Results, entry)
+			continue
+		}
 
-		if input.GroupIDs != nil {
+		if input.GroupIDs != nil && !atomicCombined {
 			if err := s.accountRepo.BindGroups(ctx, accountID, *input.GroupIDs); err != nil {
 				entry.Success = false
 				entry.Error = err.Error()
+				if hasColumnUpdates {
+					entry.Error = "account fields were updated, but group bindings failed: " + err.Error()
+					result.UnconfirmedIDs = append(result.UnconfirmedIDs, accountID)
+				}
 				result.Failed++
 				result.FailedIDs = append(result.FailedIDs, accountID)
 				result.Results = append(result.Results, entry)
