@@ -192,6 +192,9 @@ hvoy_*.js
 hvoy_*.html
 ProviderPriceApi*.js
 
+# Local probe / build artifact trees (never commit binaries)
+backend/.local-v*/
+
 # Keep selected custom docs under docs/ even though docs/* is ignored above
 !docs/ARCHITECTURE_COMPATIBILITY_KERNEL_CN.md
 !docs/promotion_e2e_checklist.md
