@@ -2038,6 +2038,14 @@ func (s *OpenAIGatewayService) handleGrokAccountUpstreamError(ctx context.Contex
 	// snapshot for observability but do not install account-level rate limiting;
 	// the failover decision below applies a bounded model-scoped block instead.
 	s.updateGrokUsageSnapshotWithRateLimit(ctx, account, snapshot, decision.Class != GrokFailureModelCapacity)
+	// Pool-mode custom codes control account-state mutation only. Keep the
+	// observed quota snapshot above, but do not let an excluded status activate
+	// Grok cooldowns or an administrator's temporary-unschedulable rule. The
+	// caller's independent pool failover decision remains available.
+	if account.IsPoolMode() && !account.ShouldHandleErrorCode(statusCode) {
+		slog.Info("grok_pool_mode_custom_error_state_skipped", "account_id", account.ID, "status_code", statusCode)
+		return
+	}
 
 	// Body-first free-usage / empty / billing / capacity must run before the
 	// status switch so non-429 free-usage bodies still cool the account.

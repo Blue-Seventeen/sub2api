@@ -102,9 +102,10 @@ func (s *OpenAIGatewayService) failoverOpenAIUpstreamHTTPError(
 	upstreamMsg string,
 	upstreamModel string,
 ) *UpstreamFailoverError {
-	// A status explicitly excluded by account policy or a definitive request
-	// rejection must not be upgraded by the secondary cooldown policy below.
-	if (account != nil && !account.ShouldHandleErrorCode(resp.StatusCode)) ||
+	// Non-pool custom exclusions and definitive request rejections must not be
+	// upgraded by the secondary cooldown policy below. Pool custom codes only
+	// control account-state side effects, not request availability.
+	if !accountAllowsRequestFailover(account, resp.StatusCode) ||
 		isOpenAIAccountTerminalUpstreamRequestError(account, resp.StatusCode, upstreamMsg, respBody) {
 		return nil
 	}
@@ -484,7 +485,7 @@ func openAIErrorPayloadAllowsReplay(c *gin.Context, account *Account, payload []
 	return !upstreamSSEPayloadHasUsage(payload) && !openAIResponsesPayloadHasOutput(payload) &&
 		!isDefinitiveUpstreamRequestError(status, payload) &&
 		!isOpenAIAccountTerminalUpstreamRequestError(account, status, message, payload) &&
-		(account == nil || account.ShouldHandleErrorCode(status))
+		accountAllowsRequestFailover(account, status)
 }
 
 // Unlike a terminal-success boundary, semantic/tool output and provider usage
@@ -541,7 +542,7 @@ func (s *OpenAIGatewayService) handleCCUpstreamErrorPayload(
 	status, errType, errMsg, matched := applyOpenAIStreamFailedErrorPassthroughRule(c, platform, payload, message)
 	if !matched {
 		semanticStatus := openAIStreamFailedEventSemanticStatus(payload, message)
-		customCodesAllow := account == nil || account.ShouldHandleErrorCode(semanticStatus)
+		customCodesAllow := accountAllowsRequestFailover(account, semanticStatus)
 		poolRetry := account != nil && account.IsPoolMode() && account.IsPoolModeRetryableStatus(semanticStatus)
 		poolSwitch := account != nil && account.IsPoolMode() && newAPIStyleShouldFailoverStatus(semanticStatus)
 		requestTerminal := isDefinitiveUpstreamRequestError(semanticStatus, payload) || isOpenAIAccountTerminalUpstreamRequestError(account, semanticStatus, message, payload)

@@ -273,7 +273,7 @@ func TestForwardAsChatCompletions_RawSSEErrorUsesPoolRetryStatus(t *testing.T) {
 	require.Empty(t, rec.Body.String())
 }
 
-func TestForwardAsChatCompletions_RawSSEErrorCustomCodesOverridePoolRetry(t *testing.T) {
+func TestForwardAsChatCompletions_RawSSEErrorCustomCodesDoNotBlockPoolRetry(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"deepseek-chat","messages":[{"role":"user","content":"hello"}],"stream":true}`)
 	account := rawChatCompletionsTestAccount()
@@ -297,9 +297,10 @@ func TestForwardAsChatCompletions_RawSSEErrorCustomCodesOverridePoolRetry(t *tes
 	_, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "")
 	var failoverErr *UpstreamFailoverError
 	require.Error(t, err)
-	require.NotErrorAs(t, err, &failoverErr, "an explicit account error-code allowlist excludes 503")
-	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
-	require.NotEmpty(t, rec.Body.String())
+	require.ErrorAs(t, err, &failoverErr, "pool custom exclusions affect account state, not replay-safe stream failures")
+	require.True(t, failoverErr.RetryableOnSameAccount)
+	require.False(t, c.Writer.Written())
+	require.Empty(t, rec.Body.String())
 }
 
 // bindStatusCodePassthroughRule 绑定一条按错误码+关键词双条件(MatchModeAll)匹配的规则。

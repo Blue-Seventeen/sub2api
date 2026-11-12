@@ -130,7 +130,7 @@ func TestAnthropicPoolHTTPInvalid400DoesNotReplay(t *testing.T) {
 	}
 }
 
-func TestAnthropicPoolHTTPCustomExclusionRemainsTerminal(t *testing.T) {
+func TestAnthropicPoolHTTPCustomExclusionDoesNotBlockFailover(t *testing.T) {
 	for _, route := range []string{"messages", "passthrough", "chat", "responses"} {
 		t.Run(route, func(t *testing.T) {
 			upstream := &anthropicPoolHTTPUpstream{status: http.StatusServiceUnavailable}
@@ -146,8 +146,9 @@ func TestAnthropicPoolHTTPCustomExclusionRemainsTerminal(t *testing.T) {
 			require.Nil(t, result)
 			require.Equal(t, 1, upstream.hits)
 			var failover *UpstreamFailoverError
-			require.False(t, errors.As(err, &failover), "excluded custom codes must not spend pool retries or rotate accounts")
-			require.True(t, c.Writer.Written())
+			require.ErrorAs(t, err, &failover, "pool custom exclusions govern account state, not safe request replay")
+			require.True(t, failover.RetryableOnSameAccount)
+			require.False(t, c.Writer.Written())
 		})
 	}
 }

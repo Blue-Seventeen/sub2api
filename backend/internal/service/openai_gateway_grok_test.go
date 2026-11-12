@@ -884,6 +884,31 @@ func TestForwardGrokMediaImagesGenerationNormalizesImagineAlias(t *testing.T) {
 	require.Equal(t, ImageBillingSize2K, result.ImageSize)
 }
 
+func TestGrokMediaErrorResponseCapturesAuthCategoryWithBodyLoggingDisabled(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	account := &Account{ID: 7402, Name: "grok-media-auth-test", Platform: PlatformGrok, Type: AccountTypeAPIKey}
+	resp := &http.Response{
+		StatusCode: http.StatusUnauthorized,
+		Header:     http.Header{"X-Request-Id": []string{"grok-media-auth-req"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"type":"authentication_error"}}`)),
+	}
+
+	_, err := svc.handleGrokMediaErrorResponse(context.Background(), resp, c, account, "grok-media-auth-req", "grok-imagine-image-quality")
+	require.Error(t, err)
+	raw, ok := c.Get(OpsUpstreamErrorsKey)
+	require.True(t, ok)
+	events, ok := raw.([]*OpsUpstreamErrorEvent)
+	require.True(t, ok)
+	require.Len(t, events, 1)
+	require.Equal(t, "provider_auth", events[0].AuthCategory)
+	require.Empty(t, events[0].Detail)
+	require.Empty(t, events[0].UpstreamResponseBody)
+}
+
 func TestForwardGrokMediaAppliesAccountModelMappingAfterEndpointNormalization(t *testing.T) {
 	t.Setenv(xai.EnvAllowUnsafeURLOverrides, "true")
 

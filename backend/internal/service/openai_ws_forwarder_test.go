@@ -29,7 +29,7 @@ func TestShouldRetryOpenAIWSPoolDialFailureRespectsAccountErrorPolicy(t *testing
 			name: "custom error allowlist excludes pool retry status",
 			credentials: map[string]any{"pool_mode": true, "pool_mode_retry_status_codes": []any{float64(http.StatusServiceUnavailable)},
 				"custom_error_codes_enabled": true, "custom_error_codes": []any{float64(http.StatusBadGateway)}},
-			want: false,
+			want: true,
 		},
 		{
 			name:        "explicit upstream policy rejection",
@@ -71,7 +71,7 @@ func TestNewOpenAIWSPoolDialFailoverErrorPreservesConfiguredStatus(t *testing.T)
 
 	account.Credentials["custom_error_codes_enabled"] = true
 	account.Credentials["custom_error_codes"] = []any{float64(http.StatusBadGateway)}
-	require.Nil(t, svc.newOpenAIWSPoolDialFailoverError(account, dialErr), "custom error allowlist must exclude the retry status")
+	require.NotNil(t, svc.newOpenAIWSPoolDialFailoverError(account, dialErr), "pool custom exclusions must not block a safe initial handshake retry")
 }
 
 // TestIsOpenAIWSTokenEvent_TerminalEventsExcluded 覆盖 isOpenAIWSTokenEvent 的回归用例。

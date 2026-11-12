@@ -66,7 +66,10 @@ func TestGatewaySSEPreflightCompatibleRecoverableError(t *testing.T) {
 			resp := newCompatibleGatewayEventStreamResponse(http.StatusOK, tc.upstream)
 			resp.Header.Set("X-Request-Id", "failed-attempt")
 			svc := newCompatibleGatewayServiceForTest(&compatibleGatewayHTTPUpstreamRecorder{responses: []*http.Response{resp}})
-			result, _, err := svc.Forward(context.Background(), c, preflightPoolAccount(tc.platform), tc.route, []byte(tc.request))
+			account := preflightPoolAccount(tc.platform)
+			account.Credentials["custom_error_codes_enabled"] = true
+			account.Credentials["custom_error_codes"] = []any{float64(401)}
+			result, _, err := svc.Forward(context.Background(), c, account, tc.route, []byte(tc.request))
 			assertPreflightFailover(t, c, rec, result, err, http.StatusServiceUnavailable)
 		})
 	}
@@ -96,7 +99,10 @@ func TestGatewaySSEPreflightNewAPIRecoverableError(t *testing.T) {
 			case NewAPIStyleRouteMessages:
 				platform = PlatformAnthropic
 			}
-			result, _, err := svc.Forward(context.Background(), c, preflightPoolAccount(platform), NewAPIStyleForwardOptions{
+			account := preflightPoolAccount(platform)
+			account.Credentials["custom_error_codes_enabled"] = true
+			account.Credentials["custom_error_codes"] = []any{float64(401)}
+			result, _, err := svc.Forward(context.Background(), c, account, NewAPIStyleForwardOptions{
 				Route: tc.route, RequestBody: []byte(`{"model":"openai/gpt-4o-mini","stream":true,"messages":[]}`), Stream: true,
 			})
 			assertPreflightFailover(t, c, rec, result, err, tc.status)
@@ -158,6 +164,8 @@ func TestGatewaySSEPreflightGeminiBeforeSyntheticStart(t *testing.T) {
 				c, _ := gin.CreateTestContext(rec)
 				c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 				account := preflightPoolAccount(PlatformGemini)
+				account.Credentials["custom_error_codes_enabled"] = true
+				account.Credentials["custom_error_codes"] = []any{float64(401)}
 				var result *ForwardResult
 				var err error
 				switch route {

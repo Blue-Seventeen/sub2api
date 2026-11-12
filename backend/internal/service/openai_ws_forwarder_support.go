@@ -393,7 +393,7 @@ func (s *OpenAIGatewayService) handleOpenAIWSDialTransientFailure(ctx context.Co
 }
 
 func shouldRetryOpenAIWSPoolDialFailure(account *Account, statusCode int, responseBody []byte) bool {
-	return account != nil && account.IsPoolMode() && account.ShouldHandleErrorCode(statusCode) &&
+	return account != nil && account.IsPoolMode() &&
 		account.IsPoolModeRetryableStatus(statusCode) && !isDefinitiveUpstreamRequestError(statusCode, responseBody)
 }
 

@@ -100,8 +100,9 @@ func TestGrokPoolRequestTerminalWinsOverAccountClassifier(t *testing.T) {
 	}
 }
 
-func TestAlphaSearchCustomErrorExclusionWinsOverEndpointFallback(t *testing.T) {
+func TestAlphaSearchNonPoolCustomErrorExclusionWinsOverEndpointFallback(t *testing.T) {
 	account := preflightPoolAccount(PlatformOpenAI)
+	account.Credentials["pool_mode"] = false
 	account.Credentials["custom_error_codes_enabled"] = true
 	account.Credentials["custom_error_codes"] = []any{float64(503)}
 	upstream := &httpUpstreamRecorder{resp: newOpenAIUpstreamErrorResponse(404, `{"error":{"message":"route unavailable"}}`)}

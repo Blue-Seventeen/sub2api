@@ -20,7 +20,7 @@ func TestOpenAIPoolHTTPRetryClassificationPreservesRequestAndCustomPolicy(t *tes
 		wantRetry   bool
 	}{
 		{"configured 404", http.StatusNotFound, `{"error":{"type":"invalid_request_error","message":"upstream route unavailable"}}`, false, true},
-		{"custom policy excludes configured 404", http.StatusNotFound, `{"error":{"message":"upstream route unavailable"}}`, true, false},
+		{"pool custom policy excludes configured 404 without blocking replay", http.StatusNotFound, `{"error":{"message":"upstream route unavailable"}}`, true, true},
 		{"schema 400", http.StatusBadRequest, openAIInvalidFunctionParametersBody, false, false},
 		{"input 400", http.StatusBadRequest, `{"error":{"type":"invalid_request_error","message":"Invalid value for messages: expected an array"}}`, false, false},
 		{"invalid json 400", http.StatusBadRequest, `{"error":{"code":"invalid_json","message":"Cannot parse the request body as JSON"}}`, false, false},

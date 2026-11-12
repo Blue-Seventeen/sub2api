@@ -92,7 +92,7 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 	if resp.StatusCode >= http.StatusBadRequest {
 		safeRespBody := sanitizeClientVisibleUpstreamErrorPayload(respBody)
 		upstreamMessage := sanitizeUserVisibleErrorText(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
-		if account.ShouldHandleErrorCode(resp.StatusCode) && !isOpenAIAccountTerminalUpstreamRequestError(account, resp.StatusCode, upstreamMessage, respBody) &&
+		if accountAllowsRequestFailover(account, resp.StatusCode) && !isOpenAIAccountTerminalUpstreamRequestError(account, resp.StatusCode, upstreamMessage, respBody) &&
 			(s.shouldFailoverOpenAIUpstreamResponse(account, resp.StatusCode, upstreamMessage, respBody) || isOpenAIAlphaSearchEndpointUnsupported(account, resp.StatusCode)) {
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
 			// alpha/search 是独立的工具端点，单次 401 不能证明账号的模型调用

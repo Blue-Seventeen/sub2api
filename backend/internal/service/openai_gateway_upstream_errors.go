@@ -344,7 +344,7 @@ func isOpenAIAccountTerminalUpstreamRequestError(account *Account, statusCode in
 }
 
 func (s *OpenAIGatewayService) shouldFailoverOpenAIUpstreamResponse(account *Account, statusCode int, upstreamMsg string, upstreamBody []byte) bool {
-	if account != nil && !account.ShouldHandleErrorCode(statusCode) {
+	if !accountAllowsRequestFailover(account, statusCode) {
 		return false
 	}
 	// cyber_policy is request-scoped even when an intermediary wraps the
@@ -624,6 +624,7 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 ) (*OpenAIForwardResult, error) {
 	body := s.readUpstreamErrorBody(resp)
 	body = s.redactAgentIdentitySensitiveBody(ctx, account, body)
+	SetOpsUpstreamAuthCategoryFromBody(c, resp.StatusCode, body)
 
 	// cyber_policy 硬阻断：透传上游原始错误体给客户端（不重包成通用 502），不冷却账号。
 	// 当前请求恒透传（需求1）；标记供 handler 事后写风控/邮件。400 cyber 不可 failover
@@ -685,7 +686,7 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		)
 	}
 
-	if account.ShouldHandleErrorCode(resp.StatusCode) && isOpenAIRequestBodyTooLargeError(resp.StatusCode, upstreamMsg, body) {
+	if accountAllowsRequestFailover(account, resp.StatusCode) && isOpenAIRequestBodyTooLargeError(resp.StatusCode, upstreamMsg, body) {
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 			ProxyID:            opsUpstreamProxyID(account),
 			ProxyName:          opsUpstreamProxyName(account),
@@ -733,8 +734,8 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		return nil, fmt.Errorf("upstream error: %d (passthrough rule matched) message=%s", resp.StatusCode, upstreamMsg)
 	}
 
-	// Check custom error codes
-	if !account.ShouldHandleErrorCode(resp.StatusCode) {
+	// Preserve the generic terminal response for non-pool custom exclusions.
+	if !accountAllowsRequestFailover(account, resp.StatusCode) {
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 			ProxyID:            opsUpstreamProxyID(account),
 			ProxyName:          opsUpstreamProxyName(account),
@@ -878,6 +879,7 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 ) (*OpenAIForwardResult, error) {
 	body := s.readUpstreamErrorBody(resp)
 	body = s.redactAgentIdentitySensitiveBody(context.Background(), account, body)
+	SetOpsUpstreamAuthCategoryFromBody(c, resp.StatusCode, body)
 
 	// cyber_policy：兼容路径（Chat Completions / Anthropic）以各自格式回写错误，
 	// 不原样透传 responses 格式的 cyber body（否则对下游格式不合法）。cyber 是上游网络
@@ -941,9 +943,9 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 		return nil, fmt.Errorf("upstream error: %d (passthrough rule matched) message=%s", resp.StatusCode, upstreamMsg)
 	}
 
-	// Check custom error codes — if the account does not handle this status,
-	// return a generic error without exposing upstream details.
-	if !account.ShouldHandleErrorCode(resp.StatusCode) {
+	// Non-pool custom exclusions retain the generic terminal response. Pool
+	// custom codes only govern state side effects, not safe request failover.
+	if !accountAllowsRequestFailover(account, resp.StatusCode) {
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 			ProxyID:            opsUpstreamProxyID(account),
 			ProxyName:          opsUpstreamProxyName(account),

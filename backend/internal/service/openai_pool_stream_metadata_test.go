@@ -22,6 +22,8 @@ func TestOpenAIPoolStreamMetadataDoesNotCommitBeforeRetryableError(t *testing.T)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 			account := preflightPoolAccount(PlatformOpenAI)
 			account.Credentials["pool_mode_retry_status_codes"] = []any{float64(503)}
+			account.Credentials["custom_error_codes_enabled"] = true
+			account.Credentials["custom_error_codes"] = []any{float64(401)}
 			prefix := "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}\n\n"
 			if strings.HasPrefix(route, "responses-to-") {
 				prefix = "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_metadata\",\"status\":\"in_progress\"}}\n\n"

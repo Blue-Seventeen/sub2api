@@ -102,6 +102,15 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 	}
 	stateCtx, cancel := openAIAccountStateContext(ctx)
 	defer cancel()
+	if account != nil && account.IsPoolMode() && !account.ShouldHandleErrorCode(statusCode) {
+		// Safe pool failover can now reach this helper for custom-excluded
+		// statuses. Preserve the explicit Team-linked policy, but do not newly
+		// install local access-state/model cooldowns for an excluded status.
+		if s != nil && s.rateLimitService != nil {
+			s.rateLimitService.maybeHandleOpenAITeamLinkedError(stateCtx, account, statusCode, responseBody)
+		}
+		return false
+	}
 	if account != nil && account.Platform == PlatformOpenAI && isOpenAIHTTPUpstreamAccessStateError(statusCode, "", responseBody) {
 		message := "OpenAI upstream account or workspace is unavailable"
 		if upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(responseBody)); upstreamMsg != "" {

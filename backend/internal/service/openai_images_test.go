@@ -1069,6 +1069,31 @@ func TestOpenAIGatewayServiceForwardImages_OAuthUpstreamHTTPErrorSurfacesRealErr
 	require.Contains(t, gjson.Get(rec.Body.String(), "error.message").String(), "Invalid value for 'size'")
 }
 
+func TestOpenAIImagesErrorResponseCapturesAuthCategoryWithBodyLoggingDisabled(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	account := &Account{ID: 7401, Name: "openai-image-auth-test", Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	resp := &http.Response{
+		StatusCode: http.StatusUnauthorized,
+		Header:     http.Header{"X-Request-Id": []string{"image-auth-req"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"code":"token_expired"}}`)),
+	}
+
+	_, err := svc.handleOpenAIImagesErrorResponse(context.Background(), resp, c, account, "gpt-image-1")
+	require.Error(t, err)
+	raw, ok := c.Get(OpsUpstreamErrorsKey)
+	require.True(t, ok)
+	events, ok := raw.([]*OpsUpstreamErrorEvent)
+	require.True(t, ok)
+	require.Len(t, events, 1)
+	require.Equal(t, "credential_expired", events[0].AuthCategory)
+	require.Empty(t, events[0].Detail)
+	require.Empty(t, events[0].UpstreamResponseBody)
+}
+
 func TestOpenAIGatewayServiceForwardImages_OAuthNonStreamModerationBlockedReturnsClientError(t *testing.T) {
 	body := []byte(`{"model":"gpt-image-1","prompt":"draw blocked image","response_format":"b64_json"}`)
 

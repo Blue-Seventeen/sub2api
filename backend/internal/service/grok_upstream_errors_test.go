@@ -368,6 +368,8 @@ func TestHandleGrokAccountUpstreamErrorDefaultCooldownsRespectPoolMode(t *testin
 			Type:     AccountTypeAPIKey,
 			Credentials: map[string]any{
 				"pool_mode":                  true,
+				"custom_error_codes_enabled": true,
+				"custom_error_codes":         []any{float64(http.StatusForbidden)},
 				"temp_unschedulable_enabled": true,
 				"temp_unschedulable_rules": []any{
 					map[string]any{

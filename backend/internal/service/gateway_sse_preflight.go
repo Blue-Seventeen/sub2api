@@ -18,8 +18,17 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+// accountAllowsRequestFailover separates request availability from account-state
+// policy. In pool mode custom codes only control account-state side effects;
+// callers must still enforce request/acceptance/replay-safety boundaries.
+// Non-pool callers retain their existing custom-code gate.
+func accountAllowsRequestFailover(account *Account, status int) bool {
+	return account == nil || account.IsPoolMode() || account.ShouldHandleErrorCode(status)
+}
+
 // poolModeHTTPFailover leaves attempt budgeting to the handler. Explicit local
-// error policies still run first and can retire an account instead of retrying it.
+// error policies can retire an account instead of retrying that same account,
+// but do not prevent a safe pool request from switching to another account.
 func poolModeHTTPFailover(ctx context.Context, rateLimit *RateLimitService, account *Account, status int, headers http.Header, body []byte, model string) *UpstreamFailoverError {
 	if account == nil || (ctx != nil && ctx.Err() != nil) {
 		return nil
@@ -27,7 +36,7 @@ func poolModeHTTPFailover(ctx context.Context, rateLimit *RateLimitService, acco
 	if isDefinitiveUpstreamRequestError(status, body) {
 		return nil
 	}
-	if !account.ShouldHandleErrorCode(status) {
+	if !accountAllowsRequestFailover(account, status) {
 		return nil
 	}
 	disabled := false

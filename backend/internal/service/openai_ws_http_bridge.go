@@ -614,7 +614,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		}
 		shouldFailover := s.shouldFailoverOpenAIUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody)
 		if account.Platform == PlatformGrok {
-			shouldFailover = account.ShouldHandleErrorCode(resp.StatusCode) &&
+			shouldFailover = accountAllowsRequestFailover(account, resp.StatusCode) &&
 				!isOpenAIAccountTerminalUpstreamRequestError(account, resp.StatusCode, upstreamMsg, respBody) &&
 				!isGrokContentPolicyRejection(resp.StatusCode, respBody) &&
 				(s.shouldFailoverGrokUpstreamError(resp.StatusCode, respBody) || (account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode)))
@@ -888,7 +888,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 					s.handleGrokAccountUpstreamError(ctx, account, statusCode, resp.Header, upstreamMessage)
 				}
 			}
-			if !account.ShouldHandleErrorCode(statusCode) || isOpenAIAccountTerminalUpstreamRequestError(account, statusCode, errMessage, upstreamMessage) {
+			if !accountAllowsRequestFailover(account, statusCode) || isOpenAIAccountTerminalUpstreamRequestError(account, statusCode, errMessage, upstreamMessage) {
 				shouldFailover = false
 			}
 			if account.Platform != PlatformGrok && !failureAccountSideEffectsApplied &&

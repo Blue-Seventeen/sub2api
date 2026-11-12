@@ -910,6 +910,7 @@ func (s *OpenAIGatewayService) handleOpenAIImagesErrorResponse(
 	requestedModel ...string,
 ) (*OpenAIForwardResult, error) {
 	body := s.readUpstreamErrorBody(resp)
+	SetOpsUpstreamAuthCategoryFromBody(c, resp.StatusCode, body)
 
 	upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(body)))
 	upstreamDetail := ""
@@ -953,10 +954,10 @@ func (s *OpenAIGatewayService) handleOpenAIImagesErrorResponse(
 		return nil, upErr
 	}
 
-	// If the account is not configured to handle this status code, fall back to
-	// a generic gateway error without exposing upstream internals (mirrors
-	// handleCompatErrorResponse).
-	if !account.ShouldHandleErrorCode(resp.StatusCode) {
+	// Non-pool custom exclusions retain the generic gateway error. Pool mode
+	// still follows the dedicated image replay policy below; bypassing this
+	// response-format gate does not make accepted image work replayable.
+	if !accountAllowsRequestFailover(account, resp.StatusCode) {
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 			ProxyID:            opsUpstreamProxyID(account),
 			ProxyName:          opsUpstreamProxyName(account),
@@ -1880,6 +1881,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 	}
 	if resp.StatusCode >= 400 {
 		respBody := s.readUpstreamErrorBody(resp)
+		SetOpsUpstreamAuthCategoryFromBody(c, resp.StatusCode, respBody)
 		_ = resp.Body.Close()
 		respBody = s.redactAgentIdentitySensitiveBody(upstreamCtx, account, respBody)
 		if direct && (resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed) {
@@ -2139,6 +2141,7 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthResponseError(
 			requestID = strings.TrimSpace(resp.Header.Get("x-request-id"))
 		}
 	}
+	SetOpsUpstreamAuthCategoryFromBody(c, upstreamErr.StatusCode, openAIImagesUpstreamErrorResponseBody(upstreamErr))
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 		ProxyID:            opsUpstreamProxyID(account),
 		ProxyName:          opsUpstreamProxyName(account),

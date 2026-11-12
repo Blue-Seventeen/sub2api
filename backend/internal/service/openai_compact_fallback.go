@@ -60,7 +60,7 @@ func newOpenAICompactFallbackSignalForAccount(c *gin.Context, account *Account, 
 	if _, _, _, matched := applyOpenAIStreamFailedErrorPassthroughRule(c, accountPlatform(account), payload, message); matched {
 		return nil
 	}
-	if account != nil && !account.ShouldHandleErrorCode(openAIStreamFailedEventSemanticStatus(payload, message)) {
+	if !accountAllowsRequestFailover(account, openAIStreamFailedEventSemanticStatus(payload, message)) {
 		return nil
 	}
 	// A policy rejection remains terminal even if a provider also includes a
