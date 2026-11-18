@@ -128,7 +128,8 @@ jobs:
 
       - name: Verify Go version
         run: |
-          go version | grep -q 'go1.27.3'
+          want="$(grep -m1 '^go ' backend/go.mod | awk '{print $2}')"
+          go version | grep -q "go${want}"
 
       - name: Run backend tests
         working-directory: backend
@@ -227,7 +228,9 @@ jobs:
           check-latest: false
           cache: false
       - name: Verify Go version
-        run: go version | grep -q 'go1.27.3'
+        run: |
+          want="$(grep -m1 '^go ' backend/go.mod | awk '{print $2}')"
+          go version | grep -q "go${want}"
       - name: Restore target-specific Go cache
         id: go-cache
         uses: actions/cache/restore@v6
