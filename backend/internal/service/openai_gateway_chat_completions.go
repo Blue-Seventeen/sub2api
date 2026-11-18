@@ -655,13 +655,9 @@ func (s *OpenAIGatewayService) handleChatCompletionsErrorResponse(
 // handleChatBufferedStreamingResponse reads all Responses SSE events from the
 // upstream, finds the terminal event, converts to a Chat Completions JSON
 // response, and writes it to the client.
-func openAICompatFailedResponseMessage(resp *apicompat.ResponsesResponse) string {
-	if resp == nil || resp.Error == nil {
-		return ""
-	}
-	return strings.TrimSpace(resp.Error.Message)
-}
-
+//
+// The failed-terminal message is extracted by handleCCUpstreamErrorPayload from
+// the raw terminal payload, so no separate message helper is needed here.
 func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	resp *http.Response,
 	c *gin.Context,
