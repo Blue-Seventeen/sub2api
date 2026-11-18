@@ -355,10 +355,11 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		return nil, err
 	}
 
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
-	}
+	// 代理路由必须走统一解析入口：自动选号账号（auto_select_proxy）本身没有
+	// ProxyID，直接读 account.Proxy 会得到空串 → 整条请求退化成直连出网，
+	// 自动代理选择/托管节点全部失效。resolveAccountProxyURL 还会把本次选中的
+	// 节点回写 account.Proxy，供后续 failover 复用同一节点与请求归因使用。
+	proxyURL := resolveAccountProxyURL(ctx, account, nil)
 
 	if c != nil {
 		c.Set("openai_passthrough", true)
@@ -373,6 +374,10 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	responseID := ""
 	imageCount := 0
 	var imageOutputSizes []string
+	// forwardErr 记录“已经产生模型输出（或已计量用量）但以非换号错误收尾”的这一轮：
+	// 此时不把整次请求判为失败，而是继续构造 forwardResult 让调用方照常落 usage
+	// （handler 的错误分支会 submitResponsesUsage(result)），错误本身仍向上返回。
+	var forwardErr error
 	for {
 		actualModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
 		if actualModel == "" {
@@ -478,7 +483,13 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 					return nil, s.handleErrorResponsePassthrough(ctx, compactResp, c, account, body, compactBody)
 				}
 				_ = resp.Body.Close()
-				return nil, handleErr
+				// 已经产出模型输出（accepted 只看模型输出/上游用量，不看错误帧）且
+				// 不是可换号重试的失败：保留本轮结果继续落账，错误留给调用方记录。
+				var failoverErr *UpstreamFailoverError
+				if result == nil || !result.accepted || errors.As(handleErr, &failoverErr) {
+					return nil, handleErr
+				}
+				forwardErr = handleErr
 			}
 			usage = result.usage
 			firstTokenMs = result.firstTokenMs
@@ -505,7 +516,11 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 					return nil, s.handleErrorResponsePassthrough(ctx, compactResp, c, account, body, compactBody)
 				}
 				_ = resp.Body.Close()
-				return nil, handleErr
+				var failoverErr *UpstreamFailoverError
+				if result == nil || errors.As(handleErr, &failoverErr) {
+					return nil, handleErr
+				}
+				forwardErr = handleErr
 			}
 			usage = result.usage
 			responseID = strings.TrimSpace(result.responseID)
@@ -516,15 +531,17 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	}
 	defer func() { _ = resp.Body.Close() }()
 	serviceTier := extractOpenAIServiceTierFromBody(body)
-	s.bindHTTPResponseAccount(ctx, c, account, responseID)
+	if forwardErr == nil {
+		s.bindHTTPResponseAccount(ctx, c, account, responseID)
 
-	// 排除 spark 影子:其 codex_* 仅由 QueryUsage(/wham/usage bengalfox)更新(外审第7轮 P1)。
-	if !account.IsShadow() {
-		if snapshot := ParseCodexRateLimitHeaders(resp.Header); snapshot != nil {
-			s.updateCodexUsageSnapshot(ctx, account.ID, snapshot)
+		// 排除 spark 影子:其 codex_* 仅由 QueryUsage(/wham/usage bengalfox)更新(外审第7轮 P1)。
+		if !account.IsShadow() {
+			if snapshot := ParseCodexRateLimitHeaders(resp.Header); snapshot != nil {
+				s.updateCodexUsageSnapshot(ctx, account.ID, snapshot)
+			}
+		} else if account.ParentAccountID != nil {
+			notifyOpenAIAutoReset(*account.ParentAccountID)
 		}
-	} else if account.ParentAccountID != nil {
-		notifyOpenAIAutoReset(*account.ParentAccountID)
 	}
 
 	if usage == nil {
@@ -555,7 +572,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		forwardResult.ImageOutputSizes = imageOutputSizes
 		forwardResult.BillingModel = imageBillingModel
 	}
-	return forwardResult, nil
+	return forwardResult, forwardErr
 }
 
 func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
@@ -878,11 +895,17 @@ func (s *OpenAIGatewayService) handleFailoverErrorResponsePassthrough(
 		Detail:               upstreamDetail,
 		UpstreamResponseBody: upstreamDetail,
 	})
-	return newOpenAIUpstreamFailoverError(
+	// 必须走账号级构造器：它把 handleOpenAIAccountUpstreamError 的 shouldDisable
+	// 结论带进 failover 错误，供"已命中模型级冷却规则 → 停止同账号重放"的裁决使用。
+	// 直接调用 newOpenAIUpstreamFailoverError 会丢掉这一结论，容量降载就退化成
+	// 无脑同账号重试。
+	return s.newOpenAIAccountFailoverError(
+		account,
 		resp.StatusCode,
 		resp.Header,
 		body,
 		upstreamMsg,
+		shouldDisable,
 		!shouldDisable && account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
 	)
 }
@@ -999,14 +1022,12 @@ func collectOpenAIPassthroughTimeoutHeaders(h http.Header) []string {
 
 type openaiStreamingResultPassthrough struct {
 	// accepted reflects model output/provider usage, not an emitted error frame.
-	accepted                      bool
-	usage                         *OpenAIUsage
-	firstTokenMs                  *int
-	responseID                    string
-	imageCount                    int
-	imageOutputSizes              []string
-	upstreamResponseModel         string
-	upstreamResponseModelConflict bool
+	accepted         bool
+	usage            *OpenAIUsage
+	firstTokenMs     *int
+	responseID       string
+	imageCount       int
+	imageOutputSizes []string
 }
 
 type openaiNonStreamingResultPassthrough struct {
@@ -1646,10 +1667,20 @@ func (s *OpenAIGatewayService) handleOpenAIStreamTerminalAccountSideEffects(
 	canonicalModel ...string,
 ) (int, bool) {
 	statusCode := openAIStreamFailureStatus(payload, message)
-	if statusCode == http.StatusServiceUnavailable && (account == nil || account.Platform != PlatformOpenAI) {
+	// 本 fork 把容量降载的失败分类固定为请求级 502（见 openAIStreamFailureStatus：
+	// 换号分类必须是请求级，客户端最终仍由 ClientStatusCode 写成 503）。但账号侧
+	// 冷却决策的口径必须是上游语义状态：容量降载就是 503，否则运营者针对 503 配置的
+	// model 级 temp_unschedulable_rules 永远匹配不到，容量降载就再也触发不了模型冷却。
+	// handleOpenAIAccountUpstreamError 对容量降载有专门的早退分支（只按模型级规则冷却、
+	// 不写账号级熔断），所以这里换成 503 不会扩大成账号级摘号。
+	decisionStatusCode := statusCode
+	if statusCode == http.StatusBadGateway && isOpenAIUpstreamCapacityShedEvent(payload) {
+		decisionStatusCode = http.StatusServiceUnavailable
+	}
+	if decisionStatusCode == http.StatusServiceUnavailable && (account == nil || account.Platform != PlatformOpenAI) {
 		return statusCode, false
 	}
-	switch statusCode {
+	switch decisionStatusCode {
 	case http.StatusForbidden:
 		if !openAIStream403AccountFailure(payload, message) {
 			return statusCode, false
@@ -1665,12 +1696,12 @@ func (s *OpenAIGatewayService) handleOpenAIStreamTerminalAccountSideEffects(
 			model = firstNonEmpty(gjson.GetBytes(payload, "model").String(), gjson.GetBytes(payload, "response.model").String())
 		}
 		accountHeaders := headers
-		if statusCode == http.StatusTooManyRequests {
+		if decisionStatusCode == http.StatusTooManyRequests {
 			// 普通模型的流式 429 不能继承外层 HTTP 200 的全局 quota 快照；
 			// 只有 OAuth/SetupToken 的 Spark 配额 429 才需要保留 headers 读取明确的 5h/7d reset。
 			accountHeaders = openAIWSSemantic429Headers(account, model, headers)
 		}
-		return statusCode, s.handleOpenAIAccountUpstreamError(ctx, account, statusCode, accountHeaders, payload, model)
+		return statusCode, s.handleOpenAIAccountUpstreamError(ctx, account, decisionStatusCode, accountHeaders, payload, model)
 	default:
 		return statusCode, false
 	}
@@ -1907,6 +1938,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	sawResponseFailed := false
 	terminalEventType := ""
 	semanticOutputSeen := false
+	// replayUnsafe 累计"上游已接受本请求"的证据（模型输出/上游用量），一旦为真
+	// 就绝不能再换号重放：重放已计费/已产出的响应会让客户端重复付费。
+	replayUnsafe := false
 	capacityFailoverSuppressedLogged := false
 	failedMessage := ""
 	clientOutputStarted := false
@@ -2039,6 +2073,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	needModelReplace := strings.TrimSpace(originalModel) != "" && strings.TrimSpace(mappedModel) != "" && strings.TrimSpace(originalModel) != strings.TrimSpace(mappedModel)
 	resultWithUsage := func() *openaiStreamingResultPassthrough {
 		return &openaiStreamingResultPassthrough{
+			accepted:         replayUnsafe || openAIUsageHasTokens(usage),
 			usage:            usage,
 			firstTokenMs:     firstTokenMs,
 			responseID:       responseID,
@@ -2092,6 +2127,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				}
 			}
 			eventType := effectiveOpenAISSEEventType(dataBytes, rawEventType)
+			replayUnsafe = replayUnsafe || openAIResponsesPayloadAccepted(dataBytes, eventType)
 			createdAtTracker.Observe(dataBytes, eventType)
 			if codexFailureTerminal && sawBareError && !sawResponseFailed && eventType != "response.failed" {
 				suppressCurrentEvent = true
@@ -2133,8 +2169,8 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 					})
 				}
 				outputStarted := openAIStreamClientOutputStarted(c, clientOutputStarted)
-				if !outputStarted && !cyberHit {
-					if compactErr := newOpenAICompactFallbackSignal(c, dataBytes, failedMessage); compactErr != nil {
+				if !outputStarted && !replayUnsafe && !openAIUsageHasTokens(usage) && !cyberHit {
+					if compactErr := newOpenAICompactFallbackSignalForAccount(c, account, dataBytes, failedMessage); compactErr != nil {
 						return resultWithUsage(), compactErr
 					}
 				}
@@ -2162,11 +2198,14 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 							shouldFailover = openAIStreamFailedEventShouldFailover(dataBytes, failedMessage)
 						}
 					}
-					if shouldFailover {
+					if shouldFailover && !replayUnsafe && !openAIUsageHasTokens(usage) &&
+						openAIErrorPayloadAllowsReplay(c, account, dataBytes, failedMessage) {
 						return resultWithUsage(),
 							s.newOpenAIStreamFailoverErrorWithModel(c, account, true, upstreamRequestID, dataBytes, failedMessage, mappedModel, resp.Header)
 					}
-					if !cyberHit && !sawBareError {
+					// 规则优先于换号重试，bare error 帧同样适用：运营方配置的规则要原样
+					// 回写给客户端（含 codex 序列里被抑制的那帧 error）。
+					if !cyberHit {
 						if status, errType, errMsg, matched := applyOpenAIStreamFailedErrorPassthroughRule(c, account.Platform, dataBytes, failedMessage); matched {
 							// 命中透传规则也要记录 ops 上游错误事件（对齐 CC/Messages 与
 							// antigravity 先例），否则透传命中的 failed 在监控中不可见。
@@ -2217,8 +2256,13 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			// response.completed (no output, no usage, no error, nothing sent
 			// to the client) are silent upstream refusals: fail over instead of
 			// recording a successful 0/0 usage turn (issue #5009).
+			// 但本 fork 的记账口径是"上游已接受即不可换号重放"：只要此前有任一帧
+			// 声明过用量（含 billable_seconds 一类非 token 计量，replayUnsafe 已由
+			// openAIResponsesPayloadAccepted 累计）或已累计 token 用量，空 completed
+			// 就是这个已接受 turn 的正常终态，不能判成静默拒答再换号。
 			if (eventType == "response.completed" || eventType == "response.done") &&
 				!sawFailedEvent && !semanticOutputSeen && !clientOutputStarted &&
+				!replayUnsafe && !openAIUsageHasTokens(usage) &&
 				openAIResponsesCompletedEventIsEmpty(dataBytes, usage) {
 				return resultWithUsage(), newOpenAIResponsesEmptyCompletedFailoverError(c, account, upstreamRequestID)
 			}
@@ -2293,7 +2337,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			logger.LegacyPrintf("service.openai_gateway", "[OpenAI passthrough] SSE line too long: account=%d max_size=%d error=%v", account.ID, maxLineSize, err)
 			return resultWithUsage(), err
 		}
-		if !openAIStreamClientOutputStarted(c, clientOutputStarted) {
+		if !openAIStreamClientOutputStarted(c, clientOutputStarted) && !replayUnsafe && !openAIUsageHasTokens(usage) {
 			msg := "OpenAI stream disconnected before completion"
 			if errText := strings.TrimSpace(err.Error()); errText != "" {
 				msg += ": " + errText
@@ -2322,7 +2366,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			zap.Int64("account_id", account.ID),
 			zap.String("upstream_request_id", upstreamRequestID),
 		).Info("OpenAI passthrough 上游流在未收到 [DONE] 时结束，疑似断流")
-		if !openAIStreamClientOutputStarted(c, clientOutputStarted) {
+		if !openAIStreamClientOutputStarted(c, clientOutputStarted) && !replayUnsafe && !openAIUsageHasTokens(usage) {
 			return resultWithUsage(),
 				s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, nil, "OpenAI stream ended before a terminal event")
 		}
@@ -2521,7 +2565,6 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(args ...any) (*openaiN
 		if restoreErr != nil {
 			return nil, fmt.Errorf("restore OpenAI passthrough namespace response: %w", restoreErr)
 		}
-		body = restoredBody
 		restoredBody = restoreCodexToolNamesFromContext(c, restoredBody)
 		body = restoreOpenAIResponsesInstructionsEchoInResponse(c, restoredBody)
 	} else {

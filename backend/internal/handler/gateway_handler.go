@@ -664,8 +664,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// original sticky account was skipped, keep that binding instead of
 			// overwriting it with a temporary fallback account.
 			if err == nil && sessionKey != "" && (sessionBoundAccountID == 0 || sessionBoundAccountID == account.ID) {
-				if err := h.gatewayService.BindStickySession(c.Request.Context(), apiKey.GroupID, sessionKey, account.ID); err != nil {
-					reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+				// Forward has completed; finish the bounded write even if the client disconnects.
+				if bindErr := h.gatewayService.BindStickySessionAfterForward(c.Request.Context(), apiKey.GroupID, sessionKey, account.ID); bindErr != nil {
+					reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(bindErr))
 				}
 			}
 
@@ -1259,10 +1260,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			//   下次请求粘性账号恢复后仍可命中
 			if sessionKey != "" && (sessionBoundAccountID == 0 || sessionBoundAccountID == account.ID) {
 				// Forward has completed; finish the bounded write even if the client disconnects.
-				bindCtx, cancelBind := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 5*time.Second)
-				bindErr := h.gatewayService.BindStickySession(bindCtx, currentAPIKey.GroupID, sessionKey, account.ID)
-				cancelBind()
-				if bindErr != nil {
+				if bindErr := h.gatewayService.BindStickySessionAfterForward(c.Request.Context(), currentAPIKey.GroupID, sessionKey, account.ID); bindErr != nil {
 					reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(bindErr))
 				}
 			}

@@ -205,7 +205,10 @@ func (h *PromoHandler) GetUsages(c *gin.Context) {
 
 	out := make([]dto.PromoCodeUsage, 0, len(usages))
 	for i := range usages {
-		out = append(out, *dto.PromoCodeUsageFromService(&usages[i]))
+		usage := usages[i]
+		// 优惠码使用记录内嵌的用户是管理端财务视图，先按 unified multiplier 重算派生余额。
+		usage.User = adminBalanceViews(usage.User)
+		out = append(out, *dto.PromoCodeUsageFromService(&usage))
 	}
 	response.Paginated(c, adminPromoUsagesResponse(c, out), paginationResult.Total, page, pageSize)
 }

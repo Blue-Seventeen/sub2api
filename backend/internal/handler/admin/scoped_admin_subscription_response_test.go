@@ -72,6 +72,10 @@ func (r *scopedSubscriptionRepo) ExtendExpiry(context.Context, int64, time.Time)
 	r.writes++
 	return nil
 }
+func (r *scopedSubscriptionRepo) UpdateMutableFields(context.Context, int64, service.UserSubscriptionMutableFields) error {
+	r.writes++
+	return nil
+}
 
 func TestScopedAdminSubscriptionExtendReplayRejectsChangedAuthorization(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -156,7 +160,9 @@ func TestScopedAdminQuotaResetRequiresReadToReturnUsage(t *testing.T) {
 		h.ResetUserPlatformQuotaWindow(c)
 		require.Equal(t, 200, w.Code, w.Body.String())
 		require.Len(t, repo.resetCalls, 1)
-		require.Len(t, cache.deleteCalls, 1)
+		// fork 的配额变更事务固定两次失效（变更前预失效 + 变更结束后的延迟失效），
+		// 与完整管理员走同一条缓存路径；受限密钥只裁剪响应字段，不改变失效次数。
+		require.Len(t, cache.deleteCalls, 2)
 		if readable {
 			require.Contains(t, w.Body.String(), "platform_quotas")
 		} else {

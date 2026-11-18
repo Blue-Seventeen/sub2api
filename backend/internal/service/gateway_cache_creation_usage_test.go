@@ -610,7 +610,14 @@ func TestAntigravityRawCacheUsageStreamingLifecycle(t *testing.T) {
 				result, err := service.ForwardUpstream(context.Background(), ctx,
 					&Account{ID: 701, Credentials: map[string]any{"base_url": "https://upstream.example", "api_key": "test-key"}},
 					[]byte(`{"model":"claude-sonnet-4","messages":[],"stream":true}`))
-				require.NoError(t, err)
+				// fork 口径（acb3100e6 起）：上游流未给出终止事件即视为不完整，必须同时
+				// 返回错误，避免把断流当成成功计费；上游 v0.2.23 的 antigravity 路径只
+				// 返回结果不报错。此处保留 fork 的更严格策略，仍校验已收集到的 usage。
+				if terminal == "eof" {
+					require.ErrorContains(t, err, "missing terminal event")
+				} else {
+					require.NoError(t, err)
+				}
 				require.True(t, result.Stream)
 				require.Equal(t, http.StatusOK, recorder.Code)
 				require.Equal(t, stream, recorder.Body.String())

@@ -62,6 +62,15 @@ func (s *OpenAIGatewayService) forwardAnthropicViaNativeAnthropicEndpoint(
 	clientStream := gjson.GetBytes(body, "stream").Bool()
 
 	billingModel := resolveOpenAIForwardModel(account, originalModel, defaultMappedModel)
+	// 原生 Anthropic 直通的多协议账号（Kimi/DeepSeek/DeepSeek 等）不服务 claude-* 名字：
+	// Messages 分流的兜底模型必须生效，否则客户端模型名会被原样发给不识别的上游。
+	// （resolveOpenAIForwardModel 只为 claude-* 名字回落兜底，那是 OpenAI/Codex 兼容路径
+	// 的口径，不适用于原生 Anthropic 直通。）
+	if _, mapped := account.ResolveMappedModel(originalModel); !mapped {
+		if dispatchModel := strings.TrimSpace(defaultMappedModel); dispatchModel != "" {
+			billingModel = dispatchModel
+		}
+	}
 	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
 	if upstreamModel != originalModel {
 		rewritten, err := sjson.SetBytes(body, "model", upstreamModel)

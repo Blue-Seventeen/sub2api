@@ -167,9 +167,11 @@ func TestGetModelPricing_DeepSeekV4AndAliases(t *testing.T) {
 
 	pro, err := svc.GetModelPricing("deepseek-v4-pro")
 	require.NoError(t, err)
-	require.InDelta(t, 1.5e-7, pro.InputPricePerToken, 1e-12)
-	require.InDelta(t, 6.0e-7, pro.OutputPricePerToken, 1e-12)
-	require.InDelta(t, 3.0e-9, pro.CacheReadPricePerToken, 1e-12)
+	// 上游 5db2d6956 起 Pro 不再按日期（原 2026-09-14 04:00 UTC）切换成 Flash 价，
+	// deepseek-v4-pro 始终按 Pro 档计费，见 deepseek_pricing_test.go 的同口径断言。
+	require.InDelta(t, 6.6e-7, pro.InputPricePerToken, 1e-12)
+	require.InDelta(t, 1.98e-6, pro.OutputPricePerToken, 1e-12)
+	require.InDelta(t, 2.2e-8, pro.CacheReadPricePerToken, 1e-12)
 }
 
 // issue #3394: fallback warn 应按模型名去重,每个模型每进程最多打一条,

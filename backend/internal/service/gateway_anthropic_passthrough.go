@@ -690,75 +690,16 @@ func extractAnthropicSSEDataLine(line string) (string, bool) {
 	}
 	return line[start:], true
 }
+
+// parseSSEUsagePassthrough 与包级解析器共用同一份实现口径。
+//
+// API-Key 直通流与原生 Anthropic 直通 / 兼容供应商直通必须产出完全一致的 usage，
+// 否则计费口径分叉：此前的副本只做"正数覆盖"，既没有 cache_creation 聚合的
+// presence 标记与 5m/1h 明细推导，也没有 prompt_tokens/cached_tokens 等兼容别名
+// 归一化，导致 Kimi/DeepSeek 等供应商的 cache_read 被记成 0、缓存写入明细丢失。
+// 保留方法名是为了让既有调用点与单元测试继续使用同一入口。
 func (s *GatewayService) parseSSEUsagePassthrough(data string, usage *ClaudeUsage) {
-	if usage == nil || data == "" || data == "[DONE]" {
-		return
-	}
-
-	parsed := gjson.Parse(data)
-	switch parsed.Get("type").String() {
-	case "message_start":
-		msgUsage := parsed.Get("message.usage")
-		if msgUsage.Exists() {
-			usage.InputTokens = int(msgUsage.Get("input_tokens").Int())
-			usage.CacheCreationInputTokens = int(msgUsage.Get("cache_creation_input_tokens").Int())
-			usage.CacheReadInputTokens = int(msgUsage.Get("cache_read_input_tokens").Int())
-
-			// 与包级通用解析一致：message_start 整体替换 5m/1h 明细（含 0）。
-			cc5m := msgUsage.Get("cache_creation.ephemeral_5m_input_tokens")
-			cc1h := msgUsage.Get("cache_creation.ephemeral_1h_input_tokens")
-			if cc5m.Exists() || cc1h.Exists() {
-				usage.CacheCreation5mTokens = int(cc5m.Int())
-				usage.CacheCreation1hTokens = int(cc1h.Int())
-			}
-		}
-	case "message_delta":
-		deltaUsage := parsed.Get("usage")
-		if deltaUsage.Exists() {
-			if v := deltaUsage.Get("input_tokens").Int(); v > 0 {
-				usage.InputTokens = int(v)
-			}
-			if v := deltaUsage.Get("output_tokens").Int(); v > 0 {
-				usage.OutputTokens = int(v)
-			}
-			if v := deltaUsage.Get("cache_creation_input_tokens").Int(); v > 0 {
-				usage.CacheCreationInputTokens = int(v)
-			}
-			if v := deltaUsage.Get("cache_read_input_tokens").Int(); v > 0 {
-				usage.CacheReadInputTokens = int(v)
-			}
-
-			cc5m := deltaUsage.Get("cache_creation.ephemeral_5m_input_tokens")
-			cc1h := deltaUsage.Get("cache_creation.ephemeral_1h_input_tokens")
-			if cc5m.Exists() && cc5m.Int() > 0 {
-				usage.CacheCreation5mTokens = int(cc5m.Int())
-			}
-			if cc1h.Exists() && cc1h.Int() > 0 {
-				usage.CacheCreation1hTokens = int(cc1h.Int())
-			}
-		}
-	}
-
-	if usage.CacheReadInputTokens == 0 {
-		if cached := parsed.Get("message.usage.cached_tokens").Int(); cached > 0 {
-			usage.CacheReadInputTokens = int(cached)
-		}
-		if cached := parsed.Get("usage.cached_tokens").Int(); usage.CacheReadInputTokens == 0 && cached > 0 {
-			usage.CacheReadInputTokens = int(cached)
-		}
-	}
-	if usage.CacheCreationInputTokens == 0 {
-		cc5m := parsed.Get("message.usage.cache_creation.ephemeral_5m_input_tokens").Int()
-		cc1h := parsed.Get("message.usage.cache_creation.ephemeral_1h_input_tokens").Int()
-		if cc5m == 0 && cc1h == 0 {
-			cc5m = parsed.Get("usage.cache_creation.ephemeral_5m_input_tokens").Int()
-			cc1h = parsed.Get("usage.cache_creation.ephemeral_1h_input_tokens").Int()
-		}
-		total := cc5m + cc1h
-		if total > 0 {
-			usage.CacheCreationInputTokens = int(total)
-		}
-	}
+	parseSSEUsagePassthrough(data, usage)
 }
 
 // normalizeAnthropicCompatiblePromptUsage converts provider-native OpenAI-style

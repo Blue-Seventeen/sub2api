@@ -103,7 +103,7 @@ func TestScopedAdminRegisteredRoutesEnforceDefaultDenyAndAccountScope(t *testing
 			accountHandler := adminhandler.NewAccountHandler(&scopedRouteAccounts{t: t}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 			r := gin.New()
 			RegisterAdminRoutes(r.Group("/api/v1"), &handler.Handlers{Admin: &handler.AdminHandlers{Account: accountHandler, Setting: adminhandler.NewSettingHandler(settings, nil, nil, nil, nil, nil, nil)}}, auth, middleware.AuditLogMiddleware(func(c *gin.Context) { c.Next() }), middleware.StepUpAuthMiddleware(func(c *gin.Context) { c.Next() }), nil, nil)
-			RegisterPaymentRoutes(r.Group("/api/v1"), &handler.PaymentHandler{}, &handler.PaymentWebhookHandler{}, &adminhandler.PaymentHandler{}, middleware.JWTAuthMiddleware(func(c *gin.Context) { c.Next() }), auth, middleware.AuditLogMiddleware(func(c *gin.Context) { c.Next() }), nil, nil, nil)
+			RegisterPaymentRoutes(r.Group("/api/v1"), &handler.PaymentHandler{}, &handler.PaymentWebhookHandler{}, &adminhandler.PaymentHandler{}, middleware.JWTAuthMiddleware(func(c *gin.Context) { c.Next() }), auth, middleware.AuditLogMiddleware(func(c *gin.Context) { c.Next() }), nil, nil)
 			for _, tc := range []struct{ method, path string }{
 				{"GET", "/api/v1/admin/accounts/1"},
 				{"GET", "/api/v1/admin/accounts/2"},
@@ -354,7 +354,7 @@ func TestScopedAdminProxyReadPermissionAndBoundedRoutes(t *testing.T) {
 			auth := middleware.NewAdminAuthMiddleware(nil, users, settings, nil)
 			svc := &scopedRouteProxyOptions{}
 			r := gin.New()
-			RegisterAdminRoutes(r.Group("/api/v1"), &handler.Handlers{Admin: &handler.AdminHandlers{Proxy: adminhandler.NewProxyHandler(svc)}}, auth, middleware.AuditLogMiddleware(func(c *gin.Context) { c.Next() }), middleware.StepUpAuthMiddleware(func(c *gin.Context) { c.Next() }), nil, nil)
+			RegisterAdminRoutes(r.Group("/api/v1"), &handler.Handlers{Admin: &handler.AdminHandlers{Proxy: adminhandler.NewProxyHandler(svc, nil, nil)}}, auth, middleware.AuditLogMiddleware(func(c *gin.Context) { c.Next() }), middleware.StepUpAuthMiddleware(func(c *gin.Context) { c.Next() }), nil, nil)
 			for _, path := range []string{"/api/v1/admin/proxies", "/api/v1/admin/proxies/all"} {
 				req := httptest.NewRequest("GET", path+"?page=2&page_size=20000", nil)
 				req.Header.Set("x-api-key", key)
@@ -411,10 +411,13 @@ func TestScopedAdminRegisteredRoutesExcludeForkOnlyEndpoints(t *testing.T) {
 	for _, route := range r.Routes() {
 		paths[route.Method+" "+route.Path] = true
 	}
-	for _, path := range []string{"GET /api/v1/admin/model-catalog", "GET /api/v1/admin/proxies/options", "GET /api/v1/admin/groups/:id/models-list-candidates"} {
+	// 本定制分支在 registerGroupRoutes 中显式保留旧路径
+	// groups/:id/models-list-candidates（见 admin.go 的"保留旧路径，兼容现有前端
+	// 和外部管理工具"），因此这里只断言另外两个未注册的端点。
+	for _, path := range []string{"GET /api/v1/admin/model-catalog", "GET /api/v1/admin/proxies/options"} {
 		require.False(t, paths[path], path)
 	}
-	for _, path := range []string{"GET /api/v1/admin/proxies", "GET /api/v1/admin/proxies/all", "GET /api/v1/admin/groups/:id/model-allowlist-candidates", "POST /api/v1/admin/accounts/import/codex-session"} {
+	for _, path := range []string{"GET /api/v1/admin/proxies", "GET /api/v1/admin/proxies/all", "GET /api/v1/admin/groups/:id/model-allowlist-candidates", "GET /api/v1/admin/groups/:id/models-list-candidates", "POST /api/v1/admin/accounts/import/codex-session"} {
 		require.True(t, paths[path], path)
 	}
 }

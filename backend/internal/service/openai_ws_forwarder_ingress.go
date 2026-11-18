@@ -535,6 +535,18 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		return err
 	}
 
+	// current-turn failover 会复用同一个 Gin 请求上下文换用另一个 OAuth 账号
+	// （见 openai_ws_http_bridge_resume_test）。上一个账号写入的
+	// x-codex-turn-state 声明的仍是旧账号，绝不能转发给新账号：那既是跨账号
+	// 状态泄漏，也会让上游把 turn state 与错误的 account 关联。
+	if c != nil && c.Request != nil {
+		if previousAccountID, ok := c.Get(openAIWSHTTPBridgeTurnStateAccountContextKey); ok {
+			if previousID, typed := previousAccountID.(int64); typed && previousID != account.ID {
+				c.Request.Header.Del(openAIWSTurnStateHeader)
+			}
+		}
+	}
+
 	useHTTPBridge := forceHTTPBridge || s.shouldBridgeOpenAIWSHTTP(account, firstPayload.payloadBytes, firstPayload.previousResponseID)
 	turnState := strings.TrimSpace(c.GetHeader(openAIWSTurnStateHeader))
 	stateStore := s.getOpenAIWSStateStore()
@@ -610,6 +622,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			if turnState != "" && c != nil && c.Request != nil {
 				c.Request.Header.Set(openAIWSTurnStateHeader, turnState)
+				// 记录 turn state 的来源账号，供下一次 failover 复用同一请求上下文时
+				// 判定是否需要丢弃（见本函数开头的守卫）。
+				c.Set(openAIWSHTTPBridgeTurnStateAccountContextKey, account.ID)
 			}
 			if c != nil && sessionHash != "" {
 				c.Set(openAIWSIngressSessionHashContextKey, sessionHash)
@@ -809,12 +824,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		HeadersFactory: func(factoryCtx context.Context, headers http.Header) (http.Header, error) {
 			return s.refreshOpenAIAgentIdentityHeaders(factoryCtx, account, headers)
 		},
-		ProxyURL: func() string {
-			if account.ProxyID != nil && account.Proxy != nil {
-				return account.Proxy.URL()
-			}
-			return ""
-		}(),
+		ProxyURL:     "",
 		ForceNewConn: false,
 	}
 	pool := s.getOpenAIWSConnPool()
@@ -876,6 +886,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	var acquireTurnLease func(int, string, bool, bool) (*openAIWSConnLease, error)
 	acquireTurnLease = func(turn int, preferred string, forcePreferredConn bool, forceNewConn bool) (*openAIWSConnLease, error) {
 		req := cloneOpenAIWSAcquireRequest(baseAcquireReq)
+		// 每次获取都重新解析代理路由，而不是复用进场时算好的 URL：自动选号
+		// 账号在上一次拨号/读写失败后已经清掉粘性绑定（见
+		// ClearAutoSelectedProxyStickyOnTransportError），唯有重解析才会换到
+		// 下一个健康节点；复用旧 URL 会让重连反复打到同一台坏节点。
+		req.ProxyURL = resolveAccountProxyURL(ctx, account, nil)
 		req.PreferredConnID = strings.TrimSpace(preferred)
 		req.ForcePreferredConn = forcePreferredConn
 		// dedicated 模式下每次获取均新建连接，避免跨会话复用残留上下文；
@@ -980,7 +995,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		turnStart := time.Now()
 		wroteDownstream := false
+		// 一轮业务 turn 的代理路由观测：conn 上记录的路由快照在本次 turn 内
+		// 计一次成功/失败尝试，供 live 用量与代理归因使用。
+		lease.BeginProxyTurn(ctx)
+		defer lease.EndProxyTurn()
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(payload), s.openAIWSWriteTimeout()); err != nil {
+			ClearAutoSelectedProxyStickyOnTransportError(ctx, account, err)
 			return nil, wrapOpenAIWSIngressTurnError(
 				"write_upstream",
 				fmt.Errorf("write upstream websocket request: %w", err),
@@ -1015,6 +1035,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		lastEventType := ""
 		needModelReplace := false
 		clientDisconnected := false
+		// 上游已经用 error 事件明确拒绝过本 turn 时，随后的关闭是该 turn 的
+		// 正常收尾，不是代理链路故障；不得据此清掉自动选号的粘性绑定。
+		applicationErrorSeen := false
 		mappedModel := ""
 		var mappedModelBytes []byte
 		if originalModel != "" {
@@ -1031,6 +1054,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			upstreamMessage, readErr := lease.ReadMessageWithContextTimeout(ctx, s.openAIWSReadTimeout())
 			if readErr != nil {
 				lease.MarkBroken()
+				if !applicationErrorSeen {
+					ClearAutoSelectedProxyStickyOnTransportError(ctx, account, readErr)
+				}
 				return nil, wrapOpenAIWSIngressTurnError(
 					"read_upstream",
 					fmt.Errorf("read upstream websocket event: %w", readErr),
@@ -1060,6 +1086,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				markOpenAICyberPolicyEvent(c, upstreamMessage, http.StatusOK, &usage)
 			}
 			if eventType == "error" {
+				applicationErrorSeen = true
 				s.handleOpenAIWSErrorEventTransientFailure(ctx, account, mappedModel, lease.HandshakeHeaders(), upstreamMessage)
 				errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(upstreamMessage)
 				statusCode := openAIWSRejectedFieldRetryHTTPStatus(upstreamMessage)

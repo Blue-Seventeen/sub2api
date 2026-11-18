@@ -104,7 +104,11 @@ func TestNativeAnthropicCacheCreationRouteBillingBoundary(t *testing.T) {
 						case "responses":
 							result, err = svc.Forward(context.Background(), ctx, account, body)
 						}
-						if route == "messages" && stream && terminal == "eof" {
+						// fork 契约：截断流不得按成功计费，见 anthropic_chat_stream_usage_test.go。
+						// 原生 chat / responses 转换与 messages 路径同口径：EOF 缺少 message_stop
+						// 必须报错（上游 v0.2.23 的这两条路径默认宽松收尾，与 fork 契约相反）。
+						truncatedStream := stream && terminal == "eof" && (route == "messages" || route == "chat" || route == "responses")
+						if truncatedStream {
 							require.ErrorContains(t, err, "missing terminal event")
 						} else {
 							require.NoError(t, err)
@@ -124,6 +128,19 @@ func TestNativeAnthropicCacheCreationRouteBillingBoundary(t *testing.T) {
 						require.Equal(t, http.StatusOK, recorder.Code)
 						if route == "messages" {
 							require.Equal(t, payload, recorder.Body.String())
+						} else if truncatedStream {
+							// fork 契约：截断流不补发 [DONE] / response.completed，也不合成 usage
+							// 终结块（同 anthropic_chat_stream_usage_test.go），只写一帧终止错误。
+							// 上面 result.Usage 的断言（含 cache_creation 分桶）已经把"截断仍保留
+							// 已收集 usage、不得丢账"钉住。
+							streamBody := recorder.Body.String()
+							if route == "responses" {
+								require.NotContains(t, streamBody, "response.completed", "截断的 responses 流不得补发终态 completed")
+								require.Contains(t, streamBody, "response.failed", "截断的 responses 流必须写出终止错误帧")
+							} else {
+								require.NotContains(t, streamBody, "[DONE]", "截断的 native chat 流不得以 [DONE] 伪装成功")
+								require.Contains(t, streamBody, `"error"`, "截断的 native chat 流必须写出终止错误帧")
+							}
 						} else {
 							assertNativeCacheCompatibleUsage(t, recorder.Body.String(), route, stream, uncachedInput, test.aggregate)
 						}

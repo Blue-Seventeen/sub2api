@@ -634,20 +634,23 @@ func (h *ChannelHandler) GetModelDefaultPricing(c *gin.Context) {
 		if pricing.CacheCreation5mPrice > 0 {
 			cacheWritePrice = pricing.CacheCreation5mPrice
 		}
-		cacheWrite1hPrice = &pricing.CacheCreation1hPrice
+		// 1h 缓存写价只在配置了正价时下发：0 表示目录未区分该档位，
+		// 前端应保持留空而不是自动填 0（0 会被当成“免费”）。
+		cacheWrite1hPrice = optionalPositiveFloat64(pricing.CacheCreation1hPrice)
 	}
 
 	response.Success(c, gin.H{
-		"found":                        true,
-		"input_price":                  pricing.InputPricePerToken,
-		"output_price":                 pricing.OutputPricePerToken,
-		"cache_write_price":            cacheWritePrice,
-		"cache_write_1h_price":         cacheWrite1hPrice,
-		"cache_write_12h_price":        pricing.CacheCreation12hPricePerToken,
-		"cache_read_price":             pricing.CacheReadPricePerToken,
-		"reasoning_effort_multipliers": pricing.ReasoningEffortMultipliers,
-		"image_input_price":            pricing.ImageInputPricePerToken,
-		"image_output_price":           pricing.ImageOutputPricePerToken,
+		"found":                           true,
+		"input_price":                     pricing.InputPricePerToken,
+		"output_price":                    pricing.OutputPricePerToken,
+		"cache_write_price":               cacheWritePrice,
+		"cache_write_1h_price":            cacheWrite1hPrice,
+		"cache_write_12h_price":           pricing.CacheCreation12hPricePerToken,
+		"cache_read_price":                pricing.CacheReadPricePerToken,
+		"reasoning_effort_multipliers":    pricing.ReasoningEffortMultipliers,
+		"max_reasoning_effort_multiplier": pricing.MaxReasoningEffortMultiplier,
+		"image_input_price":               pricing.ImageInputPricePerToken,
+		"image_output_price":              pricing.ImageOutputPricePerToken,
 	})
 }
 

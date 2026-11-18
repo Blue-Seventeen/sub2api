@@ -32,6 +32,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/sync/errgroup"
+
+	dbent "github.com/Wei-Shaw/sub2api/ent"
 )
 
 // OAuthHandler handles OAuth-related operations for accounts
@@ -1435,17 +1437,35 @@ func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *serv
 		return nil, "", infraerrors.BadRequest("SPARK_SHADOW_NO_REFRESH",
 			"cannot refresh spark shadow account; its credentials are managed by the parent account")
 	}
+	// 受限管理密钥在事务内刷新：刷新失败时不得提前调用上游隐私接口，否则事务回滚
+	// 无法撤销这个副作用（隐私设置一旦写入上游就生效）。完整管理员没有外层事务，
+	// 沿用"刷新失败后仍执行隐私检查"的既有行为。
+	outsideTx := dbent.TxFromContext(ctx) == nil
 	if h.accountRefreshService == nil {
+		h.ensureRefreshFailurePrivacy(ctx, outsideTx, account)
 		return nil, "", infraerrors.InternalServer("ACCOUNT_REFRESH_SERVICE_NOT_CONFIGURED", "account refresh service is not configured")
 	}
 	result, err := h.accountRefreshService.RefreshAccount(ctx, account)
 	if err != nil {
+		h.ensureRefreshFailurePrivacy(ctx, outsideTx, account)
 		return nil, "", err
 	}
 	if result == nil {
 		return account, "", nil
 	}
 	return result.Account, result.Warning, nil
+}
+
+// ensureRefreshFailurePrivacy 在刷新失败后补做上游隐私检查（仅限没有外层事务的路径）。
+func (h *AccountHandler) ensureRefreshFailurePrivacy(ctx context.Context, outsideTx bool, account *service.Account) {
+	if !outsideTx || h == nil || h.adminService == nil || account == nil {
+		return
+	}
+	if account.Platform == service.PlatformAntigravity {
+		h.adminService.EnsureAntigravityPrivacy(ctx, account)
+		return
+	}
+	h.adminService.EnsureOpenAIPrivacy(ctx, account)
 }
 
 // Refresh handles refreshing account credentials

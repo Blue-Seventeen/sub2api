@@ -704,7 +704,7 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 		longContextBillingGate = &legacyLongContext
 	case 5, 6:
 		var ok bool
-		webSearchMultiplier, ok = compatArgs[0].(float64)
+		webSearchMultiplier, ok = openAIUsageCompatFloatArg(compatArgs[0])
 		if !ok {
 			return nil, errors.New("invalid OpenAI usage search multiplier argument")
 		}
@@ -740,6 +740,41 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 		videoMultiplier, webSearchMultiplier, tokens, serviceTier,
 		longContextBillingGate, modelLongContextExempt, pricingAt,
 	)
+}
+
+// openAIUsageCompatFloatArg 从兼容参数里取浮点倍率。兼容入口用 ...any 收参以同时
+// 支持历史 3 参调用与新版带 pricingAt 的调用，但调用点常写成字面量 1（未定类型
+// 常量的装箱结果是 int），直接断言 float64 会把这唯一的新版路径判成
+// "invalid OpenAI usage search multiplier argument"。这里按数值类型逐一收敛。
+func openAIUsageCompatFloatArg(value any) (float64, bool) {
+	switch v := value.(type) {
+	case float64:
+		return v, true
+	case float32:
+		return float64(v), true
+	case int:
+		return float64(v), true
+	case int8:
+		return float64(v), true
+	case int16:
+		return float64(v), true
+	case int32:
+		return float64(v), true
+	case int64:
+		return float64(v), true
+	case uint:
+		return float64(v), true
+	case uint8:
+		return float64(v), true
+	case uint16:
+		return float64(v), true
+	case uint32:
+		return float64(v), true
+	case uint64:
+		return float64(v), true
+	default:
+		return 0, false
+	}
 }
 
 func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCostAt(
@@ -1086,12 +1121,13 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageTokenCostAt(
 	if apiKey != nil && apiKey.Group != nil && apiKey.Group.LongContextPricingEnabled {
 		applyLongContext = true
 	}
-	return s.billingService.calculateCostWithServiceTierPolicy(
+	return s.billingService.calculateCostWithServiceTierPolicyAt(
 		billingModel,
 		tokens,
 		multiplier,
 		serviceTier,
 		applyLongContext && !modelLongContextExempt,
+		pricingAt,
 	)
 }
 

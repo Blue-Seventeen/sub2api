@@ -2,10 +2,10 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 )
@@ -43,14 +43,23 @@ func anthropicSpeedServiceTier(account *Account, speed, model string) *string {
 }
 
 // modelSupportsAnthropicFastMode reports whether the model accepts the
-// Anthropic Fast (priority) tier. Only Opus 5 / Opus 4.8 catalogs price it.
+// Anthropic Fast (priority) tier. Fable/Mythos 5.2 price it, as do the Opus 5
+// and Opus 4.8 catalogs.
 func modelSupportsAnthropicFastMode(model string) bool {
+	// 5.2 家族按完整模型 ID 精确匹配（含 provider/日期后缀归一），避免 "-5-2"
+	// 前缀误伤 "-5-20" 这类不同版本。
+	if claude.IsFable52(model) || claude.IsMythos52(model) {
+		return true
+	}
 	model = strings.ToLower(strings.TrimSpace(model))
 	if !strings.Contains(model, "opus") {
 		return false
 	}
-	return strings.Contains(model, "opus-5") || strings.Contains(model, "opus5") ||
-		strings.Contains(model, "opus-4.8") || strings.Contains(model, "opus-4-8") || strings.Contains(model, "opus4.8")
+	// "opus-5" 必须先判：不能用裸 "5" 匹配，否则 claude-opus-4-5 会被误判。
+	if strings.Contains(model, "opus-5") || strings.Contains(model, "opus5") {
+		return true
+	}
+	return strings.Contains(model, "opus-4.8") || strings.Contains(model, "opus-4-8") || strings.Contains(model, "opus4.8")
 }
 
 func shouldForwardOpenAIResponsesViaRawChatCompletions(account *Account) bool {
@@ -74,24 +83,6 @@ func shouldForwardOpenAIResponsesViaRawChatCompletions(account *Account) bool {
 		}
 	}
 	return !openai_compat.ShouldUseResponsesAPI(account.Extra)
-}
-
-func cloneOpenAIWSRawMessages(items []json.RawMessage) []json.RawMessage {
-	if items == nil {
-		return nil
-	}
-	out := make([]json.RawMessage, len(items))
-	for i, item := range items {
-		out[i] = append(json.RawMessage(nil), item...)
-	}
-	return out
-}
-
-func cloneOpenAIWSPayloadBytes(payload []byte) []byte {
-	if payload == nil {
-		return nil
-	}
-	return append([]byte(nil), payload...)
 }
 
 func openAIStream403AccountFailure(payload []byte, message string) bool {

@@ -351,7 +351,7 @@ func GetUpstreamEndpoint(c *gin.Context, platform string) string {
 				return endpoint
 			}
 		}
-		if platform == service.PlatformOpenAI || platform == service.PlatformGrok {
+		if platform == service.PlatformOpenAI || platform == service.PlatformGrok || service.IsMultiProtocolAPIKeyProvider(platform) {
 			if endpoint := service.GetActualOpenAIUpstreamEndpoint(c); endpoint != "" {
 				return endpoint
 			}

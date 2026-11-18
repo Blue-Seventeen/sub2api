@@ -142,6 +142,7 @@ func TestGatewayMessagesStickyWritebackAfterForward(t *testing.T) {
 					nil, &fakeGroupRepo{group: group}, nil, nil, nil, nil, nil, cache, cfg,
 					snapshot, nil, service.NewBillingService(cfg, nil), nil, nil, nil, upstream,
 					&service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+					nil,
 				)
 				billingCache := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
 				t.Cleanup(billingCache.Stop)

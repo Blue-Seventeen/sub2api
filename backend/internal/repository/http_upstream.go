@@ -55,9 +55,9 @@ const (
 	defaultIdleConnTimeout = 90 * time.Second
 	// defaultResponseHeaderTimeout: 默认等待响应头超时时间（5分钟）
 	// LLM 请求可能排队较久，需要较长超时
-	defaultResponseHeaderTimeout       = 300 * time.Second
-	defaultUpstreamDialTimeout         = 10 * time.Second
-	defaultUpstreamDialKeepAlive       = 30 * time.Second
+	defaultResponseHeaderTimeout = 300 * time.Second
+	defaultUpstreamDialTimeout   = 10 * time.Second
+	defaultUpstreamDialKeepAlive = 30 * time.Second
 	// defaultUpstreamDialTimeout: 默认 TCP/DNS 建连超时（10秒）
 	// Transport 不设置 DialContext 时会退化为零值 net.Dialer（无超时），建连阶段
 	// 只能依赖内核默认 TCP 重传（Linux 约 130 秒）。ResponseHeaderTimeout 只约束

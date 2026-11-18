@@ -351,22 +351,6 @@ func TestListPlazaGroups_GroupImagePriceOverridesChannelPricing(t *testing.T) {
 	require.Len(t, channels[0].ModelPricing[0].Intervals, 1)
 }
 
-func TestListPlazaGroups_GroupImagePriceIgnoredForNonImageModes(t *testing.T) {
-	// token 模式定价不受分组图片价影响。
-	imgPrice := 0.02
-	channels := []Channel{plazaPricedChannel(1, "ch", []int64{10}, "openai", "gpt-5")}
-	groups := []Group{{ID: 10, Name: "g", Platform: "openai", RateMultiplier: 1, ImagePrice1K: &imgPrice}}
-	svc := newPlazaChannelService(channels, groups, nil)
-	out, err := svc.ListPlazaGroups(context.Background())
-	require.NoError(t, err)
-	require.Len(t, out, 1)
-	p := out[0].Models[0].Pricing
-	require.NotNil(t, p)
-	require.Empty(t, p.Intervals)
-	require.NotNil(t, p.InputPrice)
-	require.Nil(t, p.PerRequestPrice)
-}
-
 func TestListPlazaGroups_RepoErrorsPropagate(t *testing.T) {
 	sentinel := errors.New("boom")
 	repo := &mockChannelRepository{

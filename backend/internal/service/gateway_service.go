@@ -34,7 +34,10 @@ const (
 	claudeAPIURL            = "https://api.anthropic.com/v1/messages?beta=true"
 	claudeAPICountTokensURL = "https://api.anthropic.com/v1/messages/count_tokens?beta=true"
 	stickySessionTTL        = time.Hour // 粘性会话TTL
-	defaultMaxLineSize      = 500 * 1024 * 1024
+	// terminalStickyWriteTimeout 是转发完成后终态粘性写回的有界预算：写回脱离
+	// 客户端连接生命周期，但仍必须有上限，避免 Redis 抖动时长期悬挂。
+	terminalStickyWriteTimeout = 5 * time.Second
+	defaultMaxLineSize         = 500 * 1024 * 1024
 	// Canonical Claude Code banner. Keep it EXACT (no trailing whitespace/newlines)
 	// to match real Claude CLI traffic as closely as possible. When we need a visual
 	// separator between system blocks, we add "\n\n" at concatenation time.
@@ -1069,6 +1072,29 @@ func (s *GatewayService) bindStickySessionEager(ctx context.Context, groupID *in
 		return nil
 	}
 	return s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, accountID, stickySessionTTL)
+}
+
+// BindStickySessionAfterForward 在转发完成后写回本次实际使用的账号，作为终态绑定。
+//
+// 与选号阶段的 eager 绑定/`BindStickySession` 的"已存在即只续 TTL"语义不同，
+// 这里必须写实（Set）：
+//   - 选号阶段写入的绑定可能已被并发请求改写，转发结束后以本次真实账号为准；
+//   - 客户端收完响应就断开时请求上下文会被取消，而这条写回是 completed
+//     upstream request 的状态，必须脱离连接生命周期完成（detached + 有界超时）。
+//
+// 调用方仍需在写入前判断"本次账号与转发前观测到的粘性账号一致"，避免覆盖
+// 因负载/RPM 被跳过的原粘性绑定。
+func (s *GatewayService) BindStickySessionAfterForward(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
+	if sessionHash == "" || accountID <= 0 || s.cache == nil {
+		return nil
+	}
+	base := context.Background()
+	if ctx != nil {
+		base = context.WithoutCancel(ctx)
+	}
+	bindCtx, cancel := context.WithTimeout(base, terminalStickyWriteTimeout)
+	defer cancel()
+	return s.bindStickySessionEager(bindCtx, groupID, sessionHash, accountID)
 }
 
 // bindGatewayStickySessionDuringSelection preserves the normal eager sticky

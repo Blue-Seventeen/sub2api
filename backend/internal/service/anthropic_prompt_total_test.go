@@ -255,7 +255,11 @@ func TestAnthropicPromptTotalForwardBoundary(t *testing.T) {
 					case "buffered native chat":
 						nativeResult, err = native.handleCCBufferedFromNativeAnthropic(response, ctx, "claude-sonnet-4", "claude-sonnet-4", "claude-sonnet-4", nil, time.Now())
 					}
-					if terminal == "eof" && (route == "messages" || route == "passthrough" || route == "native messages") {
+					// fork 契约：所有流式路径（messages / API-Key 直通 / 原生 Anthropic 直通的
+					// messages、chat、responses 转换）在 EOF 缺 message_stop 时都必须报错，且
+					// 不补发终态帧；非流式（buffered*）路径没有终止事件概念，保持 NoError。
+					if terminal == "eof" && (route == "messages" || route == "passthrough" || route == "native messages" ||
+						route == "native chat" || route == "native responses") {
 						require.ErrorContains(t, err, "missing terminal event")
 					} else {
 						require.NoError(t, err)
@@ -281,6 +285,12 @@ func TestAnthropicPromptTotalForwardBoundary(t *testing.T) {
 					var clientUsage gjson.Result
 					if strings.HasPrefix(route, "buffered") {
 						clientUsage = gjson.GetBytes(recorder.Body.Bytes(), "usage")
+					} else if terminal == "eof" && (route == "native chat" || route == "native responses") {
+						// fork 契约：截断的 native 转换流不补发 usage 终结帧（没有 response.completed、
+						// 也没有最终 usage chunk），客户端侧无从断言；"截断仍保留已收集 usage" 已由
+						// 上面的 result.Usage 断言覆盖，终止错误帧由
+						// anthropic_chat_stream_usage_test.go / openai_gateway_native_cache_creation_test.go 钉住。
+						return
 					} else {
 						count := 0
 						for _, line := range strings.Split(recorder.Body.String(), "\n") {

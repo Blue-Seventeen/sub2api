@@ -89,9 +89,15 @@ func adminUsageLogResponses(c *gin.Context, records []service.UsageLog) any {
 		}
 		return out
 	}
-	out := make([]dto.AdminUsageLog, 0, len(records))
+	out := make([]any, 0, len(records))
 	for i := range records {
-		out = append(out, *dto.UsageLogFromServiceAdmin(&records[i]))
+		item := dto.UsageLogFromServiceAdmin(&records[i])
+		if item != nil && item.APIKey != nil && records[i].APIKey != nil {
+			// 完整管理员视图保留密钥本身（fork 的全权契约）；受限密钥走上面的
+			// 白名单投影，用户侧与导出路径仍由 DTO 的 omitempty 保持隐藏。
+			item.APIKey.Key = records[i].APIKey.Key
+		}
+		out = append(out, item)
 	}
 	return out
 }

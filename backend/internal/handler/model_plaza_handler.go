@@ -253,19 +253,8 @@ func toModelPlazaOfficialPricing(p *service.PlazaOfficialPricing) *modelPlazaOff
 	if p == nil {
 		return nil
 	}
-	intervals := make([]userPricingIntervalDTO, 0, len(p.Intervals))
-	for _, iv := range p.Intervals {
-		intervals = append(intervals, userPricingIntervalDTO{
-			MinTokens:       iv.MinTokens,
-			MaxTokens:       iv.MaxTokens,
-			TierLabel:       iv.TierLabel,
-			InputPrice:      iv.InputPrice,
-			OutputPrice:     iv.OutputPrice,
-			CacheWritePrice: iv.CacheWritePrice,
-			CacheReadPrice:  iv.CacheReadPrice,
-			PerRequestPrice: iv.PerRequestPrice,
-		})
-	}
+	// Intervals go through the shared converter: it carries the 1h/12h cache-write
+	// prices and the multipliers that an inline literal would drop.
 	return &modelPlazaOfficialPricing{
 		InputPrice:         p.InputPrice,
 		OutputPrice:        p.OutputPrice,

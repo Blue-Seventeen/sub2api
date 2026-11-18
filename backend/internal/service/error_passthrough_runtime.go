@@ -77,7 +77,10 @@ func applyErrorPassthroughRuleWithMessage(
 	if !rule.PassthroughBody && rule.CustomMessage != nil {
 		errMsg = *rule.CustomMessage
 	}
-	errMsg = sanitizeUserVisibleErrorText(sanitizeUpstreamErrorMessage(errMsg))
+	// 规则文案是运营方写给客户端看的：只脱敏查询参数中的凭据值，保留其余
+	// 字节（上游/域名/其余参数）。与 sanitizeUpstreamErrorMessage 不同，这里
+	// 不走 logredact，避免把第一个 "key=" 之后的内容整段改写掉。
+	errMsg = sanitizeQueryParamSecrets(errMsg)
 
 	// 命中 skip_monitoring 时在 context 中标记，供 ops_error_logger 跳过记录。
 	if rule.SkipMonitoring {

@@ -994,6 +994,13 @@ func (s *OpenAIGatewayService) handleGrokMediaErrorResponse(
 	if upstreamMsg == "" {
 		upstreamMsg = fmt.Sprintf("xAI upstream returned status %d", resp.StatusCode)
 	}
+	// 客户端可见文案：只脱敏查询参数里的凭据值，其余字节（域名、后续参数）
+	// 原样保留，才能让客户端定位自己的图片 URL/请求参数。ops 侧仍用上面的
+	// logredact 版本。
+	clientMsg := sanitizeQueryParamSecrets(strings.TrimSpace(grokUpstreamErrorMessage(body)))
+	if clientMsg == "" {
+		clientMsg = upstreamMsg
+	}
 
 	upstreamDetail := ""
 	if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
@@ -1077,7 +1084,7 @@ func (s *OpenAIGatewayService) handleGrokMediaErrorResponse(
 	}
 
 	MarkResponseCommitted(c)
-	writeGrokMediaErrorResponse(c, resp.StatusCode, grokMediaErrorType(resp.StatusCode), upstreamMsg, grokUpstreamErrorCode(body))
+	writeGrokMediaErrorResponse(c, resp.StatusCode, grokMediaErrorType(resp.StatusCode), clientMsg, grokUpstreamErrorCode(body))
 	return nil, fmt.Errorf("upstream error: %d %s", resp.StatusCode, upstreamMsg)
 }
 
@@ -1100,9 +1107,9 @@ func writeGrokMediaErrorResponse(c *gin.Context, statusCode int, errType, messag
 	}
 	payload := gin.H{
 		"type":    strings.TrimSpace(errType),
-		"message": sanitizeUpstreamErrorMessage(strings.TrimSpace(message)),
+		"message": sanitizeQueryParamSecrets(strings.TrimSpace(message)),
 	}
-	if code = sanitizeUpstreamErrorMessage(strings.TrimSpace(code)); code != "" {
+	if code = sanitizeQueryParamSecrets(strings.TrimSpace(code)); code != "" {
 		payload["code"] = code
 	}
 	c.JSON(statusCode, gin.H{"error": payload})

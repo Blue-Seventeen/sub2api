@@ -188,24 +188,32 @@ func (s *GatewayService) ForwardAsChatCompletions(
 				})
 				return nil, failoverErr
 			}
-		} else if !account.IsPoolMode() && s.shouldFailoverUpstreamError(resp.StatusCode) {
-			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-				ProxyID:            opsUpstreamProxyID(account),
-				ProxyName:          opsUpstreamProxyName(account),
-				Platform:           account.Platform,
-				AccountID:          account.ID,
-				AccountName:        account.Name,
-				UpstreamStatusCode: resp.StatusCode,
-				UpstreamRequestID:  resp.Header.Get("x-request-id"),
-				Kind:               "failover",
-				Message:            upstreamMsg,
-			})
-			if s.rateLimitService != nil {
-				s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody, mappedModel)
+		} else if !account.IsPoolMode() {
+			// 自定义错误码命中时，即便状态码不在默认 failover 列表，也必须按账号策略
+			// 处理（更新账号状态/冷却），再按 fork 语义换号：命中自定义码即换号，且
+			// 不在同一账号上重试。未命中自定义码的错误维持原样（直接回写上游错误）。
+			customErrorCodeHit := account.IsCustomErrorCodesEnabled() && account.ShouldHandleErrorCode(resp.StatusCode)
+			shouldDisable := false
+			if s.rateLimitService != nil && (customErrorCodeHit || s.shouldFailoverUpstreamError(resp.StatusCode)) {
+				shouldDisable = s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody, mappedModel)
 			}
-			return nil, &UpstreamFailoverError{
-				StatusCode:   resp.StatusCode,
-				ResponseBody: respBody,
+			if shouldDisable || s.shouldFailoverUpstreamError(resp.StatusCode) {
+				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+					ProxyID:            opsUpstreamProxyID(account),
+					ProxyName:          opsUpstreamProxyName(account),
+					Platform:           account.Platform,
+					AccountID:          account.ID,
+					AccountName:        account.Name,
+					UpstreamStatusCode: resp.StatusCode,
+					UpstreamRequestID:  resp.Header.Get("x-request-id"),
+					Kind:               "failover",
+					Message:            upstreamMsg,
+				})
+				// 非池模式不在同一账号重试；命中自定义码时 shouldDisable 已置位。
+				return nil, &UpstreamFailoverError{
+					StatusCode:   resp.StatusCode,
+					ResponseBody: respBody,
+				}
 			}
 		}
 

@@ -299,7 +299,7 @@ func TestTryCustomRules_CacheTTLAllocation(t *testing.T) {
 						CacheCreation5mTokens: tt.cache5m,
 						CacheCreation1hTokens: tt.cache1h,
 					}
-					result := tryCustomRules(channel, 1, 0, "anthropic", "claude-test", tokens, 1)
+					result := tryCustomRules(channel, 1, 0, "anthropic", "claude-test", tokens, 1, "")
 					if wantCost == 0 {
 						require.Nil(t, result)
 						return

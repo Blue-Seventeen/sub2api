@@ -358,45 +358,6 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 			accountReleaseFunc()
 		}
 
-		// 提交 usage 记录。成功路径与"流中断但 Forward 已观测到 usage 的部分结果"
-		// 错误路径共用；failover 错误恒定 result=nil，不会重复计费。
-		submitForwardUsage := func(result *service.ForwardResult) {
-			userAgent := c.GetHeader("User-Agent")
-			clientIP := ip.GetClientIP(c)
-			requestPayloadHash := service.HashUsageRequestPayload(body)
-			inboundEndpoint := GetInboundEndpoint(c)
-			upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
-
-			quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
-			sessionID := service.ExtractClientSessionID(c)
-			stampForwardRequestedReasoningEffort(result, service.RequestedReasoningEffortFromContext(c.Request.Context()))
-			channelUsageFields := clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel)
-			h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
-				if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
-					Result:             result,
-					QuotaPlatform:      quotaPlatform,
-					APIKey:             apiKey,
-					User:               apiKey.User,
-					Account:            account,
-					Subscription:       subscription,
-					PricingAt:          pricingAt,
-					InboundEndpoint:    inboundEndpoint,
-					UpstreamEndpoint:   upstreamEndpoint,
-					UserAgent:          userAgent,
-					IPAddress:          clientIP,
-					RequestPayloadHash: requestPayloadHash,
-					APIKeyService:      h.apiKeyService,
-					SessionID:          sessionID,
-					ChannelUsageFields: channelUsageFields,
-				}); err != nil {
-					reqLog.Error("gateway.cc.record_usage_failed",
-						zap.Int64("account_id", account.ID),
-						zap.Error(err),
-					)
-				}
-			})
-		}
-
 		forwardDurationMs := elapsedMillisSince(forwardStart)
 
 		if err != nil {
@@ -435,8 +396,8 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 			)
 			recordGatewayProxyFailureStat(c.Request.Context(), h.gatewayService, h.proxyStatsWorkerPool, account, apiKey, forwardDurationMs, "handler.gateway.chat_completions")
 			h.gatewayService.ReleaseStickySessionAfterCommittedNoContent(context.WithoutCancel(c.Request.Context()), apiKey.GroupID, selectionSessionHash, account.ID, err)
-			if result != nil {
-				submitForwardUsage(result)
+			if result == nil {
+				return
 			}
 			// A failed stream may still contain upstream-metered usage. Record the
 			// partial result below without retrying or changing the failure response.

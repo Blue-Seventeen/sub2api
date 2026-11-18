@@ -282,7 +282,11 @@ func tempUnscheduleOpenAITransportError(ctx context.Context, account *Account, s
 
 // tempUnscheduleOpenAITransportError is the service-scoped form of the helper
 // above: it resolves the account repository and runtime blocker from s.
-func (s *OpenAIGatewayService) tempUnscheduleOpenAITransportError(ctx context.Context, account *Account, safeErr string) {
+//
+// 生产路径用的是上面的显式依赖版本（handleOpenAITransportError 是包级函数，没有
+// service 接收者）。这一层封装只服务于 unit tag 下的
+// openai_upstream_transport_error_handle_test.go，因此对 unused 做定点豁免。
+func (s *OpenAIGatewayService) tempUnscheduleOpenAITransportError(ctx context.Context, account *Account, safeErr string) { //nolint:unused // service-scoped seam for unit-tagged transport-error tests
 	if s == nil {
 		return
 	}

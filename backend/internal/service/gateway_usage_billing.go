@@ -401,6 +401,14 @@ func applyUsageBilling(ctx context.Context, requestID string, usageLog *UsageLog
 		return false, nil
 	}
 
+	// 结算事务可能把费用分摊到与预检快照不同的订阅卡（聚合订阅按卡拆分、卡在
+	// 请求期间切换），使用日志必须记录实际扣费的卡：否则对账会把用量挂到虚拟
+	// 聚合 ID 或已失效的快照卡上，预检快照本身保持只读。非正数 ID 不是真实卡
+	// （0 = 虚拟聚合、负数 = 上游异常），不能成为归因。
+	if result.SubscriptionID != nil && *result.SubscriptionID > 0 && usageLog != nil {
+		usageLog.SubscriptionID = result.SubscriptionID
+	}
+
 	// Apply 可能在按用户合并的结算通道中排队，结算后的缓存同步使用独立的超时。
 	billingCtx, cancel := detachedBillingContext(ctx)
 	defer cancel()
@@ -1301,7 +1309,13 @@ func (s *GatewayService) calculateRecordUsageBaseCost(
 			cost, err = s.calculateRequestUnitCost(ctx, result, apiKey, billingModel, multiplier, unitCount)
 		}
 	} else if result.ImageCount > 0 {
-		if resolved := resolveMediaPricing(ctx, s.resolver, billingModel, apiKey); resolved != nil && resolved.Mode == BillingModeToken && forwardResultHasTokenUsage(result) {
+		// 与 OpenAI 流水线同口径：分组显式开启按张计费且请求来自专用图片端点时，
+		// 即便渠道/分组是 token 定价也必须按张结算，否则会以 token 价（分组图片
+		// 定价缺失时甚至是 $0）覆盖图片单价。未开启该开关时保持原有回落顺序：
+		// token 定价 + 有 token 用量 → 按 token，否则按图片价。
+		if imageCountBillingApplies(apiKey, result.ImageEndpoint) {
+			cost, err = s.calculateImageCost(ctx, result, apiKey, billingModel, imageMultiplier)
+		} else if resolved := resolveMediaPricing(ctx, s.resolver, billingModel, apiKey); resolved != nil && resolved.Mode == BillingModeToken && forwardResultHasTokenUsage(result) {
 			cost, err = s.calculateTokenCost(ctx, result, apiKey, billingModel, multiplier, opts)
 		} else {
 			cost, err = s.calculateImageCost(ctx, result, apiKey, billingModel, imageMultiplier)
@@ -1503,9 +1517,33 @@ func (usage ClaudeUsage) billingUsageTokens() UsageTokens {
 	return tokens
 }
 
-// calculateTokenCost 计算 Token 计费：路径选择（分组/渠道定价 → 内置定价）
-// 统一交给 BillingService.CalculateTokenCostForRequest，与模型广场的阶梯表查询同源。
+// calculateTokenCost 计算 Token 计费，并在返回前叠加“上游端点价格倍数”
+// （Backport 自上游 v0.2.23 的 calculateRecordUsageCost：Vertex 多区域端点
+// 相对 global 价按倍数计价，见 ForwardResult.UpstreamPriceMultiplier）。
+// 倍数只作用于默认模型价（LiteLLM/fallback）；管理员配置的分组价、渠道价
+// 视为最终价，不再叠加（判定见 upstreamPriceFactorApplies）。
+// 按次/图片等非 token 计费模式由 applyUpstreamPriceFactor 自行跳过。
 func (s *GatewayService) calculateTokenCost(
+	ctx context.Context,
+	result *ForwardResult,
+	apiKey *APIKey,
+	billingModel string,
+	multiplier float64,
+	opts *recordUsageOpts,
+) (*CostBreakdown, error) {
+	cost, err := s.calculateTokenCostBase(ctx, result, apiKey, billingModel, multiplier, opts)
+	if err != nil || cost == nil {
+		return cost, err
+	}
+	if s.upstreamPriceFactorApplies(ctx, result, apiKey, billingModel) {
+		applyUpstreamPriceFactor(cost, result)
+	}
+	return cost, nil
+}
+
+// calculateTokenCostBase 计算 Token 计费：路径选择（分组/渠道定价 → 内置定价）
+// 统一交给 BillingService.CalculateTokenCostForRequest，与模型广场的阶梯表查询同源。
+func (s *GatewayService) calculateTokenCostBase(
 	ctx context.Context,
 	result *ForwardResult,
 	apiKey *APIKey,

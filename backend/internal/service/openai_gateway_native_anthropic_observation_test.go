@@ -120,7 +120,14 @@ func TestNativeAnthropicResponseObservationReachesUsage(t *testing.T) {
 			require.Equal(t, 20, result.Usage.InputTokens)
 			wantOutput := 10
 			if tt.partial {
-				wantOutput = 0
+				// 期望依据（本 fork 的记账口径）：native Anthropic 流式收尾在
+				// message_start 就把该事件声明的 output_tokens 计入 usage
+				// （openai_gateway_messages_anthropic_native.go 的
+				// "Preserve the initial output estimate" 分支）。基线 acb3100e6
+				// 即已如此且带注释，属有意行为：被截断/读错的流不把上游已声明的
+				// 输出静默归零。上游 v0.2.23 的同名用例按 0 断言，与本 fork 的
+				// 终态记账口径冲突，故此处按 fork 口径校正为 message_start 中声明的 1。
+				wantOutput = 1
 			}
 			require.Equal(t, wantOutput, result.Usage.OutputTokens)
 			require.Equal(t, tt.disconnect, result.ClientDisconnect)

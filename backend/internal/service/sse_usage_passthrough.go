@@ -15,49 +15,44 @@ func parseSSEUsagePassthrough(data string, usage *ClaudeUsage) {
 	}
 
 	parsed := gjson.Parse(data)
-	switch parsed.Get("type").String() {
+	eventType := parsed.Get("type").String()
+	switch eventType {
 	case "message_start":
 		msgUsage := parsed.Get("message.usage")
 		if msgUsage.Exists() {
 			usage.InputTokens = int(msgUsage.Get("input_tokens").Int())
-			usage.CacheCreationInputTokens = int(msgUsage.Get("cache_creation_input_tokens").Int())
-			usage.cacheCreationInputTokensFromDetails = false
 			usage.CacheReadInputTokens = int(msgUsage.Get("cache_read_input_tokens").Int())
 
-			// Start events replace both TTL buckets when either detail is present.
+			// 起始快照整体替换缓存写入口径：聚合未声明时先置为未知，再由 TTL 明细推导；
+			// 任一 5m/1h 明细出现即替换两档（含显式 0）。
+			usage.CacheCreationInputTokens = 0
+			usage.cacheCreationInputTokensPresent = false
+			usage.cacheCreationInputTokensFromDetails = false
 			cc5m := msgUsage.Get("cache_creation.ephemeral_5m_input_tokens")
 			cc1h := msgUsage.Get("cache_creation.ephemeral_1h_input_tokens")
 			if cc5m.Exists() || cc1h.Exists() {
-				usage.CacheCreation5mTokens = int(cc5m.Int())
-				usage.CacheCreation1hTokens = int(cc1h.Int())
+				usage.CacheCreation5mTokens = max(int(cc5m.Int()), 0)
+				usage.CacheCreation1hTokens = max(int(cc1h.Int()), 0)
 			}
+			// 与 typed 口径共用同一合并规则：保留"聚合是否显式声明"（presence）以及
+			// "聚合是否由明细推导而来"两个标记，供下游计费区分显式 0 与缺失。
+			mergeAnthropicCacheCreationSnapshot(msgUsage, usage)
 		}
 	case "message_delta":
 		deltaUsage := parsed.Get("usage")
-		if deltaUsage.Exists() {
+		if deltaUsage.Exists() && deltaUsage.Type != gjson.Null {
 			if v := deltaUsage.Get("input_tokens").Int(); v > 0 {
 				usage.InputTokens = int(v)
 			}
 			if v := deltaUsage.Get("output_tokens").Int(); v > 0 {
 				usage.OutputTokens = int(v)
 			}
-			if v := deltaUsage.Get("cache_creation_input_tokens").Int(); v > 0 {
-				usage.CacheCreationInputTokens = int(v)
-				usage.cacheCreationInputTokensFromDetails = false
-			}
 			if v := deltaUsage.Get("cache_read_input_tokens").Int(); v > 0 {
 				usage.CacheReadInputTokens = int(v)
 			}
-
-			// Delta details are independently authoritative, including explicit zero.
-			cc5m := deltaUsage.Get("cache_creation.ephemeral_5m_input_tokens")
-			cc1h := deltaUsage.Get("cache_creation.ephemeral_1h_input_tokens")
-			if cc5m.Exists() {
-				usage.CacheCreation5mTokens = int(cc5m.Int())
-			}
-			if cc1h.Exists() {
-				usage.CacheCreation1hTokens = int(cc1h.Int())
-			}
+			// Delta 明细各自权威（含显式 0）；聚合仅在其自身声明时更新，
+			// 已由明细推导的聚合继续跟随 TTL 明细。
+			mergeAnthropicCacheCreationSnapshot(deltaUsage, usage)
 		}
 	default:
 		// Other events only contribute cache-write TTL details; their canonical
@@ -83,16 +78,61 @@ func parseSSEUsagePassthrough(data string, usage *ClaudeUsage) {
 		}
 		if total := cc5m + cc1h; total > 0 {
 			usage.CacheCreationInputTokens = int(total)
+			usage.cacheCreationInputTokensFromDetails = true
 		}
 	}
 
 	// Kimi reports total input at start but uncached input in deltas. Its stable
 	// prompt total keeps ClaudeUsage buckets disjoint without subtracting twice.
-	usageNode := parsed.Get("usage")
-	if parsed.Get("type").String() == "message_start" {
-		usageNode = parsed.Get("message.usage")
+	// 只有快照事件（message_start / message_delta）允许重新推导非缓存输入桶；
+	// 其余事件的权威计数一律忽略，避免覆盖已累计的快照口径。
+	if eventType == "message_start" || eventType == "message_delta" {
+		usageNode := parsed.Get("usage")
+		if eventType == "message_start" {
+			usageNode = parsed.Get("message.usage")
+		}
+		if !usageNode.Exists() || usageNode.Type == gjson.Null {
+			usageNode = parsed.Get("message.usage")
+		}
+		normalizeAnthropicCompatiblePromptBuckets(usageNode, usage)
 	}
-	normalizeAnthropicCompatiblePromptBuckets(usageNode, usage)
+}
+
+// mergeAnthropicCacheCreationSnapshot 把一条 Anthropic 快照事件（message_start /
+// message_delta）里的 cache_creation 写入 usage。
+//
+// 口径与 typed 合并（apicompat.AnthropicUsage + mergeAnthropicCacheCreationUsage）
+// 一致：显式声明的聚合最权威（显式 0 不会清掉既有正值），聚合未声明时由 5m/1h
+// 明细推导，推导出的聚合继续跟随明细。唯一差异是推导条件不参考 presence：本
+// 解析器允许调用方传入已被其他路径填充的 usage（例如 API-Key 直通流复用同一
+// 结构），此时"未知来源的正是正数聚合"不能被当作未声明而清零。
+func mergeAnthropicCacheCreationSnapshot(node gjson.Result, usage *ClaudeUsage) {
+	if usage == nil || !node.IsObject() {
+		return
+	}
+	aggregate, aggregatePresent := anthropicUsageInt(node.Get("cache_creation_input_tokens"))
+	if aggregatePresent && (aggregate > 0 || usage.CacheCreationInputTokens <= 0) {
+		usage.CacheCreationInputTokens = max(aggregate, 0)
+		usage.cacheCreationInputTokensPresent = true
+		usage.cacheCreationInputTokensFromDetails = false
+	}
+	details := node.Get("cache_creation")
+	if !details.IsObject() {
+		return
+	}
+	updated := false
+	if tokens, ok := anthropicUsageInt(details.Get("ephemeral_5m_input_tokens")); ok {
+		usage.CacheCreation5mTokens = max(tokens, 0)
+		updated = true
+	}
+	if tokens, ok := anthropicUsageInt(details.Get("ephemeral_1h_input_tokens")); ok {
+		usage.CacheCreation1hTokens = max(tokens, 0)
+		updated = true
+	}
+	if updated && (usage.cacheCreationInputTokensFromDetails || usage.CacheCreationInputTokens <= 0) {
+		usage.CacheCreationInputTokens = usage.CacheCreation5mTokens + usage.CacheCreation1hTokens
+		usage.cacheCreationInputTokensFromDetails = true
+	}
 }
 
 // mergeAnthropicCacheCreationDetailsOutsideSnapshots applies cache_creation TTL
@@ -135,57 +175,86 @@ func mergeAnthropicCacheCreationDetailsOutsideSnapshots(parsed gjson.Result, usa
 // normalizeAnthropicCompatiblePromptBuckets converts provider prompt/cache aliases
 // into Claude's mutually exclusive buckets, leaving native Anthropic usage alone.
 //
-// It is intentionally stateless: it never stores the prompt total on usage, so the
-// caller can compare accumulated usage snapshots field by field. Providers that
-// keep repeating prompt_tokens on every event still normalize identically.
+// 口径与 typed 路径（gateway_forward_as_responses.go 的 normalizeAnthropicCompatiblePromptUsage
+// → normalizeAnthropicPromptTotal）一致：最近一次的权威 prompt 总量会被记在
+// ClaudeUsage 上，后续事件里 cache_read / cache_creation 增长时据此重算非缓存输入桶。
+// 只保存"权威总量"这一项状态，绝不从缓存别名反推总量：没有任何权威总量可用的
+// 增量事件不会改写 InputTokens（旧实现用缺失的 prompt_tokens=0 参与减法，会把
+// cache 命中的事件误判成整单缓存而把输入桶清零）。缺失与显式 null 等价。
 func normalizeAnthropicCompatiblePromptBuckets(usageNode gjson.Result, usage *ClaudeUsage) bool {
-	if usage == nil || !usageNode.Exists() {
+	if usage == nil || !usageNode.Exists() || usageNode.Type == gjson.Null {
 		return false
 	}
-	promptTokens := usageNode.Get("prompt_tokens")
-	promptCacheHitTokens := usageNode.Get("prompt_cache_hit_tokens")
-	promptCacheMissTokens := usageNode.Get("prompt_cache_miss_tokens")
-	if (!promptTokens.Exists() || promptTokens.Int() <= 0) &&
-		!promptCacheHitTokens.Exists() && !promptCacheMissTokens.Exists() {
+	promptTokens, hasPromptTokens := anthropicUsageInt(usageNode.Get("prompt_tokens"))
+	_, hasPromptCacheHit := anthropicUsageInt(usageNode.Get("prompt_cache_hit_tokens"))
+	promptCacheMissTokens, hasPromptCacheMiss := anthropicUsageInt(usageNode.Get("prompt_cache_miss_tokens"))
+	if (!hasPromptTokens || promptTokens <= 0) && !hasPromptCacheHit && !hasPromptCacheMiss && !usage.promptTotalPresent {
 		return false
 	}
 
 	cacheReadTokens := usage.CacheReadInputTokens
-	if v := usageNode.Get("cache_read_input_tokens"); v.Exists() {
-		cacheReadTokens = int(v.Int())
-	}
-	if cacheReadTokens == 0 {
-		if v := usageNode.Get("cached_tokens"); v.Exists() {
-			cacheReadTokens = int(v.Int())
+	for _, path := range []string{"cache_read_input_tokens", "cached_tokens", "prompt_tokens_details.cached_tokens", "prompt_cache_hit_tokens"} {
+		value, ok := anthropicUsageInt(usageNode.Get(path))
+		if !ok {
+			continue
 		}
-	}
-	if cacheReadTokens == 0 {
-		if v := usageNode.Get("prompt_tokens_details.cached_tokens"); v.Exists() {
-			cacheReadTokens = int(v.Int())
+		cacheReadTokens = max(value, 0)
+		if cacheReadTokens > 0 {
+			break
 		}
-	}
-	if cacheReadTokens == 0 && promptCacheHitTokens.Exists() {
-		cacheReadTokens = max(int(promptCacheHitTokens.Int()), 0)
 	}
 
+	// 聚合/明细由 mergeAnthropicCacheCreationSnapshot 裁决（快照事件）与顶层 usage
+	// 回填（非快照事件）共同维护，这里只用显式正数采纳本事件口径；显式 0 仅在
+	// "本事件是权威兼容快照"时表示清空缓存，其余情况是供应商的占位 0。
+	authoritativeSnapshot := hasPromptCacheMiss || (hasPromptTokens && promptTokens > 0)
 	cacheCreationTokens := usage.CacheCreationInputTokens
-	if v := usageNode.Get("cache_creation_input_tokens"); v.Exists() {
-		cacheCreationTokens = int(v.Int())
+	if value, ok := anthropicUsageInt(usageNode.Get("cache_creation_input_tokens")); ok {
+		if value > 0 {
+			cacheCreationTokens = max(value, 0)
+		} else if authoritativeSnapshot {
+			cacheCreationTokens = 0
+		}
 	}
 	if cacheCreationTokens == 0 {
-		cc5m := usageNode.Get("cache_creation.ephemeral_5m_input_tokens").Int()
-		cc1h := usageNode.Get("cache_creation.ephemeral_1h_input_tokens").Int()
+		cc5m, _ := anthropicUsageInt(usageNode.Get("cache_creation.ephemeral_5m_input_tokens"))
+		cc1h, _ := anthropicUsageInt(usageNode.Get("cache_creation.ephemeral_1h_input_tokens"))
 		if cc5m > 0 || cc1h > 0 {
-			cacheCreationTokens = int(cc5m + cc1h)
+			cacheCreationTokens = cc5m + cc1h
 		}
 	}
 
-	if promptCacheMissTokens.Exists() {
-		usage.InputTokens = max(int(promptCacheMissTokens.Int()), 0)
-	} else {
-		usage.InputTokens = max(int(promptTokens.Int())-cacheReadTokens-cacheCreationTokens, 0)
+	// 先落盘缓存桶（含"显式 0 是否清零"的裁决），再用**落盘后**的桶重算输入，
+	// 否则本事件缺失的别名会被当作 0 参与减法。
+	if cacheReadTokens > 0 || usage.CacheReadInputTokens <= 0 || authoritativeSnapshot {
+		usage.CacheReadInputTokens = cacheReadTokens
 	}
-	usage.CacheReadInputTokens = cacheReadTokens
-	usage.CacheCreationInputTokens = cacheCreationTokens
+	if cacheCreationTokens > 0 || usage.CacheCreationInputTokens <= 0 || authoritativeSnapshot {
+		usage.CacheCreationInputTokens = cacheCreationTokens
+	}
+
+	// 与 typed 的 normalizeAnthropicPromptTotal 同口径：保存权威总量 / 由 miss 桶
+	// 覆盖，然后按最新的缓存桶重算非缓存输入桶。
+	if hasPromptCacheMiss {
+		usage.promptTotalPresent = false
+		usage.InputTokens = max(promptCacheMissTokens, 0)
+	} else {
+		if hasPromptTokens && promptTokens > 0 {
+			usage.promptTotalTokens = promptTokens
+			usage.promptTotalPresent = true
+		}
+		if usage.promptTotalPresent {
+			usage.InputTokens = max(usage.promptTotalTokens-usage.CacheReadInputTokens-usage.CacheCreationInputTokens, 0)
+		}
+	}
 	return true
+}
+
+// anthropicUsageInt 读取 usage 字段的整数值；字段缺失或显式 null 都视为"未提供"，
+// 与 typed 口径（指针判空）保持一致。
+func anthropicUsageInt(node gjson.Result) (int, bool) {
+	if !node.Exists() || node.Type == gjson.Null {
+		return 0, false
+	}
+	return int(node.Int()), true
 }

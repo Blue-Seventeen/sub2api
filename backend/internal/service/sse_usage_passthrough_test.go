@@ -14,7 +14,8 @@ func TestSSEUsagePassthroughEventSemantics(t *testing.T) {
 			initial: ClaudeUsage{InputTokens: 10, OutputTokens: 8, CacheCreationInputTokens: 7,
 				CacheReadInputTokens: 6, CacheCreation5mTokens: 3, CacheCreation1hTokens: 4},
 			data: `{"type":"message_start","message":{"usage":{"input_tokens":0,"output_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0}}}}`,
-			want: ClaudeUsage{OutputTokens: 8},
+			// 显式 0 聚合 + 显式 0 明细：聚合被标记为"已声明"并由明细推导为 0。
+			want: ClaudeUsage{OutputTokens: 8, cacheCreationInputTokensPresent: true, cacheCreationInputTokensFromDetails: true},
 		},
 		{
 			name:    "start missing canonical fields resets them but preserves absent TTL details",
@@ -25,12 +26,16 @@ func TestSSEUsagePassthroughEventSemantics(t *testing.T) {
 		{
 			name: "start derives aggregate cache creation from TTL details",
 			data: `{"type":"message_start","message":{"usage":{"input_tokens":12,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cached_tokens":9,"cache_creation":{"ephemeral_5m_input_tokens":3,"ephemeral_1h_input_tokens":4}}}}`,
-			want: ClaudeUsage{InputTokens: 12, CacheReadInputTokens: 9, CacheCreationInputTokens: 7, CacheCreation5mTokens: 3, CacheCreation1hTokens: 4},
+			// 显式 0 聚合交由 5m/1h 明细推导（聚合因此被标记为"由明细推导"）。
+			want: ClaudeUsage{InputTokens: 12, CacheReadInputTokens: 9, CacheCreationInputTokens: 7, CacheCreation5mTokens: 3, CacheCreation1hTokens: 4,
+				cacheCreationInputTokensPresent: true, cacheCreationInputTokensFromDetails: true},
 		},
 		{
 			name: "start canonical cache counts take precedence over aliases",
 			data: `{"type":"message_start","message":{"usage":{"input_tokens":12,"cache_creation_input_tokens":20,"cache_read_input_tokens":15,"cached_tokens":9,"cache_creation":{"ephemeral_5m_input_tokens":3,"ephemeral_1h_input_tokens":4}}}}`,
-			want: ClaudeUsage{InputTokens: 12, CacheReadInputTokens: 15, CacheCreationInputTokens: 20, CacheCreation5mTokens: 3, CacheCreation1hTokens: 4},
+			// 聚合显式声明即打 presence 标记（供 TTL 改写与计费区分"显式 0"与"缺失"）。
+			want: ClaudeUsage{InputTokens: 12, CacheReadInputTokens: 15, CacheCreationInputTokens: 20, CacheCreation5mTokens: 3, CacheCreation1hTokens: 4,
+				cacheCreationInputTokensPresent: true},
 		},
 		{
 			name:    "delta preserves zero canonical counts and replaces supplied TTL zeros",
@@ -42,12 +47,15 @@ func TestSSEUsagePassthroughEventSemantics(t *testing.T) {
 			name:    "delta preserves omitted TTL bucket",
 			initial: ClaudeUsage{InputTokens: 10, CacheCreation5mTokens: 3, CacheCreation1hTokens: 4},
 			data:    `{"type":"message_delta","usage":{"output_tokens":8,"cache_creation_input_tokens":4,"cache_creation":{"ephemeral_5m_input_tokens":0}}}`,
-			want:    ClaudeUsage{InputTokens: 10, OutputTokens: 8, CacheCreationInputTokens: 4, CacheCreation1hTokens: 4},
+			want: ClaudeUsage{InputTokens: 10, OutputTokens: 8, CacheCreationInputTokens: 4, CacheCreation1hTokens: 4,
+				cacheCreationInputTokensPresent: true},
 		},
 		{
 			name: "delta updates positive counts and TTL details",
 			data: `{"type":"message_delta","usage":{"input_tokens":10,"output_tokens":8,"cache_read_input_tokens":6,"cache_creation":{"ephemeral_5m_input_tokens":3,"ephemeral_1h_input_tokens":4}}}`,
-			want: ClaudeUsage{InputTokens: 10, OutputTokens: 8, CacheReadInputTokens: 6, CacheCreationInputTokens: 7, CacheCreation5mTokens: 3, CacheCreation1hTokens: 4},
+			// 聚合缺省时由明细推导为 7，并标记为"由明细推导"。
+			want: ClaudeUsage{InputTokens: 10, OutputTokens: 8, CacheReadInputTokens: 6, CacheCreationInputTokens: 7, CacheCreation5mTokens: 3, CacheCreation1hTokens: 4,
+				cacheCreationInputTokensFromDetails: true},
 		},
 		{
 			name:    "other events ignore canonical fields but use cache fallbacks",
@@ -68,12 +76,14 @@ func TestSSEUsagePassthroughEventSemantics(t *testing.T) {
 		{
 			name: "missing start usage still permits top level cache fallbacks",
 			data: `{"type":"message_start","usage":{"cached_tokens":6,"cache_creation":{"ephemeral_5m_input_tokens":2,"ephemeral_1h_input_tokens":1}}}`,
-			want: ClaudeUsage{CacheReadInputTokens: 6, CacheCreationInputTokens: 3},
+			// 顶层 usage 回填的聚合同样来自明细推导。
+			want: ClaudeUsage{CacheReadInputTokens: 6, CacheCreationInputTokens: 3, cacheCreationInputTokensFromDetails: true},
 		},
 		{
 			name: "zero nested cache fallbacks allow top level values",
 			data: `{"type":"message_start","message":{"usage":{"cached_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0}}},"usage":{"cached_tokens":6,"cache_creation":{"ephemeral_5m_input_tokens":2,"ephemeral_1h_input_tokens":1}}}`,
-			want: ClaudeUsage{CacheReadInputTokens: 6, CacheCreationInputTokens: 3},
+			// 顶层 usage 回填的聚合同样来自明细推导。
+			want: ClaudeUsage{CacheReadInputTokens: 6, CacheCreationInputTokens: 3, cacheCreationInputTokensFromDetails: true},
 		},
 		{
 			name:    "late aliases do not replace existing cache counts",
@@ -108,7 +118,9 @@ func TestSSEUsagePassthroughCompatiblePromptBuckets(t *testing.T) {
 				`{"type":"message_start","message":{"usage":{"input_tokens":173306,"prompt_tokens":173306,"cached_tokens":0}}}`,
 				`{"type":"message_delta","usage":{"input_tokens":250,"cache_read_input_tokens":173056,"output_tokens":166,"prompt_tokens":173306,"cached_tokens":173056}}`,
 			},
-			want: ClaudeUsage{InputTokens: 250, OutputTokens: 166, CacheReadInputTokens: 173056},
+			// 权威 prompt 总量与 typed 路径一样被保存（用于后续缓存桶增长时回算）。
+			want: ClaudeUsage{InputTokens: 250, OutputTokens: 166, CacheReadInputTokens: 173056,
+				promptTotalTokens: 173306, promptTotalPresent: true},
 		},
 		{
 			name: "Kimi fully cached delta clears start input",
@@ -116,17 +128,20 @@ func TestSSEUsagePassthroughCompatiblePromptBuckets(t *testing.T) {
 				`{"type":"message_start","message":{"usage":{"input_tokens":173306,"prompt_tokens":173306}}}`,
 				`{"type":"message_delta","usage":{"input_tokens":0,"prompt_tokens":173306,"cached_tokens":173306,"output_tokens":8}}`,
 			},
-			want: ClaudeUsage{OutputTokens: 8, CacheReadInputTokens: 173306},
+			want: ClaudeUsage{OutputTokens: 8, CacheReadInputTokens: 173306,
+				promptTotalTokens: 173306, promptTotalPresent: true},
 		},
 		{
 			name:   "Kimi start cache read and creation are excluded from prompt total",
 			events: []string{`{"type":"message_start","message":{"usage":{"input_tokens":1200,"prompt_tokens":1200,"cached_tokens":800,"cache_creation":{"ephemeral_5m_input_tokens":60,"ephemeral_1h_input_tokens":40}}}}`},
-			want:   ClaudeUsage{InputTokens: 300, CacheReadInputTokens: 800, CacheCreationInputTokens: 100, CacheCreation5mTokens: 60, CacheCreation1hTokens: 40},
+			// 聚合缺省时由 60+40 明细推导。
+			want: ClaudeUsage{InputTokens: 300, CacheReadInputTokens: 800, CacheCreationInputTokens: 100, CacheCreation5mTokens: 60, CacheCreation1hTokens: 40,
+				promptTotalTokens: 1200, promptTotalPresent: true, cacheCreationInputTokensFromDetails: true},
 		},
 		{
 			name:   "GLM nested cache details",
 			events: []string{`{"type":"message_delta","usage":{"input_tokens":1200,"prompt_tokens":1200,"prompt_tokens_details":{"cached_tokens":800},"output_tokens":30}}`},
-			want:   ClaudeUsage{InputTokens: 400, OutputTokens: 30, CacheReadInputTokens: 800},
+			want:   ClaudeUsage{InputTokens: 400, OutputTokens: 30, CacheReadInputTokens: 800, promptTotalTokens: 1200, promptTotalPresent: true},
 		},
 		{
 			name:   "DeepSeek hit and miss override overloaded input",
@@ -137,23 +152,24 @@ func TestSSEUsagePassthroughCompatiblePromptBuckets(t *testing.T) {
 			name:    "explicit compatible zeros clear stale cache buckets",
 			initial: ClaudeUsage{InputTokens: 10, CacheReadInputTokens: 800, CacheCreationInputTokens: 100},
 			events:  []string{`{"type":"message_delta","usage":{"prompt_tokens":1200,"cache_read_input_tokens":0,"cached_tokens":0,"cache_creation_input_tokens":0}}`},
-			want:    ClaudeUsage{InputTokens: 1200},
+			want:    ClaudeUsage{InputTokens: 1200, promptTotalTokens: 1200, promptTotalPresent: true},
 		},
 		{
 			name:    "missing compatible cache fields retain previous buckets",
 			initial: ClaudeUsage{CacheReadInputTokens: 800, CacheCreationInputTokens: 100},
 			events:  []string{`{"type":"message_delta","usage":{"prompt_tokens":1200,"output_tokens":30}}`},
-			want:    ClaudeUsage{InputTokens: 300, OutputTokens: 30, CacheReadInputTokens: 800, CacheCreationInputTokens: 100},
+			want: ClaudeUsage{InputTokens: 300, OutputTokens: 30, CacheReadInputTokens: 800, CacheCreationInputTokens: 100,
+				promptTotalTokens: 1200, promptTotalPresent: true},
 		},
 		{
 			name:   "canonical cache read wins over provider aliases",
 			events: []string{`{"type":"message_delta","usage":{"prompt_tokens":1200,"cache_read_input_tokens":800,"cached_tokens":600,"prompt_tokens_details":{"cached_tokens":400},"prompt_cache_hit_tokens":200}}`},
-			want:   ClaudeUsage{InputTokens: 400, CacheReadInputTokens: 800},
+			want:   ClaudeUsage{InputTokens: 400, CacheReadInputTokens: 800, promptTotalTokens: 1200, promptTotalPresent: true},
 		},
 		{
 			name:   "cache aliases prefer top level before nested and hit fields",
 			events: []string{`{"type":"message_delta","usage":{"prompt_tokens":1200,"cached_tokens":600,"prompt_tokens_details":{"cached_tokens":400},"prompt_cache_hit_tokens":200}}`},
-			want:   ClaudeUsage{InputTokens: 600, CacheReadInputTokens: 600},
+			want:   ClaudeUsage{InputTokens: 600, CacheReadInputTokens: 600, promptTotalTokens: 1200, promptTotalPresent: true},
 		},
 		{
 			name:   "explicit miss bucket is authoritative and nonnegative",
@@ -163,12 +179,13 @@ func TestSSEUsagePassthroughCompatiblePromptBuckets(t *testing.T) {
 		{
 			name:   "cache exceeding prompt total clamps uncached input to zero",
 			events: []string{`{"type":"message_delta","usage":{"input_tokens":100,"prompt_tokens":20,"cached_tokens":30}}`},
-			want:   ClaudeUsage{CacheReadInputTokens: 30},
+			want:   ClaudeUsage{CacheReadInputTokens: 30, promptTotalTokens: 20, promptTotalPresent: true},
 		},
 		{
 			name:   "native Anthropic buckets remain disjoint without provider aliases",
 			events: []string{`{"type":"message_start","message":{"usage":{"input_tokens":2,"cache_read_input_tokens":376156,"cache_creation_input_tokens":733}}}`},
-			want:   ClaudeUsage{InputTokens: 2, CacheReadInputTokens: 376156, CacheCreationInputTokens: 733},
+			// 显式聚合打 presence 标记；原生 Anthropic 桶保持互斥不做减法。
+			want: ClaudeUsage{InputTokens: 2, CacheReadInputTokens: 376156, CacheCreationInputTokens: 733, cacheCreationInputTokensPresent: true},
 		},
 		{
 			name:   "zero prompt total alone does not trigger compatible normalization",

@@ -38,7 +38,7 @@ func TestGeminiForward_SameAccountRetriesFollowConfig(t *testing.T) {
 				svc, upstream, _ := newGeminiSingleCheckService(geminiSequenceUpstreamResponse{status: http.StatusServiceUnavailable, body: geminiRetryTest503Body})
 				svc.cfg.Gateway.MaxSameAccountRetriesGemini = retries
 
-				err, _ := fw.forward(t, svc, geminiSameAccountRetryTestAccount())
+				_, err := fw.forward(t, svc, geminiSameAccountRetryTestAccount())
 
 				var failoverErr *UpstreamFailoverError
 				require.True(t, errors.As(err, &failoverErr), "同号重试耗尽应换号，got %T: %v", err, err)

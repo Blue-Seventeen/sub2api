@@ -21,6 +21,7 @@ const maxAPIKeyAuthorizationHeaderBytes = service.MaxAPIKeyCredentialBytes + 128
 func hasZeroChargeUnifiedRate(user *service.User) bool {
 	return service.HasZeroChargeUnifiedRate(user)
 }
+
 // statusClientClosedRequest 非标准状态码 499：客户端在响应前断开。
 const statusClientClosedRequest = 499
 

@@ -251,7 +251,7 @@ func ProvideHandlers(
 		Promotion:          promotionHandler,
 		AsyncImage:         asyncImageHandler,
 		BatchImage:         batchImageHandler,
-		MCPOAuth:         mcpOAuthHandler,
+		MCPOAuth:           mcpOAuthHandler,
 	}
 }
 

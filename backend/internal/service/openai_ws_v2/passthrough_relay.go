@@ -84,7 +84,7 @@ type RelayOptions struct {
 	FirstMessageSent                bool
 	StartClientAfterFirstDownstream bool
 	OnUsageParseFailure             func(eventType string, usageRaw string)
-	BeforeTurnComplete               func(msgType coderws.MessageType, payload []byte)
+	BeforeTurnComplete              func(msgType coderws.MessageType, payload []byte)
 	OnTurnComplete                  func(turn RelayTurnResult)
 	BeforeWriteClient               func(msgType coderws.MessageType, payload []byte, wroteDownstream bool) error
 	BeforeClientWrite               func(msgType coderws.MessageType, payload []byte)

@@ -101,6 +101,10 @@ type UsageLogAPIKey struct {
 	GroupID *int64 `json:"group_id"`
 	Status  string `json:"status"`
 
+	// Key 只由完整管理员视图（handler/admin 的 adminUsageLogResponses）填充；
+	// 用户侧用量接口与导出路径都不设置它，omitempty 保证不会隐式扩大暴露面。
+	Key string `json:"key,omitempty"`
+
 	Group *Group `json:"group,omitempty"`
 }
 

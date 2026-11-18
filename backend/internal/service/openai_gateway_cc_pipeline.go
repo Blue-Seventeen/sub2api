@@ -494,6 +494,8 @@ func openAIErrorPayloadAllowsReplay(c *gin.Context, account *Account, payload []
 	if account != nil {
 		platform = account.Platform
 	}
+	// 定制契约：命中运营方透传规则时优先套用规则（同一 attempt 内直接回写规则
+	// 状态码/文案），不为换号而推迟规则生效。规则优先级由这一处保证。
 	if _, _, _, matched := applyOpenAIStreamFailedErrorPassthroughRule(c, platform, payload, message); matched {
 		return false
 	}

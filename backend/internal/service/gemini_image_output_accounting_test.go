@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 
@@ -268,10 +267,11 @@ func TestHandleNativeNonStreamingResponse_FileDataImageBilling(t *testing.T) {
 		billingService: NewBillingService(&config.Config{}, nil),
 		resolver:       newOpenAIImageChannelPricingResolverForTest(t, groupID, model, 0.25),
 	}
-	cost := svc.calculateRecordUsageCost(context.Background(),
+	cost, err := svc.calculateRecordUsageCost(context.Background(),
 		&ForwardResult{Model: model, ImageCount: count, ImageSize: "1K"},
 		&APIKey{GroupID: i64p(groupID), Group: &Group{ID: groupID}},
-		model, 0.15, 1.0, time.Time{})
+		model, 0.15, 1.0, &recordUsageOpts{})
+	require.NoError(t, err)
 	require.NotNil(t, cost)
 	require.Equal(t, string(BillingModeImage), cost.BillingMode)
 	require.InDelta(t, 0.50, cost.TotalCost, 1e-12)

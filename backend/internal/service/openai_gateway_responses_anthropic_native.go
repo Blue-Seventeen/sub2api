@@ -366,6 +366,11 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 	var firstTokenMs *int
 	firstChunk := true
 	clientDisconnected := false
+	// sawTerminalEvent 记录上游是否发出过 message_stop / [DONE]。fork 契约（与
+	// handleCCStreamingFromNativeAnthropic 同口径）：原生 Anthropic 流没有终止事件
+	// 就结束 = 上游半路断流，不得补发终态帧或合成 usage 终结块，必须报错；已累计
+	// 的 usage 仍随结果返回，避免 payg 上游已计费而平台漏记。
+	sawTerminalEvent := false
 
 	scanner := bufio.NewScanner(resp.Body)
 	maxLineSize := defaultMaxLineSize
@@ -508,6 +513,11 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 		if !ok {
 			continue
 		}
+		// 兼容上游可能用 message_stop 事件或 OpenAI 风格的 [DONE] 结束流，二者都算
+		// 正常收尾（见 anthropicStreamEventIsTerminal）。
+		if anthropicStreamEventIsTerminal("", payload) {
+			sawTerminalEvent = true
+		}
 
 		if isCCUpstreamErrorPayload("", []byte(payload)) {
 			mergeNativeAnthropicErrorUsage(&usage, []byte(payload))
@@ -536,6 +546,14 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 
 	if clientDisconnected {
 		return resultWithUsage(), nil
+	}
+
+	// fork 契约：未收到 message_stop / [DONE] 即结束 = 截断流，不得补发
+	// response.completed，改为写出终止错误帧（response.failed）并返回错误；
+	// 已收集的 usage 随结果保留（同 handleCCStreamingFromNativeAnthropic）。
+	if !sawTerminalEvent {
+		_ = resp.Body.Close()
+		return failStream("stream usage incomplete: missing terminal event")
 	}
 
 	// Finalize only after the upstream has supplied a terminal event.

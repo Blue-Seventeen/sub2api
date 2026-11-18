@@ -198,7 +198,7 @@ func (h *UserHandler) List(c *gin.Context) {
 	out := make([]UserWithConcurrency, len(users))
 	for i := range users {
 		out[i] = UserWithConcurrency{
-			AdminUser: *dto.UserFromServiceAdmin(&users[i]),
+			AdminUser: *dto.UserFromServiceAdmin(adminBalanceViews(&users[i])),
 		}
 		if info := loadInfo[users[i].ID]; info != nil {
 			out[i].CurrentConcurrency = info.CurrentConcurrency
@@ -998,12 +998,6 @@ func (h *UserHandler) ResetUserPlatformQuotaWindow(c *gin.Context) {
 		"target_user_id", userID,
 		"platform", req.Platform,
 		"window", req.Window)
-
-	if h.billingCache != nil {
-		if err := h.billingCache.DeleteUserPlatformQuotaCache(ctx, userID, req.Platform); err != nil {
-			slog.Error("ALERT: quota cache invalidation failed after ResetExpiredWindow; 窗口重置可能延迟至 sentinel TTL(最长 1h)", "user_id", userID, "platform", req.Platform, "err", err)
-		}
-	}
 
 	if scopedAdminWriteOnly(c, "users.quotas.read") {
 		response.Success(c, gin.H{"id": userID})

@@ -1601,10 +1601,17 @@ func (s *GatewayService) getSchedulableAccount(ctx context.Context, accountID in
 		err     error
 	)
 	if GatewayRetryAccountFromContext(ctx) > 0 || gatewayAttemptUsesAuthoritativeCandidates(ctx) {
-		if s.accountRepo == nil {
+		// 同账号重试与权威候选口径要求读库拿最新状态，避免用陈旧快照判断账号可用性。
+		// 仅在完全没有仓储（降级装配 / 单元测试只提供调度快照）时退回快照，
+		// 否则池模式的同账号重试会直接被判成"不可重试"，把上游 429 透传给客户端。
+		switch {
+		case s.accountRepo != nil:
+			account, err = s.accountRepo.GetByID(ctx, accountID)
+		case s.schedulerSnapshot != nil:
+			account, err = s.schedulerSnapshot.GetAccount(ctx, accountID)
+		default:
 			return nil, ErrSameAccountRetryUnavailable
 		}
-		account, err = s.accountRepo.GetByID(ctx, accountID)
 	} else if s.schedulerSnapshot != nil {
 		account, err = s.schedulerSnapshot.GetAccount(ctx, accountID)
 	} else {

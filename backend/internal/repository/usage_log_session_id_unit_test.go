@@ -32,7 +32,7 @@ func newSessionIDUsageLog(sessionID *string) *service.UsageLog {
 // arg slice / arg-type table so the five INSERT column lists stay in sync. session_id
 // is followed by native_compaction_v2 and created_at.
 func TestPrepareUsageLogInsert_SessionIDArgWiring(t *testing.T) {
-	require.Len(t, usageLogInsertArgTypes, 75, "arg-type table must include proxy routes, upstream request ID, requested reasoning effort and native compaction")
+	require.Len(t, usageLogInsertArgTypes, 77, "arg-type table must include proxy routes, upstream request ID, requested reasoning effort, native compaction and the 30m/12h cache-creation columns")
 
 	sessionID := "sess-persisted-123"
 	log := newSessionIDUsageLog(&sessionID)
@@ -46,15 +46,15 @@ func TestPrepareUsageLogInsert_SessionIDArgWiring(t *testing.T) {
 
 	// proxy_routes precedes upstream_request_id and session_id; its addition
 	// must not shift the session value into an adjacent text column.
-	proxyArg := prepared.args[len(prepared.args)-5]
+	proxyArg := prepared.args[len(prepared.args)-7]
 	proxyJSON, ok := proxyArg.(string)
 	require.True(t, ok, "proxy_routes arg should be a JSON string, got %T", proxyArg)
 	require.JSONEq(t, `[{"kind":"proxy","proxy_id":17,"name":"session-node","host":"proxy.example","port":1080}]`, proxyJSON)
-	require.Equal(t, "jsonb", usageLogInsertArgTypes[len(usageLogInsertArgTypes)-5],
+	require.Equal(t, "jsonb", usageLogInsertArgTypes[len(usageLogInsertArgTypes)-7],
 		"proxy_routes arg type must be jsonb")
 
 	// native_compaction_v2 and created_at follow session_id.
-	sessionArg := prepared.args[len(prepared.args)-3]
+	sessionArg := prepared.args[len(prepared.args)-5]
 	ns, ok := sessionArg.(sql.NullString)
 	require.True(t, ok, "session_id arg should be a sql.NullString, got %T", sessionArg)
 	require.True(t, ns.Valid)
@@ -77,7 +77,7 @@ func TestPrepareUsageLogInsert_SessionIDNullWhenAbsent(t *testing.T) {
 
 	empty := ""
 	preparedEmpty := prepareUsageLogInsert(newSessionIDUsageLog(&empty))
-	nsEmpty, ok := preparedEmpty.args[len(preparedEmpty.args)-3].(sql.NullString)
+	nsEmpty, ok := preparedEmpty.args[len(preparedEmpty.args)-5].(sql.NullString)
 	require.True(t, ok, "empty session_id arg should be a sql.NullString")
 	require.False(t, nsEmpty.Valid, "empty session id must also be NULL")
 }

@@ -1511,11 +1511,13 @@ func openAIResponsesCompletedEventIsEmpty(data []byte, usage *OpenAIUsage) bool 
 		usage.CacheCreationInputTokens > 0 || usage.CacheReadInputTokens > 0) {
 		return false
 	}
-	if gjson.GetBytes(data, "usage").Exists() || gjson.GetBytes(data, "response.usage").Exists() {
-		return false
-	}
-	if gjson.GetBytes(data, "error").Exists() || gjson.GetBytes(data, "response.error").Exists() {
-		return false
+	// 显式 null（"usage":null / "error":null）等同缺省：部分上游把空管道字段
+	// 写成 null，若按 Exists() 判定就会把"空 completed 的静默拒答"当成正常完成，
+	// 记下 0/0 的成功用量并阻止换号（#5009）。
+	for _, path := range []string{"usage", "response.usage", "error", "response.error"} {
+		if value := gjson.GetBytes(data, path); value.Exists() && value.Type != gjson.Null {
+			return false
+		}
 	}
 	if output := gjson.GetBytes(data, "response.output"); output.Exists() && output.IsArray() && len(output.Array()) > 0 {
 		return false

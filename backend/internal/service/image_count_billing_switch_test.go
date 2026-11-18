@@ -45,10 +45,11 @@ func TestCalculateRecordUsageCost_ImageCountBillingGroupTokenPricing(t *testing.
 	apiKey := &APIKey{ID: 1, GroupID: &groupID, Group: group}
 	svc := &GatewayService{billingService: resolver.billingService, resolver: resolver}
 
-	cost := svc.calculateRecordUsageCost(context.Background(), &ForwardResult{
+	cost, err := svc.calculateRecordUsageCost(context.Background(), &ForwardResult{
 		Model: model, ImageCount: 2, ImageSize: "1K", ImageEndpoint: true,
 		Usage: ClaudeUsage{InputTokens: 1000, OutputTokens: 1000},
-	}, apiKey, model, 1, 1, time.Time{})
+	}, apiKey, model, 1, 1, &recordUsageOpts{})
+	require.NoError(t, err)
 
 	require.NotNil(t, cost)
 	require.InDelta(t, 1.0, cost.TotalCost, 1e-12, "应回落分组图片价，而不是 token 定价的 $0")
@@ -72,10 +73,11 @@ func TestCalculateRecordUsageCost_ImageCountBillingChannelTokenPricing(t *testin
 	apiKey := &APIKey{ID: 2, GroupID: &groupID, Group: group}
 	svc := &GatewayService{billingService: resolver.billingService, resolver: resolver}
 
-	cost := svc.calculateRecordUsageCost(context.Background(), &ForwardResult{
+	cost, err := svc.calculateRecordUsageCost(context.Background(), &ForwardResult{
 		Model: model, ImageCount: 2, ImageSize: "1K", ImageEndpoint: true,
 		Usage: ClaudeUsage{InputTokens: 1_000_000, OutputTokens: 10_000},
-	}, apiKey, model, 1, 1, time.Time{})
+	}, apiKey, model, 1, 1, &recordUsageOpts{})
+	require.NoError(t, err)
 
 	require.NotNil(t, cost)
 	require.InDelta(t, 0.8, cost.TotalCost, 1e-12)
@@ -99,10 +101,11 @@ func TestCalculateRecordUsageCost_ImageCountBillingIgnoresMixedRequests(t *testi
 	apiKey := &APIKey{ID: 3, GroupID: &groupID, Group: group}
 	svc := &GatewayService{billingService: resolver.billingService, resolver: resolver}
 
-	cost := svc.calculateRecordUsageCost(context.Background(), &ForwardResult{
+	cost, err := svc.calculateRecordUsageCost(context.Background(), &ForwardResult{
 		Model: model, ImageCount: 1, ImageSize: "1K", ImageEndpoint: false,
 		Usage: ClaudeUsage{InputTokens: 1_000_000, OutputTokens: 10_000},
-	}, apiKey, model, 1, 1, time.Time{})
+	}, apiKey, model, 1, 1, &recordUsageOpts{})
+	require.NoError(t, err)
 
 	require.NotNil(t, cost)
 	require.Equal(t, string(BillingModeToken), cost.BillingMode)
@@ -213,10 +216,11 @@ func TestCalculateRecordUsageCost_ChannelPerRequestContextTierUsesTokens(t *test
 		apiKey := &APIKey{ID: 5, GroupID: &groupID, Group: group}
 		svc := &GatewayService{billingService: resolver.billingService, resolver: resolver}
 
-		cost := svc.calculateRecordUsageCost(context.Background(), &ForwardResult{
+		cost, err := svc.calculateRecordUsageCost(context.Background(), &ForwardResult{
 			Model: model, ImageCount: 2, ImageSize: "1K", ImageEndpoint: true,
 			Usage: ClaudeUsage{InputTokens: 5000, OutputTokens: 100},
-		}, apiKey, model, 1, 1, time.Time{})
+		}, apiKey, model, 1, 1, &recordUsageOpts{})
+		require.NoError(t, err)
 
 		require.NotNil(t, cost)
 		require.InDelta(t, 0.6, cost.TotalCost, 1e-12, "switch=%v: 应按上下文档 0.3 × 2 张结算", switchOn)

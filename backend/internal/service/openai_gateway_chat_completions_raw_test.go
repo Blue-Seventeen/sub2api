@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -1217,12 +1218,6 @@ func rawChatCompletionsTestAccount() *Account {
 			"base_url": "http://upstream.example",
 		},
 	}
-}
-
-func largeRawChatCompletionsBody() []byte {
-	return []byte(`{"model":"gpt-5.5","messages":[{"role":"user","content":"` +
-		strings.Repeat("x", openAISilentRefusalMinRequestBodyBytes) +
-		`"}],"stream":true}`)
 }
 
 func TestForwardAsRawChatCompletions_RestoresMappedResponseModel(t *testing.T) {

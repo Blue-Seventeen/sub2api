@@ -145,18 +145,6 @@ const (
 	openAIGPT54LongContextOutputMultiplier = 1.5
 )
 
-// deepseekProBilledAsFlash preserves the official model-routing price switch
-// at the request's billing timestamp. A zero timestamp means "now" so legacy
-// callers keep the existing real-time behavior.
-var deepseekProRoutesToFlashAt = time.Date(2026, 9, 14, 4, 0, 0, 0, time.UTC)
-
-func deepseekProBilledAsFlash(pricingAt time.Time) bool {
-	if pricingAt.IsZero() {
-		pricingAt = timezone.Now()
-	}
-	return !pricingAt.Before(deepseekProRoutesToFlashAt)
-}
-
 func normalizeBillingServiceTier(serviceTier string) string {
 	return strings.ToLower(strings.TrimSpace(serviceTier))
 }
@@ -1773,23 +1761,28 @@ type CostInput struct {
 // 使用 ModelPricingResolver 解析定价，然后根据 BillingMode 分发计算。
 func (s *BillingService) CalculateCostUnified(input CostInput) (*CostBreakdown, error) {
 	if input.Resolver == nil {
-		// 无 Resolver，回退到旧路径
+		// 无 Resolver，回退到旧路径。必须按请求时点取价卡：GPT-6.2 Ultrafast
+		// 促销倍率（3x ↔ 6x）以 2027-03-01T08:00Z 为界，按结算时刻取值会把
+		// 补结算/延迟落账判到错误档位；零值 PricingAt 退化为当前时刻，行为不变。
 		applyLongContextBilling := true
 		if input.LongContextBillingEnabled != nil {
 			applyLongContextBilling = *input.LongContextBillingEnabled
 		}
-		breakdown, err := s.calculateCostInternalWithPolicy(
-			input.Model,
+		pricing, err := s.getModelPricingAt(input.Model, input.PricingAt)
+		if err != nil {
+			return nil, err
+		}
+		breakdown := s.computeTokenBreakdown(
+			pricing,
 			input.Tokens,
 			input.RateMultiplier,
 			input.ServiceTier,
-			nil,
 			applyLongContextBilling && !input.DisableModelLongContextPricing,
 		)
-		if err == nil && breakdown != nil {
+		if breakdown != nil {
 			applyCostBreakdownMultiplier(breakdown, maxReasoningEffortBillingMultiplier(input.Model, input.ReasoningEffort, nil))
 		}
-		return breakdown, err
+		return breakdown, nil
 	}
 
 	// 优先使用预解析结果，避免重复 Resolve 调用
@@ -1981,7 +1974,8 @@ func (s *BillingService) computeTokenBreakdown(
 		if pricing.CacheCreationPricePerTokenPriority > 0 {
 			cacheCreationPrice = pricing.CacheCreationPricePerTokenPriority
 		}
-		if pricing.CacheCreation12hPricePerToken != nil {
+		if pricing.CacheCreation12hPricePerToken != nil ||
+			(pricing.SupportsCacheBreakdown && (pricing.CacheCreation5mPrice > 0 || pricing.CacheCreation1hPrice > 0)) {
 			// Free short writes and free ordinary input have no usable catalog ratio.
 			ratio := configuredServiceTierMultiplier(serviceTier, pricing)
 			if pricing.CacheCreationPricePerToken > 0 {
@@ -1990,8 +1984,19 @@ func (s *BillingService) computeTokenBreakdown(
 				ratio = inputPrice / pricing.InputPricePerToken
 			}
 			cloned := *pricing
-			price := *pricing.CacheCreation12hPricePerToken * ratio
-			cloned.CacheCreation12hPricePerToken = &price
+			if pricing.CacheCreation12hPricePerToken != nil {
+				price := *pricing.CacheCreation12hPricePerToken * ratio
+				cloned.CacheCreation12hPricePerToken = &price
+			}
+			// Anthropic 5m/1h 明细价必须跟随 Fast/priority 档缩放：computeCacheCreationCost
+			// 走 SupportsCacheBreakdown 分支时直接读这两档单价，不经过总价倍率，
+			// 否则 Fast 档只把聚合价翻倍、明细价仍按标准价收取（少收一半）。
+			if pricing.CacheCreation5mPrice > 0 {
+				cloned.CacheCreation5mPrice = pricing.CacheCreation5mPrice * ratio
+			}
+			if pricing.CacheCreation1hPrice > 0 {
+				cloned.CacheCreation1hPrice = pricing.CacheCreation1hPrice * ratio
+			}
 			cacheCreationPricing = &cloned
 		}
 	} else {
@@ -2228,6 +2233,28 @@ func (s *BillingService) calculateCostWithServiceTierPolicy(
 	longContextBillingEnabled bool,
 ) (*CostBreakdown, error) {
 	return s.calculateCostInternalWithPolicy(model, tokens, rateMultiplier, serviceTier, nil, longContextBillingEnabled)
+}
+
+// calculateCostWithServiceTierPolicyAt 与 calculateCostWithServiceTierPolicy 相同，
+// 但按请求级定价时刻取价卡：GPT-6.2 Ultrafast 促销倍率（3x ↔ 6x）以
+// 2027-03-01T08:00Z 为界，按结算时刻取值会把延迟落账/补结算判到错误档位。
+// 零值 pricingAt 退化为当前时刻，与旧行为一致。
+func (s *BillingService) calculateCostWithServiceTierPolicyAt(
+	model string,
+	tokens UsageTokens,
+	rateMultiplier float64,
+	serviceTier string,
+	longContextBillingEnabled bool,
+	pricingAt time.Time,
+) (*CostBreakdown, error) {
+	if pricingAt.IsZero() {
+		return s.calculateCostWithServiceTierPolicy(model, tokens, rateMultiplier, serviceTier, longContextBillingEnabled)
+	}
+	pricing, err := s.getModelPricingAt(model, pricingAt)
+	if err != nil {
+		return nil, err
+	}
+	return s.computeTokenBreakdown(pricing, tokens, rateMultiplier, serviceTier, longContextBillingEnabled), nil
 }
 
 func (s *BillingService) calculateCostInternal(model string, tokens UsageTokens, rateMultiplier float64, serviceTier string, channelPricing *ChannelModelPricing) (*CostBreakdown, error) {

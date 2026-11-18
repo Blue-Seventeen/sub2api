@@ -292,6 +292,11 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	startTime time.Time,
 	requestBodyLen int,
 ) (*OpenAIForwardResult, error) {
+	// 池模式先探前缀：HTTP 200 + 首个错误帧的流必须在写出任何下游字节前就能
+	// 按规则裁剪状态码或换号重放，否则 200 已提交就再也改不回来。
+	if err := s.preflightOpenAIPoolCompatStream(c, resp, account, upstreamSSEChat, writeChatCompletionsError); err != nil {
+		return nil, err
+	}
 	observer := upstreamResponseModelObserverFromContext(c)
 	if observer == nil {
 		observer = beginUpstreamResponseModelObservation(c)
@@ -300,6 +305,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
 
 	var usage OpenAIUsage
+	billableUsageSeen := false
 	var firstTokenMs *int
 	clientDisconnected := false
 	clientOutputStarted := false
@@ -314,6 +320,8 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	pendingLines := make([]string, 0, 8)
 	refusalDetector := newOpenAIChatSilentRefusalDetector(requestBodyLen)
 	var terminal openAIRawStreamTerminalState
+	var namedEvent string
+	var terminalErr error
 
 	writeLine := func(line string) {
 		if clientDisconnected {
@@ -349,6 +357,46 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 
 	for scanner.Scan() {
 		line := scanner.Text()
+		if payload, ok := extractOpenAISSEDataLine(line); ok {
+			billableUsageSeen = billableUsageSeen || upstreamSSEPayloadHasUsage([]byte(payload))
+		}
+		if line == "" {
+			namedEvent = ""
+		}
+		if name, ok := extractOpenAISSEEventLine(line); ok {
+			namedEvent = strings.TrimSpace(name)
+			// error / response.failed 的事件名本身不能提交下游 200：同一帧的
+			// payload 还要先按规则选状态码、或决定能否安全换号重放。
+			if namedEvent == "error" || namedEvent == "response.failed" {
+				continue
+			}
+		}
+		if payload, ok := extractOpenAISSEDataLine(line); ok && isCCUpstreamErrorPayload(namedEvent, []byte(payload)) {
+			payloadBytes := []byte(payload)
+			// 上游可能把最终 usage 挂在 response.failed / error 帧上。先取用量再
+			// 决定能否重放：重放一份已计费的终态响应会让客户端被扣两次。
+			if parsedUsage, usageOK := extractOpenAIUsageFromJSONBytes(payloadBytes); usageOK &&
+				(openAIUsageHasTokens(&parsedUsage) || !openAIUsageHasTokens(&usage)) {
+				usage = parsedUsage
+			}
+			errorMessage := extractOpenAISSEErrorMessage(payloadBytes)
+			allowFailover := !clientOutputStarted && !clientDisconnected && !billableUsageSeen &&
+				!openAIUsageHasTokens(&usage) && openAIErrorPayloadAllowsReplay(c, account, payloadBytes, errorMessage)
+			terminalErr = s.handleCCUpstreamErrorPayload(c, resp, account, payloadBytes, allowFailover,
+				func(c *gin.Context, status int, errType, message string) {
+					if clientDisconnected {
+						return
+					}
+					if !clientOutputStarted {
+						writeChatCompletionsError(c, status, errType, message)
+						return
+					}
+					if _, err := fmt.Fprint(c.Writer, buildChatStreamErrorSSEWithType(errType, errType, message)); err == nil {
+						c.Writer.Flush()
+					}
+				})
+			break
+		}
 		refusalDetector.ObserveSSELine(line)
 		if payload, ok := extractOpenAISSEDataLine(line); ok {
 			trimmedPayload := strings.TrimSpace(payload)
@@ -392,6 +440,16 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 			Duration:                      time.Since(startTime),
 			FirstTokenMs:                  firstTokenMs,
 		}
+	}
+
+	if terminalErr != nil {
+		// 已接受的失败（用量/已产出）仍要以 result 落账一次；可重放的失败返回
+		// nil result，交给上层换号。
+		var failoverErr *UpstreamFailoverError
+		if errors.As(terminalErr, &failoverErr) {
+			return nil, terminalErr
+		}
+		return resultWithUsage(), terminalErr
 	}
 
 	scanErr := scanner.Err()
@@ -543,7 +601,10 @@ func (s *OpenAIGatewayService) bufferRawChatCompletions(
 		}
 	}
 	respBody = applyOllamaCloudRawChatCompletionsResponse(account, respBody)
+	// Observe the upstream-returned model before rewriting it back to the
+	// client-facing alias: usage/audit must record what upstream actually served.
 	observer.ObserveOpenAI(respBody, strings.TrimSpace(gjson.GetBytes(respBody, "type").String()))
+	respBody = s.replaceModelInResponseBody(respBody, upstreamModel, originalModel)
 
 	if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)

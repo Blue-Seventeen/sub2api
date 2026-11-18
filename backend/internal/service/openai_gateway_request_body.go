@@ -1901,27 +1901,6 @@ func normalizeOpenAIPassthroughOAuthBody(body []byte, compact bool) ([]byte, boo
 	return normalized, changed, nil
 }
 
-func detectOpenAIPassthroughInstructionsRejectReason(reqModel string, body []byte) string {
-	if !isOpenAICodexModel(reqModel) {
-		return ""
-	}
-	if !hasEffectiveOpenAIPromptPayload(body) && gjson.GetBytes(body, "model").Exists() {
-		return ""
-	}
-
-	instructions := gjson.GetBytes(body, "instructions")
-	if !instructions.Exists() {
-		return ""
-	}
-	if instructions.Type != gjson.String {
-		return "instructions_not_string"
-	}
-	if strings.TrimSpace(instructions.String()) == "" {
-		return "instructions_empty"
-	}
-	return ""
-}
-
 func ensureOpenAIPassthroughOAuthShellInstructions(body []byte) ([]byte, bool, error) {
 	if len(body) == 0 || !gjson.ValidBytes(body) {
 		return body, false, nil
@@ -2924,29 +2903,6 @@ func normalizeOpenAIReasoningEffortForModel(raw, model string) string {
 		return "max"
 	}
 	return normalizeOpenAIReasoningEffort(raw)
-}
-
-// validateGPT61SolCompatRequest runs after model mapping, before conversion can
-// discard unsupported explicit effort selections or disabled thinking.
-func validateGPT61SolCompatRequest(body []byte, model string) error {
-	if !openai.IsGPT61SolModelSpelling(model) {
-		return nil
-	}
-	for _, path := range []string{"reasoning.effort", "reasoning_effort", "output_config.effort"} {
-		if err := openai.ValidateGPT61SolReasoningEffort(model, gjson.GetBytes(body, path).String()); err != nil {
-			return err
-		}
-	}
-	if gjson.GetBytes(body, "thinking.type").String() == "disabled" {
-		return openai.ValidateGPT61SolReasoningEffort(model, "none")
-	}
-	requestedModel := gjson.GetBytes(body, "model").String()
-	for _, effort := range []string{"none", "minimal"} {
-		if strings.HasSuffix(strings.ToLower(requestedModel), "-"+effort) {
-			return openai.ValidateGPT61SolReasoningEffort(model, effort)
-		}
-	}
-	return nil
 }
 
 // validateGPT61CompatRequest validates the converted request after model

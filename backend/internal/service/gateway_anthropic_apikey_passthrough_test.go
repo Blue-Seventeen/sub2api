@@ -1340,7 +1340,9 @@ func TestGatewayService_ParseSSEUsagePassthrough_MessageDeltaSelectiveOverwrite(
 	require.Equal(t, 8, usage.CacheCreationInputTokens)
 	require.Equal(t, 11, usage.CacheReadInputTokens, "cache_read_input_tokens 为空时应回退到 cached_tokens")
 	require.Equal(t, 1, usage.CacheCreation5mTokens)
-	require.Equal(t, 6, usage.CacheCreation1hTokens, "message_delta 中 0 值不应覆盖已有 1h 明细")
+	// 合并后与包级解析器同口径：message_delta 里的显式 0 属于独立权威值，
+	// 会替换既有的 5m/1h 明细；旧副本"仅正数覆盖"的规则已随统一实现移除。
+	require.Equal(t, 0, usage.CacheCreation1hTokens, "显式 0 明细直接替换既有 1h 明细")
 }
 
 func TestGatewayService_ParseSSEUsagePassthrough_NoopCases(t *testing.T) {

@@ -26,6 +26,33 @@ func shouldUseMessagesDispatchMappedModel(requestedModel string) bool {
 	return strings.HasPrefix(model, "claude-")
 }
 
+// resolveOpenAIMessagesDispatchModel 解析 /v1/messages 分流（Messages →
+// Responses / Messages → Chat）的终态计费模型。
+//
+// 与 resolveOpenAIForwardModel 的差别只在"未命中账号映射"这一支：
+//   - 通用 OpenAI/Codex 兼容入口（resolveOpenAIForwardModel）必须原样保留未知
+//     模型名——这是 custom fork 的契约，未知/自定义的 API Key 模型名绝不替换成
+//     分组默认映射模型（见 openai_gateway_chat_completions_test.go 的
+//     "custom fork never replaces unknown API Key models"）；
+//   - /v1/messages 分流不同：调用方已经为这条请求解析出终态调度模型（可能是
+//     渠道/分组给 Claude Code 配的公开别名映射结果），此时把别名原样发给不识
+//     别它的上游只会必然 400 model_not_found，且该模型只应被映射一次。
+//
+// 账号自身 model_mapping 命中时仍以账号映射为准（映射优先级不变）。
+func resolveOpenAIMessagesDispatchModel(account *Account, requestedModel, messagesDispatchMappedModel string) string {
+	requestedModel = strings.TrimSpace(requestedModel)
+	dispatchModel := strings.TrimSpace(messagesDispatchMappedModel)
+	if dispatchModel == "" {
+		return resolveOpenAIForwardModel(account, requestedModel, "")
+	}
+	if account != nil {
+		if mapped, matched := account.ResolveMappedModel(requestedModel); matched {
+			return mapped
+		}
+	}
+	return dispatchModel
+}
+
 // openAIOAuthForeignModelPrefixes 列出明确属于其他厂商家族的模型名前缀。
 // Codex 上游不可能服务这些模型：转发阶段 normalizeOpenAIModelForUpstream
 // 对未知模型原样透传，上游必然返回不可重试的 400。

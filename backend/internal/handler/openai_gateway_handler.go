@@ -3790,7 +3790,10 @@ func (h *OpenAIGatewayHandler) applyOpenAIFailoverPassthroughRule(
 
 	msg := service.ExtractUpstreamErrorMessage(responseBody)
 	if !rule.PassthroughBody && rule.CustomMessage != nil {
-		msg = *rule.CustomMessage
+		// 运营方配置的文案是客户端可见文案：走统一的客户端可见脱敏器
+		// （凭据 + 内网域名/IP），与 GatewayHandler / compatible / gemini
+		// 等兄弟路径一致。
+		msg = service.SanitizeUserVisibleErrorText(*rule.CustomMessage)
 	}
 
 	if rule.SkipMonitoring {
