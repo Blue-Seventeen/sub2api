@@ -26,6 +26,7 @@ import (
 	"golang.org/x/net/http2"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyutil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/servertiming"
@@ -57,6 +58,14 @@ const (
 	defaultResponseHeaderTimeout       = 300 * time.Second
 	defaultUpstreamDialTimeout         = 10 * time.Second
 	defaultUpstreamDialKeepAlive       = 30 * time.Second
+	// defaultUpstreamDialTimeout: 默认 TCP/DNS 建连超时（10秒）
+	// Transport 不设置 DialContext 时会退化为零值 net.Dialer（无超时），建连阶段
+	// 只能依赖内核默认 TCP 重传（Linux 约 130 秒）。ResponseHeaderTimeout 只约束
+	// 连接建立之后等待响应头的阶段，覆盖不到 DNS 解析与 TCP 握手。
+	// 上游域名被解析到 443 不可达的 IP 时（DNS 污染/路由异常），单个账号就要卡满
+	// 内核超时；而多账号故障转移是串行的，一次请求会阻塞数分钟且不写中间错误。
+	// defaultUpstreamTLSHandshakeTimeout: TLS 握手超时（10秒）
+	// 与建连超时同量级，避免 TCP 已连通但对端不推进握手时无限等待
 	defaultUpstreamTLSHandshakeTimeout = 10 * time.Second
 	// defaultMaxUpstreamClients: 默认最大客户端缓存数量
 	// 超出后会淘汰最久未使用的客户端
@@ -212,7 +221,7 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 	client := s.httpClientForUpstreamRequest(entry.client, req)
 	client = httpClientWithGrokAccessDeniedFallback(client)
 	attempt := service.BeginProxyRouteAttempt(req.Context(), accountID, proxyURL, false)
-	resp, err := doUpstreamRequest(client, req)
+	resp, err := doUpstreamRequest(client, req, s.upstreamDrainTimeout())
 	if err != nil {
 		attempt.End()
 		s.recordOpenAIHTTP2Failure(profile, entry.protocolMode, entry.proxyKey, err)
@@ -276,7 +285,7 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 	client := s.httpClientForUpstreamRequest(entry.client, req)
 	client = httpClientWithGrokAccessDeniedFallback(client)
 	attempt := service.BeginProxyRouteAttempt(req.Context(), accountID, proxyURL, false)
-	resp, err := doUpstreamRequest(client, req)
+	resp, err := doUpstreamRequest(client, req, s.upstreamDrainTimeout())
 	if err != nil {
 		attempt.End()
 		atomic.AddInt64(&entry.inFlight, -1)
@@ -294,10 +303,21 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 	return resp, nil
 }
 
-// doUpstreamRequest owns cancellation for one attempt without cancelling the
-// caller's context, which may be reused for billing or retries.
-func doUpstreamRequest(client *http.Client, req *http.Request) (*http.Response, error) {
-	ctx, cancel := context.WithCancel(req.Context())
+func (s *httpUpstreamService) upstreamDrainTimeout() time.Duration {
+	if s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
+		return time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
+	}
+	return pkghttputil.DefaultUpstreamDrainTimeout
+}
+
+// doUpstreamRequest owns cancellation for one attempt, without cancelling the
+// caller's context (which may be detached for billing or reused for retries).
+func doUpstreamRequest(client *http.Client, req *http.Request, drainTimeouts ...time.Duration) (*http.Response, error) {
+	var drainTimeout time.Duration
+	if len(drainTimeouts) > 0 {
+		drainTimeout = drainTimeouts[0]
+	}
+	ctx, cancel := pkghttputil.NewUpstreamAttemptContext(req.Context(), drainTimeout)
 	resp, err := servertiming.Do(client, req.WithContext(ctx))
 	if err != nil {
 		cancel()
@@ -1418,27 +1438,20 @@ func defaultPoolSettings(cfg *config.Config) poolSettings {
 	}
 }
 
-// buildUpstreamTransport 构建上游请求的 Transport
-// 使用配置文件中的连接池参数，支持生产环境调优
+// newUpstreamDialer 构建上游 Transport 的 TCP dialer。
 //
-// 参数:
-//   - settings: 连接池配置
-//   - proxyURL: 代理 URL（nil 表示直连）
-//
-// 返回:
-//   - *http.Transport: 配置好的 Transport 实例
-//   - error: 代理配置错误
-//
-// Transport 参数说明:
-//   - MaxIdleConns: 所有主机的最大空闲连接总数
-//   - MaxIdleConnsPerHost: 每主机最大空闲连接数（影响连接复用率）
-//   - MaxConnsPerHost: 每主机最大连接数（达到后新请求等待）
-//   - IdleConnTimeout: 空闲连接超时（超时后关闭）
-//   - ResponseHeaderTimeout: 等待响应头超时（不影响流式传输）
+// 必须显式提供：http.Transport 的 DialContext 为 nil 时使用零值 net.Dialer，
+// 建连没有任何超时上限，只能等内核 TCP 重传耗尽（Linux 约 130 秒）。
 func newUpstreamDialer() *net.Dialer {
 	return &net.Dialer{
-		Timeout:   defaultUpstreamDialTimeout,
-		KeepAlive: defaultUpstreamDialKeepAlive,
+		Timeout: defaultUpstreamDialTimeout,
+		KeepAliveConfig: net.KeepAliveConfig{
+			Enable:   true,
+			Idle:     upstreamKeepAliveIdle,
+			Interval: upstreamKeepAliveInterval,
+			Count:    upstreamKeepAliveCount,
+		},
+		Control: upstreamDialControl,
 	}
 }
 

@@ -1947,7 +1947,7 @@ func chatUsageToClaudeUsage(usage *apicompat.ChatUsage) ClaudeUsage {
 	}
 	if usage.PromptTokensDetails != nil {
 		out.CacheReadInputTokens = usage.PromptTokensDetails.CachedTokens
-		out.CacheCreationInputTokens = usage.PromptTokensDetails.EffectiveCacheCreationTokens()
+		out.CacheCreationInputTokens = chatTokenDetailsCacheCreation(usage.PromptTokensDetails)
 	}
 	out.InputTokens = openAIUncachedInputTokens(out.InputTokens, out.CacheReadInputTokens+out.CacheCreationInputTokens)
 	return out
@@ -1958,4 +1958,21 @@ func openAIUncachedInputTokens(total, cached int) int {
 		return 0
 	}
 	return total - max(cached, 0)
+}
+
+// chatTokenDetailsCacheCreation resolves the cache-write counter for a chat usage
+// snapshot using the fork's precedence: an explicitly reported canonical
+// cache_write_tokens value — including an explicit zero — overrides the legacy
+// cache_creation_tokens alias, because providers reuse the alias for a different
+// bucket. EffectiveCacheCreationTokens() cannot express "explicit zero" after the
+// upstream sync (its presence flag is latent), so presence is read back from the
+// canonical field being emitted at all.
+func chatTokenDetailsCacheCreation(details *apicompat.ChatTokenDetails) int {
+	if details == nil {
+		return 0
+	}
+	if raw, err := json.Marshal(details); err == nil && gjson.GetBytes(raw, "cache_write_tokens").Exists() {
+		return max(details.CacheWriteTokens, 0)
+	}
+	return max(details.EffectiveCacheCreationTokens(), 0)
 }

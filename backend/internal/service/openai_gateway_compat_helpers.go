@@ -1,18 +1,13 @@
 package service
 
 import (
-	"bytes"
-	"strings"
-)
-
-import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
-	"github.com/tidwall/gjson"
 )
 
 const OpenAIFastTierUltrafast = "ultrafast"
@@ -47,12 +42,15 @@ func anthropicSpeedServiceTier(account *Account, speed, model string) *string {
 	return &tier
 }
 
+// modelSupportsAnthropicFastMode reports whether the model accepts the
+// Anthropic Fast (priority) tier. Only Opus 5 / Opus 4.8 catalogs price it.
 func modelSupportsAnthropicFastMode(model string) bool {
 	model = strings.ToLower(strings.TrimSpace(model))
 	if !strings.Contains(model, "opus") {
 		return false
 	}
-	return strings.Contains(model, "opus-5") || strings.Contains(model, "opus5") || strings.Contains(model, "opus-4.8") || strings.Contains(model, "opus-4-8") || strings.Contains(model, "opus4.8")
+	return strings.Contains(model, "opus-5") || strings.Contains(model, "opus5") ||
+		strings.Contains(model, "opus-4.8") || strings.Contains(model, "opus-4-8") || strings.Contains(model, "opus4.8")
 }
 
 func shouldForwardOpenAIResponsesViaRawChatCompletions(account *Account) bool {
@@ -94,30 +92,6 @@ func cloneOpenAIWSPayloadBytes(payload []byte) []byte {
 		return nil
 	}
 	return append([]byte(nil), payload...)
-}
-
-func openAIStreamCredentialAuthFailure(payload []byte) bool {
-	if len(bytes.TrimSpace(payload)) == 0 || !gjson.ValidBytes(payload) {
-		return false
-	}
-	for _, path := range []string{"response.error.status_code", "response.error.status", "error.status_code", "error.status", "status_code", "status"} {
-		if int(gjson.GetBytes(payload, path).Int()) == http.StatusUnauthorized {
-			return true
-		}
-	}
-	for _, path := range []string{"response.error.type", "error.type", "type"} {
-		errType := strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, path).String()))
-		if errType == "authentication_error" || errType == "authentication_failed" || errType == "unauthorized_error" {
-			return true
-		}
-	}
-	for _, path := range []string{"response.error.code", "error.code", "code"} {
-		switch strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, path).String())) {
-		case "invalid_api_key", "api_key_disabled", "unauthorized", "authentication_error", "invalid_token", "access_token_invalid", "token_revoked", "token_invalidated", "invalid_credentials", "credential_invalid":
-			return true
-		}
-	}
-	return false
 }
 
 func openAIStream403AccountFailure(payload []byte, message string) bool {

@@ -275,6 +275,63 @@ func TestRateLimiterJSONFieldHashSuffixSeparatesSameIPLogins(t *testing.T) {
 	require.Equal(t, http.StatusTooManyRequests, rec3.Code)
 }
 
+func TestRateLimitClientKeyAggregatesIPv6Prefix(t *testing.T) {
+	require.Equal(t, "2001:db8:1:2::/64", rateLimitClientKey("2001:db8:1:2:aaaa:bbbb:cccc:dddd", 64))
+	require.Equal(t, "2001:db8:1:2::/64", rateLimitClientKey("2001:db8:1:2::1", 64))
+	require.Equal(t, "2001:db8:1:3::/64", rateLimitClientKey("2001:db8:1:3::1", 64))
+	require.Equal(t, "2001:db8:1:2::1", rateLimitClientKey("2001:db8:1:2::1", 0), "per-address keys stay the default")
+	for _, ip := range []string{"203.0.113.9", "::ffff:203.0.113.9", "not-an-ip", ""} {
+		require.Equal(t, ip, rateLimitClientKey(ip, 64))
+	}
+}
+
+func TestRateLimiterIPv6PrefixSharesOneBudget(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	callCounts := make(map[string]int64)
+	originalRun := rateLimitRun
+	rateLimitRun = func(ctx context.Context, client *redis.Client, key string, windowMillis int64) (int64, bool, error) {
+		callCounts[key]++
+		return callCounts[key], false, nil
+	}
+	t.Cleanup(func() {
+		rateLimitRun = originalRun
+	})
+
+	limiter := NewRateLimiter(redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"}))
+
+	router := gin.New()
+	router.Use(limiter.LimitWithOptions("login", 1, time.Second, RateLimitOptions{
+		KeySuffix: JSONFieldHashSuffix("email"),
+	}))
+	router.POST("/login", func(c *gin.Context) {
+		body, err := io.ReadAll(c.Request.Body)
+		require.NoError(t, err)
+		c.JSON(http.StatusOK, gin.H{"body": string(body)})
+	})
+
+	req1 := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"email":"a@example.com","password":"x"}`))
+	req1.Header.Set("Content-Type", "application/json")
+	req1.RemoteAddr = "10.0.0.1:1234"
+	rec1 := httptest.NewRecorder()
+	router.ServeHTTP(rec1, req1)
+	require.Equal(t, http.StatusOK, rec1.Code)
+	require.Contains(t, rec1.Body.String(), "a@example.com")
+
+	req2 := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"email":"b@example.com","password":"x"}`))
+	req2.Header.Set("Content-Type", "application/json")
+	req2.RemoteAddr = "10.0.0.1:1234"
+	rec2 := httptest.NewRecorder()
+	router.ServeHTTP(rec2, req2)
+	require.Equal(t, http.StatusOK, rec2.Code)
+
+	req3 := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"email":"a@example.com","password":"x"}`))
+	req3.Header.Set("Content-Type", "application/json")
+	req3.RemoteAddr = "10.0.0.1:1234"
+	rec3 := httptest.NewRecorder()
+	router.ServeHTTP(rec3, req3)
+	require.Equal(t, http.StatusTooManyRequests, rec3.Code)
+}
+
 func TestRateLimiterFailCloseRedisErrorReturnsUnavailable(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

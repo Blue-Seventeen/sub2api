@@ -27,10 +27,10 @@ import (
 )
 
 var (
-	integrationDB          *sql.DB
-	integrationEntClient   *dbent.Client
-	integrationRedis       *redisclient.Client
-	integrationRedisPrefix string
+	integrationDB        *sql.DB
+	integrationDSN       string
+	integrationEntClient *dbent.Client
+	integrationRedis     *redisclient.Client
 
 	redisNamespaceSeq uint64
 )
@@ -100,14 +100,19 @@ func runIntegrationTestsWithExternalServices(run func() int, cfg integrationHarn
 		log.Printf("integration database is already in use or the suite lock is unavailable")
 		return 1
 	}
-	defer func() {
-		unlockCtx, unlockCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer unlockCancel()
-		_, _ = lockConn.ExecContext(unlockCtx, "SELECT pg_catalog.pg_advisory_unlock($1)", suiteLockID)
-	}()
-	if err := resetIntegrationDatabase(ctx, lockConn, cfg); err != nil {
-		log.Printf("failed to reset integration database: %v", err)
-		return 1
+	defer func() { _ = redisContainer.Terminate(ctx) }()
+
+	dsn, err := pgContainer.ConnectionString(ctx, "sslmode=disable", "TimeZone=UTC")
+	if err != nil {
+		log.Printf("failed to get postgres dsn: %v", err)
+		os.Exit(1)
+	}
+
+	integrationDSN = dsn
+	integrationDB, err = openSQLWithRetry(ctx, dsn, 30*time.Second)
+	if err != nil {
+		log.Printf("failed to open sql db: %v", err)
+		os.Exit(1)
 	}
 	if err := ApplyMigrations(ctx, integrationDB); err != nil {
 		log.Printf("failed to apply db migrations: %v", err)

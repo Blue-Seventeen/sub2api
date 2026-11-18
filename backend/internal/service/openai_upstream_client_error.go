@@ -42,10 +42,10 @@ func writeOpenAIUpstreamClientError(c *gin.Context, statusCode int, body []byte,
 		errorPayload["type"] = errType
 	}
 	if code := strings.TrimSpace(extractUpstreamErrorCode(body)); code != "" {
-		errorPayload["code"] = code
+		errorPayload["code"] = sanitizeQueryParamSecrets(code)
 	}
 	if param := strings.TrimSpace(gjson.GetBytes(body, "error.param").String()); param != "" {
-		errorPayload["param"] = param
+		errorPayload["param"] = sanitizeQueryParamSecrets(param)
 	}
 	message := strings.TrimSpace(upstreamMsg)
 	if message == "" {

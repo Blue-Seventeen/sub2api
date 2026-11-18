@@ -44,7 +44,129 @@
 
 后端核心测试：
 
-```powershell
+## 三、CI/CD 流水线
+
+### GitHub Actions Workflows
+
+| Workflow | 触发条件 | 检查内容 |
+|----------|----------|----------|
+| **backend-ci.yml** | push, pull_request | 单元测试 + 集成测试 + golangci-lint v2.13 |
+| **security-scan.yml** | push, pull_request, 每周一 | govulncheck + gosec + pnpm audit |
+| **release.yml** | tag `v*` | 构建发布（PR 不触发） |
+
+### CI 要求
+
+- Go 版本必须是 **1.27.4**：三个 workflow 都用 `go-version-file: backend/go.mod` 取版本，随后硬断言 `go version | grep -q 'go1.27.4'`。升级 Go 时要同时改 `backend/go.mod`、`backend-ci.yml`（两处）、`release.yml`、`security-scan.yml` 里的这句断言，**以及三个 Dockerfile 里的 Go 构建镜像**（`Dockerfile` / `deploy/Dockerfile` 的 `ARG GOLANG_IMAGE`、`backend/Dockerfile` 的 `FROM golang:`）。前者漏了 CI 会在版本校验步骤直接失败；**后者漏了 CI 不会报，而是等到有人用这些 Dockerfile 构建时才失败**（`go.mod requires go >= X (running Y; GOTOOLCHAIN=local)`）。
+- 前端使用 `pnpm install --frozen-lockfile`，必须提交 `pnpm-lock.yaml`
+
+### 本地测试命令
+
+```bash
+# 后端单元测试
+cd backend && go test -tags=unit ./...
+
+# 后端集成测试
+cd backend && go test -tags=integration ./...
+
+# 代码质量检查
+cd backend && golangci-lint run ./...
+
+# 前端依赖安装（必须用 pnpm）
+cd frontend && pnpm install
+```
+
+## 四、常见坑点 & 解决方案
+
+### 坑 1：pnpm-lock.yaml 必须同步提交
+
+**问题**：`package.json` 新增依赖后，CI 的 `pnpm install --frozen-lockfile` 失败。
+
+**原因**：上游 CI 使用 pnpm，lock 文件不同步会报错。
+
+**解决**：
+```bash
+cd frontend
+pnpm install  # 更新 pnpm-lock.yaml
+git add pnpm-lock.yaml
+git commit -m "chore: update pnpm-lock.yaml"
+```
+
+---
+
+### 坑 2：npm 和 pnpm 的 node_modules 冲突
+
+**问题**：之前用 npm 装过 `node_modules`，pnpm install 报 `EPERM` 错误。
+
+**解决**：
+```bash
+cd frontend
+rm -rf node_modules  # 或 PowerShell: Remove-Item -Recurse -Force node_modules
+pnpm install
+```
+
+---
+
+### 坑 3：PowerShell 中 bcrypt hash 的 `$` 被转义
+
+**问题**：bcrypt hash 格式如 `$2a$10$xxx...`，PowerShell 把 `$2a` 当变量解析，导致数据丢失。
+
+**解决**：将 SQL 写入文件，用 `psql -f` 执行：
+```bash
+# 错误示范（PowerShell 会吃掉 $）
+psql -c "INSERT INTO users ... VALUES ('$2a$10$...')"
+
+# 正确做法
+echo "INSERT INTO users ... VALUES ('\$2a\$10\$...')" > temp.sql
+psql -U sub2api -h 127.0.0.1 -d sub2api -f temp.sql
+```
+
+---
+
+### 坑 4：psql 不支持中文路径
+
+**问题**：`psql -f "D:\中文路径\file.sql"` 报错找不到文件。
+
+**解决**：复制到纯英文路径再执行：
+```bash
+cp "D:\中文路径\file.sql" "C:\temp.sql"
+psql -f "C:\temp.sql"
+```
+
+---
+
+### 坑 5：PostgreSQL 密码重置流程
+
+**场景**：忘记 PostgreSQL 密码。
+
+**步骤**：
+1. 修改 `C:\Program Files\PostgreSQL\16\data\pg_hba.conf`
+   ```
+   # 将 scram-sha-256 改为 trust
+   host    all    all    127.0.0.1/32    trust
+   ```
+2. 重启 PostgreSQL 服务
+   ```powershell
+   Restart-Service postgresql-x64-16
+   ```
+3. 无密码登录并重置
+   ```bash
+   psql -U postgres -h 127.0.0.1
+   ALTER USER sub2api WITH PASSWORD 'sub2api';
+   ALTER USER postgres WITH PASSWORD 'postgres';
+   ```
+4. 改回 `scram-sha-256` 并重启
+
+---
+
+### 坑 6：Go interface 新增方法后 test stub 必须补全
+
+**问题**：给 interface 新增方法后，编译报错 `does not implement interface (missing method XXX)`。
+
+**原因**：所有测试文件中实现该 interface 的 stub/mock 都必须补上新方法。
+
+**解决**：
+```bash
+# 搜索所有实现该 interface 的 struct
 cd backend
 go test ./internal/config ./internal/service ./cmd/server -count=1
 ```

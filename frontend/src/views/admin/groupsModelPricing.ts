@@ -32,6 +32,7 @@ export function groupPricingFromAPI(pricing: ChannelModelPricing[] | undefined):
     output_price: perTokenToMTok(entry.output_price),
     cache_write_price: perTokenToMTok(entry.cache_write_price),
     cache_write_1h_price: perTokenToMTok(entry.cache_write_1h_price),
+    cache_write_12h_price: perTokenToMTok(entry.cache_write_12h_price),
     cache_read_price: perTokenToMTok(entry.cache_read_price),
     fast_multiplier: entry.fast_multiplier, flex_multiplier: entry.flex_multiplier,
     reasoning_effort_multipliers: entry.reasoning_effort_multipliers
@@ -53,6 +54,13 @@ export function groupPricingToAPI(pricing: GroupPricingFormEntry[], platform: st
     output_price: mTokToPerToken(entry.output_price),
     cache_write_price: mTokToPerToken(entry.cache_write_price),
     cache_write_1h_price: mTokToPerToken(entry.cache_write_1h_price),
+    ...(entry.cache_write_12h_price !== undefined &&
+    entry.cache_write_12h_price !== null &&
+    entry.cache_write_12h_price !== ""
+      ? { cache_write_12h_price: mTokToPerToken(entry.cache_write_12h_price) }
+      : entry.original?.cache_write_12h_price != null
+        ? { cache_write_12h_price: null }
+        : {}),
     cache_read_price: mTokToPerToken(entry.cache_read_price),
     fast_multiplier: toNullableNumber(entry.fast_multiplier),
     flex_multiplier: toNullableNumber(entry.flex_multiplier),

@@ -53,12 +53,17 @@ func TestSSEUsagePassthroughEventSemantics(t *testing.T) {
 			name:    "other events ignore canonical fields but use cache fallbacks",
 			initial: ClaudeUsage{InputTokens: 10, OutputTokens: 8},
 			data:    `{"type":"content_block_delta","usage":{"input_tokens":99,"output_tokens":99,"cache_read_input_tokens":99,"cache_creation_input_tokens":99,"cached_tokens":6,"cache_creation":{"ephemeral_5m_input_tokens":2,"ephemeral_1h_input_tokens":1}}}`,
-			want:    ClaudeUsage{InputTokens: 10, OutputTokens: 8, CacheReadInputTokens: 6, CacheCreationInputTokens: 3},
+			// Cache-write TTL details reported by a non-snapshot event are recorded
+			// (merged upstream contract); the canonical input/output/cache counters
+			// carried by such an event stay ignored.
+			want: ClaudeUsage{InputTokens: 10, OutputTokens: 8, CacheReadInputTokens: 6, CacheCreationInputTokens: 3,
+				CacheCreation5mTokens: 2, CacheCreation1hTokens: 1, cacheCreationInputTokensFromDetails: true},
 		},
 		{
 			name: "nested cache fallbacks precede top level even outside start",
 			data: `{"type":"content_block_delta","message":{"usage":{"cached_tokens":6,"cache_creation":{"ephemeral_5m_input_tokens":2,"ephemeral_1h_input_tokens":1}}},"usage":{"cached_tokens":99,"cache_creation":{"ephemeral_5m_input_tokens":9,"ephemeral_1h_input_tokens":9}}}`,
-			want: ClaudeUsage{CacheReadInputTokens: 6, CacheCreationInputTokens: 3},
+			want: ClaudeUsage{CacheReadInputTokens: 6, CacheCreationInputTokens: 3, CacheCreation5mTokens: 2,
+				CacheCreation1hTokens: 1, cacheCreationInputTokensFromDetails: true},
 		},
 		{
 			name: "missing start usage still permits top level cache fallbacks",
@@ -74,7 +79,9 @@ func TestSSEUsagePassthroughEventSemantics(t *testing.T) {
 			name:    "late aliases do not replace existing cache counts",
 			initial: ClaudeUsage{CacheReadInputTokens: 6, CacheCreationInputTokens: 3},
 			data:    `{"type":"content_block_delta","usage":{"cached_tokens":99,"cache_creation":{"ephemeral_5m_input_tokens":9,"ephemeral_1h_input_tokens":9}}}`,
-			want:    ClaudeUsage{CacheReadInputTokens: 6, CacheCreationInputTokens: 3},
+			// Counts stay authoritative; only the TTL details follow the late snapshot.
+			want: ClaudeUsage{CacheReadInputTokens: 6, CacheCreationInputTokens: 3, CacheCreation5mTokens: 9,
+				CacheCreation1hTokens: 9},
 		},
 	}
 	for _, tt := range tests {

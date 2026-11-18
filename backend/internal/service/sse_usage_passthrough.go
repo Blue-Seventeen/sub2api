@@ -2,6 +2,13 @@ package service
 
 import "github.com/tidwall/gjson"
 
+// parseSSEUsagePassthrough accumulates Anthropic SSE usage snapshots into usage.
+//
+// message_start is a full snapshot (missing canonical counts reset), message_delta
+// carries independently authoritative counts (explicit zeros keep previously known
+// values because providers reuse the field for other meanings), and every other
+// event may only contribute cache details — it never carries cross-event canonical
+// counts.
 func parseSSEUsagePassthrough(data string, usage *ClaudeUsage) {
 	if usage == nil || data == "" || data == "[DONE]" {
 		return
@@ -14,6 +21,7 @@ func parseSSEUsagePassthrough(data string, usage *ClaudeUsage) {
 		if msgUsage.Exists() {
 			usage.InputTokens = int(msgUsage.Get("input_tokens").Int())
 			usage.CacheCreationInputTokens = int(msgUsage.Get("cache_creation_input_tokens").Int())
+			usage.cacheCreationInputTokensFromDetails = false
 			usage.CacheReadInputTokens = int(msgUsage.Get("cache_read_input_tokens").Int())
 
 			// Start events replace both TTL buckets when either detail is present.
@@ -35,6 +43,7 @@ func parseSSEUsagePassthrough(data string, usage *ClaudeUsage) {
 			}
 			if v := deltaUsage.Get("cache_creation_input_tokens").Int(); v > 0 {
 				usage.CacheCreationInputTokens = int(v)
+				usage.cacheCreationInputTokensFromDetails = false
 			}
 			if v := deltaUsage.Get("cache_read_input_tokens").Int(); v > 0 {
 				usage.CacheReadInputTokens = int(v)
@@ -50,6 +59,11 @@ func parseSSEUsagePassthrough(data string, usage *ClaudeUsage) {
 				usage.CacheCreation1hTokens = int(cc1h.Int())
 			}
 		}
+	default:
+		// Other events only contribute cache-write TTL details; their canonical
+		// input/output/cache counters are ignored so a non-terminal event cannot
+		// overwrite counts accumulated from start/delta snapshots.
+		mergeAnthropicCacheCreationDetailsOutsideSnapshots(parsed, usage)
 	}
 
 	if usage.CacheReadInputTokens == 0 {
@@ -78,12 +92,53 @@ func parseSSEUsagePassthrough(data string, usage *ClaudeUsage) {
 	if parsed.Get("type").String() == "message_start" {
 		usageNode = parsed.Get("message.usage")
 	}
-	normalizeAnthropicCompatiblePromptUsage(usageNode, usage)
+	normalizeAnthropicCompatiblePromptBuckets(usageNode, usage)
 }
 
-// normalizeAnthropicCompatiblePromptUsage converts provider prompt/cache aliases
+// mergeAnthropicCacheCreationDetailsOutsideSnapshots applies cache_creation TTL
+// details reported by events other than message_start/message_delta. Providers
+// may split a cumulative snapshot over several such events ("5m: 2" then
+// "1h: 1"), so the buckets are merged and an aggregate that the provider never
+// stated explicitly keeps following them.
+func mergeAnthropicCacheCreationDetailsOutsideSnapshots(parsed gjson.Result, usage *ClaudeUsage) {
+	node := parsed.Get("usage")
+	if nested := parsed.Get("message.usage"); nested.IsObject() && nested.Get("cache_creation").IsObject() {
+		node = nested
+	}
+	if !node.IsObject() {
+		return
+	}
+	details := node.Get("cache_creation")
+	if !details.IsObject() {
+		return
+	}
+	updated := false
+	if tokens := details.Get("ephemeral_5m_input_tokens"); tokens.Exists() && tokens.Type != gjson.Null {
+		usage.CacheCreation5mTokens = max(int(tokens.Int()), 0)
+		updated = true
+	}
+	if tokens := details.Get("ephemeral_1h_input_tokens"); tokens.Exists() && tokens.Type != gjson.Null {
+		usage.CacheCreation1hTokens = max(int(tokens.Int()), 0)
+		updated = true
+	}
+	if !updated {
+		return
+	}
+	// An aggregate the provider reported explicitly stays authoritative; only a
+	// derived (or still unknown) aggregate follows the TTL buckets.
+	if usage.CacheCreationInputTokens <= 0 || usage.cacheCreationInputTokensFromDetails {
+		usage.CacheCreationInputTokens = usage.CacheCreation5mTokens + usage.CacheCreation1hTokens
+		usage.cacheCreationInputTokensFromDetails = true
+	}
+}
+
+// normalizeAnthropicCompatiblePromptBuckets converts provider prompt/cache aliases
 // into Claude's mutually exclusive buckets, leaving native Anthropic usage alone.
-func normalizeAnthropicCompatiblePromptUsage(usageNode gjson.Result, usage *ClaudeUsage) bool {
+//
+// It is intentionally stateless: it never stores the prompt total on usage, so the
+// caller can compare accumulated usage snapshots field by field. Providers that
+// keep repeating prompt_tokens on every event still normalize identically.
+func normalizeAnthropicCompatiblePromptBuckets(usageNode gjson.Result, usage *ClaudeUsage) bool {
 	if usage == nil || !usageNode.Exists() {
 		return false
 	}

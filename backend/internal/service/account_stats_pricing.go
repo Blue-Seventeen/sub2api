@@ -26,6 +26,7 @@ type accountStatsBillableQuantity struct {
 // pricingAt 与本次客户计费使用同一时刻，避免跨峰谷请求的成本与售价错位。
 // longContextPricingEnabled 表示上游是否对本次请求收取长上下文费率，用于优先级 3；
 // 由 accountStatsLongContextPricingEnabled 按账号开关得出，不受分组售价开关影响。
+// upstreamPriceFactor 是上游按实际请求端点计价的倍数（见 ForwardResult.UpstreamPriceMultiplier），用于优先级 3。
 // reasoningEffort 是最终转发等级；按账号统计定价中配置的等级倍率计费。
 func resolveAccountStatsCost( //nolint:unused // retained as the legacy pricing helper for compatibility tests
 	ctx context.Context,
@@ -40,6 +41,7 @@ func resolveAccountStatsCost( //nolint:unused // retained as the legacy pricing 
 	serviceTier string,
 	pricingAt time.Time,
 	longContextPricingEnabled bool,
+	upstreamPriceFactor float64,
 	reasoningEfforts ...string,
 ) *float64 {
 	reasoningEffort := ""
@@ -48,7 +50,8 @@ func resolveAccountStatsCost( //nolint:unused // retained as the legacy pricing 
 	}
 	return resolveAccountStatsCostWithQuantities(
 		ctx, channelService, billingService, accountID, groupID, upstreamModel,
-		tokens, requestCount, totalCost, serviceTier, pricingAt, longContextPricingEnabled, reasoningEffort,
+		tokens, requestCount, totalCost, serviceTier, pricingAt, longContextPricingEnabled,
+		upstreamPriceFactor, reasoningEffort,
 	)
 }
 
@@ -65,6 +68,7 @@ func resolveAccountStatsCostWithQuantities(
 	serviceTier string,
 	pricingAt time.Time,
 	longContextPricingEnabled bool,
+	upstreamPriceFactor float64,
 	reasoningEffort string,
 	quantities ...accountStatsBillableQuantity,
 ) *float64 {
@@ -94,7 +98,11 @@ func resolveAccountStatsCostWithQuantities(
 
 	// 优先级 3：模型定价文件（LiteLLM）默认价格
 	if billingService != nil {
-		return tryModelFilePricing(billingService, upstreamModel, tokens, serviceTier, pricingAt, longContextPricingEnabled, reasoningEffort)
+		cost := tryModelFilePricing(billingService, upstreamModel, tokens, serviceTier, pricingAt, longContextPricingEnabled, reasoningEffort)
+		if cost != nil && upstreamPriceFactor > 0 {
+			*cost *= upstreamPriceFactor
+		}
+		return cost
 	}
 
 	return nil
@@ -286,12 +294,13 @@ func calculateTokenStatsCost(pricing *ChannelModelPricing, tokens UsageTokens) *
 		totalTokens := tokens.InputTokens + tokens.OutputTokens + tokens.CacheCreationTokens + tokens.CacheReadTokens
 		if iv := FindMatchingInterval(pricing.Intervals, totalTokens); iv != nil {
 			p = &ChannelModelPricing{
-				InputPrice:        iv.InputPrice,
-				OutputPrice:       iv.OutputPrice,
-				CacheWritePrice:   iv.CacheWritePrice,
-				CacheWrite1hPrice: iv.CacheWrite1hPrice,
-				CacheReadPrice:    iv.CacheReadPrice,
-				PerRequestPrice:   iv.PerRequestPrice,
+				InputPrice:         iv.InputPrice,
+				OutputPrice:        iv.OutputPrice,
+				CacheWritePrice:    iv.CacheWritePrice,
+				CacheWrite1hPrice:  iv.CacheWrite1hPrice,
+				CacheWrite12hPrice: iv.CacheWrite12hPrice,
+				CacheReadPrice:     iv.CacheReadPrice,
+				PerRequestPrice:    iv.PerRequestPrice,
 			}
 		}
 	}
@@ -302,10 +311,15 @@ func calculateTokenStatsCost(pricing *ChannelModelPricing, tokens UsageTokens) *
 		return *ptr
 	}
 	cacheCreationCost := float64(tokens.CacheCreationTokens) * deref(p.CacheWritePrice)
-	if p.CacheWrite1hPrice != nil && (tokens.CacheCreation5mTokens > 0 || tokens.CacheCreation1hTokens > 0) {
-		cache5m, cache1h := normalizeCacheCreationBreakdown(tokens)
-		cacheCreationCost = float64(cache5m)*deref(p.CacheWritePrice) +
-			float64(cache1h)*deref(p.CacheWrite1hPrice)
+	if p.CacheWrite1hPrice != nil {
+		cache5m, cache1h := allocateCacheCreationBillingTokens(tokens)
+		if cache5m > 0 || cache1h > 0 {
+			cacheCreationCost = float64(cache5m)*deref(p.CacheWritePrice) +
+				float64(cache1h)*deref(p.CacheWrite1hPrice)
+		}
+	}
+	if cost, ok := openAICacheCreationTTLCost(tokens, deref(p.CacheWritePrice), p.CacheWrite12hPrice); ok {
+		cacheCreationCost = cost
 	}
 	cost := float64(tokens.InputTokens)*deref(p.InputPrice) +
 		float64(tokens.OutputTokens)*deref(p.OutputPrice) +
@@ -331,6 +345,7 @@ func applyAccountStatsCost(
 	totalCost float64,
 	pricingAt time.Time,
 	longContextPricingEnabled bool,
+	upstreamPriceFactor float64,
 ) {
 	model := upstreamModel
 	if model == "" {
@@ -350,7 +365,7 @@ func applyAccountStatsCost(
 	}
 	usageLog.AccountStatsCost = resolveAccountStatsCostWithQuantities(
 		ctx, cs, bs, accountID, groupID, model, tokens, requestCount, totalCost,
-		serviceTier, pricingAt, longContextPricingEnabled, reasoningEffort,
+		serviceTier, pricingAt, longContextPricingEnabled, upstreamPriceFactor, reasoningEffort,
 		accountStatsBillableQuantity{
 			DurationSeconds: usageLog.BillableDurationSeconds,
 			CharacterCount:  usageLog.BillableCharacterCount,

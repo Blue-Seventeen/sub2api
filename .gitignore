@@ -143,6 +143,10 @@ deploy/docker-compose.override.yml
 .gocache/
 vite.config.js
 docs/*
+!docs/agent-resource-safety.md
+!docs/moego-json-batching.md
+!docs/admin-api-keys.md
+!docs/mcp.md
 !docs/PAYMENT.md
 !docs/PAYMENT_CN.md
 !docs/ADMIN_PAYMENT_INTEGRATION_API.md
@@ -151,6 +155,7 @@ docs/*
 !docs/升级部署-国内代理远程数据库节点.md
 !docs/升级部署 -子节点-镜像导入.md
 !docs/ASYNC_IMAGE_TASKS.md
+!docs/OPENAI_IMAGES_CODEX.md
 !docs/BATCH_IMAGE_MVP.md
 !docs/COMPOSITE_GROUPS.md
 !docs/PLUGIN_DEVELOPMENT.md
@@ -195,3 +200,6 @@ ProviderPriceApi*.js
 # Keep selected custom docs under docs/ even though docs/* is ignored above
 !docs/ARCHITECTURE_COMPATIBILITY_KERNEL_CN.md
 !docs/promotion_e2e_checklist.md
+
+# Local build droppings (prebuilt binaries kept out of git)
+backend/.local-*/

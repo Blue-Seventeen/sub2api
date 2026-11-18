@@ -10,11 +10,12 @@ import (
 // PlazaOfficialPricing contains channel-configured reference prices in USD per
 // token. Missing fields stay nil; explicit zero prices remain configured.
 type PlazaOfficialPricing struct {
-	InputPrice        *float64
-	OutputPrice       *float64
-	CacheWritePrice   *float64 // 5m 缓存写入（= LiteLLM cache_creation）
-	CacheWrite1hPrice *float64 // 1h 缓存写入，仅计费会区分 5m/1h 时给出
-	CacheReadPrice    *float64
+	InputPrice         *float64
+	OutputPrice        *float64
+	CacheWritePrice    *float64 // 5m 缓存写入（= LiteLLM cache_creation）
+	CacheWrite1hPrice  *float64 // 1h 缓存写入，仅计费会区分 5m/1h 时给出
+	CacheWrite12hPrice *float64 // OpenAI 12h cache-write price
+	CacheReadPrice     *float64
 	// Intervals 官方长上下文阶梯（多档时给出），不受分组开关影响。
 	Intervals []PricingInterval
 }
@@ -263,6 +264,11 @@ func officialPricingFromChannelPricingV1(p *ChannelModelPricing) *PlazaOfficialP
 func (s *ModelPlazaService) fillDisplayPricing(ctx context.Context, m *PlazaModel, g *Group) {
 	if groupPricing := matchGroupModelPricing(g, m.Name); groupPricing != nil {
 		m.Pricing = groupPricing
+		// 分组模型级固定价就是实收价，不能再被分组图片兜底档位覆盖。
+		// 否则模型广场会显示 image_price_1k/2k/4k，而实际按 model_pricing 扣费。
+		if groupPricing.BillingMode == BillingModeImage || groupPricing.BillingMode == BillingModePerRequest {
+			return
+		}
 	}
 	if s.billingService != nil && s.resolver != nil {
 		sched, err := s.billingService.ResolveContextPricingSchedule(ctx, s.resolver, ContextPricingScheduleInput{
@@ -297,6 +303,7 @@ func plazaPricingFromSchedule(raw *ChannelModelPricing, sched *ContextPricingSch
 	out.OutputPrice = first.Output
 	out.CacheWritePrice = first.CacheWrite
 	out.CacheWrite1hPrice = first.CacheWrite1h
+	out.CacheWrite12hPrice = first.CacheWrite12h
 	out.CacheReadPrice = first.CacheRead
 	if len(sched.Tiers) > 1 {
 		out.Intervals = plazaIntervalsFromTiers(sched.Tiers)
@@ -308,15 +315,16 @@ func plazaIntervalsFromTiers(tiers []ContextPricingTier) []PricingInterval {
 	intervals := make([]PricingInterval, 0, len(tiers))
 	for i, t := range tiers {
 		intervals = append(intervals, PricingInterval{
-			MinTokens:         t.MinTokens,
-			MaxTokens:         t.MaxTokens,
-			TierLabel:         t.Label,
-			InputPrice:        t.Input,
-			OutputPrice:       t.Output,
-			CacheWritePrice:   t.CacheWrite,
-			CacheWrite1hPrice: t.CacheWrite1h,
-			CacheReadPrice:    t.CacheRead,
-			SortOrder:         i,
+			MinTokens:          t.MinTokens,
+			MaxTokens:          t.MaxTokens,
+			TierLabel:          t.Label,
+			InputPrice:         t.Input,
+			OutputPrice:        t.Output,
+			CacheWritePrice:    t.CacheWrite,
+			CacheWrite1hPrice:  t.CacheWrite1h,
+			CacheWrite12hPrice: t.CacheWrite12h,
+			CacheReadPrice:     t.CacheRead,
+			SortOrder:          i,
 		})
 	}
 	return intervals
@@ -367,4 +375,42 @@ func plazaImageDisplayPricing(p *ChannelModelPricing, g *Group) *ChannelModelPri
 		})
 	}
 	return &clone
+}
+
+// lookupOfficialPricing 查询模型的官方参考价（与计费同源：LiteLLM → 内置兜底 → 模型策略），
+// 带 memo 避免同名模型重复解析。官方阶梯按无分组、无渠道的口径查阶梯表。
+// billingService 为 nil（测试场景）或查不到时返回 nil。
+func (s *ModelPlazaService) lookupOfficialPricing(ctx context.Context, modelName string, memo map[string]*PlazaOfficialPricing) *PlazaOfficialPricing {
+	if s.billingService == nil {
+		return nil
+	}
+	if cached, ok := memo[modelName]; ok {
+		return cached
+	}
+	var result *PlazaOfficialPricing
+	if mp, err := s.billingService.GetModelPricing(modelName); err == nil && mp != nil {
+		result = &PlazaOfficialPricing{
+			InputPrice:      nonZeroPtr(mp.InputPricePerToken),
+			OutputPrice:     nonZeroPtr(mp.OutputPricePerToken),
+			CacheWritePrice: nonZeroPtr(mp.CacheCreationPricePerToken),
+			CacheReadPrice:  nonZeroPtr(mp.CacheReadPricePerToken),
+		}
+		// 计费只在支持 5m/1h 分档时使用 1h 价，其余情况 1h 价对用户无意义。
+		if mp.SupportsCacheBreakdown {
+			result.CacheWrite1hPrice = nonZeroPtr(mp.CacheCreation1hPrice)
+		}
+		result.CacheWrite12hPrice = mp.CacheCreation12hPricePerToken
+		if s.resolver != nil {
+			sched, schedErr := s.billingService.ResolveContextPricingSchedule(ctx, s.resolver, ContextPricingScheduleInput{Model: modelName})
+			if schedErr == nil && sched != nil && len(sched.Tiers) > 1 {
+				result.Intervals = plazaIntervalsFromTiers(sched.Tiers)
+			}
+		}
+		if result.InputPrice == nil && result.OutputPrice == nil && result.CacheWritePrice == nil &&
+			result.CacheWrite1hPrice == nil && result.CacheWrite12hPrice == nil && result.CacheReadPrice == nil && len(result.Intervals) == 0 {
+			result = nil
+		}
+	}
+	memo[modelName] = result
+	return result
 }

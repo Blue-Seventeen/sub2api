@@ -1170,12 +1170,8 @@ async function handleRegister(): Promise<void> {
     // Redirect to dashboard
     await router.push('/dashboard')
   } catch (error: unknown) {
-    // Handle registration error
-    errorMessage.value = extractApiErrorCode(error) === 'EMAIL_DOMAIN_REGISTRATION_LIMIT'
-      ? t('auth.emailDomainRegistrationLimit')
-      : buildAuthErrorMessage(error, {
-          fallback: t('auth.registrationFailed')
-        })
+    // Handle registration error（EMAIL_DOMAIN_REGISTRATION_LIMIT / EMAIL_BLOCKED 走专用文案）
+    errorMessage.value = buildRegistrationErrorMessage(error, t('auth.registrationFailed'))
 
     // Also show error toast
     appStore.showError(errorMessage.value)
@@ -1185,6 +1181,16 @@ async function handleRegister(): Promise<void> {
     }
     isLoading.value = false
   }
+}
+
+function buildRegistrationErrorMessage(error: unknown, fallback: string): string {
+  if (extractApiErrorCode(error) === 'EMAIL_DOMAIN_REGISTRATION_LIMIT') {
+    return t('auth.emailDomainRegistrationLimit')
+  }
+  if (extractApiErrorCode(error) === 'EMAIL_BLOCKED') {
+    return t('auth.errors.EMAIL_BLOCKED')
+  }
+  return buildAuthErrorMessage(error, { fallback })
 }
 </script>
 

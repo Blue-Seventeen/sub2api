@@ -84,7 +84,7 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletionsWithStartTime(
 	// 2. Resolve model mapping (same as ForwardAsChatCompletions)
 	billingModel := resolveOpenAIForwardModel(account, originalModel, defaultMappedModel)
 	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
-	if err := validateGPT61SolCompatRequest(body, upstreamModel); err != nil {
+	if err := validateGPT61CompatRequest(body, upstreamModel); err != nil {
 		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, err
 	}
@@ -95,8 +95,8 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletionsWithStartTime(
 		// anchored to the client's stable conversation prefix.
 		grokCacheIdentity = resolveGrokCacheIdentity(c, body, "", upstreamModel)
 	}
-	if openai.IsGPT61SolModelSpelling(upstreamModel) && (len(gjson.GetBytes(body, "tools").Array()) > 0 || len(gjson.GetBytes(body, "functions").Array()) > 0) {
-		err := fmt.Errorf("gpt-6.1-sol requires Responses for tool calls; this account only supports Chat Completions")
+	if openai.RequiresResponsesForToolCalls(upstreamModel) && (len(gjson.GetBytes(body, "tools").Array()) > 0 || len(gjson.GetBytes(body, "functions").Array()) > 0) {
+		err := fmt.Errorf("%s requires Responses for tool calls; this account only supports Chat Completions", normalizeKnownOpenAICodexModel(upstreamModel))
 		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, err
 	}
@@ -292,100 +292,67 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	startTime time.Time,
 	requestBodyLen int,
 ) (*OpenAIForwardResult, error) {
-	if err := s.preflightOpenAIPoolCompatStream(c, resp, account, upstreamSSEChat, writeChatCompletionsError); err != nil {
-		return nil, err
-	}
 	observer := upstreamResponseModelObserverFromContext(c)
 	if observer == nil {
 		observer = beginUpstreamResponseModelObservation(c)
 	}
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
-	scanner := s.newUpstreamSSEScanner(resp.Body)
 
 	var usage OpenAIUsage
-	billableUsageSeen := false
 	var firstTokenMs *int
 	clientDisconnected := false
 	clientOutputStarted := false
-	terminalState := openAIRawStreamTerminalState{}
+	flushPending := false
+	flushToClient := func() {
+		if flushPending && !clientDisconnected && clientOutputStarted {
+			c.Writer.Flush()
+		}
+		flushPending = false
+	}
+	scanner := s.newUpstreamSSEScanner(&flushBeforeUpstreamRead{r: resp.Body, flush: flushToClient})
+	pendingLines := make([]string, 0, 8)
 	refusalDetector := newOpenAIChatSilentRefusalDetector(requestBodyLen)
-	outputReleased := !refusalDetector.Enabled()
-	bufferedLines := make([]string, 0, 8)
-	var namedEvent string
-	var terminalErr error
+	var terminal openAIRawStreamTerminalState
 
 	writeLine := func(line string) {
 		if clientDisconnected {
 			return
 		}
-		writeStreamHeaders()
+		if !clientOutputStarted && !refusalDetector.ShouldReleaseClientOutput() {
+			pendingLines = append(pendingLines, line)
+			return
+		}
+		if !clientOutputStarted {
+			writeStreamHeaders()
+			for _, pending := range pendingLines {
+				if _, werr := c.Writer.WriteString(pending + "\n"); werr != nil {
+					clientDisconnected = true
+					logger.L().Debug("openai chat_completions raw: client disconnected, continuing to drain upstream for billing",
+						zap.Error(werr),
+						zap.String("request_id", requestID),
+					)
+					return
+				}
+			}
+			pendingLines = pendingLines[:0]
+			clientOutputStarted = true
+		}
 		if _, werr := c.Writer.WriteString(line + "\n"); werr != nil {
 			clientDisconnected = true
 			logger.L().Debug("openai chat_completions raw: client disconnected, continuing to drain upstream for billing",
 				zap.Error(werr),
 				zap.String("request_id", requestID),
 			)
-			return
 		}
-		clientOutputStarted = true
-		c.Writer.Flush()
-	}
-	flushBufferedLines := func() {
-		for _, bufferedLine := range bufferedLines {
-			writeLine(bufferedLine)
-			if clientDisconnected {
-				break
-			}
-		}
-		bufferedLines = nil
 	}
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		if payload, ok := extractOpenAISSEDataLine(line); ok {
-			billableUsageSeen = billableUsageSeen || upstreamSSEPayloadHasUsage([]byte(payload))
-		}
-		if line == "" {
-			namedEvent = ""
-		}
-		if name, ok := extractOpenAISSEEventLine(line); ok {
-			namedEvent = strings.TrimSpace(name)
-			// Do not commit HTTP 200 for an error event's name before its
-			// payload can select a custom status or an early failover.
-			if namedEvent == "error" || namedEvent == "response.failed" {
-				continue
-			}
-		}
-		if payload, ok := extractOpenAISSEDataLine(line); ok && isCCUpstreamErrorPayload(namedEvent, []byte(payload)) {
-			payloadBytes := []byte(payload)
-			// Providers may attach final usage to a response.failed/error event. Capture
-			// it before deciding whether the stream is safe to replay; replaying a
-			// billable terminal response would double-charge the client request.
-			if parsedUsage, usageOK := extractOpenAIUsageFromJSONBytes(payloadBytes); usageOK &&
-				(openAIUsageHasTokens(&parsedUsage) || !openAIUsageHasTokens(&usage)) {
-				usage = parsedUsage
-			}
-			allowFailover := !clientOutputStarted && !clientDisconnected && !billableUsageSeen && !openAIUsageHasTokens(&usage)
-			terminalErr = s.handleCCUpstreamErrorPayload(c, resp, account, payloadBytes, allowFailover,
-				func(c *gin.Context, status int, errType, message string) {
-					if clientDisconnected {
-						return
-					}
-					if !clientOutputStarted {
-						writeChatCompletionsError(c, status, errType, message)
-						return
-					}
-					if _, err := fmt.Fprint(c.Writer, buildChatStreamErrorSSEWithType(errType, errType, message)); err == nil {
-						c.Writer.Flush()
-					}
-				})
-			break
-		}
 		refusalDetector.ObserveSSELine(line)
 		if payload, ok := extractOpenAISSEDataLine(line); ok {
 			trimmedPayload := strings.TrimSpace(payload)
-			terminalState.ObserveDataLine(trimmedPayload)
+			terminal.ObserveDataLine(trimmedPayload)
 			if trimmedPayload != "[DONE]" {
 				observer.ObserveOpenAI([]byte(payload), strings.TrimSpace(gjson.Get(payload, "type").String()))
 				usageOnlyChunk := isOpenAIChatUsageOnlyStreamChunk(payload)
@@ -398,98 +365,99 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 				}
 			}
 		}
-		line = stripEmptyChatToolCallIdentityFromSSELine(line)
 		line = applyOllamaCloudRawChatCompletionsSSELine(account, line)
+		line = stripEmptyChatToolCallIdentityFromSSELine(line)
 
-		if clientDisconnected {
-			continue
-		}
-		if outputReleased {
-			writeLine(line)
-			continue
-		}
-		bufferedLines = append(bufferedLines, line)
-		if refusalDetector.ShouldReleaseClientOutput() {
-			outputReleased = true
-			flushBufferedLines()
-		}
+		line = s.replaceModelInSSELine(line, upstreamModel, originalModel)
+		writeLine(line)
+		// 不逐行 flush：scanner 下次向上游读取前统一 flush（见 flushBeforeUpstreamRead）。
+		flushPending = true
 	}
+	flushToClient()
 
-	if terminalErr != nil {
+	resultWithUsage := func() *OpenAIForwardResult {
 		return &OpenAIForwardResult{
 			RequestID:                     requestID,
+			UpstreamHeaders:               resp.Header,
 			Usage:                         usage,
 			Model:                         originalModel,
 			BillingModel:                  billingModel,
 			UpstreamModel:                 upstreamModel,
 			UpstreamResponseModel:         observedUpstreamResponseModel(c),
 			UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
+			UpstreamResponseServiceTier:   observedUpstreamResponseServiceTier(c),
 			ReasoningEffort:               reasoningEffort,
-			ServiceTier:                   serviceTier,
+			ServiceTier:                   resolvedOpenAIUpstreamServiceTier(c, serviceTier),
 			Stream:                        true,
 			Duration:                      time.Since(startTime),
 			FirstTokenMs:                  firstTokenMs,
-			ClientDisconnect:              clientDisconnected,
-		}, terminalErr
-	}
-	scanErr := scanner.Err()
-	clientCanceled := errors.Is(scanErr, context.Canceled) || errors.Is(scanErr, context.DeadlineExceeded)
-	if scanErr != nil {
-		if !errors.Is(scanErr, context.Canceled) && !errors.Is(scanErr, context.DeadlineExceeded) {
-			logger.L().Warn("openai chat_completions raw: stream read error",
-				zap.Error(scanErr),
-				zap.String("request_id", requestID),
-			)
 		}
 	}
-	if refusalDetector.IsSilentRefusal() {
-		return nil, newOpenAISilentRefusalFailoverError(c, account, requestID)
+
+	scanErr := scanner.Err()
+	if scanErr != nil && !errors.Is(scanErr, context.Canceled) && !errors.Is(scanErr, context.DeadlineExceeded) {
+		logger.L().Warn("openai chat_completions raw: stream read error",
+			zap.Error(scanErr),
+			zap.String("request_id", requestID),
+		)
 	}
-	if !outputReleased && !clientDisconnected && len(bufferedLines) > 0 {
-		flushBufferedLines()
-	}
-	if clientDisconnected || clientCanceled || terminalState.Terminated() {
-		scanErr = nil
-	}
-	if scanErr != nil || (!clientDisconnected && !clientCanceled && terminalState.IsTruncated(clientOutputStarted)) {
+
+	// 客户端取消/断开后上游读失败与上游截断不可区分（取消会连带取消上游请求），
+	// 沿用既有语义：按已收到的用量正常收尾计费，不判为上游故障。
+	clientAborted := clientDisconnected ||
+		errors.Is(scanErr, context.Canceled) ||
+		errors.Is(scanErr, context.DeadlineExceeded)
+
+	// 上游在任何终止信号之前结束：连接被 reset（scanErr != nil）或干净 EOF。
+	// 两者都不能再记成功——此前统一返回 nil error，把上游截断伪装成
+	// `HTTP 200 + usage 0/0`，客户端收到半截回答且 Ops 侧完全无感。
+	if !clientAborted && terminal.IsTruncated(clientOutputStarted) {
 		cause := scanErr
 		if cause == nil {
 			cause = ErrOpenAIUpstreamStreamTruncated
 		}
-		if !clientOutputStarted && !clientDisconnected {
+		logger.L().Warn("openai chat_completions raw: upstream stream truncated before terminal chunk",
+			zap.Error(cause),
+			zap.String("request_id", requestID),
+			zap.Int64("account_id", account.ID),
+			zap.String("upstream_model", upstreamModel),
+			zap.Bool("saw_sse_data", terminal.sawDataLine),
+			zap.Bool("client_output_started", clientOutputStarted),
+		)
+		if !clientOutputStarted {
+			// 响应头尚未提交：可以透明换号重试，客户端不会看到半截流。
 			return nil, newOpenAIRawStreamTruncatedFailoverError(c, account, requestID, cause)
 		}
+		// 已写出语义字节：无法再 failover，改为带类型的上游错误。handler 会据此
+		// 补发 SSE error 帧并把本次请求计入 SLA 失败。
 		recordOpenAIRawStreamTruncation(c, account, requestID, cause, "http_error")
-		return &OpenAIForwardResult{
-			RequestID:                     requestID,
-			Usage:                         usage,
-			Model:                         originalModel,
-			BillingModel:                  billingModel,
-			UpstreamModel:                 upstreamModel,
-			UpstreamResponseModel:         observedUpstreamResponseModel(c),
-			UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
-			ReasoningEffort:               reasoningEffort,
-			ServiceTier:                   serviceTier,
-			Stream:                        true,
-			Duration:                      time.Since(startTime),
-			FirstTokenMs:                  firstTokenMs,
-		}, newOpenAIUpstreamStreamReadError(cause)
+		return resultWithUsage(), newOpenAIUpstreamStreamReadError(cause)
 	}
 
-	return &OpenAIForwardResult{
-		RequestID:                     requestID,
-		Usage:                         usage,
-		Model:                         originalModel,
-		BillingModel:                  billingModel,
-		UpstreamModel:                 upstreamModel,
-		UpstreamResponseModel:         observedUpstreamResponseModel(c),
-		UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
-		ReasoningEffort:               reasoningEffort,
-		ServiceTier:                   serviceTier,
-		Stream:                        true,
-		Duration:                      time.Since(startTime),
-		FirstTokenMs:                  firstTokenMs,
-	}, nil
+	if scanErr == nil && !clientDisconnected && !clientOutputStarted {
+		if refusalDetector.IsSilentRefusal() {
+			return nil, newOpenAISilentRefusalFailoverError(c, account, requestID)
+		}
+		if len(pendingLines) > 0 {
+			writeStreamHeaders()
+			for _, pending := range pendingLines {
+				if _, werr := c.Writer.WriteString(pending + "\n"); werr != nil {
+					clientDisconnected = true
+					logger.L().Debug("openai chat_completions raw: client disconnected during final flush",
+						zap.Error(werr),
+						zap.String("request_id", requestID),
+					)
+					break
+				}
+			}
+			if !clientDisconnected {
+				c.Writer.Flush()
+				clientOutputStarted = true
+			}
+		}
+	}
+
+	return resultWithUsage(), nil
 }
 
 // ensureOpenAIChatStreamUsage 确保 raw Chat Completions 流式请求会让上游返回 usage。

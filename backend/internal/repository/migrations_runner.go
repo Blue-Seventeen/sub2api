@@ -60,12 +60,15 @@ const latestAPIKeyIPIndexMigration = "174_add_usage_logs_api_key_latest_ip_index
 const latestAPIKeyIPIndex = "idx_usage_logs_api_key_latest_ip"
 const emailAliasDedupIndexMigration = "190_add_users_email_alias_dedup_index_notx.sql"
 const emailAliasDedupIndex = "idx_users_email_dot_stripped"
-const upstreamModelMismatchIndexMigration = "195_add_usage_log_upstream_model_mismatch_index_notx.sql"
+const usageLogsUpstreamModelMismatchIndexMigration = "195_add_usage_log_upstream_model_mismatch_index_notx.sql"
 const usageLogsUpstreamModelMismatchIndex = "idx_usage_logs_upstream_model_mismatch_created_at" //nolint:unused // used by migration integration assertions
-const effectiveModelIndexesMigration = "226_add_usage_log_effective_model_indexes_notx.sql"
+const usageLogsEffectiveModelIndexesMigration = "226_add_usage_log_effective_model_indexes_notx.sql"
 const usageLogsEffectiveRequestedModelIndex = "idx_usage_logs_effective_requested_model_created" //nolint:unused // used by migration integration assertions
 const usageLogsEffectiveUpstreamModelIndex = "idx_usage_logs_effective_upstream_model_created"   //nolint:unused // used by migration integration assertions
-const upstreamRequestIDIndexMigration = "233_add_usage_log_upstream_request_id_index_notx.sql"
+const usageLogsUpstreamRequestIDIndexMigration = "233_add_usage_log_upstream_request_id_index_notx.sql"
+const usageLogsUpstreamRequestIDIndex = "idx_usage_logs_upstream_request_id"
+const usageLogsAPIKeyCostIndexMigration = "249_add_usage_logs_api_key_cost_index_notx.sql"
+const usageLogsAPIKeyCostIndex = "idx_usage_logs_api_key_created_cost"
 
 var accountGroupSchedulerIndexes = []string{
 	"idx_account_groups_group_priority_account",
@@ -315,15 +318,22 @@ func prepareNonTransactionalMigration(ctx context.Context, db migrationConnectio
 	case schedulerOutboxPendingDedupKeyMigration:
 		return dropInvalidIndexes(ctx, db, schedulerOutboxPendingDedupKeyIndex)
 	case latestAPIKeyIPIndexMigration:
-		return dropInvalidIndexes(ctx, db, latestAPIKeyIPIndex)
+		return dropInvalidIndexIfPresent(ctx, db, latestAPIKeyIPIndex)
 	case emailAliasDedupIndexMigration:
-		return dropInvalidIndexes(ctx, db, emailAliasDedupIndex)
-	case upstreamModelMismatchIndexMigration:
-		return dropInvalidIndexes(ctx, db, "idx_usage_logs_upstream_model_mismatch_created_at")
-	case effectiveModelIndexesMigration:
-		return dropInvalidIndexes(ctx, db, "idx_usage_logs_effective_requested_model_created", "idx_usage_logs_effective_upstream_model_created")
-	case upstreamRequestIDIndexMigration:
-		return dropInvalidIndexes(ctx, db, "idx_usage_logs_upstream_request_id")
+		return dropInvalidIndexIfPresent(ctx, db, emailAliasDedupIndex)
+	case usageLogsUpstreamModelMismatchIndexMigration:
+		return dropInvalidIndexIfPresent(ctx, db, usageLogsUpstreamModelMismatchIndex)
+	case usageLogsEffectiveModelIndexesMigration:
+		for _, indexName := range []string{usageLogsEffectiveRequestedModelIndex, usageLogsEffectiveUpstreamModelIndex} {
+			if err := dropInvalidIndexIfPresent(ctx, db, indexName); err != nil {
+				return err
+			}
+		}
+		return nil
+	case usageLogsUpstreamRequestIDIndexMigration:
+		return dropInvalidIndexIfPresent(ctx, db, usageLogsUpstreamRequestIDIndex)
+	case usageLogsAPIKeyCostIndexMigration:
+		return dropInvalidIndexIfPresent(ctx, db, usageLogsAPIKeyCostIndex)
 	default:
 		return nil
 	}
@@ -358,6 +368,21 @@ func dropInvalidIndexes(ctx context.Context, db migrationConnection, indexNames 
 		if _, err := db.ExecContext(ctx, fmt.Sprintf("DROP INDEX CONCURRENTLY IF EXISTS %s", indexName)); err != nil {
 			return fmt.Errorf("drop invalid index %s: %w", indexName, err)
 		}
+	}
+	return nil
+}
+
+func dropInvalidIndexIfPresent(ctx context.Context, db migrationConnection, indexName string) error {
+	invalid, err := indexIsInvalid(ctx, db, indexName)
+	if err != nil {
+		return fmt.Errorf("check invalid index %s: %w", indexName, err)
+	}
+	if !invalid {
+		return nil
+	}
+
+	if _, err := db.ExecContext(ctx, fmt.Sprintf("DROP INDEX CONCURRENTLY IF EXISTS %s", indexName)); err != nil {
+		return fmt.Errorf("drop invalid index %s: %w", indexName, err)
 	}
 	return nil
 }

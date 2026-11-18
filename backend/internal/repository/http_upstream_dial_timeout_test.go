@@ -21,7 +21,7 @@ func TestNewUpstreamDialerHasBoundedTimeout(t *testing.T) {
 	dialer := newUpstreamDialer()
 	require.Greater(t, dialer.Timeout, time.Duration(0))
 	require.Equal(t, defaultUpstreamDialTimeout, dialer.Timeout)
-	require.Equal(t, defaultUpstreamDialKeepAlive, dialer.KeepAlive)
+	require.Equal(t, net.KeepAliveConfig{Enable: true, Idle: 15 * time.Second, Interval: 5 * time.Second, Count: 3}, dialer.KeepAliveConfig)
 }
 
 func TestBuildUpstreamTransportKeepsDialTimeoutWithHTTPProxy(t *testing.T) {

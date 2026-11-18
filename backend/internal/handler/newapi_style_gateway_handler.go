@@ -410,6 +410,7 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 		compat := compatibilityLogFields(c)
 		compatibleInputTokens := service.EstimateCompatibleInputTokensForPlatform(account.Platform, parsedReq)
 
+		channelUsageFields := clientRequestedUsageFields(c, channelMapping, model, result.UpstreamModel)
 		h.base.submitMandatoryUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 			if err := h.base.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 				Result:                result,
@@ -431,7 +432,7 @@ func (h *NewAPIStyleGatewayHandler) forward(c *gin.Context, route service.NewAPI
 				UpstreamTransport:     compat.UpstreamTransport,
 				PricingAt:             pricingAt,
 				APIKeyService:         h.base.apiKeyService,
-				ChannelUsageFields:    clientRequestedUsageFields(c, channelMapping, model, result.UpstreamModel),
+				ChannelUsageFields:    channelUsageFields,
 			}); err != nil {
 				logger.L().With(
 					zap.String("component", "handler.newapi_style"),

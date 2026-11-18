@@ -1056,7 +1056,7 @@
           </div>
         </div>
 
-        <!-- 鍥剧墖鐢熸垚璁¤垂閰嶇疆 -->
+        <!-- 图片生成计费配置 -->
         <div
           v-if="supportsImagePricingPlatform(createForm.platform)"
           class="border-t pt-4"
@@ -1085,6 +1085,20 @@
                 class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
               />
               {{ t(imagePricingI18nKey(createForm.platform, "independentMultiplier")) }}
+            </label>
+            <label
+              v-if="
+                createForm.allow_image_generation &&
+                (createForm.platform === 'composite' || createForm.platform === 'openai')
+              "
+              class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"
+            >
+              <input
+                v-model="createForm.image_count_billing"
+                type="checkbox"
+                class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              {{ t("admin.groups.imagePricing.perImageBilling") }}
             </label>
           </div>
           <div
@@ -1280,6 +1294,45 @@
                 class="input"
                 :placeholder="getVideoPricePlaceholder(createForm.platform, 'video_price_1080p')"
               />
+            </div>
+          </div>
+          <div
+            class="mt-4 border-t border-dashed border-gray-200 pt-4 dark:border-dark-700"
+            data-testid="create-grok-video-model-prices"
+          >
+            <p class="text-sm font-medium text-gray-700 dark:text-gray-300">
+              {{ t("admin.groups.videoPricing.modelOverridesTitle") }}
+            </p>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t("admin.groups.videoPricing.modelOverridesDescription") }}
+            </p>
+            <div class="mt-3 space-y-3">
+              <div
+                v-for="family in videoModelPriceFamilyRows(createForm.video_model_prices)"
+                :key="family.key"
+                class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_repeat(3,minmax(0,7rem))] sm:items-end"
+              >
+                <div class="min-w-0 pb-1 font-mono text-xs text-gray-700 dark:text-gray-300">
+                  {{ family.label }}
+                </div>
+                <label
+                  v-for="resolution in grokVideoPriceResolutions"
+                  :key="resolution.key"
+                  class="block"
+                >
+                  <span class="mb-1 block text-xs text-gray-500 dark:text-gray-400">
+                    {{ resolution.label }} ($/s)
+                  </span>
+                  <input
+                    v-model.number="createForm.video_model_prices[family.key][resolution.key]"
+                    type="number"
+                    step="0.001"
+                    min="0"
+                    class="input"
+                    :data-testid="`create-grok-video-price-${family.key}-${resolution.key}`"
+                  />
+                </label>
+              </div>
             </div>
           </div>
           <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
@@ -1679,7 +1732,118 @@
 
         <!-- OpenAI Live 开关（仅 openai 平台） -->
         <div
-          v-if="createForm.platform === 'openai'"
+          v-if="createForm.platform === 'grok'"
+          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4"
+        >
+          <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            {{ t("admin.groups.explicitPricing.title") }}
+          </h4>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
+            {{ t("admin.groups.explicitPricing.description") }}
+          </p>
+          <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <div>
+              <label class="input-label">{{ t("admin.groups.explicitPricing.searchPricePer1k") }}</label>
+              <input
+                v-model.number="createForm.search_price_per_1k"
+                type="number"
+                step="0.000001"
+                min="0"
+                class="input"
+                :placeholder="t('admin.groups.explicitPricing.pricePlaceholder')"
+                data-testid="create-search-price"
+              />
+            </div>
+            <div>
+              <label class="input-label">{{ t("admin.groups.voicePricing.audioRealtimePerMin") }}</label>
+              <input
+                v-model.number="createForm.audio_realtime_price_per_min"
+                type="number"
+                step="0.000001"
+                min="0"
+                class="input"
+                :placeholder="t('admin.groups.voicePricing.pricePlaceholder')"
+                data-testid="create-audio-realtime-price"
+              />
+            </div>
+            <div>
+              <label class="input-label">{{ t("admin.groups.voicePricing.audioTtsPerMillionChars") }}</label>
+              <input
+                v-model.number="createForm.audio_tts_price_per_million_chars"
+                type="number"
+                step="0.000001"
+                min="0"
+                class="input"
+                :placeholder="t('admin.groups.voicePricing.pricePlaceholder')"
+                data-testid="create-audio-tts-price"
+              />
+            </div>
+            <div>
+              <label class="input-label">{{ t("admin.groups.voicePricing.audioSttPerHour") }}</label>
+              <input
+                v-model.number="createForm.audio_stt_price_per_hour"
+                type="number"
+                step="0.000001"
+                min="0"
+                class="input"
+                :placeholder="t('admin.groups.voicePricing.pricePlaceholder')"
+                data-testid="create-audio-stt-price"
+              />
+            </div>
+          </div>
+        </div>
+        <!-- OpenAI Fast 开关（OpenAI 与 Composite 平台） -->
+        <div
+          v-if="supportsGroupOpenAIFast(createForm.platform)"
+          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4"
+        >
+          <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+            {{ t("admin.groups.openaiFast.title") }}
+          </h4>
+          <div class="flex items-center justify-between gap-4">
+            <label class="text-sm text-gray-600 dark:text-gray-400">
+              {{ t("admin.groups.openaiFast.force") }}
+            </label>
+            <Toggle
+              data-testid="create-force-openai-fast"
+              :aria-label="t('admin.groups.openaiFast.force')"
+              v-model="createForm.force_openai_fast"
+            />
+          </div>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            {{ t("admin.groups.openaiFast.hint") }}
+          </p>
+          <div class="flex items-center justify-between gap-4 mt-4">
+            <label class="text-sm text-gray-600 dark:text-gray-400">
+              {{ t("admin.groups.openaiFast.forceUltrafast") }}
+            </label>
+            <Toggle
+              data-testid="create-force-openai-ultrafast"
+              :aria-label="t('admin.groups.openaiFast.forceUltrafast')"
+              v-model="createForm.force_openai_ultrafast"
+            />
+          </div>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            {{ t("admin.groups.openaiFast.ultrafastHint") }}
+          </p>
+          <div class="flex items-center justify-between gap-4 mt-4">
+            <label class="text-sm text-gray-600 dark:text-gray-400">
+              {{ t("admin.groups.openaiFast.free") }}
+            </label>
+            <Toggle
+              data-testid="create-free-openai-fast"
+              :aria-label="t('admin.groups.openaiFast.free')"
+              v-model="createForm.free_openai_fast"
+            />
+          </div>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            {{ t("admin.groups.openaiFast.freeHint") }}
+          </p>
+        </div>
+
+        <!-- Codex Live 开关（OpenAI 与 Composite 平台） -->
+        <div
+          v-if="supportsLivePlatform(createForm.platform)"
           class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4"
         >
           <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
@@ -2805,7 +2969,7 @@
           </div>
         </div>
 
-        <!-- 鍥剧墖鐢熸垚璁¤垂閰嶇疆 -->
+        <!-- 图片生成计费配置 -->
         <div
           v-if="supportsImagePricingPlatform(editForm.platform)"
           class="border-t pt-4"
@@ -2834,6 +2998,20 @@
                 class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
               />
               {{ t(imagePricingI18nKey(editForm.platform, "independentMultiplier")) }}
+            </label>
+            <label
+              v-if="
+                editForm.allow_image_generation &&
+                (editForm.platform === 'composite' || editForm.platform === 'openai')
+              "
+              class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"
+            >
+              <input
+                v-model="editForm.image_count_billing"
+                type="checkbox"
+                class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              {{ t("admin.groups.imagePricing.perImageBilling") }}
             </label>
           </div>
           <div
@@ -3029,6 +3207,45 @@
                 class="input"
                 :placeholder="getVideoPricePlaceholder(editForm.platform, 'video_price_1080p')"
               />
+            </div>
+          </div>
+          <div
+            class="mt-4 border-t border-dashed border-gray-200 pt-4 dark:border-dark-700"
+            data-testid="edit-grok-video-model-prices"
+          >
+            <p class="text-sm font-medium text-gray-700 dark:text-gray-300">
+              {{ t("admin.groups.videoPricing.modelOverridesTitle") }}
+            </p>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t("admin.groups.videoPricing.modelOverridesDescription") }}
+            </p>
+            <div class="mt-3 space-y-3">
+              <div
+                v-for="family in videoModelPriceFamilyRows(editForm.video_model_prices)"
+                :key="family.key"
+                class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_repeat(3,minmax(0,7rem))] sm:items-end"
+              >
+                <div class="min-w-0 pb-1 font-mono text-xs text-gray-700 dark:text-gray-300">
+                  {{ family.label }}
+                </div>
+                <label
+                  v-for="resolution in grokVideoPriceResolutions"
+                  :key="resolution.key"
+                  class="block"
+                >
+                  <span class="mb-1 block text-xs text-gray-500 dark:text-gray-400">
+                    {{ resolution.label }} ($/s)
+                  </span>
+                  <input
+                    v-model.number="editForm.video_model_prices[family.key][resolution.key]"
+                    type="number"
+                    step="0.001"
+                    min="0"
+                    class="input"
+                    :data-testid="`edit-grok-video-price-${family.key}-${resolution.key}`"
+                  />
+                </label>
+              </div>
             </div>
           </div>
           <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
@@ -3424,7 +3641,118 @@
 
         <!-- OpenAI Live 开关（仅 openai 平台） -->
         <div
-          v-if="editForm.platform === 'openai'"
+          v-if="editForm.platform === 'grok'"
+          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4"
+        >
+          <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            {{ t("admin.groups.explicitPricing.title") }}
+          </h4>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
+            {{ t("admin.groups.explicitPricing.description") }}
+          </p>
+          <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <div>
+              <label class="input-label">{{ t("admin.groups.explicitPricing.searchPricePer1k") }}</label>
+              <input
+                v-model.number="editForm.search_price_per_1k"
+                type="number"
+                step="0.000001"
+                min="0"
+                class="input"
+                :placeholder="t('admin.groups.explicitPricing.pricePlaceholder')"
+                data-testid="edit-search-price"
+              />
+            </div>
+            <div>
+              <label class="input-label">{{ t("admin.groups.voicePricing.audioRealtimePerMin") }}</label>
+              <input
+                v-model.number="editForm.audio_realtime_price_per_min"
+                type="number"
+                step="0.000001"
+                min="0"
+                class="input"
+                :placeholder="t('admin.groups.voicePricing.pricePlaceholder')"
+                data-testid="edit-audio-realtime-price"
+              />
+            </div>
+            <div>
+              <label class="input-label">{{ t("admin.groups.voicePricing.audioTtsPerMillionChars") }}</label>
+              <input
+                v-model.number="editForm.audio_tts_price_per_million_chars"
+                type="number"
+                step="0.000001"
+                min="0"
+                class="input"
+                :placeholder="t('admin.groups.voicePricing.pricePlaceholder')"
+                data-testid="edit-audio-tts-price"
+              />
+            </div>
+            <div>
+              <label class="input-label">{{ t("admin.groups.voicePricing.audioSttPerHour") }}</label>
+              <input
+                v-model.number="editForm.audio_stt_price_per_hour"
+                type="number"
+                step="0.000001"
+                min="0"
+                class="input"
+                :placeholder="t('admin.groups.voicePricing.pricePlaceholder')"
+                data-testid="edit-audio-stt-price"
+              />
+            </div>
+          </div>
+        </div>
+        <!-- OpenAI Fast 开关（OpenAI 与 Composite 平台） -->
+        <div
+          v-if="supportsGroupOpenAIFast(editForm.platform)"
+          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4"
+        >
+          <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+            {{ t("admin.groups.openaiFast.title") }}
+          </h4>
+          <div class="flex items-center justify-between gap-4">
+            <label class="text-sm text-gray-600 dark:text-gray-400">
+              {{ t("admin.groups.openaiFast.force") }}
+            </label>
+            <Toggle
+              data-testid="edit-force-openai-fast"
+              :aria-label="t('admin.groups.openaiFast.force')"
+              v-model="editForm.force_openai_fast"
+            />
+          </div>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            {{ t("admin.groups.openaiFast.hint") }}
+          </p>
+          <div class="flex items-center justify-between gap-4 mt-4">
+            <label class="text-sm text-gray-600 dark:text-gray-400">
+              {{ t("admin.groups.openaiFast.forceUltrafast") }}
+            </label>
+            <Toggle
+              data-testid="edit-force-openai-ultrafast"
+              :aria-label="t('admin.groups.openaiFast.forceUltrafast')"
+              v-model="editForm.force_openai_ultrafast"
+            />
+          </div>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            {{ t("admin.groups.openaiFast.ultrafastHint") }}
+          </p>
+          <div class="flex items-center justify-between gap-4 mt-4">
+            <label class="text-sm text-gray-600 dark:text-gray-400">
+              {{ t("admin.groups.openaiFast.free") }}
+            </label>
+            <Toggle
+              data-testid="edit-free-openai-fast"
+              :aria-label="t('admin.groups.openaiFast.free')"
+              v-model="editForm.free_openai_fast"
+            />
+          </div>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            {{ t("admin.groups.openaiFast.freeHint") }}
+          </p>
+        </div>
+
+        <!-- Codex Live 开关（OpenAI 与 Composite 平台） -->
+        <div
+          v-if="supportsLivePlatform(editForm.platform)"
           class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4"
         >
           <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
@@ -4603,6 +4931,9 @@ import ModelListScopeDialog from "@/components/admin/group/ModelListScopeDialog.
 import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
 import ReasoningEffortPolicyFields from "@/components/admin/group/ReasoningEffortPolicyFields.vue";
 import CodexManifestAccountsField from "@/components/admin/group/CodexManifestAccountsField.vue";
+import PricingEntryCard from "@/components/admin/channel/PricingEntryCard.vue";
+import Toggle from "@/components/common/Toggle.vue";
+import { validateReasoningEffortMultipliers } from "@/components/admin/channel/types";
 import { VueDraggable } from "vue-draggable-plus";
 import { createStableObjectKeyResolver } from "@/utils/stableObjectKey";
 import { extractApiErrorMessage } from "@/utils/apiError";
@@ -4664,6 +4995,19 @@ import {
   supportsReasoningEffortPolicyPlatform,
   type ReasoningEffortMappingRow,
 } from "./groupsReasoningEffort";
+import { normalizeGroupOpenAIFast, supportsGroupOpenAIFast } from "./groupsOpenAIFast";
+import {
+  createVideoModelPricesForm,
+  grokVideoPriceResolutions,
+  serializeVideoModelPrices,
+  videoModelPriceFamilyRows,
+} from "./groupsVideoModelPricing";
+import {
+  createGroupPricing,
+  groupPricingFromAPI,
+  groupPricingToAPI,
+  type GroupPricingFormEntry,
+} from "./groupsModelPricing";
 import {
   defaultAllowImageGenerationForPlatform,
   getDefaultImagePreviewPrice,
@@ -4676,9 +5020,8 @@ import {
   videoPricingI18nKey,
 } from "./groupsImagePricing";
 
-import PricingEntryCard from '@/components/admin/channel/PricingEntryCard.vue';
-import { validateReasoningEffortMultipliers } from '@/components/admin/channel/types';
-import { createGroupPricing, groupPricingFromAPI, groupPricingToAPI, type GroupPricingFormEntry } from './groupsModelPricing';
+const supportsLivePlatform = (platform: string): boolean =>
+  platform === "openai" || platform === "composite";
 
 const { t } = useI18n();
 const appStore = useAppStore();
@@ -5569,9 +5912,15 @@ const createForm = reactive({
   monthly_limit_usd: null as number | null,
   custom_limit_hours: 0 as number,
   custom_limit_usd: null as number | null,
-  // 鍥剧墖鐢熸垚璁¤垂閰嶇疆
+  long_context_pricing_enabled: true,
+  force_openai_fast: false,
+  force_openai_ultrafast: false,
+  free_openai_fast: false,
+  model_pricing: [] as GroupPricingFormEntry[],
+  // 图片生成计费配置
   allow_image_generation: false,
   allow_batch_image_generation: false,
+  image_count_billing: false,
   image_rate_independent: false,
   image_rate_multiplier: 1,
   batch_image_discount_multiplier: 0.5,
@@ -5580,16 +5929,17 @@ const createForm = reactive({
   image_price_2k: null as number | null,
   image_price_4k: null as number | null,
   video_rate_independent: false,
-  // 瑙嗛鐢熸垚璁¤垂閰嶇疆锛堜粎 Grok 骞冲彴锛?  video_rate_independent: false,
   video_rate_multiplier: 1,
   video_price_480p: null as number | null,
   video_price_720p: null as number | null,
   video_price_1080p: null as number | null,
-  // 楂樺嘲鏃舵鍊嶇巼閰嶇疆
+  video_model_prices: createVideoModelPricesForm(),
   // Codex 网页搜索按次计费（仅 openai 平台使用）；null = 使用默认价 0.01
   web_search_price_per_call: null as number | null,
-  long_context_pricing_enabled: true,
-  model_pricing: [] as GroupPricingFormEntry[],
+  search_price_per_1k: null as number | null,
+  audio_realtime_price_per_min: null as number | null,
+  audio_tts_price_per_million_chars: null as number | null,
+  audio_stt_price_per_hour: null as number | null,
   // 高峰时段倍率配置
   peak_rate_enabled: false,
   peak_start: "",
@@ -5602,27 +5952,20 @@ const createForm = reactive({
   profit_safety_buffer_percent: 0,
   // Claude Code 客户端限制（仅 anthropic 平台使用）
   claude_code_only: false,
-  // Claude Code 瀹㈡埛绔檺鍒讹紙浠?anthropic 骞冲彴浣跨敤锛?  claude_code_only: false,
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
   allow_messages_dispatch: false,
-  // OpenAI Messages 璋冨害閰嶇疆锛堜粎 openai 骞冲彴浣跨敤锛?  allow_messages_dispatch: false,
   allow_live: false,
   opus_mapped_model: createMessagesDispatchDefaults.opus_mapped_model,
   sonnet_mapped_model: createMessagesDispatchDefaults.sonnet_mapped_model,
   haiku_mapped_model: createMessagesDispatchDefaults.haiku_mapped_model,
   exact_model_mappings: [] as MessagesDispatchMappingRow[],
   require_oauth_only: false,
-  // 璐﹀彿杩囨护鎺у埗锛圤penAI/Antigravity 骞冲彴锛?  require_oauth_only: false,
   require_privacy_set: false,
   model_routing_enabled: false,
   supported_model_scopes: ["claude", "gemini_text", "gemini_image"] as string[],
   mcp_xml_inject: true,
   copy_accounts_from_group_ids: [] as number[],
-  // 妯″瀷璺敱寮€鍏?  model_routing_enabled: false,
-  // 鏀寔鐨勬ā鍨嬬郴鍒楋紙浠?antigravity 骞冲彴锛?  supported_model_scopes: ["claude", "gemini_text", "gemini_image"] as string[],
-  // MCP XML 鍗忚娉ㄥ叆寮€鍏筹紙浠?antigravity 骞冲彴锛?  mcp_xml_inject: true,
-  // 浠庡垎缁勫鍒惰处鍙?  copy_accounts_from_group_ids: [] as number[],
   // 鍒嗙粍绾?RPM 闄愬埗锛堟瘡鐢ㄦ埛姣忓垎閽熸渶澶ц姹傛暟锛? = 涓嶉檺鍒讹級
   rpm_limit: 0 as number,
   newapi_style_interface_enabled: false,
@@ -5687,7 +6030,6 @@ const handleCreatePlatformWheel = (event: WheelEvent) => {
 };
 
 interface SimpleAccount {
-// 绠€鍗曡处鍙风被鍨嬶紙鐢ㄤ簬妯″瀷璺敱閫夋嫨锛?interface SimpleAccount {
   id: number;
   name: string;
 }
@@ -5695,15 +6037,12 @@ interface SimpleAccount {
 // 妯″瀷璺敱瑙勫垯绫诲瀷
 interface ModelRoutingRule {
   pattern: string;
-  accounts: SimpleAccount[];
-// 閫変腑鐨勮处鍙峰璞℃暟缁?}
+  accounts: SimpleAccount[]; // 选中的账号对象数组
 }
 
 const createModelRoutingRules = ref<ModelRoutingRule[]>([]);
-// 鍒涘缓琛ㄥ崟鐨勬ā鍨嬭矾鐢辫鍒?const createModelRoutingRules = ref<ModelRoutingRule[]>([]);
 
 const editModelRoutingRules = ref<ModelRoutingRule[]>([]);
-// 缂栬緫琛ㄥ崟鐨勬ā鍨嬭矾鐢辫鍒?const editModelRoutingRules = ref<ModelRoutingRule[]>([]);
 
 // 瑙勫垯瀵硅薄绋冲畾 key锛堥伩鍏嶄娇鐢?index 瀵艰嚧鐘舵€侀敊浣嶏級
 const resolveCreateRuleKey =
@@ -5852,12 +6191,10 @@ const onAccountSearchFocus = (
 };
 
 const addCreateRoutingRule = () => {
-// 娣诲姞鍒涘缓琛ㄥ崟鐨勮矾鐢辫鍒?const addCreateRoutingRule = () => {
   createModelRoutingRules.value.push({ pattern: "", accounts: [] });
 };
 
 const removeCreateRoutingRule = (rule: ModelRoutingRule) => {
-// 鍒犻櫎鍒涘缓琛ㄥ崟鐨勮矾鐢辫鍒?const removeCreateRoutingRule = (rule: ModelRoutingRule) => {
   const index = createModelRoutingRules.value.indexOf(rule);
   if (index === -1) return;
 
@@ -5868,12 +6205,10 @@ const removeCreateRoutingRule = (rule: ModelRoutingRule) => {
 };
 
 const addEditRoutingRule = () => {
-// 娣诲姞缂栬緫琛ㄥ崟鐨勮矾鐢辫鍒?const addEditRoutingRule = () => {
   editModelRoutingRules.value.push({ pattern: "", accounts: [] });
 };
 
 const removeEditRoutingRule = (rule: ModelRoutingRule) => {
-// 鍒犻櫎缂栬緫琛ㄥ崟鐨勮矾鐢辫鍒?const removeEditRoutingRule = (rule: ModelRoutingRule) => {
   const index = editModelRoutingRules.value.indexOf(rule);
   if (index === -1) return;
 
@@ -6010,9 +6345,15 @@ const editForm = reactive({
   monthly_limit_usd: null as number | null,
   custom_limit_hours: 0 as number,
   custom_limit_usd: null as number | null,
-  // 鍥剧墖鐢熸垚璁¤垂閰嶇疆
+  long_context_pricing_enabled: true,
+  force_openai_fast: false,
+  force_openai_ultrafast: false,
+  free_openai_fast: false,
+  model_pricing: [] as GroupPricingFormEntry[],
+  // 图片生成计费配置
   allow_image_generation: false,
   allow_batch_image_generation: false,
+  image_count_billing: false,
   image_rate_independent: false,
   image_rate_multiplier: 1,
   batch_image_discount_multiplier: 0.5,
@@ -6021,16 +6362,17 @@ const editForm = reactive({
   image_price_2k: null as number | null,
   image_price_4k: null as number | null,
   video_rate_independent: false,
-  // 瑙嗛鐢熸垚璁¤垂閰嶇疆锛堜粎 Grok 骞冲彴锛?  video_rate_independent: false,
   video_rate_multiplier: 1,
   video_price_480p: null as number | null,
   video_price_720p: null as number | null,
   video_price_1080p: null as number | null,
-  // 楂樺嘲鏃舵鍊嶇巼閰嶇疆
+  video_model_prices: createVideoModelPricesForm(),
   // Codex 网页搜索按次计费（仅 openai 平台使用）；null = 使用默认价 0.01
   web_search_price_per_call: null as number | null,
-  long_context_pricing_enabled: true,
-  model_pricing: [] as GroupPricingFormEntry[],
+  search_price_per_1k: null as number | null,
+  audio_realtime_price_per_min: null as number | null,
+  audio_tts_price_per_million_chars: null as number | null,
+  audio_stt_price_per_hour: null as number | null,
   // 高峰时段倍率配置
   peak_rate_enabled: false,
   peak_start: "",
@@ -6043,11 +6385,9 @@ const editForm = reactive({
   profit_safety_buffer_percent: 0,
   // Claude Code 客户端限制（仅 anthropic 平台使用）
   claude_code_only: false,
-  // Claude Code 瀹㈡埛绔檺鍒讹紙浠?anthropic 骞冲彴浣跨敤锛?  claude_code_only: false,
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
   allow_messages_dispatch: false,
-  // OpenAI Messages 璋冨害閰嶇疆锛堜粎 openai 骞冲彴浣跨敤锛?  allow_messages_dispatch: false,
   allow_live: false,
   default_mapped_model: '',
   opus_mapped_model: editMessagesDispatchDefaults.opus_mapped_model,
@@ -6055,16 +6395,11 @@ const editForm = reactive({
   haiku_mapped_model: editMessagesDispatchDefaults.haiku_mapped_model,
   exact_model_mappings: [] as MessagesDispatchMappingRow[],
   require_oauth_only: false,
-  // 璐﹀彿杩囨护鎺у埗锛圤penAI/Antigravity 骞冲彴锛?  require_oauth_only: false,
   require_privacy_set: false,
   model_routing_enabled: false,
   supported_model_scopes: ["claude", "gemini_text", "gemini_image"] as string[],
   mcp_xml_inject: true,
   copy_accounts_from_group_ids: [] as number[],
-  // 妯″瀷璺敱寮€鍏?  model_routing_enabled: false,
-  // 鏀寔鐨勬ā鍨嬬郴鍒楋紙浠?antigravity 骞冲彴锛?  supported_model_scopes: ["claude", "gemini_text", "gemini_image"] as string[],
-  // MCP XML 鍗忚娉ㄥ叆寮€鍏筹紙浠?antigravity 骞冲彴锛?  mcp_xml_inject: true,
-  // 浠庡垎缁勫鍒惰处鍙?  copy_accounts_from_group_ids: [] as number[],
   // 鍒嗙粍绾?RPM 闄愬埗锛堟瘡鐢ㄦ埛姣忓垎閽熸渶澶ц姹傛暟锛? = 涓嶉檺鍒讹級
   rpm_limit: 0 as number,
   newapi_style_interface_enabled: false,
@@ -6077,6 +6412,7 @@ type ImagePricingFormState = {
   platform: GroupPlatform;
   allow_image_generation: boolean;
   allow_batch_image_generation: boolean;
+  image_count_billing: boolean;
   rate_multiplier: number;
   image_rate_independent: boolean;
   image_rate_multiplier: number;
@@ -6223,7 +6559,12 @@ const editWebSearchFinalPricePreview = computed(() =>
 const resetDisabledBatchImagePricing = (
   form: Pick<
     ImagePricingFormState,
-    "platform" | "allow_image_generation" | "allow_batch_image_generation" | "batch_image_discount_multiplier" | "batch_image_hold_multiplier"
+    | "platform"
+    | "allow_image_generation"
+    | "allow_batch_image_generation"
+    | "image_count_billing"
+    | "batch_image_discount_multiplier"
+    | "batch_image_hold_multiplier"
   >,
 ) => {
   if (form.platform !== "gemini" || !form.allow_image_generation) {
@@ -6232,6 +6573,12 @@ const resetDisabledBatchImagePricing = (
   if (!form.allow_batch_image_generation) {
     form.batch_image_discount_multiplier = 0.5;
     form.batch_image_hold_multiplier = 0.6;
+  }
+  if (
+    !form.allow_image_generation ||
+    (form.platform !== "composite" && form.platform !== "openai")
+  ) {
+    form.image_count_billing = false;
   }
 };
 
@@ -6470,6 +6817,7 @@ const closeCreateModal = () => {
   createForm.custom_limit_usd = null;
   createForm.allow_image_generation = false;
   createForm.allow_batch_image_generation = false;
+  createForm.image_count_billing = false;
   createForm.image_rate_independent = false;
   createForm.image_rate_multiplier = 1;
   createForm.batch_image_discount_multiplier = 0.5;
@@ -6482,9 +6830,17 @@ const closeCreateModal = () => {
   createForm.video_price_480p = null;
   createForm.video_price_720p = null;
   createForm.video_price_1080p = null;
-  createForm.web_search_price_per_call = null;
+  createForm.video_model_prices = createVideoModelPricesForm();
   createForm.long_context_pricing_enabled = true;
+  createForm.force_openai_fast = false;
+  createForm.force_openai_ultrafast = false;
+  createForm.free_openai_fast = false;
   createForm.model_pricing = [];
+  createForm.web_search_price_per_call = null;
+  createForm.search_price_per_1k = null;
+  createForm.audio_realtime_price_per_min = null;
+  createForm.audio_tts_price_per_million_chars = null;
+  createForm.audio_stt_price_per_hour = null;
   createForm.peak_rate_enabled = false;
   createForm.peak_start = "";
   createForm.peak_end = "";
@@ -6598,11 +6954,31 @@ const handleCreateGroup = async () => {
   if (!validateGroupPricing(createForm.model_pricing)) return;
   submitting.value = true;
   try {
+    const {
+      video_model_prices: videoModelPricesForm,
+      ...createGroupForm
+    } = createForm;
+    const videoModelPrices = serializeVideoModelPrices(videoModelPricesForm);
     const requestData = {
-    // 鏋勫缓璇锋眰鏁版嵁锛屽寘鍚ā鍨嬭矾鐢遍厤缃?    const requestData = {
-      ...createForm,
-      long_context_pricing_enabled: authStore.isSimpleMode ? undefined : createForm.long_context_pricing_enabled,
-      model_pricing: authStore.isSimpleMode ? undefined : groupPricingToAPI(createForm.model_pricing, createForm.platform),
+      ...createGroupForm,
+      long_context_pricing_enabled: authStore.isSimpleMode
+        ? undefined
+        : createForm.long_context_pricing_enabled,
+      force_openai_fast: normalizeGroupOpenAIFast(
+        createForm.platform,
+        createForm.force_openai_fast,
+      ),
+      force_openai_ultrafast: normalizeGroupOpenAIFast(
+        createForm.platform,
+        createForm.force_openai_ultrafast,
+      ),
+      free_openai_fast: normalizeGroupOpenAIFast(
+        createForm.platform,
+        createForm.free_openai_fast,
+      ),
+      model_pricing: authStore.isSimpleMode
+        ? undefined
+        : groupPricingToAPI(createForm.model_pricing, createForm.platform),
       daily_limit_usd: normalizeOptionalLimit(
         createForm.daily_limit_usd as number | string | null,
       ),
@@ -6616,6 +6992,9 @@ const handleCreateGroup = async () => {
       custom_limit_usd: normalizeOptionalLimit(
         createForm.custom_limit_usd as number | string | null,
       ),
+      ...(Object.keys(videoModelPrices).length > 0
+        ? { video_model_prices: videoModelPrices }
+        : {}),
       model_routing: convertRoutingRulesToApiFormat(
         createModelRoutingRules.value,
       ),
@@ -6678,6 +7057,18 @@ const handleCreateGroup = async () => {
     requestData.web_search_price_per_call = emptyToNull(
       requestData.web_search_price_per_call,
     );
+    requestData.search_price_per_1k = emptyToNull(
+      requestData.search_price_per_1k,
+    );
+    requestData.audio_realtime_price_per_min = emptyToNull(
+      requestData.audio_realtime_price_per_min,
+    );
+    requestData.audio_tts_price_per_million_chars = emptyToNull(
+      requestData.audio_tts_price_per_million_chars,
+    );
+    requestData.audio_stt_price_per_hour = emptyToNull(
+      requestData.audio_stt_price_per_hour,
+    );
     const requestPayload: CreateGroupRequest = {
       ...requestData,
       i18n: createForm.i18n,
@@ -6724,11 +7115,16 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.monthly_limit_usd = group.monthly_limit_usd;
   editForm.custom_limit_hours = group.custom_limit_hours ?? 0;
   editForm.custom_limit_usd = group.custom_limit_usd;
-  editForm.long_context_pricing_enabled = group.long_context_pricing_enabled ?? true;
+  editForm.long_context_pricing_enabled =
+    group.long_context_pricing_enabled ?? true;
+  editForm.force_openai_fast = group.force_openai_fast ?? false;
+  editForm.force_openai_ultrafast = group.force_openai_ultrafast ?? false;
+  editForm.free_openai_fast = group.free_openai_fast ?? false;
   editForm.model_pricing = groupPricingFromAPI(group.model_pricing);
   editForm.allow_image_generation = group.allow_image_generation ?? false;
   editForm.allow_batch_image_generation =
     group.allow_batch_image_generation ?? false;
+  editForm.image_count_billing = group.image_count_billing ?? false;
   editForm.image_rate_independent = group.image_rate_independent ?? false;
   editForm.image_rate_multiplier = group.image_rate_multiplier ?? 1;
   editForm.batch_image_discount_multiplier =
@@ -6742,7 +7138,16 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.video_price_480p = group.video_price_480p;
   editForm.video_price_720p = group.video_price_720p;
   editForm.video_price_1080p = group.video_price_1080p;
+  editForm.video_model_prices = createVideoModelPricesForm(
+    group.video_model_prices,
+  );
   editForm.web_search_price_per_call = group.web_search_price_per_call ?? null;
+  editForm.search_price_per_1k = group.search_price_per_1k ?? null;
+  editForm.audio_realtime_price_per_min =
+    group.audio_realtime_price_per_min ?? null;
+  editForm.audio_tts_price_per_million_chars =
+    group.audio_tts_price_per_million_chars ?? null;
+  editForm.audio_stt_price_per_hour = group.audio_stt_price_per_hour ?? null;
   editForm.peak_rate_enabled = group.peak_rate_enabled ?? false;
   editForm.peak_start = group.peak_start ?? "";
   editForm.peak_end = group.peak_end ?? "";
@@ -6843,9 +7248,17 @@ const closeEditModal = () => {
   editForm.video_price_480p = null;
   editForm.video_price_720p = null;
   editForm.video_price_1080p = null;
-  editForm.web_search_price_per_call = null;
+  editForm.video_model_prices = createVideoModelPricesForm();
   editForm.long_context_pricing_enabled = true;
+  editForm.force_openai_fast = false;
+  editForm.force_openai_ultrafast = false;
+  editForm.free_openai_fast = false;
   editForm.model_pricing = [];
+  editForm.web_search_price_per_call = null;
+  editForm.search_price_per_1k = null;
+  editForm.audio_realtime_price_per_min = null;
+  editForm.audio_tts_price_per_million_chars = null;
+  editForm.audio_stt_price_per_hour = null;
   resetMessagesDispatchFormState(editForm);
   editForm.allow_live = false;
   resetModelsListState(editModelsListState);
@@ -6884,8 +7297,24 @@ const handleUpdateGroup = async () => {
     // 杞崲 fallback_group_id: null -> 0 (鍚庣浣跨敤 0 琛ㄧず娓呴櫎)
     const payload = {
       ...editForm,
-      long_context_pricing_enabled: authStore.isSimpleMode ? undefined : editForm.long_context_pricing_enabled,
-      model_pricing: authStore.isSimpleMode ? undefined : groupPricingToAPI(editForm.model_pricing, editForm.platform),
+      long_context_pricing_enabled: authStore.isSimpleMode
+        ? undefined
+        : editForm.long_context_pricing_enabled,
+      force_openai_fast: normalizeGroupOpenAIFast(
+        editForm.platform,
+        editForm.force_openai_fast,
+      ),
+      force_openai_ultrafast: normalizeGroupOpenAIFast(
+        editForm.platform,
+        editForm.force_openai_ultrafast,
+      ),
+      free_openai_fast: normalizeGroupOpenAIFast(
+        editForm.platform,
+        editForm.free_openai_fast,
+      ),
+      model_pricing: authStore.isSimpleMode
+        ? undefined
+        : groupPricingToAPI(editForm.model_pricing, editForm.platform),
       daily_limit_usd: normalizeOptionalLimit(
         editForm.daily_limit_usd as number | string | null,
       ),
@@ -6898,6 +7327,9 @@ const handleUpdateGroup = async () => {
       custom_limit_hours: normalizeOptionalHours(editForm.custom_limit_hours),
       custom_limit_usd: normalizeOptionalLimit(
         editForm.custom_limit_usd as number | string | null,
+      ),
+      video_model_prices: serializeVideoModelPrices(
+        editForm.video_model_prices,
       ),
       fallback_group_id:
         editForm.fallback_group_id === null ? 0 : editForm.fallback_group_id,
@@ -6967,6 +7399,18 @@ const handleUpdateGroup = async () => {
     payload.video_price_480p = emptyPriceToClear(payload.video_price_480p);
     payload.video_price_720p = emptyPriceToClear(payload.video_price_720p);
     payload.video_price_1080p = emptyPriceToClear(payload.video_price_1080p);
+    payload.search_price_per_1k = emptyPriceToClear(
+      payload.search_price_per_1k,
+    );
+    payload.audio_realtime_price_per_min = emptyPriceToClear(
+      payload.audio_realtime_price_per_min,
+    );
+    payload.audio_tts_price_per_million_chars = emptyPriceToClear(
+      payload.audio_tts_price_per_million_chars,
+    );
+    payload.audio_stt_price_per_hour = emptyPriceToClear(
+      payload.audio_stt_price_per_hour,
+    );
     payload.web_search_price_per_call = emptyPriceToClear(
       payload.web_search_price_per_call,
     );
@@ -7249,7 +7693,6 @@ const confirmDelete = async () => {
 };
 
 watch(
-// 鐩戝惉 subscription_type 鍙樺寲锛氳闃呮ā寮忔椂 is_exclusive 榛樿涓?true锛涙爣鍑嗕綑棰濆垎缁勪篃淇濈暀楂樺嘲閰嶇疆銆?watch(
   () => createForm.subscription_type,
   (newVal) => {
     if (newVal === "subscription") {
@@ -7423,7 +7866,7 @@ const closeSortModal = () => {
   sortableGroups.value = [];
 };
 
-// 淇濆瓨鎺掑簭
+// 保存排序
 const saveSortOrder = async () => {
   sortSubmitting.value = true;
   try {

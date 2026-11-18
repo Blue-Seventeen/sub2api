@@ -2105,3 +2105,355 @@ func TestAdminService_PreviewCompositeRouteUsesExplicitRoutes(t *testing.T) {
 	require.NotNil(t, decision.Route)
 	require.Equal(t, int64(11), decision.Route.ID)
 }
+
+// accountRepoStubForGroupCodexManifest 支撑固定账号 manifest 配置校验测试。
+type accountRepoStubForGroupCodexManifest struct {
+	AccountRepository
+	accounts []Account
+}
+
+func (s *accountRepoStubForGroupCodexManifest) ListByGroup(_ context.Context, _ int64) ([]Account, error) {
+	return append([]Account(nil), s.accounts...), nil
+}
+
+func openAIGroupCodexManifestAccounts(ids ...int64) []Account {
+	accounts := make([]Account, 0, len(ids))
+	for _, id := range ids {
+		accounts = append(accounts, Account{
+			ID: id, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+			Status: StatusActive, Schedulable: true,
+		})
+	}
+	return accounts
+}
+
+func TestAdminService_UpdateGroup_CodexModelsManifestConfigValidation(t *testing.T) {
+	t.Run("enabled with empty list rejected", func(t *testing.T) {
+		existing := &Group{ID: 1, Name: "g", Platform: PlatformOpenAI, Status: StatusActive}
+		repo := &groupRepoStubForAdmin{getByID: existing}
+		svc := &adminServiceImpl{
+			groupRepo:   repo,
+			accountRepo: &accountRepoStubForGroupCodexManifest{},
+		}
+
+		_, err := svc.UpdateGroup(context.Background(), existing.ID, &UpdateGroupInput{
+			CodexModelsManifestConfig: &GroupCodexModelsManifestConfig{Enabled: true},
+		})
+
+		require.Error(t, err)
+		require.Equal(t, http.StatusBadRequest, infraerrors.Code(err))
+		require.Equal(t, "INVALID_CODEX_MODELS_MANIFEST_CONFIG", infraerrors.Reason(err))
+		require.Nil(t, repo.updated)
+	})
+
+	t.Run("non-member or non-openai account rejected", func(t *testing.T) {
+		existing := &Group{ID: 1, Name: "g", Platform: PlatformOpenAI, Status: StatusActive}
+		repo := &groupRepoStubForAdmin{getByID: existing}
+		anthropicMember := Account{ID: 30, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Status: StatusActive}
+		inactiveMember := Account{ID: 40, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusDisabled}
+		svc := &adminServiceImpl{
+			groupRepo:   repo,
+			accountRepo: &accountRepoStubForGroupCodexManifest{accounts: append(openAIGroupCodexManifestAccounts(10, 20), anthropicMember, inactiveMember)},
+		}
+
+		_, err := svc.UpdateGroup(context.Background(), existing.ID, &UpdateGroupInput{
+			CodexModelsManifestConfig: &GroupCodexModelsManifestConfig{
+				Enabled:    true,
+				AccountIDs: []int64{10, 30, 40, 99},
+			},
+		})
+
+		require.Error(t, err)
+		require.Equal(t, http.StatusBadRequest, infraerrors.Code(err))
+		require.Equal(t, "INVALID_CODEX_MODELS_MANIFEST_CONFIG", infraerrors.Reason(err))
+		require.Contains(t, err.Error(), "30")
+		require.Contains(t, err.Error(), "40")
+		require.Contains(t, err.Error(), "99")
+		require.Nil(t, repo.updated)
+	})
+
+	t.Run("more than ten accounts rejected", func(t *testing.T) {
+		existing := &Group{ID: 1, Name: "g", Platform: PlatformOpenAI, Status: StatusActive}
+		repo := &groupRepoStubForAdmin{getByID: existing}
+		ids := make([]int64, 0, 11)
+		for id := int64(1); id <= 11; id++ {
+			ids = append(ids, id)
+		}
+		svc := &adminServiceImpl{
+			groupRepo:   repo,
+			accountRepo: &accountRepoStubForGroupCodexManifest{accounts: openAIGroupCodexManifestAccounts(ids...)},
+		}
+
+		_, err := svc.UpdateGroup(context.Background(), existing.ID, &UpdateGroupInput{
+			CodexModelsManifestConfig: &GroupCodexModelsManifestConfig{Enabled: true, AccountIDs: ids},
+		})
+
+		require.Error(t, err)
+		require.Equal(t, http.StatusBadRequest, infraerrors.Code(err))
+		require.Equal(t, "INVALID_CODEX_MODELS_MANIFEST_CONFIG", infraerrors.Reason(err))
+		require.Nil(t, repo.updated)
+	})
+
+	t.Run("duplicate ids deduplicated preserving order", func(t *testing.T) {
+		existing := &Group{ID: 1, Name: "g", Platform: PlatformOpenAI, Status: StatusActive}
+		repo := &groupRepoStubForAdmin{getByID: existing}
+		svc := &adminServiceImpl{
+			groupRepo:   repo,
+			accountRepo: &accountRepoStubForGroupCodexManifest{accounts: openAIGroupCodexManifestAccounts(1, 2, 3)},
+		}
+
+		group, err := svc.UpdateGroup(context.Background(), existing.ID, &UpdateGroupInput{
+			CodexModelsManifestConfig: &GroupCodexModelsManifestConfig{
+				Enabled:    true,
+				AccountIDs: []int64{3, 1, 3, 2, 1},
+			},
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, []int64{3, 1, 2}, repo.updated.CodexModelsManifestConfig.AccountIDs)
+		require.True(t, group.CodexModelsManifestConfig.Enabled)
+	})
+
+	t.Run("valid config accepted", func(t *testing.T) {
+		existing := &Group{ID: 1, Name: "g", Platform: PlatformOpenAI, Status: StatusActive}
+		repo := &groupRepoStubForAdmin{getByID: existing}
+		svc := &adminServiceImpl{
+			groupRepo:   repo,
+			accountRepo: &accountRepoStubForGroupCodexManifest{accounts: openAIGroupCodexManifestAccounts(10, 20)},
+		}
+
+		group, err := svc.UpdateGroup(context.Background(), existing.ID, &UpdateGroupInput{
+			CodexModelsManifestConfig: &GroupCodexModelsManifestConfig{
+				Enabled:             true,
+				AccountIDs:          []int64{10, 20},
+				FallbackToScheduler: true,
+			},
+		})
+
+		require.NoError(t, err)
+		require.True(t, group.CodexModelsManifestConfig.Enabled)
+		require.Equal(t, []int64{10, 20}, repo.updated.CodexModelsManifestConfig.AccountIDs)
+		require.True(t, repo.updated.CodexModelsManifestConfig.FallbackToScheduler)
+	})
+}
+
+func TestAdminService_UpdateGroup_CodexModelsManifestConfigZeroedForNonOpenAIPlatform(t *testing.T) {
+	existing := &Group{ID: 1, Name: "g", Platform: PlatformOpenAI, Status: StatusActive}
+	repo := &groupRepoStubForAdmin{getByID: existing}
+	svc := &adminServiceImpl{
+		groupRepo:   repo,
+		accountRepo: &accountRepoStubForGroupCodexManifest{},
+	}
+
+	group, err := svc.UpdateGroup(context.Background(), existing.ID, &UpdateGroupInput{
+		Platform: PlatformAnthropic,
+		CodexModelsManifestConfig: &GroupCodexModelsManifestConfig{
+			Enabled:             true,
+			AccountIDs:          []int64{1, 2},
+			FallbackToScheduler: true,
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, GroupCodexModelsManifestConfig{}, repo.updated.CodexModelsManifestConfig)
+	require.Equal(t, GroupCodexModelsManifestConfig{}, group.CodexModelsManifestConfig)
+}
+
+func TestAdminService_UpdateGroup_CodexModelsManifestConfigUntouchedWhenOmitted(t *testing.T) {
+	existing := &Group{
+		ID: 1, Name: "g", Platform: PlatformOpenAI, Status: StatusActive,
+		CodexModelsManifestConfig: GroupCodexModelsManifestConfig{
+			Enabled:    true,
+			AccountIDs: []int64{10},
+		},
+	}
+	repo := &groupRepoStubForAdmin{getByID: existing}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	_, err := svc.UpdateGroup(context.Background(), existing.ID, &UpdateGroupInput{Name: "renamed"})
+
+	require.NoError(t, err)
+	require.Equal(t, existing.CodexModelsManifestConfig, repo.updated.CodexModelsManifestConfig)
+}
+
+func TestAdminService_CreateGroup_CodexModelsManifestConfigEnabledRejected(t *testing.T) {
+	repo := &groupRepoStubForAdmin{createID: 61}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	_, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
+		Name: "codex-pinned", Platform: PlatformOpenAI, RateMultiplier: 1,
+		CodexModelsManifestConfig: GroupCodexModelsManifestConfig{
+			Enabled:    true,
+			AccountIDs: []int64{1},
+		},
+	})
+
+	require.Error(t, err)
+	require.Equal(t, http.StatusBadRequest, infraerrors.Code(err))
+	require.Equal(t, "INVALID_CODEX_MODELS_MANIFEST_CONFIG", infraerrors.Reason(err))
+	require.Nil(t, repo.created)
+}
+
+func TestAdminService_CreateGroup_CodexModelsManifestConfigDisabledAccepted(t *testing.T) {
+	repo := &groupRepoStubForAdmin{createID: 62}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	group, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
+		Name: "codex-pinned-off", Platform: PlatformOpenAI, RateMultiplier: 1,
+		CodexModelsManifestConfig: GroupCodexModelsManifestConfig{
+			Enabled:    false,
+			AccountIDs: []int64{1, 1, 2},
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, []int64{1, 2}, group.CodexModelsManifestConfig.AccountIDs)
+	require.False(t, repo.created.CodexModelsManifestConfig.Enabled)
+}
+
+func TestAdminService_CreateGroup_NormalizesForceOpenAIUltrafastByPlatform(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		platform string
+		want     bool
+	}{
+		{name: "openai", platform: PlatformOpenAI, want: true},
+		{name: "composite", platform: PlatformComposite, want: true},
+		{name: "anthropic", platform: PlatformAnthropic, want: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &groupRepoStubForAdmin{}
+			svc := &adminServiceImpl{groupRepo: repo}
+
+			group, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
+				Name: "ultrafast-" + tt.name, Platform: tt.platform, RateMultiplier: 1, ForceOpenAIUltrafast: true,
+			})
+
+			require.NoError(t, err)
+			require.NotNil(t, group)
+			require.Equal(t, tt.want, repo.created.ForceOpenAIUltrafast)
+			require.False(t, repo.created.ForceOpenAIFast)
+		})
+	}
+}
+
+// 两个开关相互独立：同时开启表示"支持的模型走 Ultra Fast，其余走 Fast"。
+func TestAdminService_CreateGroup_AllowsForcingFastAndUltrafastTogether(t *testing.T) {
+	repo := &groupRepoStubForAdmin{}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	group, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
+		Name: "both", Platform: PlatformOpenAI, RateMultiplier: 1, ForceOpenAIFast: true, ForceOpenAIUltrafast: true,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, group)
+	require.True(t, repo.created.ForceOpenAIFast)
+	require.True(t, repo.created.ForceOpenAIUltrafast)
+}
+
+// 不支持该能力的平台两个开关都会被清零。
+func TestAdminService_CreateGroup_UnsupportedPlatformIgnoresBothForcedTiers(t *testing.T) {
+	repo := &groupRepoStubForAdmin{}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	group, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
+		Name: "anthropic-both", Platform: PlatformAnthropic, RateMultiplier: 1, ForceOpenAIFast: true, ForceOpenAIUltrafast: true,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, group)
+	require.False(t, repo.created.ForceOpenAIFast)
+	require.False(t, repo.created.ForceOpenAIUltrafast)
+}
+
+func TestAdminService_UpdateGroup_ForceOpenAIUltrafast(t *testing.T) {
+	truth, falsity := true, false
+
+	t.Run("enables ultrafast and invalidates auth cache", func(t *testing.T) {
+		existing := &Group{ID: 1, Name: "g", Platform: PlatformOpenAI, Status: StatusActive}
+		repo := &groupRepoStubForAdmin{getByID: existing}
+		invalidator := &authCacheInvalidatorStub{}
+		svc := &adminServiceImpl{groupRepo: repo, authCacheInvalidator: invalidator}
+
+		_, err := svc.UpdateGroup(context.Background(), existing.ID, &UpdateGroupInput{ForceOpenAIUltrafast: &truth})
+
+		require.NoError(t, err)
+		require.True(t, repo.updated.ForceOpenAIUltrafast)
+		require.False(t, repo.updated.ForceOpenAIFast)
+		require.Equal(t, []int64{existing.ID}, invalidator.groupIDs)
+	})
+
+	t.Run("switching fast to ultrafast in one request", func(t *testing.T) {
+		existing := &Group{ID: 1, Name: "g", Platform: PlatformOpenAI, Status: StatusActive, ForceOpenAIFast: true}
+		repo := &groupRepoStubForAdmin{getByID: existing}
+		svc := &adminServiceImpl{groupRepo: repo}
+
+		_, err := svc.UpdateGroup(context.Background(), existing.ID, &UpdateGroupInput{
+			ForceOpenAIFast: &falsity, ForceOpenAIUltrafast: &truth,
+		})
+
+		require.NoError(t, err)
+		require.False(t, repo.updated.ForceOpenAIFast)
+		require.True(t, repo.updated.ForceOpenAIUltrafast)
+	})
+
+	t.Run("enabling ultrafast leaves fast untouched", func(t *testing.T) {
+		existing := &Group{ID: 1, Name: "g", Platform: PlatformOpenAI, Status: StatusActive, ForceOpenAIFast: true}
+		repo := &groupRepoStubForAdmin{getByID: existing}
+		svc := &adminServiceImpl{groupRepo: repo}
+
+		_, err := svc.UpdateGroup(context.Background(), existing.ID, &UpdateGroupInput{ForceOpenAIUltrafast: &truth})
+
+		require.NoError(t, err)
+		require.True(t, repo.updated.ForceOpenAIFast)
+		require.True(t, repo.updated.ForceOpenAIUltrafast)
+	})
+
+	t.Run("enabling fast leaves ultrafast untouched", func(t *testing.T) {
+		existing := &Group{ID: 1, Name: "g", Platform: PlatformOpenAI, Status: StatusActive, ForceOpenAIUltrafast: true}
+		repo := &groupRepoStubForAdmin{getByID: existing}
+		svc := &adminServiceImpl{groupRepo: repo}
+
+		_, err := svc.UpdateGroup(context.Background(), existing.ID, &UpdateGroupInput{ForceOpenAIFast: &truth})
+
+		require.NoError(t, err)
+		require.True(t, repo.updated.ForceOpenAIFast)
+		require.True(t, repo.updated.ForceOpenAIUltrafast)
+	})
+
+	t.Run("platform change clears both", func(t *testing.T) {
+		existing := &Group{ID: 1, Name: "g", Platform: PlatformOpenAI, Status: StatusActive, ForceOpenAIFast: true, ForceOpenAIUltrafast: true}
+		repo := &groupRepoStubForAdmin{getByID: existing}
+		svc := &adminServiceImpl{groupRepo: repo}
+
+		_, err := svc.UpdateGroup(context.Background(), existing.ID, &UpdateGroupInput{Platform: PlatformAnthropic})
+
+		require.NoError(t, err)
+		require.False(t, repo.updated.ForceOpenAIFast)
+		require.False(t, repo.updated.ForceOpenAIUltrafast)
+	})
+
+	t.Run("platform change clears ultrafast", func(t *testing.T) {
+		existing := &Group{ID: 1, Name: "g", Platform: PlatformOpenAI, Status: StatusActive, ForceOpenAIUltrafast: true}
+		repo := &groupRepoStubForAdmin{getByID: existing}
+		svc := &adminServiceImpl{groupRepo: repo}
+
+		_, err := svc.UpdateGroup(context.Background(), existing.ID, &UpdateGroupInput{Platform: PlatformAnthropic})
+
+		require.NoError(t, err)
+		require.False(t, repo.updated.ForceOpenAIUltrafast)
+	})
+
+	t.Run("unrelated update preserves ultrafast", func(t *testing.T) {
+		description := "renamed"
+		existing := &Group{ID: 1, Name: "g", Platform: PlatformOpenAI, Status: StatusActive, ForceOpenAIUltrafast: true}
+		repo := &groupRepoStubForAdmin{getByID: existing}
+		svc := &adminServiceImpl{groupRepo: repo}
+
+		_, err := svc.UpdateGroup(context.Background(), existing.ID, &UpdateGroupInput{Description: &description})
+
+		require.NoError(t, err)
+		require.True(t, repo.updated.ForceOpenAIUltrafast)
+	})
+}

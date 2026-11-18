@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -132,7 +133,11 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 	if isClientCanceledTransportError(ctx, err) {
 		return err
 	}
-	result := handleOpenAITransportError(ctx, c, account, err, passthrough, "", accountRepo, runtimeBlocker, deferredService)
+	var cfg *config.Config
+	if s != nil {
+		cfg = s.cfg
+	}
+	result := handleOpenAITransportError(ctx, c, account, err, passthrough, "", accountRepo, runtimeBlocker, deferredService, cfg)
 	// Keep the failed node attached until Ops attribution has been recorded.
 	ClearAutoSelectedProxyStickyOnTransportError(ctx, account, err)
 	return result
@@ -148,10 +153,14 @@ func (s *GatewayService) handleOpenAIUpstreamTransportError(ctx context.Context,
 		accountRepo = s.accountRepo
 		deferredService = s.deferredService
 	}
-	return handleOpenAITransportError(ctx, c, account, err, passthrough, upstreamURL, accountRepo, runtimeBlocker, deferredService)
+	var cfg *config.Config
+	if s != nil {
+		cfg = s.cfg
+	}
+	return handleOpenAITransportError(ctx, c, account, err, passthrough, upstreamURL, accountRepo, runtimeBlocker, deferredService, cfg)
 }
 
-func handleOpenAITransportError(ctx context.Context, c *gin.Context, account *Account, err error, passthrough bool, upstreamURL string, accountRepo AccountRepository, runtimeBlocker AccountRuntimeBlocker, deferredService *DeferredService) error {
+func handleOpenAITransportError(ctx context.Context, c *gin.Context, account *Account, err error, passthrough bool, upstreamURL string, accountRepo AccountRepository, runtimeBlocker AccountRuntimeBlocker, deferredService *DeferredService, cfg *config.Config) error {
 	if err == nil {
 		err = errors.New("upstream transport error")
 	}
@@ -199,7 +208,7 @@ func handleOpenAITransportError(ctx context.Context, c *gin.Context, account *Ac
 	}
 
 	if classifyOpenAITransportError(err).Persistent {
-		tempUnscheduleOpenAITransportError(ctx, account, safeErr, accountRepo, runtimeBlocker)
+		tempUnscheduleOpenAITransportError(ctx, account, safeErr, accountRepo, runtimeBlocker, cfg)
 	}
 
 	return &UpstreamFailoverError{
@@ -219,8 +228,11 @@ func handleOpenAITransportError(ctx context.Context, c *gin.Context, account *Ac
 //     accountRepo is nil (in-memory only; no persistence).
 //   - "openai.account_temp_unscheduled_transport_failed" — DB write attempted
 //     but returned an error.
-func tempUnscheduleOpenAITransportError(ctx context.Context, account *Account, safeErr string, accountRepo AccountRepository, runtimeBlocker AccountRuntimeBlocker) {
+func tempUnscheduleOpenAITransportError(ctx context.Context, account *Account, safeErr string, accountRepo AccountRepository, runtimeBlocker AccountRuntimeBlocker, cfg *config.Config) {
 	if account == nil {
+		return
+	}
+	if cfg != nil && cfg.Gateway.DisableOpenAITransportErrorCooldown {
 		return
 	}
 	until := time.Now().Add(openAITransportErrorTempUnschedDuration)
@@ -266,4 +278,13 @@ func tempUnscheduleOpenAITransportError(ctx context.Context, account *Account, s
 		zap.Time("until", until),
 		zap.String("reason", reason),
 	)
+}
+
+// tempUnscheduleOpenAITransportError is the service-scoped form of the helper
+// above: it resolves the account repository and runtime blocker from s.
+func (s *OpenAIGatewayService) tempUnscheduleOpenAITransportError(ctx context.Context, account *Account, safeErr string) {
+	if s == nil {
+		return
+	}
+	tempUnscheduleOpenAITransportError(ctx, account, safeErr, s.accountRepo, s, s.cfg)
 }

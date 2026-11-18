@@ -105,10 +105,10 @@ type ModelStat struct {
 	CacheCreationTokens int64   `json:"cache_creation_tokens"`
 	CacheReadTokens     int64   `json:"cache_read_tokens"`
 	TotalTokens         int64   `json:"total_tokens"`
-	Cost                float64 `json:"cost"`
-	ActualCost          float64 `json:"actual_cost"`
+	Cost                float64 `json:"cost"`         // 标准计费
+	ActualCost          float64 `json:"actual_cost"`  // 实际扣除
 	RealActualCost      float64 `json:"real_actual_cost"`
-	AccountCost         float64 `json:"account_cost"`
+	AccountCost         float64 `json:"account_cost"` // 账号成本
 }
 
 // EndpointStat represents usage statistics for a single request endpoint.
@@ -120,6 +120,7 @@ type EndpointStat struct {
 	ActualCost  float64 `json:"actual_cost"` // 实际扣除
 	// RealActualCost is the admin-facing real cost metric.
 	RealActualCost float64 `json:"real_actual_cost"`
+	AccountCost float64 `json:"account_cost,omitempty"` // 账号成本（仅管理员接口返回）
 }
 
 // GroupUsageSummary represents today's and cumulative cost for a single group.

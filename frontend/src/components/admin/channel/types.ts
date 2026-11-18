@@ -11,6 +11,7 @@ export interface IntervalFormEntry {
   output_price: number | string | null
   cache_write_price: number | string | null
   cache_write_1h_price?: number | string | null
+  cache_write_12h_price?: number | string | null
   cache_read_price: number | string | null
   input_multiplier?: number | string | null
   output_multiplier?: number | string | null
@@ -27,9 +28,11 @@ export interface PricingFormEntry {
   output_price: number | string | null
   cache_write_price: number | string | null
   cache_write_1h_price?: number | string | null
+  cache_write_12h_price?: number | string | null
   cache_read_price: number | string | null
   fast_multiplier?: number | string | null
   flex_multiplier?: number | string | null
+  ultrafast_multiplier?: number | string | null
   reasoning_effort_multipliers?: Record<string, number | string> | null
   image_input_price: number | string | null
   image_output_price: number | string | null
@@ -203,6 +206,7 @@ export function apiIntervalsToForm(intervals: PricingInterval[]): IntervalFormEn
     output_price: perTokenToMTok(iv.output_price),
     cache_write_price: perTokenToMTok(iv.cache_write_price),
     cache_write_1h_price: perTokenToMTok(iv.cache_write_1h_price),
+    cache_write_12h_price: perTokenToMTok(iv.cache_write_12h_price),
     cache_read_price: perTokenToMTok(iv.cache_read_price),
     per_request_price: iv.per_request_price,
     sort_order: iv.sort_order,
@@ -222,6 +226,7 @@ export function formIntervalsToAPI(intervals: IntervalFormEntry[]): PricingInter
     output_price: mTokToPerToken(iv.output_price),
     cache_write_price: mTokToPerToken(iv.cache_write_price),
     cache_write_1h_price: mTokToPerToken(iv.cache_write_1h_price),
+    cache_write_12h_price: mTokToPerToken(iv.cache_write_12h_price),
     cache_read_price: mTokToPerToken(iv.cache_read_price),
     per_request_price: toNullableNumber(iv.per_request_price),
     sort_order: iv.sort_order,
@@ -346,6 +351,8 @@ function validateIntervalPrices(iv: IntervalFormEntry, idx: number, t: Translate
     ['inputPrice', iv.input_price],
     ['outputPrice', iv.output_price],
     ['cacheWritePrice', iv.cache_write_price],
+    ['cacheWrite1hPrice', iv.cache_write_1h_price ?? null],
+    ['cacheWrite12hPrice', iv.cache_write_12h_price ?? null],
     ['cacheReadPrice', iv.cache_read_price],
     ['perRequestPrice', iv.per_request_price],
   ]

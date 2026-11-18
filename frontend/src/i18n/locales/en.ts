@@ -7,6 +7,8 @@ import admin from './en/admin'
 import misc from './en/misc'
 import carryover from './en/carryover'
 import upstreamAdditions from './en/upstreamAdditions'
+import adminAccessKeys from './en/adminAccessKeys'
+import mcp from './en/mcp'
 import { mergeLocaleMessages } from './merge'
 import { compatibilityLabel, createCompatibilityLocale } from './compatibility'
 
@@ -8189,4 +8191,6 @@ export default mergeLocaleMessages(createCompatibilityLocale(compatibilityLabel)
   ...batchImage,
   admin,
   ...misc,
+  adminAccessKeys,
+  mcp,
 }, upstreamAdditions)

@@ -478,6 +478,7 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 		inboundEndpoint := GetInboundEndpoint(c)
 		compat := compatibilityLogFields(c)
 		compatibleInputTokens := service.EstimateCompatibleInputTokensForPlatform(account.Platform, parsed)
+		channelUsageFields := clientRequestedUsageFields(c, channelMapping, parsed.Model, result.UpstreamModel)
 		h.base.submitMandatoryUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 			if err := h.base.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 				Result:                result,
@@ -499,7 +500,7 @@ func (h *CompatibleGatewayHandler) forward(c *gin.Context, route service.Compati
 				RequestPayloadHash:    requestPayloadHash,
 				PricingAt:             pricingAt,
 				APIKeyService:         h.base.apiKeyService,
-				ChannelUsageFields:    clientRequestedUsageFields(c, channelMapping, parsed.Model, result.UpstreamModel),
+				ChannelUsageFields:    channelUsageFields,
 			}); err != nil {
 				reqLog.Error("compatible.record_usage_failed", zap.Error(err), zap.Int64("account_id", account.ID))
 			}
