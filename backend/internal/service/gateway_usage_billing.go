@@ -868,6 +868,11 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		return nil
 	}
 	ApplyForwardImageBillingResolution(result)
+	// 按"实际服务档位"计费（上游每次请求会计费口径）：当上游在自己可裁定的响应里
+	// 声明只给了 standard（而我们请求的是 fast/priority/ultrafast）时，把
+	// result.ServiceTier 降到 standard，后续定价与落库都用这个档位。
+	// 该判定只降不升：上游没声明或声明更高时保持请求档位。
+	logServiceTierBillingDowngrade("service.gateway", account, result.RequestID, ApplyForwardServiceTierBillingResolution(result))
 	var apiKeyGroup *Group
 	if apiKey != nil {
 		apiKeyGroup = apiKey.Group
@@ -1611,23 +1616,40 @@ func (s *GatewayService) calculateTokenCostBase(
 			pricingAt = opts.PricingAt
 		}
 		cost, err = s.billingService.CalculateCostUnified(CostInput{
-			Ctx:             ctx,
-			Model:           billingModel,
-			GroupID:         &gid,
-			Group:           apiKey.Group,
-			Tokens:          tokens,
-			RequestCount:    1,
-			RateMultiplier:  multiplier,
-			PricingAt:       pricingAt,
+			Ctx:            ctx,
+			Model:          billingModel,
+			GroupID:        &gid,
+			Group:          apiKey.Group,
+			Tokens:         tokens,
+			RequestCount:   1,
+			RateMultiplier: multiplier,
+			PricingAt:      pricingAt,
+			// 按实际服务档位计价：channel 定价里的 fast/priority/ultrafast 分档价
+			// 只有在把档位传进来时才会命中；此前该字段始终为空，等于所有请求
+			// 一律按标准档收费（"点了加急却按普通件收钱"）。
+			ServiceTier:     optionalStringValue(result.ServiceTier),
 			ReasoningEffort: optionalStringValue(result.ReasoningEffort),
 			Resolver:        s.resolver,
 			Resolved:        resolved,
 		})
 	} else if opts != nil && opts.LongContextThreshold > 0 {
-		// 长上下文双倍计费（如 Gemini 200K 阈值）
+		// 长上下文双倍计费（如 Gemini 200K 阈值）。该分支沿用既有实现（阈值 + 倍率），
+		// 档位不在其中叠加，避免"长上下文 × 档位"两个乘数重复作用。
 		cost, err = s.billingService.CalculateCostWithLongContext(billingModel, tokens, multiplier, opts.LongContextThreshold, opts.LongContextMultiplier)
 	} else {
-		cost, err = s.billingService.CalculateCost(billingModel, tokens, multiplier)
+		// 内置目录定价：同样按实际服务档位取价（fast/priority 价卡由 service tier 策略改写）。
+		var pricingAt time.Time
+		if opts != nil {
+			pricingAt = opts.PricingAt
+		}
+		cost, err = s.billingService.calculateCostWithServiceTierPolicyAt(
+			billingModel,
+			tokens,
+			multiplier,
+			optionalStringValue(result.ServiceTier),
+			true,
+			pricingAt,
+		)
 	}
 	return cost, err
 }
@@ -1664,16 +1686,19 @@ func (s *GatewayService) buildRecordUsageLog(
 		)
 	}
 	usageLog := &UsageLog{
-		ProxyRoutes:              ProxyRoutesFromContext(ctx),
-		UserID:                   user.ID,
-		APIKeyID:                 apiKey.ID,
-		AccountID:                account.ID,
-		RequestID:                requestID,
-		Model:                    result.Model,
-		RequestedModel:           requestedModel,
-		UpstreamModel:            optionalUpstreamModelPtr(result.UpstreamModel, result.Model, requestedModel),
-		UpstreamResponseModel:    optionalTrimmedStringPtr(result.UpstreamResponseModel),
-		UpstreamModelMismatch:    upstreamModelMismatch(sentModel, result.UpstreamResponseModel),
+		ProxyRoutes:           ProxyRoutesFromContext(ctx),
+		UserID:                user.ID,
+		APIKeyID:              apiKey.ID,
+		AccountID:             account.ID,
+		RequestID:             requestID,
+		Model:                 result.Model,
+		RequestedModel:        requestedModel,
+		UpstreamModel:         optionalUpstreamModelPtr(result.UpstreamModel, result.Model, requestedModel),
+		UpstreamResponseModel: optionalTrimmedStringPtr(result.UpstreamResponseModel),
+		UpstreamModelMismatch: upstreamModelMismatch(sentModel, result.UpstreamResponseModel),
+		// 落库的档位必须是"实际计费档位"（已在 recordUsageCore 顶部按上游声明降级），
+		// 否则报表显示 priority 而金额按 standard 算，对不上账。
+		ServiceTier:              result.ServiceTier,
 		ReasoningEffort:          result.ReasoningEffort,
 		RequestedReasoningEffort: result.RequestedReasoningEffort,
 		InboundEndpoint:          optionalTrimmedStringPtr(input.InboundEndpoint),

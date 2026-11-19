@@ -131,3 +131,31 @@ func TestApplyServiceTierBillingResolutionOnlyRewritesDowngrades(t *testing.T) {
 		require.False(t, ApplyForwardServiceTierBillingResolution(nil).Downgraded)
 	})
 }
+
+// TestForwardServiceTierResolutionBillsActualTier 锁死"按实收"：
+// 上游在自己可裁定的响应里声明只给了 standard，而请求要的是 fast/priority，
+// 计费必须按 standard 落（否则就是对客户多收）。
+func TestForwardServiceTierResolutionBillsActualTier(t *testing.T) {
+	t.Run("downgraded tier is what gets logged", func(t *testing.T) {
+		requested := "priority"
+		result := &ForwardResult{ServiceTier: &requested, UpstreamResponseServiceTier: "standard"}
+		ApplyForwardServiceTierBillingResolution(result)
+		require.NotNil(t, result.ServiceTier)
+		require.Equal(t, "standard", *result.ServiceTier,
+			"billed tier must follow what upstream actually served")
+	})
+
+	t.Run("upstream silent keeps requested tier", func(t *testing.T) {
+		requested := "priority"
+		result := &ForwardResult{ServiceTier: &requested}
+		ApplyForwardServiceTierBillingResolution(result)
+		require.NotNil(t, result.ServiceTier)
+		require.Equal(t, "priority", *result.ServiceTier)
+	})
+
+	t.Run("standard request stays standard", func(t *testing.T) {
+		requested := "standard"
+		result := &ForwardResult{ServiceTier: &requested, UpstreamResponseServiceTier: "standard"}
+		require.False(t, ApplyForwardServiceTierBillingResolution(result).Downgraded)
+	})
+}
