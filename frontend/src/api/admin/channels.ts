@@ -53,6 +53,9 @@ export interface ChannelModelPricing {
   fast_multiplier?: number | null
   flex_multiplier?: number | null
   ultrafast_multiplier?: number | null
+  // 分组/渠道定价的 max 推理档倍率；后端响应与计费都在用，保存时必须原样回传，
+  // 否则更新请求缺该字段会被后端当作"未提供"而清空既有配置。
+  max_reasoning_effort_multiplier?: number | null
   reasoning_effort_multipliers?: Record<string, number> | null
   image_input_price: number | null
   image_output_price: number | null

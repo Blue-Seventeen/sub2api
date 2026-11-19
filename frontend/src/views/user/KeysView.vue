@@ -219,7 +219,7 @@
                   class="inline-block h-3 w-14 animate-pulse rounded bg-gray-200 dark:bg-dark-600"
                 />
                 <span v-else class="font-medium text-gray-900 dark:text-white">
-                  ${{ (usageStats[row.id]?.today_actual_cost ?? 0).toFixed(4) }}
+                  {{ formatCostAmount(usageStats[row.id]?.today_actual_cost ?? 0) }}
                 </span>
               </div>
               <div class="mt-0.5 flex items-center gap-1.5">
@@ -229,7 +229,7 @@
                   class="inline-block h-3 w-14 animate-pulse rounded bg-gray-200 dark:bg-dark-600"
                 />
                 <span v-else class="font-medium text-gray-900 dark:text-white">
-                  ${{ (usageStats[row.id]?.total_actual_cost ?? 0).toFixed(4) }}
+                  {{ formatCostAmount(usageStats[row.id]?.total_actual_cost ?? 0) }}
                 </span>
               </div>
               <!-- Quota progress (if quota is set) -->
