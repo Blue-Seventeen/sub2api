@@ -64,13 +64,9 @@ func TestAnthropicChatStreamAuthoritativeUsage(t *testing.T) {
 						if adapter == "native" {
 							svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
 							result, err := svc.forwardChatCompletionsViaNativeAnthropic(context.Background(), c, nativeAnthropicTestAccount(), body, "")
-							if terminal == "eof" {
-								require.Error(t, err, "EOF without message_stop must not synthesize successful completion")
-								var failoverErr *UpstreamFailoverError
-								require.NotErrorAs(t, err, &failoverErr)
-							} else {
-								require.NoError(t, err)
-							}
+							// 与上游 v0.2.23 同口径：带 stop_reason 的 message_delta 已是终态，
+						// 之后 EOF 属正常收尾（Kimi/DeepSeek 等兼容上游不发 message_stop）。
+						require.NoError(t, err)
 							require.NotNil(t, result)
 							require.Equal(t, tc.totalInput, result.Usage.InputTokens)
 							require.Equal(t, tc.output, result.Usage.OutputTokens)
@@ -128,18 +124,13 @@ func TestAnthropicChatStreamAuthoritativeUsage(t *testing.T) {
 								require.Equal(t, tc.created, chunk.Usage.PromptTokensDetails.CacheCreationTokens)
 							}
 						}
-						if adapter == "native" && terminal == "eof" {
-							require.Zero(t, done, "an incomplete native stream must not emit DONE")
-							require.Equal(t, 1, errorCount)
-							require.Zero(t, count, "do not synthesize a terminal usage chunk on failure; partial usage remains in the result")
+						// stop_reason 已标记终态，两条路径都必须正常补 DONE 与 usage 终块。
+						require.Equal(t, 1, done)
+						require.Zero(t, errorCount)
+						if tc.want {
+							require.Equal(t, 1, count)
 						} else {
-							require.Equal(t, 1, done)
-							require.Zero(t, errorCount)
-							if tc.want {
-								require.Equal(t, 1, count)
-							} else {
-								require.Zero(t, count)
-							}
+							require.Zero(t, count)
 						}
 					})
 				}

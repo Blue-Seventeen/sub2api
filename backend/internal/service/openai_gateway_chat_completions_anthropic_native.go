@@ -356,10 +356,6 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 	var firstTokenMs *int
 	firstChunk := true
 	clientDisconnected := false
-	// sawTerminalEvent 记录上游是否发出过 message_stop / [DONE]。原生 Anthropic 流
-	// 只有收到显式结束事件才算正常收尾：仅有 stop_reason 的 message_delta 不足以
-	// 证明上游完整结束（上游可能半路断流），此时必须报错而不是补发 DONE。
-	sawTerminalEvent := false
 
 	scanner := bufio.NewScanner(resp.Body)
 	maxLineSize := defaultMaxLineSize
@@ -514,7 +510,6 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 		// 兼容上游可能用 message_stop 事件或 OpenAI 风格的 [DONE] 结束流，二者都算
 		// 正常收尾（见 anthropicStreamEventIsTerminal）。
 		if anthropicStreamEventIsTerminal("", payload) {
-			sawTerminalEvent = true
 		}
 
 		if isCCUpstreamErrorPayload("", []byte(payload)) {
@@ -552,13 +547,9 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 		return resultWithUsage(), nil
 	}
 
-	// fork 契约：原生 Anthropic 流未收到 message_stop / [DONE] 就结束，说明上游半路
-	// 断流。此时不得补发 DONE 或合成的 usage 终止块，而是写出协议内终止错误并返回
-	// 错误；已累计的 usage 仍随结果返回（payg 上游照常计费）。
-	if !sawTerminalEvent {
-		_ = resp.Body.Close()
-		return failStream("stream usage incomplete: missing terminal event")
-	}
+	// 终止判定交给上面的 streamStatus.failure()（与上游 v0.2.23 同口径）：
+	// 它把 message_stop / [DONE] / 带 stop_reason 的 message_delta 都算正常收尾，
+	// 因此 Kimi / DeepSeek 一类不发 message_stop 的兼容上游不会在这里被误判成断流。
 
 	// Finalize only after the upstream has supplied a terminal event.
 	finalResEvents := apicompat.FinalizeAnthropicResponsesStream(anthState)

@@ -107,7 +107,9 @@ func TestNativeAnthropicCacheCreationRouteBillingBoundary(t *testing.T) {
 						// fork 契约：截断流不得按成功计费，见 anthropic_chat_stream_usage_test.go。
 						// 原生 chat / responses 转换与 messages 路径同口径：EOF 缺少 message_stop
 						// 必须报错（上游 v0.2.23 的这两条路径默认宽松收尾，与 fork 契约相反）。
-						truncatedStream := stream && terminal == "eof" && (route == "messages" || route == "chat" || route == "responses")
+						// messages 与上游一致仍按截断报错；chat/responses 转换路径与上游 v0.2.23 同口径，
+						// 流里已出现带 stop_reason 的 message_delta，EOF 属正常收尾。
+						truncatedStream := stream && terminal == "eof" && route == "messages"
 						if truncatedStream {
 							require.ErrorContains(t, err, "missing terminal event")
 						} else {
