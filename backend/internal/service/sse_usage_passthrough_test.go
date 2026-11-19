@@ -61,11 +61,11 @@ func TestSSEUsagePassthroughEventSemantics(t *testing.T) {
 			name:    "other events ignore canonical fields but use cache fallbacks",
 			initial: ClaudeUsage{InputTokens: 10, OutputTokens: 8},
 			data:    `{"type":"content_block_delta","usage":{"input_tokens":99,"output_tokens":99,"cache_read_input_tokens":99,"cache_creation_input_tokens":99,"cached_tokens":6,"cache_creation":{"ephemeral_5m_input_tokens":2,"ephemeral_1h_input_tokens":1}}}`,
-			// Cache-write TTL details reported by a non-snapshot event are recorded
-			// (merged upstream contract); the canonical input/output/cache counters
-			// carried by such an event stay ignored.
-			want: ClaudeUsage{InputTokens: 10, OutputTokens: 8, CacheReadInputTokens: 6, CacheCreationInputTokens: 3,
-				CacheCreation5mTokens: 2, CacheCreation1hTokens: 1, cacheCreationInputTokensFromDetails: true},
+			// 非快照事件：input/output/cache_read 一律忽略（不能覆盖快照累计值），
+			// 但 cache_creation 的显式**正**聚合会被采纳（与官方 v0.2.23 同口径），
+			// 随后 5m/1h 明细仍然记录，聚合因已是显式声明而不再跟随明细。
+			want: ClaudeUsage{InputTokens: 10, OutputTokens: 8, CacheReadInputTokens: 6, CacheCreationInputTokens: 99,
+				CacheCreation5mTokens: 2, CacheCreation1hTokens: 1, cacheCreationInputTokensPresent: true},
 		},
 		{
 			name: "nested cache fallbacks precede top level even outside start",
@@ -149,10 +149,13 @@ func TestSSEUsagePassthroughCompatiblePromptBuckets(t *testing.T) {
 			want:   ClaudeUsage{InputTokens: 400, OutputTokens: 30, CacheReadInputTokens: 800},
 		},
 		{
-			name:    "explicit compatible zeros clear stale cache buckets",
+			// 显式 0 是兼容供应商的占位值，不清空已有缓存桶（官方 v0.2.23 口径）。
+			// 只按权威 prompt 总量重算非缓存输入桶：1200 - 800 - 100 = 300。
+			name:    "explicit compatible zeros are placeholders and keep buckets",
 			initial: ClaudeUsage{InputTokens: 10, CacheReadInputTokens: 800, CacheCreationInputTokens: 100},
 			events:  []string{`{"type":"message_delta","usage":{"prompt_tokens":1200,"cache_read_input_tokens":0,"cached_tokens":0,"cache_creation_input_tokens":0}}`},
-			want:    ClaudeUsage{InputTokens: 1200, promptTotalTokens: 1200, promptTotalPresent: true},
+			want: ClaudeUsage{InputTokens: 300, CacheReadInputTokens: 800, CacheCreationInputTokens: 100,
+				promptTotalTokens: 1200, promptTotalPresent: true},
 		},
 		{
 			name:    "missing compatible cache fields retain previous buckets",

@@ -55,9 +55,14 @@ func parseSSEUsagePassthrough(data string, usage *ClaudeUsage) {
 			mergeAnthropicCacheCreationSnapshot(deltaUsage, usage)
 		}
 	default:
-		// Other events only contribute cache-write TTL details; their canonical
-		// input/output/cache counters are ignored so a non-terminal event cannot
-		// overwrite counts accumulated from start/delta snapshots.
+		// 非快照事件只贡献缓存写入口径（聚合 + TTL 明细），它们的
+		// input/output/cache_read 一律忽略，避免中途事件覆盖快照累计值。
+		// 聚合与官方同口径：只接受显式正数；目标桶本来就空时才接受 0。
+		if nested := parsed.Get("usage"); nested.IsObject() {
+			mergeAnthropicCacheCreationSnapshot(nested, usage)
+		} else if nested := parsed.Get("message.usage"); nested.IsObject() {
+			mergeAnthropicCacheCreationSnapshot(nested, usage)
+		}
 		mergeAnthropicCacheCreationDetailsOutsideSnapshots(parsed, usage)
 	}
 
@@ -205,16 +210,11 @@ func normalizeAnthropicCompatiblePromptBuckets(usageNode gjson.Result, usage *Cl
 	}
 
 	// 聚合/明细由 mergeAnthropicCacheCreationSnapshot 裁决（快照事件）与顶层 usage
-	// 回填（非快照事件）共同维护，这里只用显式正数采纳本事件口径；显式 0 仅在
-	// "本事件是权威兼容快照"时表示清空缓存，其余情况是供应商的占位 0。
-	authoritativeSnapshot := hasPromptCacheMiss || (hasPromptTokens && promptTokens > 0)
+	// 回填（非快照事件）共同维护。与官方 v0.2.23 的 typed 路径同口径：显式 0 是
+	// 供应商的占位值，不代表"缓存被清空"，只有显式正数才覆盖已有桶。
 	cacheCreationTokens := usage.CacheCreationInputTokens
-	if value, ok := anthropicUsageInt(usageNode.Get("cache_creation_input_tokens")); ok {
-		if value > 0 {
-			cacheCreationTokens = max(value, 0)
-		} else if authoritativeSnapshot {
-			cacheCreationTokens = 0
-		}
+	if value, ok := anthropicUsageInt(usageNode.Get("cache_creation_input_tokens")); ok && value > 0 {
+		cacheCreationTokens = max(value, 0)
 	}
 	if cacheCreationTokens == 0 {
 		cc5m, _ := anthropicUsageInt(usageNode.Get("cache_creation.ephemeral_5m_input_tokens"))
@@ -226,10 +226,11 @@ func normalizeAnthropicCompatiblePromptBuckets(usageNode gjson.Result, usage *Cl
 
 	// 先落盘缓存桶（含"显式 0 是否清零"的裁决），再用**落盘后**的桶重算输入，
 	// 否则本事件缺失的别名会被当作 0 参与减法。
-	if cacheReadTokens > 0 || usage.CacheReadInputTokens <= 0 || authoritativeSnapshot {
+	// 显式 0 落库的唯一条件：目标桶本来就是空/负（没有历史正值可保留）。
+	if cacheReadTokens > 0 || usage.CacheReadInputTokens <= 0 {
 		usage.CacheReadInputTokens = cacheReadTokens
 	}
-	if cacheCreationTokens > 0 || usage.CacheCreationInputTokens <= 0 || authoritativeSnapshot {
+	if cacheCreationTokens > 0 || usage.CacheCreationInputTokens <= 0 {
 		usage.CacheCreationInputTokens = cacheCreationTokens
 	}
 
