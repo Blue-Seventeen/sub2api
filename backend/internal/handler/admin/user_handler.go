@@ -78,6 +78,8 @@ type CreateUserRequest struct {
 	Concurrency           int      `json:"concurrency"`
 	RPMLimit              int      `json:"rpm_limit"`
 	AllowedGroups         []int64  `json:"allowed_groups"`
+	// RestrictPublicGroups 为 true 时，该用户仅可使用 AllowedGroups 中列出的公开分组。
+	RestrictPublicGroups bool `json:"restrict_public_groups"`
 }
 
 // UpdateUserRequest represents admin update user request
@@ -95,6 +97,7 @@ type UpdateUserRequest struct {
 	RPMLimit              *int     `json:"rpm_limit"`
 	Status                string   `json:"status" binding:"omitempty,oneof=active disabled"`
 	AllowedGroups         *[]int64 `json:"allowed_groups"`
+	RestrictPublicGroups  *bool    `json:"restrict_public_groups"`
 	// GroupRates 用户专属分组倍率配置
 	// map[groupID]*rate，nil 表示删除该分组的专属倍率
 	GroupRates map[int64]*float64 `json:"group_rates"`
@@ -323,10 +326,11 @@ func (h *UserHandler) Create(c *gin.Context) {
 			}
 			return *req.UnifiedRateMultiplier
 		}(),
-		Concurrency:   req.Concurrency,
-		RPMLimit:      req.RPMLimit,
-		AllowedGroups: req.AllowedGroups,
-		ActorAdminID:  getAdminIDFromContext(c),
+		Concurrency:          req.Concurrency,
+		RPMLimit:             req.RPMLimit,
+		AllowedGroups:        req.AllowedGroups,
+		RestrictPublicGroups: req.RestrictPublicGroups,
+		ActorAdminID:         getAdminIDFromContext(c),
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -387,6 +391,7 @@ func (h *UserHandler) Update(c *gin.Context) {
 		RPMLimit:              req.RPMLimit,
 		Status:                req.Status,
 		AllowedGroups:         req.AllowedGroups,
+		RestrictPublicGroups:  req.RestrictPublicGroups,
 		GroupRates:            req.GroupRates,
 		ActorAdminID:          getAdminIDFromContext(c),
 	})

@@ -58,24 +58,25 @@ type updateChannelRequest struct {
 }
 
 type channelModelPricingRequest struct {
-	Platform                   string                     `json:"platform" binding:"omitempty,max=50"`
-	Models                     []string                   `json:"models" binding:"required,min=1,max=100"`
-	BillingMode                string                     `json:"billing_mode" binding:"omitempty,oneof=token per_request image"`
-	InputPrice                 *float64                   `json:"input_price" binding:"omitempty,min=0"`
-	OutputPrice                *float64                   `json:"output_price" binding:"omitempty,min=0"`
-	CacheWritePrice            *float64                   `json:"cache_write_price" binding:"omitempty,min=0"`
-	CacheWrite1hPrice          *float64                   `json:"cache_write_1h_price" binding:"omitempty,min=0"`
-	CacheWrite12hPrice         *float64                   `json:"cache_write_12h_price" binding:"omitempty,min=0"`
-	CacheReadPrice             *float64                   `json:"cache_read_price" binding:"omitempty,min=0"`
-	FastMultiplier             *float64                   `json:"fast_multiplier" binding:"omitempty,gt=0"`
-	FlexMultiplier             *float64                   `json:"flex_multiplier" binding:"omitempty,gt=0"`
-	UltrafastMultiplier        *float64                   `json:"ultrafast_multiplier" binding:"omitempty,gt=0"`
-	ReasoningEffortMultipliers map[string]float64         `json:"reasoning_effort_multipliers"`
-	ImageInputPrice            *float64                   `json:"image_input_price" binding:"omitempty,min=0"`
-	ImageOutputPrice           *float64                   `json:"image_output_price" binding:"omitempty,min=0"`
-	PerRequestPrice            *float64                   `json:"per_request_price" binding:"omitempty,min=0"`
-	Intervals                  []pricingIntervalRequest   `json:"intervals"`
-	TimePricing                *channelTimePricingRequest `json:"time_pricing"`
+	Platform                     string                     `json:"platform" binding:"omitempty,max=50"`
+	Models                       []string                   `json:"models" binding:"required,min=1,max=100"`
+	BillingMode                  string                     `json:"billing_mode" binding:"omitempty,oneof=token per_request image duration character"`
+	InputPrice                   *float64                   `json:"input_price" binding:"omitempty,min=0"`
+	OutputPrice                  *float64                   `json:"output_price" binding:"omitempty,min=0"`
+	CacheWritePrice              *float64                   `json:"cache_write_price" binding:"omitempty,min=0"`
+	CacheWrite1hPrice            *float64                   `json:"cache_write_1h_price" binding:"omitempty,min=0"`
+	CacheWrite12hPrice           *float64                   `json:"cache_write_12h_price" binding:"omitempty,min=0"`
+	CacheReadPrice               *float64                   `json:"cache_read_price" binding:"omitempty,min=0"`
+	FastMultiplier               *float64                   `json:"fast_multiplier" binding:"omitempty,gt=0"`
+	FlexMultiplier               *float64                   `json:"flex_multiplier" binding:"omitempty,gt=0"`
+	UltrafastMultiplier          *float64                   `json:"ultrafast_multiplier" binding:"omitempty,gt=0"`
+	MaxReasoningEffortMultiplier *float64                   `json:"max_reasoning_effort_multiplier" binding:"omitempty,gt=0"`
+	ReasoningEffortMultipliers   map[string]float64         `json:"reasoning_effort_multipliers"`
+	ImageInputPrice              *float64                   `json:"image_input_price" binding:"omitempty,min=0"`
+	ImageOutputPrice             *float64                   `json:"image_output_price" binding:"omitempty,min=0"`
+	PerRequestPrice              *float64                   `json:"per_request_price" binding:"omitempty,min=0"`
+	Intervals                    []pricingIntervalRequest   `json:"intervals"`
+	TimePricing                  *channelTimePricingRequest `json:"time_pricing"`
 }
 
 type channelTimePricingRequest struct {
@@ -368,31 +369,33 @@ func pricingRequestToService(reqs []channelModelPricingRequest, allowChannelMult
 				SortOrder:            iv.SortOrder,
 			})
 		}
-		var fastMultiplier, flexMultiplier, ultrafastMultiplier *float64
+		var fastMultiplier, flexMultiplier, ultrafastMultiplier, maxReasoningEffortMultiplier *float64
 		if allowMultipliers {
 			fastMultiplier = r.FastMultiplier
 			flexMultiplier = r.FlexMultiplier
 			ultrafastMultiplier = r.UltrafastMultiplier
+			maxReasoningEffortMultiplier = r.MaxReasoningEffortMultiplier
 		}
 		result = append(result, service.ChannelModelPricing{
-			Platform:                   platform,
-			Models:                     r.Models,
-			BillingMode:                billingMode,
-			InputPrice:                 r.InputPrice,
-			OutputPrice:                r.OutputPrice,
-			CacheWritePrice:            r.CacheWritePrice,
-			CacheWrite1hPrice:          r.CacheWrite1hPrice,
-			CacheWrite12hPrice:         r.CacheWrite12hPrice,
-			CacheReadPrice:             r.CacheReadPrice,
-			FastMultiplier:             fastMultiplier,
-			FlexMultiplier:             flexMultiplier,
-			UltrafastMultiplier:        ultrafastMultiplier,
-			ReasoningEffortMultipliers: r.ReasoningEffortMultipliers,
-			ImageInputPrice:            r.ImageInputPrice,
-			ImageOutputPrice:           r.ImageOutputPrice,
-			PerRequestPrice:            r.PerRequestPrice,
-			Intervals:                  intervals,
-			TimePricing:                timePricingRequestToService(r.TimePricing),
+			Platform:                     platform,
+			Models:                       r.Models,
+			BillingMode:                  billingMode,
+			InputPrice:                   r.InputPrice,
+			OutputPrice:                  r.OutputPrice,
+			CacheWritePrice:              r.CacheWritePrice,
+			CacheWrite1hPrice:            r.CacheWrite1hPrice,
+			CacheWrite12hPrice:           r.CacheWrite12hPrice,
+			CacheReadPrice:               r.CacheReadPrice,
+			FastMultiplier:               fastMultiplier,
+			FlexMultiplier:               flexMultiplier,
+			UltrafastMultiplier:          ultrafastMultiplier,
+			MaxReasoningEffortMultiplier: maxReasoningEffortMultiplier,
+			ReasoningEffortMultipliers:   r.ReasoningEffortMultipliers,
+			ImageInputPrice:              r.ImageInputPrice,
+			ImageOutputPrice:             r.ImageOutputPrice,
+			PerRequestPrice:              r.PerRequestPrice,
+			Intervals:                    intervals,
+			TimePricing:                  timePricingRequestToService(r.TimePricing),
 		})
 	}
 	return result

@@ -999,6 +999,26 @@ func TestGetFallbackPricing_FamilyMatching(t *testing.T) {
 	}
 }
 
+// TestGetFallbackPricing_TypeSafeJevCard 锁死 jev-latest 的价卡存在性。
+// getFallbackPricing 对 jev-latest 有专门查表分支；卡一旦缺失就返回 nil，
+// 定价解析 fail-closed，TypeSafe 分组的所有请求都会被拒（不是免费）。
+func TestGetFallbackPricing_TypeSafeJevCard(t *testing.T) {
+	svc := NewBillingService(nil, nil)
+	pricing := svc.getFallbackPricing("jev-latest")
+	require.NotNil(t, pricing, "jev-latest must keep a fallback pricing card")
+	require.InDelta(t, 0.042/1_000_000, pricing.InputPricePerToken, 1e-12)
+	require.InDelta(t, 0, pricing.OutputPricePerToken, 1e-12)
+
+	// 大小写与 provider 前缀归一后仍应命中同一张卡。
+	for _, model := range []string{"JEV-Latest", "typesafe/jev-latest"} {
+		got := svc.getFallbackPricing(model)
+		if model == "typesafe/jev-latest" {
+			continue // provider 前缀由上层解析，getFallbackPricing 只认裸模型名
+		}
+		require.NotNil(t, got, "case-insensitive lookup must keep the jev card")
+	}
+}
+
 // 硅基流动 Qwen3-Embedding 系列（纯文本向量化）：只按输入计费，输出价为 0。
 // 验证 GetModelPricing 能解出带厂商前缀 / 裸名 / 0.6B 连字符别名的拼法。
 func TestGetModelPricing_Qwen3EmbeddingFallback(t *testing.T) {

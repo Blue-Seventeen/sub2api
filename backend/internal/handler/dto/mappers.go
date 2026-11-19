@@ -77,6 +77,7 @@ func UserFromServiceAdmin(u *service.User) *AdminUser {
 		UnifiedRateEnabled:    u.UnifiedRateEnabled,
 		UnifiedRateMultiplier: u.EffectiveUnifiedRateMultiplier(),
 		GroupRates:            u.GroupRates,
+		RestrictPublicGroups:  u.RestrictPublicGroups,
 	}
 }
 

@@ -52,6 +52,9 @@ type AdminUser struct {
 	// GroupRates 用户专属分组倍率配置
 	// map[groupID]rateMultiplier
 	GroupRates map[int64]float64 `json:"group_rates,omitempty"`
+	// RestrictPublicGroups 为 true 时，该用户仅可使用 allowed_groups 中列出的
+	// 公开分组。管理侧权限开关，只出现在管理端视图。
+	RestrictPublicGroups bool `json:"restrict_public_groups"`
 }
 
 type APIKey struct {

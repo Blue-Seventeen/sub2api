@@ -307,6 +307,13 @@ func extractUpstreamErrorMessage(body []byte) string {
 	return gjson.GetBytes(body, "message").String()
 }
 
+// SanitizeClientVisibleUpstreamErrorPayload redacts operator hosts, internal
+// addresses and credentials from a body that is about to be shown to an end user.
+// It is shape-preserving: a body with nothing to redact keeps its original bytes.
+func SanitizeClientVisibleUpstreamErrorPayload(body []byte) []byte {
+	return sanitizeClientVisibleUpstreamErrorPayload(body)
+}
+
 func sanitizeClientVisibleUpstreamErrorPayload(body []byte) []byte {
 	if len(body) == 0 {
 		return body

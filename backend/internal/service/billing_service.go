@@ -573,6 +573,14 @@ func (s *BillingService) initFallbackPricing() {
 			SupportsCacheBreakdown:     true,
 		}
 	}
+	// TypeSafe Jev bills input tokens only: $0.042 per million tokens.
+	// getFallbackPricing 里对 jev-latest 有专门查表分支，缺这张卡会让该模型
+	// 定价解析失败（fail-closed），TypeSafe 分组的所有请求都会被拒。
+	s.fallbackPrices["jev-latest"] = &ModelPricing{
+		InputPricePerToken:  0.042 / 1_000_000,
+		OutputPricePerToken: 0,
+	}
+
 	// Claude Fable 5.0 and 5.1 use the same input/output and cache-write prices, while
 	// Fable 5.1 reduces cache reads from $1 to $0.25 per MTok.
 	s.fallbackPrices["claude-fable-5"] = &ModelPricing{
@@ -2015,7 +2023,9 @@ func (s *BillingService) computeTokenBreakdown(
 		// 缓存创建（cache_write）也是输入侧操作，三档价格（标准 / 5m / 1h）
 		// 都通过 computeCacheCreationCost 直接读取 pricing.*，不会经过这里
 		// 的倍率修改，因此显式向下传一个倍率，避免长上下文场景下被漏乘。
-		cacheCreationMultiplier = pricing.LongContextInputMultiplier
+		// 未配置（≤0）必须归一为 1：价卡只配了阈值没配倍率时，直接传 0 会把
+		// 缓存写费用整体乘成 0（等于免费）。
+		cacheCreationMultiplier = longContextMultiplierOrOne(pricing.LongContextInputMultiplier)
 	}
 
 	bd := &CostBreakdown{}

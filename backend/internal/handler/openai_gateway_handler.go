@@ -3827,7 +3827,11 @@ func (h *OpenAIGatewayHandler) tryPassthroughOpenAIUpstreamErrorBody(c *gin.Cont
 		h.handleStreamingAwareError(c, statusCode, errType, message, true)
 		return true
 	}
-	c.Data(statusCode, "application/json; charset=utf-8", responseBody)
+	// Automatic passthrough (no operator opt-in): keep the body shape for clients
+	// that parse the provider's 429 payload, but run the client-visible sanitizer so
+	// a provider echoing the operator's host or credential cannot reach the end user.
+	// Bodies with nothing to redact keep their original bytes.
+	c.Data(statusCode, "application/json; charset=utf-8", service.SanitizeClientVisibleUpstreamErrorPayload(responseBody))
 	return true
 }
 
