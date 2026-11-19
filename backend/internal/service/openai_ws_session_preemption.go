@@ -128,8 +128,11 @@ func (s *OpenAIGatewayService) BeginOpenAIWSIngressSessionPreemptionWithClient(
 	}
 	if preemptedPrevious {
 		if stateStore := s.getOpenAIWSStateStore(); stateStore != nil {
-			stateStore.DeleteSessionTurnState(preemptGroupID, preemptScope)
-			stateStore.DeleteSessionConn(preemptGroupID, preemptScope)
+			// 会话级状态带账号维度：这里只能清掉"当前接管者"自己的旧条目。
+			// 被抢占的旧连接若由别的账号服务，它的条目对新账号不可见，且会在
+			// TTL 内自然过期，不需要（也无法）用本账号去删它。
+			stateStore.DeleteSessionTurnState(preemptGroupID, account.ID, preemptScope)
+			stateStore.DeleteSessionConn(preemptGroupID, account.ID, preemptScope)
 		}
 		lane := resolveOpenAIWSExecutionLane(c, firstClientMessage)
 		if lane == "" {
@@ -224,8 +227,10 @@ func (s *OpenAIGatewayService) beginOpenAIWSSessionPreemptContext(
 		preemptOnce.Do(func() {
 			state.preempted.Store(true)
 			if stateStore := s.getOpenAIWSStateStore(); stateStore != nil {
-				stateStore.DeleteSessionTurnState(key.groupID, key.sessionHash)
-				stateStore.DeleteSessionConn(key.groupID, key.sessionHash)
+				// 与上面的抢占清理一致：抢占窗口本身按 (group, apiKey, scope)
+				// 跨账号生效，但会话级状态只清当前账号自己的条目。
+				stateStore.DeleteSessionTurnState(key.groupID, account.ID, key.sessionHash)
+				stateStore.DeleteSessionConn(key.groupID, account.ID, key.sessionHash)
 			}
 			if notifyPreempted == nil {
 				cancel(errOpenAIWSSessionPreempted)

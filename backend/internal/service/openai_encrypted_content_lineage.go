@@ -262,8 +262,9 @@ func stripOpenAIInvalidEncryptedContentRaw(payload []byte, invalid map[string]st
 }
 
 // markOpenAIWSInvalidEncryptedContentLineage 把本次被上游拒绝的密文摘要写入
-// 会话 lineage。digests 须在剥离前收集。
-func (s *OpenAIGatewayService) markOpenAIWSInvalidEncryptedContentLineage(groupID int64, sessionHash string, digests []string) {
+// 会话 lineage。digests 须在剥离前收集。accountID 是拒绝这份密文的那个上游账号：
+// 密文能否被解，是上游账号侧的性质，摘要在换号后不该跨账号生效。
+func (s *OpenAIGatewayService) markOpenAIWSInvalidEncryptedContentLineage(groupID, accountID int64, sessionHash string, digests []string) {
 	if s == nil || len(digests) == 0 || strings.TrimSpace(sessionHash) == "" {
 		return
 	}
@@ -271,12 +272,13 @@ func (s *OpenAIGatewayService) markOpenAIWSInvalidEncryptedContentLineage(groupI
 	if stateStore == nil {
 		return
 	}
-	stateStore.MarkSessionInvalidEncryptedContent(groupID, sessionHash, digests, s.openAIWSSessionStickyTTL())
+	stateStore.MarkSessionInvalidEncryptedContent(groupID, accountID, sessionHash, digests, s.openAIWSSessionStickyTTL())
 }
 
 // sessionInvalidEncryptedContentDigests 返回会话已知失效密文摘要；全局无记录
-// 时（常态）零成本返回 nil。
-func (s *OpenAIGatewayService) sessionInvalidEncryptedContentDigests(groupID int64, sessionHash string) map[string]struct{} {
+// 时（常态）零成本返回 nil。accountID 是当前要服务这一轮的上游账号，只返回它
+// 自己记录过的摘要。
+func (s *OpenAIGatewayService) sessionInvalidEncryptedContentDigests(groupID, accountID int64, sessionHash string) map[string]struct{} {
 	if s == nil || strings.TrimSpace(sessionHash) == "" {
 		return nil
 	}
@@ -284,7 +286,7 @@ func (s *OpenAIGatewayService) sessionInvalidEncryptedContentDigests(groupID int
 	if stateStore == nil || !stateStore.HasAnySessionInvalidEncryptedContent() {
 		return nil
 	}
-	return stateStore.GetSessionInvalidEncryptedContentDigests(groupID, sessionHash)
+	return stateStore.GetSessionInvalidEncryptedContentDigests(groupID, accountID, sessionHash)
 }
 
 // openAIWSLineageSessionHashFromContext 取 lineage 会话键：优先 ingress 循环
@@ -300,6 +302,8 @@ func (s *OpenAIGatewayService) openAIWSLineageSessionHashFromContext(c *gin.Cont
 
 // markOpenAIWSInvalidEncryptedContentLineageFromPayload 在上游以
 // invalid_encrypted_content 拒绝 payload 时记录其密文摘要并输出观测日志。
+// accountID 既是日志字段，也是 lineage 的归属账号：只有拒绝过这份密文的账号
+// 才需要在后续 turn 里剥离它。
 func (s *OpenAIGatewayService) markOpenAIWSInvalidEncryptedContentLineageFromPayload(
 	c *gin.Context,
 	payload []byte,
@@ -313,6 +317,7 @@ func (s *OpenAIGatewayService) markOpenAIWSInvalidEncryptedContentLineageFromPay
 	}
 	s.markOpenAIWSInvalidEncryptedContentLineage(
 		getOpenAIGroupIDFromContext(c),
+		accountID,
 		s.openAIWSLineageSessionHashFromContext(c, payload),
 		digests,
 	)

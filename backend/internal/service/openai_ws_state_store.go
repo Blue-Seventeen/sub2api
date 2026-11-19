@@ -76,19 +76,24 @@ type OpenAIWSStateStore interface {
 	GetResponseConn(responseID string) (string, bool)
 	DeleteResponseConn(responseID string)
 
-	BindSessionTurnState(groupID int64, sessionHash, turnState string, ttl time.Duration)
-	GetSessionTurnState(groupID int64, sessionHash string) (string, bool)
-	DeleteSessionTurnState(groupID int64, sessionHash string)
+	// 会话级状态一律按 (groupID, accountID, sessionHash) 三键隔离；accountID 必须是
+	// 铸造或正在使用该状态的那个上游账号。理由与兼容边界见
+	// openAIWSSessionAccountScopeKey。
+	BindSessionTurnState(groupID, accountID int64, sessionHash, turnState string, ttl time.Duration)
+	GetSessionTurnState(groupID, accountID int64, sessionHash string) (string, bool)
+	DeleteSessionTurnState(groupID, accountID int64, sessionHash string)
 
-	BindSessionConn(groupID int64, sessionHash, connID string, ttl time.Duration)
-	GetSessionConn(groupID int64, sessionHash string) (string, bool)
-	DeleteSessionConn(groupID int64, sessionHash string)
+	BindSessionConn(groupID, accountID int64, sessionHash, connID string, ttl time.Duration)
+	GetSessionConn(groupID, accountID int64, sessionHash string) (string, bool)
+	DeleteSessionConn(groupID, accountID int64, sessionHash string)
 
 	// invalid_encrypted_content lineage：按会话记录已被上游拒绝的
 	// encrypted_content 摘要，后续 turn 进场时仅剥离命中项，避免同一失效
 	// 密文随客户端历史反复触发"整包被拒→剥离→重试/重连"。仅进程内有效。
-	MarkSessionInvalidEncryptedContent(groupID int64, sessionHash string, digests []string, ttl time.Duration)
-	GetSessionInvalidEncryptedContentDigests(groupID int64, sessionHash string) map[string]struct{}
+	// 上游对密文的可解性判断是按账号生效的，因此摘要同样带上账号维度：换号后
+	// 不该让新账号莫名剥离它没有拒绝过的密文（与 turn state 同源缺陷）。
+	MarkSessionInvalidEncryptedContent(groupID, accountID int64, sessionHash string, digests []string, ttl time.Duration)
+	GetSessionInvalidEncryptedContentDigests(groupID, accountID int64, sessionHash string) map[string]struct{}
 	// HasAnySessionInvalidEncryptedContent 是热路径快速探测：全局无记录时
 	// 调用方可跳过会话哈希计算与摘要匹配。
 	HasAnySessionInvalidEncryptedContent() bool
@@ -331,8 +336,8 @@ func (s *defaultOpenAIWSStateStore) DeleteResponseConn(responseID string) {
 	s.responseToConnMu.Unlock()
 }
 
-func (s *defaultOpenAIWSStateStore) BindSessionTurnState(groupID int64, sessionHash, turnState string, ttl time.Duration) {
-	key := openAIWSSessionTurnStateKey(groupID, sessionHash)
+func (s *defaultOpenAIWSStateStore) BindSessionTurnState(groupID, accountID int64, sessionHash, turnState string, ttl time.Duration) {
+	key := openAIWSSessionAccountScopeKey(groupID, accountID, sessionHash)
 	state := strings.TrimSpace(turnState)
 	if key == "" || state == "" {
 		return
@@ -349,8 +354,8 @@ func (s *defaultOpenAIWSStateStore) BindSessionTurnState(groupID int64, sessionH
 	s.sessionToTurnStateMu.Unlock()
 }
 
-func (s *defaultOpenAIWSStateStore) GetSessionTurnState(groupID int64, sessionHash string) (string, bool) {
-	key := openAIWSSessionTurnStateKey(groupID, sessionHash)
+func (s *defaultOpenAIWSStateStore) GetSessionTurnState(groupID, accountID int64, sessionHash string) (string, bool) {
+	key := openAIWSSessionAccountScopeKey(groupID, accountID, sessionHash)
 	if key == "" {
 		return "", false
 	}
@@ -366,8 +371,8 @@ func (s *defaultOpenAIWSStateStore) GetSessionTurnState(groupID int64, sessionHa
 	return binding.turnState, true
 }
 
-func (s *defaultOpenAIWSStateStore) DeleteSessionTurnState(groupID int64, sessionHash string) {
-	key := openAIWSSessionTurnStateKey(groupID, sessionHash)
+func (s *defaultOpenAIWSStateStore) DeleteSessionTurnState(groupID, accountID int64, sessionHash string) {
+	key := openAIWSSessionAccountScopeKey(groupID, accountID, sessionHash)
 	if key == "" {
 		return
 	}
@@ -376,8 +381,8 @@ func (s *defaultOpenAIWSStateStore) DeleteSessionTurnState(groupID int64, sessio
 	s.sessionToTurnStateMu.Unlock()
 }
 
-func (s *defaultOpenAIWSStateStore) BindSessionConn(groupID int64, sessionHash, connID string, ttl time.Duration) {
-	key := openAIWSSessionTurnStateKey(groupID, sessionHash)
+func (s *defaultOpenAIWSStateStore) BindSessionConn(groupID, accountID int64, sessionHash, connID string, ttl time.Duration) {
+	key := openAIWSSessionAccountScopeKey(groupID, accountID, sessionHash)
 	conn := strings.TrimSpace(connID)
 	if key == "" || conn == "" {
 		return
@@ -394,8 +399,8 @@ func (s *defaultOpenAIWSStateStore) BindSessionConn(groupID int64, sessionHash, 
 	s.sessionToConnMu.Unlock()
 }
 
-func (s *defaultOpenAIWSStateStore) GetSessionConn(groupID int64, sessionHash string) (string, bool) {
-	key := openAIWSSessionTurnStateKey(groupID, sessionHash)
+func (s *defaultOpenAIWSStateStore) GetSessionConn(groupID, accountID int64, sessionHash string) (string, bool) {
+	key := openAIWSSessionAccountScopeKey(groupID, accountID, sessionHash)
 	if key == "" {
 		return "", false
 	}
@@ -411,8 +416,8 @@ func (s *defaultOpenAIWSStateStore) GetSessionConn(groupID int64, sessionHash st
 	return binding.connID, true
 }
 
-func (s *defaultOpenAIWSStateStore) DeleteSessionConn(groupID int64, sessionHash string) {
-	key := openAIWSSessionTurnStateKey(groupID, sessionHash)
+func (s *defaultOpenAIWSStateStore) DeleteSessionConn(groupID, accountID int64, sessionHash string) {
+	key := openAIWSSessionAccountScopeKey(groupID, accountID, sessionHash)
 	if key == "" {
 		return
 	}
@@ -421,8 +426,8 @@ func (s *defaultOpenAIWSStateStore) DeleteSessionConn(groupID int64, sessionHash
 	s.sessionToConnMu.Unlock()
 }
 
-func (s *defaultOpenAIWSStateStore) MarkSessionInvalidEncryptedContent(groupID int64, sessionHash string, digests []string, ttl time.Duration) {
-	key := openAIWSSessionTurnStateKey(groupID, sessionHash)
+func (s *defaultOpenAIWSStateStore) MarkSessionInvalidEncryptedContent(groupID, accountID int64, sessionHash string, digests []string, ttl time.Duration) {
+	key := openAIWSSessionAccountScopeKey(groupID, accountID, sessionHash)
 	if key == "" || len(digests) == 0 {
 		return
 	}
@@ -464,8 +469,8 @@ func (s *defaultOpenAIWSStateStore) MarkSessionInvalidEncryptedContent(groupID i
 	}
 }
 
-func (s *defaultOpenAIWSStateStore) GetSessionInvalidEncryptedContentDigests(groupID int64, sessionHash string) map[string]struct{} {
-	key := openAIWSSessionTurnStateKey(groupID, sessionHash)
+func (s *defaultOpenAIWSStateStore) GetSessionInvalidEncryptedContentDigests(groupID, accountID int64, sessionHash string) map[string]struct{} {
+	key := openAIWSSessionAccountScopeKey(groupID, accountID, sessionHash)
 	if key == "" {
 		return nil
 	}
@@ -650,12 +655,34 @@ func normalizeOpenAIWSTTL(ttl time.Duration) time.Duration {
 	return ttl
 }
 
-func openAIWSSessionTurnStateKey(groupID int64, sessionHash string) string {
+// openAIWSSessionAccountScopeKey 构造会话级状态的存储键：groupID:accountID:sessionHash。
+//
+// 账号维度是隔离的必要条件，不是冗余：sessionHash 只由 apiKeyID + thread/session +
+// lane 派生（见 resolveOpenAIWSExecutionScope），完全不含上游账号，而同一会话在其
+// 生命周期内可能先后被不同上游账号服务（429/额度耗尽触发 failover、粘性账号冷却、
+// 客户端重连时落到新账号）。旧键 "groupID:sessionHash" 里没有账号，于是后一个账号
+// 会读到前一个账号铸造的 x-codex-turn-state 并原样发给上游：上游可能拒绝该 blob
+// （代理链独有的矛盾信号），也可能把 turn state 记到错误的账号；conn 绑定与
+// invalid_encrypted_content lineage 复用同一把键，同样会跨账号生效。
+// 把账号放进键里，让"读不到 ≠ 忘了删"成为数据结构本身的不变量，而不是依赖调用
+// 方纪律（HTTP /responses 路径的 guardOpenAICodexTurnStateEcho 即调用方纪律版本）。
+//
+// 兼容边界：
+//   - 旧版本（无账号维度）写入的条目不满足本键格式，对新版本不可见，等价于"该会话
+//     没有工牌"：属安全降级——宁可退回无状态，也不把异账号的 blob 重放给上游。
+//   - 这些旧条目无需迁移，仍按原 TTL 自然过期（默认 1 小时），随后被既有增量清理
+//     回收；新条目按同样的 TTL 结算。
+//   - 除键维度外不改变任何既有行为：TTL、容量上限、过期清理、热缓存与登录态绑定
+//     时机全部保持原样。
+//
+// accountID 不做正值校验：调用方已经保证它是真实服务账号，保留 0 只是让键仍可构造
+// （与既有 groupID 的处理一致），不会与带账号的条目互相命中。
+func openAIWSSessionAccountScopeKey(groupID, accountID int64, sessionHash string) string {
 	hash := strings.TrimSpace(sessionHash)
 	if hash == "" {
 		return ""
 	}
-	return fmt.Sprintf("%d:%s", groupID, hash)
+	return fmt.Sprintf("%d:%d:%s", groupID, accountID, hash)
 }
 
 func withOpenAIWSStateStoreRedisTimeout(ctx context.Context) (context.Context, context.CancelFunc) {

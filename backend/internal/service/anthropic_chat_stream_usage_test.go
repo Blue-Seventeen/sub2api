@@ -65,8 +65,8 @@ func TestAnthropicChatStreamAuthoritativeUsage(t *testing.T) {
 							svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
 							result, err := svc.forwardChatCompletionsViaNativeAnthropic(context.Background(), c, nativeAnthropicTestAccount(), body, "")
 							// 与上游 v0.2.23 同口径：带 stop_reason 的 message_delta 已是终态，
-						// 之后 EOF 属正常收尾（Kimi/DeepSeek 等兼容上游不发 message_stop）。
-						require.NoError(t, err)
+							// 之后 EOF 属正常收尾（Kimi/DeepSeek 等兼容上游不发 message_stop）。
+							require.NoError(t, err)
 							require.NotNil(t, result)
 							require.Equal(t, tc.totalInput, result.Usage.InputTokens)
 							require.Equal(t, tc.output, result.Usage.OutputTokens)

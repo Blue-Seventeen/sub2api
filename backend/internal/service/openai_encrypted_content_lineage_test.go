@@ -169,48 +169,55 @@ func TestOpenAIWSStateStoreInvalidEncryptedContentLineage(t *testing.T) {
 	t.Run("mark_get_roundtrip_with_merge", func(t *testing.T) {
 		t.Parallel()
 		store := NewOpenAIWSStateStore(nil)
+		const accountID = int64(71)
 		require.False(t, store.HasAnySessionInvalidEncryptedContent())
-		require.Nil(t, store.GetSessionInvalidEncryptedContentDigests(1, "session-a"))
+		require.Nil(t, store.GetSessionInvalidEncryptedContentDigests(1, accountID, "session-a"))
 
-		store.MarkSessionInvalidEncryptedContent(1, "session-a", []string{"d1", "d2"}, time.Minute)
-		store.MarkSessionInvalidEncryptedContent(1, "session-a", []string{"d2", "d3"}, time.Minute)
+		store.MarkSessionInvalidEncryptedContent(1, accountID, "session-a", []string{"d1", "d2"}, time.Minute)
+		store.MarkSessionInvalidEncryptedContent(1, accountID, "session-a", []string{"d2", "d3"}, time.Minute)
 		require.True(t, store.HasAnySessionInvalidEncryptedContent())
 
-		digests := store.GetSessionInvalidEncryptedContentDigests(1, "session-a")
+		digests := store.GetSessionInvalidEncryptedContentDigests(1, accountID, "session-a")
 		require.Len(t, digests, 3)
 		for _, digest := range []string{"d1", "d2", "d3"} {
 			require.Contains(t, digests, digest)
 		}
 		// 组隔离：另一组同名会话不可见。
-		require.Nil(t, store.GetSessionInvalidEncryptedContentDigests(2, "session-a"))
+		require.Nil(t, store.GetSessionInvalidEncryptedContentDigests(2, accountID, "session-a"))
+		// 账号隔离：同组同会话的另一个上游账号看不到本账号记录的摘要。
+		require.Nil(t, store.GetSessionInvalidEncryptedContentDigests(1, accountID+1, "session-a"))
 		// 返回值是拷贝，调用方修改不得影响存储。
 		digests["d4"] = struct{}{}
-		require.Len(t, store.GetSessionInvalidEncryptedContentDigests(1, "session-a"), 3)
+		require.Len(t, store.GetSessionInvalidEncryptedContentDigests(1, accountID, "session-a"), 3)
 	})
 
 	t.Run("expired_binding_not_returned", func(t *testing.T) {
 		t.Parallel()
+		const accountID = int64(71)
 		raw := NewOpenAIWSStateStore(nil)
-		raw.MarkSessionInvalidEncryptedContent(1, "session-b", []string{"d1"}, time.Minute)
+		raw.MarkSessionInvalidEncryptedContent(1, accountID, "session-b", []string{"d1"}, time.Minute)
 		store, ok := raw.(*defaultOpenAIWSStateStore)
 		require.True(t, ok)
+		key := openAIWSSessionAccountScopeKey(1, accountID, "session-b")
+		require.Equal(t, "1:71:session-b", key)
 		store.sessionInvalidEncryptedMu.Lock()
-		binding := store.sessionInvalidEncrypted["1:session-b"]
+		binding := store.sessionInvalidEncrypted[key]
 		binding.expiresAt = time.Now().Add(-time.Second)
-		store.sessionInvalidEncrypted["1:session-b"] = binding
+		store.sessionInvalidEncrypted[key] = binding
 		store.sessionInvalidEncryptedMu.Unlock()
-		require.Nil(t, store.GetSessionInvalidEncryptedContentDigests(1, "session-b"))
+		require.Nil(t, store.GetSessionInvalidEncryptedContentDigests(1, accountID, "session-b"))
 	})
 
 	t.Run("per_session_capacity_degrades_gracefully", func(t *testing.T) {
 		t.Parallel()
+		const accountID = int64(71)
 		store := NewOpenAIWSStateStore(nil)
 		oversized := make([]string, 0, openAIWSInvalidEncryptedDigestsPerSession+10)
 		for i := range openAIWSInvalidEncryptedDigestsPerSession + 10 {
 			oversized = append(oversized, openAIEncryptedContentDigest(fmt.Sprintf("cipher-%d", i)))
 		}
-		store.MarkSessionInvalidEncryptedContent(1, "session-c", oversized, time.Minute)
-		digests := store.GetSessionInvalidEncryptedContentDigests(1, "session-c")
+		store.MarkSessionInvalidEncryptedContent(1, accountID, "session-c", oversized, time.Minute)
+		digests := store.GetSessionInvalidEncryptedContentDigests(1, accountID, "session-c")
 		require.Len(t, digests, openAIWSInvalidEncryptedDigestsPerSession)
 	})
 }

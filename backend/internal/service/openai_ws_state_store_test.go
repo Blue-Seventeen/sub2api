@@ -64,36 +64,202 @@ func TestOpenAIWSStateStore_ResponseConnTTL(t *testing.T) {
 
 func TestOpenAIWSStateStore_SessionTurnStateTTL(t *testing.T) {
 	store := NewOpenAIWSStateStore(nil)
-	store.BindSessionTurnState(9, "session_hash_1", "turn_state_1", 30*time.Millisecond)
+	const accountID = int64(131)
+	store.BindSessionTurnState(9, accountID, "session_hash_1", "turn_state_1", 30*time.Millisecond)
 
-	state, ok := store.GetSessionTurnState(9, "session_hash_1")
+	state, ok := store.GetSessionTurnState(9, accountID, "session_hash_1")
 	require.True(t, ok)
 	require.Equal(t, "turn_state_1", state)
 
 	// group 隔离
-	_, ok = store.GetSessionTurnState(10, "session_hash_1")
+	_, ok = store.GetSessionTurnState(10, accountID, "session_hash_1")
 	require.False(t, ok)
 
 	time.Sleep(60 * time.Millisecond)
-	_, ok = store.GetSessionTurnState(9, "session_hash_1")
+	_, ok = store.GetSessionTurnState(9, accountID, "session_hash_1")
 	require.False(t, ok)
 }
 
 func TestOpenAIWSStateStore_SessionConnTTL(t *testing.T) {
 	store := NewOpenAIWSStateStore(nil)
-	store.BindSessionConn(9, "session_hash_conn_1", "conn_1", 30*time.Millisecond)
+	const accountID = int64(131)
+	store.BindSessionConn(9, accountID, "session_hash_conn_1", "conn_1", 30*time.Millisecond)
 
-	connID, ok := store.GetSessionConn(9, "session_hash_conn_1")
+	connID, ok := store.GetSessionConn(9, accountID, "session_hash_conn_1")
 	require.True(t, ok)
 	require.Equal(t, "conn_1", connID)
 
 	// group 隔离
-	_, ok = store.GetSessionConn(10, "session_hash_conn_1")
+	_, ok = store.GetSessionConn(10, accountID, "session_hash_conn_1")
 	require.False(t, ok)
 
 	time.Sleep(60 * time.Millisecond)
-	_, ok = store.GetSessionConn(9, "session_hash_conn_1")
+	_, ok = store.GetSessionConn(9, accountID, "session_hash_conn_1")
 	require.False(t, ok)
+}
+
+// 账号隔离的反向验证：同一个 (group, sessionHash) 在换上游账号后必须读不到上一个
+// 账号铸造的 x-codex-turn-state，否则后者会被原样转发给新账号（D4 缺陷）。
+// 同一账号自身仍必须能读回，证明隔离不是"一律读不到"的假检查。
+func TestOpenAIWSStateStore_SessionTurnStateIsolatedByAccount(t *testing.T) {
+	store := NewOpenAIWSStateStore(nil)
+	const (
+		groupID     = int64(7)
+		accountA    = int64(129)
+		accountB    = int64(130)
+		sessionHash = "6794ac38c44c22fa"
+	)
+
+	store.BindSessionTurnState(groupID, accountA, sessionHash, "blob-minted-by-account-A", time.Hour)
+
+	turnState, ok := store.GetSessionTurnState(groupID, accountA, sessionHash)
+	require.True(t, ok, "铸造账号自己必须能读回")
+	require.Equal(t, "blob-minted-by-account-A", turnState)
+
+	turnState, ok = store.GetSessionTurnState(groupID, accountB, sessionHash)
+	require.False(t, ok, "换账号后不得读到上一个账号铸造的工牌")
+	require.Empty(t, turnState)
+}
+
+// 连接绑定（store=false 时的会话→上游连接粘性）同源缺陷：换账号后不能再拿旧账号的
+// 原生 WS 连接。
+func TestOpenAIWSStateStore_SessionConnIsolatedByAccount(t *testing.T) {
+	store := NewOpenAIWSStateStore(nil)
+	const (
+		groupID     = int64(7)
+		accountA    = int64(129)
+		accountB    = int64(130)
+		sessionHash = "6794ac38c44c22fa"
+	)
+
+	store.BindSessionConn(groupID, accountA, sessionHash, "conn-bound-by-account-A", time.Hour)
+
+	connID, ok := store.GetSessionConn(groupID, accountA, sessionHash)
+	require.True(t, ok, "绑定账号自己必须能读回")
+	require.Equal(t, "conn-bound-by-account-A", connID)
+
+	connID, ok = store.GetSessionConn(groupID, accountB, sessionHash)
+	require.False(t, ok, "换账号后不得命中上一个账号的会话连接绑定")
+	require.Empty(t, connID)
+}
+
+// invalid_encrypted_content lineage 同源缺陷：A 账号记录的失效密文摘要不得让 B 账号
+// 莫名剥离它从未拒绝过的密文。
+func TestOpenAIWSStateStore_InvalidEncryptedContentIsolatedByAccount(t *testing.T) {
+	store := NewOpenAIWSStateStore(nil)
+	const (
+		groupID     = int64(7)
+		accountA    = int64(129)
+		accountB    = int64(130)
+		sessionHash = "6794ac38c44c22fa"
+	)
+
+	store.MarkSessionInvalidEncryptedContent(groupID, accountA, sessionHash, []string{"digest-1"}, time.Hour)
+
+	digests := store.GetSessionInvalidEncryptedContentDigests(groupID, accountA, sessionHash)
+	require.Len(t, digests, 1, "标记账号自己必须读得到")
+	require.Contains(t, digests, "digest-1")
+
+	require.Nil(t, store.GetSessionInvalidEncryptedContentDigests(groupID, accountB, sessionHash),
+		"换账号后不得命中上一个账号记录的失效密文摘要")
+}
+
+// 同一 accountID 内的行为必须与修复前完全一致：写入后能读、Delete 后读不到、
+// TTL 过期读不到（三类会话级状态各验一遍）。
+func TestOpenAIWSStateStore_SessionStateSameAccountBehaviorUnchanged(t *testing.T) {
+	const (
+		groupID     = int64(7)
+		accountID   = int64(129)
+		sessionHash = "6794ac38c44c22fa"
+	)
+	store := NewOpenAIWSStateStore(nil)
+
+	// turn state：写 → 读 → Delete 后读不到 → TTL 过期后读不到。
+	store.BindSessionTurnState(groupID, accountID, sessionHash, "turn-state", time.Hour)
+	_, ok := store.GetSessionTurnState(groupID, accountID, sessionHash)
+	require.True(t, ok)
+	store.DeleteSessionTurnState(groupID, accountID, sessionHash)
+	_, ok = store.GetSessionTurnState(groupID, accountID, sessionHash)
+	require.False(t, ok, "Delete 后同一账号也不得读回")
+	store.BindSessionTurnState(groupID, accountID, sessionHash, "turn-state-ttl", 30*time.Millisecond)
+	time.Sleep(60 * time.Millisecond)
+	_, ok = store.GetSessionTurnState(groupID, accountID, sessionHash)
+	require.False(t, ok, "TTL 过期后同一账号不得读回")
+
+	// session conn：同上。
+	store.BindSessionConn(groupID, accountID, sessionHash, "conn-1", time.Hour)
+	_, ok = store.GetSessionConn(groupID, accountID, sessionHash)
+	require.True(t, ok)
+	store.DeleteSessionConn(groupID, accountID, sessionHash)
+	_, ok = store.GetSessionConn(groupID, accountID, sessionHash)
+	require.False(t, ok, "Delete 后同一账号也不得读回")
+	store.BindSessionConn(groupID, accountID, sessionHash, "conn-ttl", 30*time.Millisecond)
+	time.Sleep(60 * time.Millisecond)
+	_, ok = store.GetSessionConn(groupID, accountID, sessionHash)
+	require.False(t, ok, "TTL 过期后同一账号不得读回")
+
+	// invalid_encrypted lineage：写 → 读 → TTL 过期后读不到（该类型没有 Delete API，
+	// 过期是唯一的清理路径）。
+	store.MarkSessionInvalidEncryptedContent(groupID, accountID, sessionHash, []string{"digest-ttl"}, 30*time.Millisecond)
+	require.Len(t, store.GetSessionInvalidEncryptedContentDigests(groupID, accountID, sessionHash), 1)
+	time.Sleep(60 * time.Millisecond)
+	require.Nil(t, store.GetSessionInvalidEncryptedContentDigests(groupID, accountID, sessionHash),
+		"TTL 过期后同一账号不得读回")
+}
+
+// 键格式：账号维度必须在键里，且旧格式（group:sessionHash）不得与新键碰撞，
+// 否则滚动升级期间旧版本写入的条目会被新版本读到（违反"安全降级"）。
+func TestOpenAIWSSessionAccountScopeKeyIncludesAccountAndDoesNotCollideWithLegacy(t *testing.T) {
+	require.Equal(t, "7:129:6794ac38c44c22fa", openAIWSSessionAccountScopeKey(7, 129, "6794ac38c44c22fa"))
+	require.Equal(t, "", openAIWSSessionAccountScopeKey(7, 129, "  "))
+	require.NotEqual(t,
+		openAIWSSessionAccountScopeKey(7, 129, "6794ac38c44c22fa"),
+		openAIWSSessionAccountScopeKey(7, 130, "6794ac38c44c22fa"),
+		"换账号必须换键",
+	)
+	require.NotEqual(t,
+		fmt.Sprintf("%d:%s", 7, "6794ac38c44c22fa"),
+		openAIWSSessionAccountScopeKey(7, 129, "6794ac38c44c22fa"),
+		"同一 group+hash 的旧格式键与新键必须不同，否则旧条目会被新版本读到",
+	)
+}
+
+// 滚动升级安全降级：旧版本（无账号维度）留下的条目在新版本读路径上不可见，
+// 等价于"该会话没有工牌"，而不是被误当作本账号的状态。
+func TestOpenAIWSStateStore_LegacyAccountAgnosticEntryNotVisible(t *testing.T) {
+	raw := NewOpenAIWSStateStore(nil)
+	store, ok := raw.(*defaultOpenAIWSStateStore)
+	require.True(t, ok)
+	legacyKey := fmt.Sprintf("%d:%s", 7, "6794ac38c44c22fa")
+	require.NotEqual(t, legacyKey, openAIWSSessionAccountScopeKey(7, 129, "6794ac38c44c22fa"))
+
+	store.sessionInvalidEncryptedMu.Lock()
+	store.sessionInvalidEncrypted[legacyKey] = openAIWSInvalidEncryptedBinding{
+		digests:   map[string]struct{}{"legacy-digest": {}},
+		expiresAt: time.Now().Add(time.Hour),
+	}
+	store.sessionInvalidEncryptedMu.Unlock()
+	store.sessionToTurnStateMu.Lock()
+	store.sessionToTurnState[legacyKey] = openAIWSTurnStateBinding{
+		turnState: "legacy-turn-state",
+		expiresAt: time.Now().Add(time.Hour),
+	}
+	store.sessionToTurnStateMu.Unlock()
+	store.sessionToConnMu.Lock()
+	store.sessionToConn[legacyKey] = openAIWSSessionConnBinding{
+		connID:    "legacy-conn",
+		expiresAt: time.Now().Add(time.Hour),
+	}
+	store.sessionToConnMu.Unlock()
+
+	for _, accountID := range []int64{129, 130} {
+		_, ok := store.GetSessionTurnState(7, accountID, "6794ac38c44c22fa")
+		require.False(t, ok, "旧格式条目对新版本不可见（account=%d）", accountID)
+		_, ok = store.GetSessionConn(7, accountID, "6794ac38c44c22fa")
+		require.False(t, ok, "旧格式条目对新版本不可见（account=%d）", accountID)
+		require.Nil(t, store.GetSessionInvalidEncryptedContentDigests(7, accountID, "6794ac38c44c22fa"),
+			"旧格式条目对新版本不可见（account=%d）", accountID)
+	}
 }
 
 func TestOpenAIWSStateStore_GetResponseAccount_NoStaleAfterCacheMiss(t *testing.T) {
